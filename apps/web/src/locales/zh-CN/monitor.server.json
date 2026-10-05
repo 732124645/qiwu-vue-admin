@@ -1,0 +1,13 @@
+{
+  "monitor": {
+    "server": {
+      "free": "可用",
+      "heap": "Node.js 堆内存"
+    }
+  },
+  "menu": {
+    "monitor": {
+      "server": "服务监控"
+    }
+  }
+}

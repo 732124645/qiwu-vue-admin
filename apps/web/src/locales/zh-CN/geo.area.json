@@ -1,0 +1,25 @@
+{
+  "geo": {
+    "area": {
+      "tree": "行政区划",
+      "lookup": "IP 归属地查询",
+      "ipHint": "IPv4 或 IPv6 地址，例如 8.8.8.8",
+      "query": "查询",
+      "unknown": "未知",
+      "picker": "地区选择器",
+      "pickerHint": "表单组件 AreaCascader：取值为区划代码路径。",
+      "value": "取值"
+    }
+  },
+  "picker": {
+    "area": {
+      "placeholder": "请选择地区",
+      "loading": "正在加载地区…"
+    }
+  },
+  "menu": {
+    "geo": {
+      "area": "地区管理"
+    }
+  }
+}

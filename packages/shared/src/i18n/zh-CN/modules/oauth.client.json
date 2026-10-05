@@ -1,0 +1,20 @@
+{
+  "field": {
+    "oauth": {
+      "client": {
+        "clientId": "客户端标识",
+        "name": "客户端名称",
+        "logoUrl": "图标",
+        "grantTypes": "授权方式",
+        "redirectUris": "回调地址",
+        "scopes": "授权范围",
+        "autoApproveScopes": "自动授权范围",
+        "accessTtlSec": "访问令牌有效期（秒）",
+        "refreshTtlSec": "刷新令牌有效期（秒）",
+        "isBuiltin": "内置",
+        "enabled": "是否启用",
+        "secret": "客户端密钥"
+      }
+    }
+  }
+}

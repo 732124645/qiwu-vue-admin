@@ -1,0 +1,19 @@
+{
+  "field": {
+    "biz": {
+      "leave": {
+        "userId": "Applicant",
+        "deptId": "Department",
+        "leaveKind": "Leave type",
+        "startAt": "Starts at",
+        "startAtFrom": "Starts at (from)",
+        "startAtTo": "Starts at (to)",
+        "endAt": "Ends at",
+        "days": "Days",
+        "reason": "Reason",
+        "state": "State",
+        "instanceId": "Process instance"
+      }
+    }
+  }
+}

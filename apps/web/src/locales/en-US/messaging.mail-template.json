@@ -1,0 +1,18 @@
+{
+  "messaging": {
+    "mailTemplate": {
+      "entity": "mail template",
+      "defaultAccount": "Default account",
+      "testSend": "Test send",
+      "recipient": "Recipient email",
+      "invalidRecipient": "Enter a valid recipient email and parameters",
+      "testOk": "Test mail sent, record #{id}",
+      "testFailed": "Test mail failed, record #{id}"
+    }
+  },
+  "menu": {
+    "messaging": {
+      "mailTemplate": "Mail templates"
+    }
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "field": {
+    "audit": {
+      "httpTrace": {
+        "url": "Path",
+        "traceId": "Trace ID",
+        "userId": "User ID",
+        "username": "Username",
+        "userType": "User type",
+        "clientId": "Client",
+        "method": "Method",
+        "query": "Query parameters",
+        "body": "Request body",
+        "statusCode": "HTTP status",
+        "bizCode": "Result code",
+        "msg": "Error",
+        "ip": "IP address",
+        "userAgent": "User agent",
+        "startedAt": "Requested at",
+        "startedAtFrom": "Requested at (from)",
+        "startedAtTo": "Requested at (to)",
+        "costMs": "Duration (ms)"
+      }
+    }
+  }
+}

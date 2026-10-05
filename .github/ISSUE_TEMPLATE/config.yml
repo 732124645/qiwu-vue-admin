@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 文档 / Documentation
+    url: https://qiwuadmin.com
+    about: 使用指南与常见问题 / Guides and FAQ
+  - name: 安全漏洞 / Security vulnerability
+    url: https://github.com/732124645/qiwu-vue-admin/security/policy
+    about: 请私密报告，勿公开提交 / Report privately, not in a public issue

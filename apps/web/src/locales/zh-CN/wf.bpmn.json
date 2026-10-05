@@ -1,0 +1,61 @@
+{
+  "wf": {
+    "bpmn": {
+      "tool": {
+        "hand": "抓手：拖动画布",
+        "lasso": "套索：框选多个元素",
+        "space": "增减空间：在图中插入或移除空白",
+        "connect": "连线：从一个元素连到另一个"
+      },
+      "create": {
+        "start": "开始事件",
+        "end": "结束事件",
+        "review": "审批节点",
+        "notify": "抄送节点",
+        "exclusive": "排他网关",
+        "parallel": "并行网关",
+        "inclusive": "包容网关"
+      },
+      "append": {
+        "review": "在后面加审批节点",
+        "notify": "在后面加抄送节点",
+        "end": "在后面加结束事件"
+      },
+      "block": {
+        "exclusive": "在后面插入排他分支块",
+        "parallel": "在后面插入并行分支块",
+        "inclusive": "在后面插入包容分支块"
+      },
+      "edit": {
+        "connect": "连到其它元素",
+        "change": "更换类型",
+        "delete": "删除",
+        "search": "在图中查找"
+      },
+      "type": {
+        "review": "审批节点",
+        "notify": "抄送节点",
+        "exclusive": "排他网关",
+        "parallel": "并行网关",
+        "inclusive": "包容网关",
+        "flow": "普通连线",
+        "defaultFlow": "默认路径"
+      },
+      "panel": {
+        "title": "属性",
+        "empty": "选中画布上的一个元素，在这里设置它。",
+        "fork": "分支网关设置",
+        "end": "结束事件",
+        "join": "汇合网关",
+        "flow": "连线",
+        "element": "元素",
+        "makeDefault": "设为默认路径",
+        "order": "路径顺序",
+        "orderHint": "排他分支按此顺序取第一个满足条件的路径，都不满足时走默认路径。",
+        "default": "默认",
+        "up": "上移",
+        "down": "下移"
+      }
+    }
+  }
+}

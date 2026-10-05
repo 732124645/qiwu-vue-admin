@@ -1,0 +1,15 @@
+{
+  "messaging": {
+    "mailAccount": {
+      "entity": "mail account",
+      "testConnection": "Test connection",
+      "testOk": "Mail server connected",
+      "testFailed": "Mail server connection failed"
+    }
+  },
+  "menu": {
+    "messaging": {
+      "mailAccount": "Mail accounts"
+    }
+  }
+}

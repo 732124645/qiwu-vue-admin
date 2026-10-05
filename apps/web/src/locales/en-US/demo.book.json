@@ -1,0 +1,12 @@
+{
+  "demo": {
+    "book": {
+      "entity": "book"
+    }
+  },
+  "menu": {
+    "demo": {
+      "book": "Books"
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "storage": {
+    "driver": {
+      "local": "本地磁盘",
+      "s3": "S3 兼容存储",
+      "localHint": "文件保存在服务器 STORAGE_LOCAL_ROOT 目录（由服务器环境变量设置，不在此处配置）。公开文件按此前缀访问：留空为 /files，也可填写前置 CDN 的地址。",
+      "secretUnchanged": "未修改：输入新的密钥即可替换",
+      "test": "测试连接",
+      "testHint": "使用已保存的配置连接：请先保存修改",
+      "testOk": "连接成功",
+      "testFailed": "连接失败，请检查服务地址、区域、存储桶和访问密钥。"
+    }
+  }
+}

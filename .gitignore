@@ -1,0 +1,42 @@
+# deps & build
+node_modules/
+dist/
+*.tsbuildinfo
+coverage/
+.vite/
+
+# env (secrets live in apps/server/.env.local only, never committed)
+.env*
+!.env.example
+!.env.test
+!.env.e2e
+!apps/web/.env.development
+!apps/web/.env.production
+
+# app signing and upload keys stay outside the repo (docs/mobile.md "发布清单")
+*.keystore
+*.jks
+*.p12
+*.mobileprovision
+*.cer
+private.*.key
+
+# runtime data
+data/
+*.xdb
+
+# test output
+playwright-report/
+test-results/
+blob-report/
+
+# os / editor / logs
+.DS_Store
+*.log
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# CommonJS insurance probe output (scripts/smoke-boot.mjs --cjs)
+apps/server/.cjs-probe/
+

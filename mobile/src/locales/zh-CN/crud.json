@@ -1,0 +1,34 @@
+{
+  "action": {
+    "create": "新增",
+    "edit": "编辑",
+    "delete": "删除",
+    "save": "保存",
+    "addChild": "新增下级",
+    "addRow": "添加一行",
+    "removeRow": "删除此行"
+  },
+  "title": {
+    "create": "新增{name}",
+    "edit": "编辑{name}",
+    "detail": "查看{name}"
+  },
+  "rows": {
+    "row": "第 {n} 行",
+    "empty": "暂无明细，点击下方按钮添加"
+  },
+  "tree": {
+    "topLevel": "无（顶级）",
+    "children": "下级 {n}"
+  },
+  "confirm": {
+    "title": "提示",
+    "delete": "确定删除这条记录吗？删除后不再显示，也无法在页面上恢复。"
+  },
+  "msg": {
+    "created": "新增成功",
+    "updated": "保存成功",
+    "deleted": "删除成功"
+  },
+  "empty": "暂无数据"
+}

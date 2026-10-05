@@ -1,0 +1,17 @@
+{
+  "ok": "Signed in",
+  "unknown_user": "Unknown username",
+  "disabled": "User is disabled",
+  "sms_code_invalid": "SMS verification code is wrong or has expired",
+  "credentials_changed": "Password changed or user disabled during sign-in: no session started",
+  "bind_refused": "Account verified, but WeChat account linking was refused or canceled in the meantime (that WeChat account or this user is already linked, the credentials changed, or the account was unlinked): no session started",
+  "bad_password": "Wrong password",
+  "locked": "Too many failed attempts: this username is locked on this IP for {minutes} minutes",
+  "ip_blocked": "IP address is on the sign-in blacklist",
+  "captcha_required": "Captcha ticket missing, invalid or expired",
+  "signout": "Signed out",
+  "refresh_reuse": "Refresh token replayed: the session was revoked",
+  "lock_screen_exceeded": "Too many wrong lock-screen passwords: the session was revoked",
+  "password_check_exceeded": "Too many wrong current-password checks: all sessions were revoked",
+  "kicked": "Signed out by an administrator ({by})"
+}

@@ -1,0 +1,12 @@
+{
+  "messaging": {
+    "mailRecord": {
+      "entity": "邮件记录"
+    }
+  },
+  "menu": {
+    "messaging": {
+      "mailRecord": "邮件记录"
+    }
+  }
+}

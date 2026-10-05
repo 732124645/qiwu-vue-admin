@@ -1,0 +1,8 @@
+{
+  "error": {
+    "messaging": {
+      "sms_channel_incomplete": "短信渠道缺少服务商必填配置",
+      "sms_too_frequent": "短信请求过于频繁，请稍后再试"
+    }
+  }
+}

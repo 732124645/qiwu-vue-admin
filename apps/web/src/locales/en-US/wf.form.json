@@ -1,0 +1,15 @@
+{
+  "wf": {
+    "form": {
+      "entity": "form",
+      "invalid": "The form cannot be saved: {reason}",
+      "removedTitle": "Unsupported settings",
+      "removed": "These settings are not allowed in a process form and will not be saved: {settings}"
+    }
+  },
+  "menu": {
+    "wf": {
+      "form": "Process forms"
+    }
+  }
+}

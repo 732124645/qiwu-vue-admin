@@ -1,0 +1,17 @@
+{
+  "menu": {
+    "wf": {
+      "data": "审批数据"
+    }
+  },
+  "wf": {
+    "data": {
+      "model": "流程",
+      "pickModel": "请选择流程",
+      "currentVersion": "当前版本（v{version}）",
+      "versionOption": "v{version}",
+      "addFilter": "添加字段筛选",
+      "withheld": "有 {n} 个字段在流程中被隐藏，仅流程管理员可见"
+    }
+  }
+}

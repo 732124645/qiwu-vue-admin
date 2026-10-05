@@ -1,0 +1,15 @@
+{
+  "scheduler": {
+    "run": {
+      "entity": "执行日志",
+      "clean": "清空",
+      "cleanConfirm": "确定清空全部执行日志吗？清空后不再显示，也无法在页面上恢复。",
+      "cleaned": "已清空"
+    }
+  },
+  "menu": {
+    "scheduler": {
+      "run": "调度日志"
+    }
+  }
+}

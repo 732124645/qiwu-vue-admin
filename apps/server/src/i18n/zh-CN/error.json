@@ -1,0 +1,112 @@
+{
+  "common": {
+    "bad_request": "请求无效",
+    "validation_failed": "请求参数校验未通过",
+    "unauthenticated": "未登录或登录已失效，请重新登录",
+    "forbidden": "没有执行此操作的权限",
+    "not_found": "请求的资源不存在",
+    "conflict": "数据已被修改，请刷新后重试",
+    "duplicate": "数据已存在，不能重复",
+    "in_use": "数据正在被使用，不能删除",
+    "payload_too_large": "请求内容过大",
+    "unprocessable": "请求无法处理",
+    "too_many_requests": "请求过于频繁，请稍后再试",
+    "internal": "服务器出错了，请稍后再试",
+    "demo_read_only": "演示模式下不能执行此操作"
+  },
+  "auth": {
+    "bad_credentials": "用户名或密码错误",
+    "locked": "登录失败次数过多，请稍后再试",
+    "ip_blocked": "当前 IP 已被禁止访问",
+    "signup_disabled": "当前不开放注册",
+    "sms_code_invalid": "验证码错误或已过期",
+    "password_change_required": "请先修改密码",
+    "session_expired": "会话已过期，请重新登录",
+    "refresh_rejected": "登录状态已失效，请重新登录",
+    "origin_rejected": "请求来源不被允许",
+    "old_password_wrong": "旧密码不正确",
+    "password_unchanged": "新密码不能与旧密码相同",
+    "password_wrong": "密码不正确",
+    "captcha_invalid": "验证码错误或已过期，请获取新题目",
+    "captcha_required": "请先完成验证码校验",
+    "wx_mp_code_invalid": "微信登录凭证无效或已使用，请重新进入小程序",
+    "wx_mp_ticket_invalid": "绑定已失效，请重新进入小程序后再绑定",
+    "wx_mp_bound": "该微信已绑定其他账号",
+    "wx_mp_user_bound": "该账号已绑定微信，请先在个人中心解绑",
+    "wx_mp_refused": "该微信绑定的账号已停用",
+    "wx_mp_upstream": "微信服务暂时不可用，请稍后再试"
+  },
+  "excel": {
+    "invalid": "不是有效的 Excel（.xlsx）文件",
+    "unsafe": "文件含宏、外部链接或嵌入对象，已拒绝",
+    "too_many_rows": "数据行数超过上限 {max} 行",
+    "too_many_columns": "列数超过上限 {max} 列",
+    "no_columns": "表头与导入模板不符，请使用下载的模板"
+  },
+  "tree": {
+    "parent_invalid": "上级不能是它自己或它的下级",
+    "parent_disabled": "上级已停用，不能在其下新增或移入",
+    "child_enabled": "还有启用的下级，不能停用",
+    "has_children": "还有下级，不能删除",
+    "path_too_long": "树的层级路径过长，请选择较浅的上级节点"
+  },
+  "iam": {
+    "grant_exceeds_own": "不能授予超出自己权限或数据范围的角色",
+    "user_self": "不能删除或停用自己的账号",
+    "user_protected": "超级管理员账号受保护，不能执行此操作",
+    "initial_password_unset": "未设置初始密码参数或其不符合密码策略，请填写密码",
+    "dept_has_users": "部门下还有用户，不能删除",
+    "menu_parent_kind": "上级菜单下不能添加这种类型的菜单（操作只能在页面下，操作下不能再添加）",
+    "menu_granted": "菜单已授权给角色，请先在角色中取消授权再删除",
+    "role_builtin": "内置角色受保护，不能执行此操作",
+    "role_has_users": "角色已分配给用户，请先取消分配再删除",
+    "own_mobile_in_profile": "请在个人中心修改自己的手机号（需验证密码与短信验证码）",
+    "mobile_change_unavailable": "短信验证码未配置，无法在个人中心修改手机号，请联系管理员修改",
+    "menu_route_name_fixed": "分组的路由名称保存后不能修改：种子与生成的页面按它查找分组"
+  },
+  "storage": {
+    "file_required": "请选择要上传的文件",
+    "type_rejected": "不支持的文件类型（.{ext}），或文件内容与扩展名不符",
+    "public_image_only": "该用途只能上传 PNG、JPEG、GIF 或 WebP 图片",
+    "endpoint_refused": "不允许使用该服务地址（内网地址或未登记的端口）",
+    "primary_locked": "主存储配置不能停用或删除，停用的配置也不能设为主配置",
+    "driver_fixed": "存储驱动在添加后不能更改",
+    "direct_unavailable": "当前主存储不支持直传，请经服务器上传",
+    "upload_mismatch": "上传的文件与申请直传时的大小或类型不符，已删除",
+    "ref_invalid": "引用的文件无效：只能使用本人上传且尚未被使用的文件，请重新上传",
+    "secret_required": "修改存储连接信息后，请重新填写访问密钥"
+  },
+  "codegen": {
+    "table_unavailable": "数据表 {table} 不可用：当前数据库中不存在、属于框架表（meta_、test_、cg_）或已导入",
+    "identifier_invalid": "{name} 不能用于代码生成：表名和列名只能包含小写字母、数字和下划线并以字母开头，类名和属性名不能是保留字或生成代码已使用的名称，项目领域不能是保留名称",
+    "options_label_missing": "数据表 {table} 没有可作为下拉选项标签的文本列（名称、标题或其他文本列），不能开启下拉选项接口",
+    "tree_columns": "数据表 {table} 不能使用树模板：需要 parent_id 与 tree_path 列（属性名 parentId、treePath）和一个文本显示列",
+    "write_disabled": "当前服务未开启代码写入：只在开发环境（NODE_ENV=development 且 CODEGEN_WRITE=true）可写入工作区，请改用预览或下载",
+    "path_conflict": "所选的多个配置会生成同一个文件 {path}（分组、领域和业务名相同），请修改其中一个配置后再试",
+    "sub_tables": "数据表 {table} 不能使用主子模板：主表需要至少一个子表配置，子表配置需要指向另一个表配置的主表，外键列须为子表自己的整数列",
+    "parent_menu": "父菜单 {name} 不可用：它必须是一个分组，且它与所有上级分组的路由名称都符合生成器格式（小写字母、数字、连字符）；请从列表中另选分组",
+    "reference": "引用 {table}.{column} 无效：须为当前数据库中带 deleted_at 列的表的列",
+    "no_deleted_at": "数据表 {table} 没有 deleted_at 列，不能导入或生成：生成的代码按逻辑删除，请先加列 deleted_at datetime(3) NULL",
+    "name_conflict": "与表 {table} 的生成配置冲突：类名（及导出的标识符）或领域加业务名相同，请修改其中一个配置的类名、领域或业务名",
+    "route_name_clash": "生成页面的路由名称 {name} 已被某个菜单分组或按钮使用，或与其上级分组链中的路由名称相同：请修改领域或业务名"
+  },
+  "settings": {
+    "param_builtin": "内置参数不能删除，也不能更改是否登录前可读",
+    "param_secret_public": "敏感参数不能设为登录前可读"
+  },
+  "scheduler": {
+    "handler_unknown": "处理器 {handler} 不存在：只能选择系统已注册的处理器"
+  },
+  "wf": {
+    "no_assignee": "节点“{node}”没有可用的审批人，请联系管理员检查流程的审批人与流程管理员设置",
+    "bad_target": "请选择已启用、且在本节点没有待办的用户",
+    "handler_missing": "模型 {modelKey} 是自定义表单，但没有注册业务处理器，无法发布",
+    "comment_required": "该节点要求填写审批意见"
+  },
+  "oauth": {
+    "client_invalid": "客户端无效：客户端不存在、已停用或不支持授权码方式，或回调地址未登记",
+    "request_invalid": "授权请求无效：response_type 必须是 code，申请的权限范围必须在客户端已登记的范围内",
+    "insufficient_scope": "该令牌不代表任何用户，不能读取用户信息",
+    "client_builtin": "内置客户端受保护，不能执行此操作"
+  }
+}

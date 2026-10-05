@@ -1,0 +1,14 @@
+{
+  "title": "Security check",
+  "image": {
+    "alt": "Verification image",
+    "placeholder": "Enter the image answer",
+    "newImage": "New image"
+  },
+  "slider": {
+    "title": "Drag the piece into place"
+  },
+  "confirm": "Confirm",
+  "loadFailed": "Could not load the verification challenge",
+  "retry": "Try again"
+}

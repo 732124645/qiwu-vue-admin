@@ -1,0 +1,12 @@
+{
+  "messaging": {
+    "smsRecord": {
+      "entity": "短信记录"
+    }
+  },
+  "menu": {
+    "messaging": {
+      "smsRecord": "短信记录"
+    }
+  }
+}

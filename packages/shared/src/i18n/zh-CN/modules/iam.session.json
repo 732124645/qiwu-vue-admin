@@ -1,0 +1,26 @@
+{
+  "field": {
+    "iam": {
+      "session": {
+        "sid": "会话 ID",
+        "userId": "用户 ID",
+        "username": "用户名",
+        "deptName": "部门",
+        "userType": "用户类型",
+        "clientId": "客户端",
+        "ip": "IP 地址",
+        "location": "登录地点",
+        "browser": "浏览器",
+        "os": "操作系统",
+        "userAgent": "User-Agent",
+        "keepSignedIn": "保持登录",
+        "loginAt": "登录时间",
+        "lastSeenAt": "最近访问",
+        "expiresAt": "过期时间",
+        "current": "当前会话",
+        "sids": "会话",
+        "kicked": "已强退会话数"
+      }
+    }
+  }
+}

@@ -1,0 +1,71 @@
+{
+  "wf": {
+    "model": {
+      "entity": "process model",
+      "formKinds": {
+        "dynamic": "Dynamic form",
+        "custom": "Business form"
+      },
+      "flowKinds": {
+        "tree": "Tree",
+        "bpmn": "BPMN"
+      },
+      "list": {
+        "published": "Published",
+        "yes": "Published",
+        "no": "Not published",
+        "versions": "Versions",
+        "moveUp": "Move {name} up",
+        "moveDown": "Move {name} down",
+        "design": "Design",
+        "wizard": "Wizard",
+        "truncated": "Only the first {max} of {total} models are shown, and they cannot be reordered here. Narrow the filter to find the others.",
+        "wizardTreeOnly": "The wizard is for tree processes only; edit a BPMN process on its design page"
+      },
+      "form": {
+        "scopeHint": "Who may start this process: the listed users, members of the listed departments (and the departments below them), and holders of the listed roles. Leave all empty to let everyone start it.",
+        "managersHint": "When an approval step has no available approver and is configured to send the task to process managers, these users handle it. Process managers can also view and export every field of this process in Approval data, including fields hidden at any step. Changing process managers requires the separate wf.model.managers permission.",
+        "managersLocked": "You may not change the process managers (wf.model.managers): they stay as they are.",
+        "noView": "No page component src/views/{path}.vue",
+        "formHint": "Publishing takes the fields and layout of this form; without one, the last version's fields carry over.",
+        "flowKindHint": "Cannot be changed after creation. Tree: add approval steps, CC steps and branches in a node tree. BPMN: draw a standard BPMN diagram and import or export .bpmn files. Both use the same approval engine."
+      },
+      "versions": {
+        "title": "Versions: {name}",
+        "version": "Version",
+        "current": "Current",
+        "publishedAt": "Published at",
+        "publishedBy": "Published by",
+        "seeded": "System setup",
+        "none": "Not published yet",
+        "importJson": "Import JSON",
+        "importTitle": "Import process",
+        "badJson": "Not a process JSON: the file needs a JSON object with a tree",
+        "exportJson": "Export JSON",
+        "exportBpmn": "Export BPMN"
+      },
+      "design": {
+        "back": "Back to list",
+        "saveDraft": "Save draft",
+        "publish": "Publish",
+        "draftSaved": "Draft saved",
+        "draftUnreadable": "The saved draft diagram cannot be opened, so a new diagram with just the initiator node is shown. Import a .bpmn file or draw the process again; saving the draft replaces the old one.",
+        "confirmTitle": "Publish process",
+        "publishConfirm": "Publish as v{version}? Processes started from now on use the new version; running ones are not affected.",
+        "published": "Published v{version}",
+        "current": "Current version v{version}",
+        "leaveTitle": "Unsaved changes",
+        "leaveConfirm": "The design has changes that are not saved. Leave and discard them?",
+        "leave": "Leave",
+        "import": "Import",
+        "importTitle": "Import diagram",
+        "importHint": "Takes .bpmn / .xml files and the process JSON exported from the version list; check the result on the canvas, then save the draft or publish.",
+        "importConfirm": "Importing replaces the diagram on the canvas. Continue?",
+        "importWarnings": "The import reported:",
+        "importRenamed": "These IDs do not suit BPMN and were renamed: {ids}",
+        "badFile": "The file cannot be read: it needs BPMN 2.0 XML (.bpmn / .xml) or a process JSON",
+        "exportBpmn": "Export BPMN"
+      }
+    }
+  }
+}

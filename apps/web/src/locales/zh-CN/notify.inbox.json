@@ -1,0 +1,24 @@
+{
+  "notify": {
+    "tabs": { "bulletins": "公告", "inbox": "站内信" },
+    "inbox": {
+      "pageTitle": "我的消息",
+      "viewAll": "查看全部消息",
+      "empty": "暂无站内信",
+      "systemSender": "系统",
+      "close": "关闭",
+      "state": "状态",
+      "title": "标题",
+      "categoryLabel": "分类",
+      "sender": "发送人",
+      "receivedAt": "接收时间",
+      "readFilter": "阅读状态",
+      "all": "全部",
+      "unreadOnly": "仅未读",
+      "read": "已读",
+      "unread": "未读",
+      "view": "查看",
+      "category": { "system": "系统", "business": "业务" }
+    }
+  }
+}

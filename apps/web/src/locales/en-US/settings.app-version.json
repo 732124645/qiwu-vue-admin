@@ -1,0 +1,12 @@
+{
+  "settings": {
+    "appVersion": {
+      "entity": "version"
+    }
+  },
+  "menu": {
+    "settings": {
+      "appVersion": "App versions"
+    }
+  }
+}

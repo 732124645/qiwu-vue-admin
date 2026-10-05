@@ -1,0 +1,165 @@
+<%_
+// the uni-app detail page (docs/codegen-golden.md "Mobile"): the row's fields (a master-sub's rows
+// too), edit / delete (a tree's add below) by permission
+const b = m.biz
+const B = m.Biz
+const perms = b + 'Perms'
+const w = !m.readonly
+const tree = m.kind === 'tree'
+const subs = m.subs
+const Row = B + (subs.length ? 'Detail' : 'Vo')
+const cols = [...m.detail, ...subs.flatMap((s) => s.form)]
+const dicts = [...new Set(cols.filter((c) => c.web.dict).map((c) => c.web.dict))]
+const page = '/pages-biz/' + m.home
+_%>
+<%_ function cell(c, v) { _%>
+<%_ if (c.widget === 'image-upload') { _%>
+        <wd-cell :title="t('<%= c.labelKey %>')">
+          <wd-img v-if="<%= v %>" :src="assetUrl(<%= v %>)" :width="64" :height="64" mode="aspectFill" />
+        </wd-cell>
+<%_ } else if (c.widget === 'richtext') { _%>
+        <!-- sanitized by the server (core/sanitize.ts allow-list) when saved and on GET /:id -->
+        <wd-cell :title="t('<%= c.labelKey %>')" use-label-slot>
+          <template #label><rich-text :nodes="<%= v %> ?? ''" /></template>
+        </wd-cell>
+<%_ } else if (c.freeText) { _%>
+        <wd-cell :title="t('<%= c.labelKey %>')" :label="<%= v %> ?? ''" />
+<%_ } else { _%>
+        <wd-cell :title="t('<%= c.labelKey %>')" :value="<% if (c.web.dict) { %>dictText('<%= c.web.dict %>', <%= v %>)<% } else if (c.tsType === 'Date') { %><%= v %> ? formatTime(<%= v %>) : ''<% } else if (c.seedName) { %>tx(<%= v %>)<% } else if (c.widget === 'file-upload') { %>uploadName(<%= v %>)<% } else if (c.web.scale) { %><%= v %><% if (c.nullable) { %>?<% } %>.toFixed(<%= c.web.scale %>)<% } else { %><%= v %><% } %>" />
+<%_ } _%>
+<%_ } _%>
+<template>
+  <view class="qw-detail qw-stack">
+    <template v-if="row">
+      <wd-cell-group custom-class="qw-group" border>
+<%_ for (const c of m.detail) { _%>
+<%_ if (c.widget === 'dept-tree-select' || c.widget === 'user-picker') { _%>
+        <!-- The id, as the web's detail outside the caller's tree; names when mobile has a lookup -->
+<%_ } _%>
+<%_ cell(c, 'row.' + c.field) _%>
+<%_ } _%>
+      </wd-cell-group>
+<%_ for (const sub of subs) { _%>
+      <view class="qw-sec">
+        <text class="qw-sec__title">{{ t('field.<%= m.key %>.<%= sub.prop %>') }}</text>
+      </view>
+      <wd-cell-group
+        v-for="(line, i) in row.<%= sub.prop %>"
+        :key="line.id"
+        custom-class="qw-group"
+        :title="t('crud.rows.row', { n: i + 1 })"
+        border
+      >
+  <%_ for (const c of sub.form) { _%>
+<%_ cell(c, 'line.' + c.field) _%>
+  <%_ } _%>
+      </wd-cell-group>
+<%_ } _%>
+<%_ if (w) { _%>
+      <QwPerm :perm="<%= perms %>.modify">
+        <wd-button custom-class="qw-btn qw-btn--primary" type="primary" block @click="edit">
+          {{ t('crud.action.edit') }}
+        </wd-button>
+      </QwPerm>
+  <%_ if (tree) { _%>
+      <QwPerm :perm="<%= perms %>.create">
+        <wd-button custom-class="qw-btn" type="primary" variant="soft" block @click="addChild">
+          {{ t('crud.action.addChild') }}
+        </wd-button>
+      </QwPerm>
+  <%_ } _%>
+      <QwPerm :perm="<%= perms %>.remove">
+        <wd-button
+          custom-class="qw-btn"
+          type="danger"
+          variant="plain"
+          block
+          :loading="removing"
+          :disabled="removing"
+          @click="remove"
+        >
+          {{ t('crud.action.delete') }}
+        </wd-button>
+      </QwPerm>
+<%_ } _%>
+    </template>
+    <QwEmpty v-else-if="error" :title="error" />
+  </view>
+</template>
+
+<script setup lang="ts">
+import { <%= names(['ref', 'shallowRef']) %> } from 'vue'
+import { <%= names(['onLoad', 'onShow']) %> } from '@dcloudio/uni-app'
+import { <%= names([w && perms, 'type ' + Row, cols.some((c) => c.widget === 'file-upload') && 'uploadName']) %> } from '@qiwu/shared'
+import { <%= b %>Api } from '@/api/<%= m.home %>'
+import QwEmpty from '@/core/components/QwEmpty.vue'
+<%_ if (w) { _%>
+import QwPerm from '@/core/components/QwPerm.vue'
+<%_ } _%>
+<%_ if (dicts.length) { _%>
+import { useDicts } from '@/core/crud'
+<%_ } _%>
+<%_ if (cols.some((c) => c.tsType === 'Date')) { _%>
+import { formatTime } from '@/core/format'
+<%_ } _%>
+import { <%= names(['t', cols.some((c) => c.seedName) && 'tx']) %> } from '@/core/i18n'
+import { <%= names([w && 'ApiError', cols.some((c) => c.widget === 'image-upload') && 'assetUrl', 'errorText']) %> } from '@/core/request'
+
+/**
+ * One <%= comment(m.noun) %> (mobile, generated): `?id=`; GET /:id answers only a row in the caller's scope (else
+ * 404, shown with its message). Showing again (back from its form) reloads it.
+ */
+const id = ref(0)
+const row = shallowRef<<%= Row %>>()
+const error = ref('')
+<%_ if (dicts.length) { _%>
+const { dictText } = useDicts([<% for (const d of dicts) { %>'<%= d %>', <% } %>])
+<%_ } _%>
+
+async function load() {
+  try {
+    row.value = await <%= b %>Api.get(id.value)
+  } catch (e) {
+    error.value = errorText(e)
+  }
+}
+
+onLoad((query) => {
+  id.value = Number(query?.id) || 0
+  uni.setNavigationBarTitle({ title: t('crud.title.detail', { name: t('<%= m.key %>.entity') }) })
+})
+// the first show loads too
+onShow(() => void load())
+<%_ if (w) { _%>
+
+const edit = () => uni.navigateTo({ url: `<%= page %>/form?id=${id.value}` })
+  <%_ if (tree) { _%>
+const addChild = () => uni.navigateTo({ url: `<%= page %>/form?parentId=${id.value}` })
+  <%_ } _%>
+
+const removing = ref(false)
+function remove() {
+  uni.showModal({
+    title: t('crud.confirm.title'),
+    content: t('crud.confirm.delete'),
+    confirmText: t('crud.action.delete'),
+    cancelText: t('common.action.cancel'),
+    success: async ({ confirm }) => {
+      if (!confirm || removing.value) return
+      removing.value = true
+      try {
+        await <%= b %>Api.remove(id.value)
+        uni.showToast({ title: t('crud.msg.deleted'), icon: 'none' })
+        uni.navigateBack()
+      } catch (e) {
+        // the request layer toasts a 409 (still in use: a reference, a tree node's children); a row gone
+        // meanwhile (404) here
+        if (e instanceof ApiError && e.status === 404) uni.showToast({ title: e.message, icon: 'none' })
+      } finally {
+        removing.value = false
+      }
+    },
+  })
+}
+<%_ } _%>
+</script>

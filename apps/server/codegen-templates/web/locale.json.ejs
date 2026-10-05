@@ -1,0 +1,7 @@
+<%_
+// the page's own texts (web fragment, docs/codegen-golden.md "Strings"): the noun in dialog titles, the
+// menu / page name; field labels are in the shared fragment
+const [domain, biz] = m.key.split('.')
+const texts = { entity: m.entity[lang] }
+_%>
+<%= json({ [domain]: { [biz]: texts }, menu: { [domain]: { [biz]: m.title[lang] } } }) %>

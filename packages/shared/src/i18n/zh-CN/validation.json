@@ -1,0 +1,89 @@
+{
+  "required": "{field}不能为空",
+  "invalid_type": "{field}的类型不正确",
+  "integer": "{field}必须是整数",
+  "too_small": {
+    "string": "{field}至少 {minimum} 个字符",
+    "number": "{field}不能小于 {minimum}",
+    "number_exclusive": "{field}必须大于 {minimum}",
+    "array": "{field}至少 {minimum} 项"
+  },
+  "too_big": {
+    "string": "{field}最多 {maximum} 个字符",
+    "number": "{field}不能大于 {maximum}",
+    "number_exclusive": "{field}必须小于 {maximum}",
+    "array": "{field}最多 {maximum} 项"
+  },
+  "invalid_format": {
+    "email": "{field}不是有效的邮箱地址",
+    "url": "{field}不是有效的网址",
+    "other": "{field}的格式不正确"
+  },
+  "invalid_value": "{field}只能是：{values}",
+  "not_multiple_of": "{field}必须是 {divisor} 的倍数",
+  "unrecognized_keys": "不支持的字段：{keys}",
+  "sort": "{field}只能使用以下字段：{allowed}",
+  "invalid": "{field}无效",
+  "route_name_reserved": "{field}已被内置页面占用",
+  "json_object": "{field}必须是 JSON 对象",
+  "template_params_max": "{field}最多只能包含 20 项",
+  "password": {
+    "too_long_bytes": "{field}不能超过 {maxBytes} 字节",
+    "char_classes": "{field}需至少包含 {count} 类字符（小写、大写、数字、符号）",
+    "same_as_old": "新密码不能与旧密码相同"
+  },
+  "wf": {
+    "too_large": "流程过大：最多 200 个节点、嵌套 100 层",
+    "duplicate_id": "标识 {node} 重复",
+    "fallback_count": "分支 {node} 需要恰好一条默认路径",
+    "fallback_when": "默认路径 {node} 不能设置条件",
+    "path_when_required": "路径 {node} 需要设置条件",
+    "parallel_path": "并行路径 {node} 不能设置条件，也不能是默认路径",
+    "unknown_field": "路径 {node} 的条件使用了表单中不存在的字段",
+    "op_mismatch": "路径 {node} 的条件使用了该字段不支持的运算符",
+    "value_mismatch": "路径 {node} 的条件值缺失或类型不符",
+    "assignee_ids": "请选择节点 {node} 的审批人",
+    "assignee_field": "节点 {node} 的审批人需要类型相符的表单字段",
+    "fallback_user": "请选择节点 {node} 的兜底审批人",
+    "picks_missing": "请选择节点 {node} 的人员",
+    "picks_unknown_user": "节点 {node} 只能选择已启用的用户",
+    "filter_unknown_field": "所选版本的表单中没有字段 {name}，不能按它筛选",
+    "filter_op_mismatch": "字段 {name} 不支持该筛选方式",
+    "filter_value_mismatch": "字段 {name} 的筛选值缺失或类型不符",
+    "bpmn_parse": "无法读取 BPMN 流程图：需要本系统支持的 BPMN 2.0 XML",
+    "bpmn_too_large": "BPMN 流程图过大：最多 80 KiB（约 90 个元素）",
+    "bpmn_doctype": "BPMN 流程图不能包含 DOCTYPE 或实体声明",
+    "bpmn_process": "流程图必须恰好包含一个流程",
+    "bpmn_pool": "不支持泳池与泳道（{node}）",
+    "bpmn_unsupported": "不支持元素 {node} 的类型或其中的某项设置",
+    "bpmn_foreign": "元素 {node} 带有外来扩展、监听器或其它 BPMN 工具的配置，不受支持",
+    "bpmn_expression": "元素 {node} 含有表达式：条件只能用条件构造器设置",
+    "bpmn_condition_misplaced": "连线 {node} 的条件或默认路径位置不对：只有分支网关的出线可以设置",
+    "bpmn_ref": "元素 {node} 引用的元素不存在或不能连接",
+    "bpmn_di": "元素 {node} 的图形缺失、重复、带有自定义颜色、小于 10 × 10 或与其他节点重叠，或连线没有从起点画到终点、经过或贴近（5 px 内）其他节点",
+    "bpmn_id": "元素 {node} 的标识或名称不合规：标识以字母或 _ 开头、只含字母、数字、_ 和 -，最多 64 个字符且不以 __ 开头；名称最多 64 个字",
+    "bpmn_start": "流程必须恰好有一个开始事件",
+    "bpmn_arity": "元素 {node} 的连线数量不对：开始只出一条，审批与抄送一进一出，结束只进不出，网关一进多出（分支）或多进一出（汇合）；合流请用网关",
+    "bpmn_unreachable": "从开始事件走不到元素 {node}",
+    "bpmn_cycle": "流程中有回环（经过 {node}）：返工请用退回或驳回",
+    "bpmn_join_type": "分支网关 {node} 与它的汇合网关类型不一致",
+    "bpmn_unstructured": "网关 {node} 处的分支与汇合不成对：每个分支网关的各条分支要汇合到同一个同类型的汇合网关（或都走到结束），不能提前结束或跨块汇合",
+    "bpmn_config": "元素 {node} 的配置无效"
+  },
+  "form": {
+    "too_large": "表单过大：最多 {rules} 个字段、嵌套 {depth} 层、{values} 个值",
+    "forbidden_key": "表单不能包含 {key}（事件、数据加载与联动设置不可用）",
+    "code": "{path} 含有代码：表单不能包含函数或脚本",
+    "unknown_type": "表单不能使用组件 {type}",
+    "duplicate_field": "字段名 {name} 重复",
+    "calc_ref": "自动算天数须引用本表单的字段：开始、结束为日期字段，上午/下午字段可不填"
+  },
+  "oauth": {
+    "client_id_reserved": "{field}是系统保留的标识",
+    "redirect_uri": "{field}须为 https 地址（本机调试可用 http://localhost 或 http://127.0.0.1），不能含 #、*、空白或用户名密码",
+    "logo_url": "{field}须为 https 地址或本站路径（以 / 开头）",
+    "duplicate": "{field}有重复项",
+    "refresh_needs_code": "启用刷新令牌须同时启用授权码",
+    "auto_approve_subset": "{field}只能从授权范围中选择"
+  }
+}

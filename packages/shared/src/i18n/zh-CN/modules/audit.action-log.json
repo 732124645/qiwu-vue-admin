@@ -1,0 +1,26 @@
+{
+  "field": {
+    "audit": {
+      "actionLog": {
+        "traceId": "追踪 ID",
+        "domain": "业务域",
+        "verb": "动作",
+        "bizId": "业务 ID",
+        "userId": "操作人 ID",
+        "username": "操作人",
+        "deptName": "部门",
+        "httpMethod": "请求方法",
+        "url": "请求地址",
+        "ip": "IP 地址",
+        "location": "操作地点",
+        "userAgent": "User-Agent",
+        "params": "请求参数",
+        "result": "返回结果",
+        "ok": "是否成功",
+        "errorMsg": "失败原因",
+        "costMs": "耗时（毫秒）",
+        "userType": "用户类型"
+      }
+    }
+  }
+}

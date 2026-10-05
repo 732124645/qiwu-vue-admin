@@ -1,0 +1,31 @@
+{
+  "action": {
+    "upload": "上传文件",
+    "uploadImage": "上传图片",
+    "preview": "预览 {name}",
+    "remove": "移除 {name}"
+  },
+  "hint": {
+    "file": "最多 {limit} 个文件，单个不超过 {size}",
+    "image": "支持 PNG、JPG、GIF、WebP，最多 {limit} 张，单张不超过 {size}"
+  },
+  "error": {
+    "limit": "最多上传 {limit} 个",
+    "imageOnly": "“{name}”不是 PNG、JPG、GIF 或 WebP 图片",
+    "tooLarge": "“{name}”超过 {size}"
+  },
+  "uploading": "正在上传 {name}：{percent}%",
+  "avatar": {
+    "title": "更换头像",
+    "image": "待裁剪的图片",
+    "empty": "选择一张图片开始裁剪",
+    "choose": "选择图片",
+    "preview": "预览",
+    "rotateLeft": "向左旋转",
+    "rotateRight": "向右旋转",
+    "zoomIn": "放大",
+    "zoomOut": "缩小",
+    "reset": "重置",
+    "failed": "这张图片无法裁剪，请换一张"
+  }
+}

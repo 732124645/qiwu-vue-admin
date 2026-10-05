@@ -1,0 +1,36 @@
+{
+  "demo": {
+    "realtime": {
+      "status": {
+        "label": "实时连接",
+        "up": "已连接",
+        "reconnecting": "重连中",
+        "down": "已断开"
+      },
+      "send": {
+        "title": "发送消息",
+        "target": {
+          "user": "指定用户",
+          "role": "角色",
+          "all": "全员"
+        },
+        "rolePlaceholder": "选择角色",
+        "textPlaceholder": "纯文本，最多 500 字",
+        "submit": "发送",
+        "done": "已发送，暂无在线用户收到 | 已发送，1 位在线用户收到 | 已发送，{count} 位在线用户收到"
+      },
+      "log": {
+        "title": "接收日志",
+        "hint": "最新在前，保留最近 {max} 条",
+        "clear": "清空",
+        "empty": "暂无消息",
+        "emptyHint": "发给你的消息到达后会显示在这里。"
+      }
+    }
+  },
+  "menu": {
+    "demo": {
+      "realtime": "实时推送示例"
+    }
+  }
+}

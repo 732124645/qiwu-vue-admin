@@ -1,0 +1,91 @@
+{
+  "aliases": [
+    {
+      "package": "chainsaw",
+      "version": "0.1.0",
+      "from": "MIT/X11",
+      "to": "MIT",
+      "reason": "non-SPDX spelling of MIT; via exceljs -> unzipper -> binary"
+    },
+    {
+      "package": "traverse",
+      "version": "0.3.9",
+      "from": "MIT/X11",
+      "to": "MIT",
+      "reason": "non-SPDX spelling of MIT; via exceljs -> unzipper -> binary -> chainsaw"
+    },
+    {
+      "package": "@darabonba/typescript",
+      "version": "1.0.5",
+      "from": "Apache License 2.0",
+      "to": "Apache-2.0",
+      "reason": "non-SPDX spelling of Apache-2.0 (the package ships no LICENSE file; Alibaba Cloud's Darabonba SDK runtime); via @alicloud/dysmsapi20170525 -> @alicloud/openapi-core (SMS provider)"
+    },
+    {
+      "package": "bpmn-js",
+      "version": "18.30.1",
+      "from": "Unknown",
+      "to": "LicenseRef-bpmn-io",
+      "reason": "package.json says \"SEE LICENSE IN LICENSE\" (pnpm reports Unknown); LICENSE = MIT text + bpmn.io watermark clause. Pinned to this exact version: any upgrade (patch included) re-reads LICENSE and moves this alias in the same commit; changed terms or a new major need a new license review"
+    }
+  ],
+  "elections": [
+    {
+      "package": "jszip",
+      "versionRange": "3.10.x",
+      "expression": "MIT OR GPL-3.0-or-later",
+      "elected": "MIT",
+      "reason": "dual-licensed; we use it under MIT; via exceljs",
+      "approved": "2026-09-26"
+    },
+    {
+      "package": "string-format",
+      "versionRange": "2.x",
+      "expression": "WTFPL OR MIT",
+      "elected": "MIT",
+      "reason": "via nestjs-i18n; dual licensed, MIT branch elected",
+      "approved": "2026-09-26"
+    }
+  ],
+  "binaryExceptions": [
+    {
+      "packagePattern": "@img/sharp-libvips-*",
+      "license": "LGPL-3.0-or-later",
+      "reason": "prebuilt libvips shared library, dynamically loaded by sharp (Apache-2.0), all platform packages; THIRD-PARTY-NOTICES.md carries the LGPL-3.0 text, the libvips version and its source URL",
+      "approved": "2026-09-26"
+    },
+    {
+      "packagePattern": "@img/sharp-win32-x64",
+      "license": "Apache-2.0 AND LGPL-3.0-or-later",
+      "reason": "Windows sharp platform package bundles the libvips DLLs, dynamically loaded by sharp (Apache-2.0); THIRD-PARTY-NOTICES.md carries the LGPL-3.0 text, the libvips version and its source URL",
+      "approved": "2026-10-03"
+    },
+    {
+      "packagePattern": "@img/sharp-win32-arm64",
+      "license": "Apache-2.0 AND LGPL-3.0-or-later",
+      "reason": "Windows sharp platform package bundles the libvips DLLs, dynamically loaded by sharp (Apache-2.0); THIRD-PARTY-NOTICES.md carries the LGPL-3.0 text, the libvips version and its source URL",
+      "approved": "2026-10-03"
+    },
+    {
+      "packagePattern": "@img/sharp-win32-ia32",
+      "license": "Apache-2.0 AND LGPL-3.0-or-later",
+      "reason": "Windows sharp platform package bundles the libvips DLLs, dynamically loaded by sharp (Apache-2.0); THIRD-PARTY-NOTICES.md carries the LGPL-3.0 text, the libvips version and its source URL",
+      "approved": "2026-10-03"
+    },
+    {
+      "packagePattern": "lightningcss*",
+      "license": "MPL-2.0",
+      "reason": "MPL-2.0 build-time CSS tool reached via vue-router@5 -> unplugin -> vite; unmodified, not bundled into the web output; MPL-2.0 is file-level copyleft and compatible with MIT distribution",
+      "approved": "2026-09-26"
+    }
+  ],
+  "exceptions": [
+    {
+      "packagePattern": "bpmn-js",
+      "license": "LicenseRef-bpmn-io",
+      "reason": "bpmn.io license: MIT text plus a watermark clause; the watermark stays visible and unchanged",
+      "approved": "2026-10-01"
+    }
+  ],
+  "iconSets": ["ep", "lucide"]
+}

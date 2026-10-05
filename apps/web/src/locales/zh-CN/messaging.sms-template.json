@@ -1,0 +1,20 @@
+{
+  "messaging": {
+    "smsTemplate": {
+      "entity": "短信模板",
+      "defaultChannel": "默认渠道",
+      "otpChannelUnset": "未配置（验证码不会发送）",
+      "otpChannelHint": "验证码模板必须选择已启用的渠道；为安全起见不会回退到默认渠道",
+      "testSend": "测试发送",
+      "recipient": "接收手机号",
+      "invalidRecipient": "请输入有效的手机号和参数",
+      "testOk": "测试短信已发送，记录 #{id}",
+      "testFailed": "测试短信发送失败，记录 #{id}"
+    }
+  },
+  "menu": {
+    "messaging": {
+      "smsTemplate": "短信模板"
+    }
+  }
+}

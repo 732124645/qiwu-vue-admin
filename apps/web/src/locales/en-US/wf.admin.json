@@ -1,0 +1,23 @@
+{
+  "wf": {
+    "admin": {
+      "instanceId": "Instance",
+      "dept": "Initiator dept",
+      "taskState": "Task state",
+      "dueAt": "Due at",
+      "terminate": {
+        "action": "Terminate",
+        "title": "Terminate instance #{id}",
+        "hint": "The process ends at once and every open task is canceled. This cannot be undone.",
+        "submit": "Terminate",
+        "done": "Terminated"
+      },
+      "reassign": {
+        "action": "Reassign",
+        "title": "Reassign: {node}",
+        "submit": "Reassign",
+        "done": "Reassigned"
+      }
+    }
+  }
+}

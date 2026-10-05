@@ -1,0 +1,115 @@
+{
+    "name" : "Qiwu",
+    "appid" : "",
+    "description" : "",
+    "versionName" : "1.0.0",
+    "versionCode" : "100",
+    "transformPx" : false,
+    /* 5+App特有相关 */
+    "app-plus" : {
+        "usingComponents" : true,
+        "nvueStyleCompiler" : "uni-app",
+        "compilerVersion" : 3,
+        /* light and dark: native bars from theme.json; 我的 → 外观 switches with plus.nativeUI.setUIStyle */
+        "darkmode" : true,
+        "themeLocation" : "theme.json",
+        /* the pages reach under the home indicator, as on H5 and the mini program (their CSS pads with
+           env(safe-area-inset-bottom)): uni's default for a tab bar app ends them above it on a white band */
+        "safearea" : {
+            "bottom" : {
+                "offset" : "none"
+            }
+        },
+        "splashscreen" : {
+            "alwaysShowBeforeRender" : true,
+            "waiting" : true,
+            "autoclose" : true,
+            "delay" : 0
+        },
+        /* 模块配置 */
+        "modules" : {},
+        /* 应用发布信息 */
+        "distribute" : {
+            /* android打包配置 */
+            "android" : {
+                /* only what the app uses: network state, the camera (avatar, uni.chooseImage); docs/mobile.md "App 权限" */
+                "permissions" : [
+                    "<uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\"/>",
+                    "<uses-permission android:name=\"android.permission.ACCESS_WIFI_STATE\"/>",
+                    "<uses-permission android:name=\"android.permission.CAMERA\"/>",
+                    "<uses-feature android:name=\"android.hardware.camera\"/>"
+                ]
+            },
+            /* ios打包配置 */
+            /* uni.chooseImage offers the camera and the photo library (avatar, attachments): iOS needs a usage
+               string for each, or the call crashes and review rejects the build; docs/mobile.md "发布清单" */
+            "ios" : {
+                "privacyDescription" : {
+                    "NSCameraUsageDescription" : "用于拍照更换头像或上传附件图片",
+                    "NSPhotoLibraryUsageDescription" : "用于从相册选择图片更换头像或上传附件"
+                }
+            },
+            /* app icon A and the splash (visual-system §12.3): generated from the brand art, kept outside src/static so
+               the mini program package never carries them; paths as HBuilderX's manifest editor writes them */
+            "icons" : {
+                "android" : {
+                    "hdpi" : "unpackage/res/icons/72x72.png",
+                    "xhdpi" : "unpackage/res/icons/96x96.png",
+                    "xxhdpi" : "unpackage/res/icons/144x144.png",
+                    "xxxhdpi" : "unpackage/res/icons/192x192.png"
+                },
+                "ios" : {
+                    "appstore" : "unpackage/res/icons/1024x1024.png",
+                    "ipad" : {
+                        "app" : "unpackage/res/icons/76x76.png",
+                        "app@2x" : "unpackage/res/icons/152x152.png",
+                        "notification" : "unpackage/res/icons/20x20.png",
+                        "notification@2x" : "unpackage/res/icons/40x40.png",
+                        "proapp@2x" : "unpackage/res/icons/167x167.png",
+                        "settings" : "unpackage/res/icons/29x29.png",
+                        "settings@2x" : "unpackage/res/icons/58x58.png",
+                        "spotlight" : "unpackage/res/icons/40x40.png",
+                        "spotlight@2x" : "unpackage/res/icons/80x80.png"
+                    },
+                    "iphone" : {
+                        "app@2x" : "unpackage/res/icons/120x120.png",
+                        "app@3x" : "unpackage/res/icons/180x180.png",
+                        "notification@2x" : "unpackage/res/icons/40x40.png",
+                        "notification@3x" : "unpackage/res/icons/60x60.png",
+                        "settings@2x" : "unpackage/res/icons/58x58.png",
+                        "settings@3x" : "unpackage/res/icons/87x87.png",
+                        "spotlight@2x" : "unpackage/res/icons/80x80.png",
+                        "spotlight@3x" : "unpackage/res/icons/120x120.png"
+                    }
+                }
+            },
+            "splashscreen" : {
+                "androidStyle" : "default",
+                "android" : {
+                    "hdpi" : "unpackage/res/splash/splash-480x762.png",
+                    "xhdpi" : "unpackage/res/splash/splash-720x1242.png",
+                    "xxhdpi" : "unpackage/res/splash/splash-1080x1882.png"
+                }
+            },
+            /* SDK配置 */
+            "sdkConfigs" : {}
+        }
+    },
+    /* H5 (debug and e2e only) has no "darkmode": with it, uni-h5's uni.hideTabBar misses the themed copy of the
+       tab bar; core/theme.ts reads the system theme and paints the native navigation bar itself */
+    /* 小程序特有相关 */
+    "mp-weixin" : {
+        "appid" : "",
+        /* follows the system only (no 外观 setting) */
+        "darkmode" : true,
+        "themeLocation" : "theme.json",
+        "setting" : {
+            "urlCheck" : false
+        },
+        "usingComponents" : true
+    },
+    "uniStatistics": {  
+        "enable": false
+    },
+    "vueVersion" : "3"
+}

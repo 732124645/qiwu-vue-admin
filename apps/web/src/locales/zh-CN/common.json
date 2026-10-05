@@ -1,0 +1,124 @@
+{
+  "app": {
+    "title": "栖梧管理系统",
+    "name": "栖梧",
+    "suffix": "管理系统"
+  },
+  "brand": {
+    "tagline": "企业级中后台的\n稳固起点",
+    "access": "精细到按钮的权限",
+    "accessDesc": "菜单、按钮与数据范围，逐级授权",
+    "global": "多语言与暗色主题",
+    "globalDesc": "中英双语、亮暗两套配色，开箱即用",
+    "audit": "每一步都可追溯",
+    "auditDesc": "登录日志与操作审计，自动记录"
+  },
+  "action": {
+    "backHome": "返回首页",
+    "signIn": "登录",
+    "signOut": "退出登录",
+    "cancel": "取消",
+    "retry": "重试"
+  },
+  "form": {
+    "showPassword": "显示密码"
+  },
+  "client": {
+    "console": "电脑",
+    "mobile": "手机"
+  },
+  "session": {
+    "expiredTitle": "会话已过期",
+    "expired": "登录状态已失效。可留在本页保留未保存的内容，或重新登录后回到此页。",
+    "stay": "留在本页",
+    "signInAgain": "重新登录",
+    "kicked": "你已被管理员强制下线，请重新登录"
+  },
+  "error": {
+    "network": "网络异常，请稍后重试",
+    "forbidden": "抱歉，你没有访问此页面的权限",
+    "notFound": "页面不存在",
+    "unavailable": "服务器暂时无法连接，请稍后重试"
+  },
+  "login": {
+    "title": "登录",
+    "username": "用户名",
+    "password": "密码",
+    "keepSignedIn": "保持登录",
+    "rememberUsername": "记住用户名",
+    "subtitle": "欢迎回来，请登录你的账号"
+  },
+  "passwordChange": {
+    "title": "修改密码",
+    "required": "为了账号安全，请先修改密码",
+    "expired": "密码已过期，请修改密码后继续使用",
+    "policy": "新密码至少 {minLength} 个字符，且至少包含小写字母、大写字母、数字、符号中的 {charClasses} 类",
+    "policyLength": "新密码至少 {minLength} 个字符",
+    "oldPassword": "旧密码",
+    "newPassword": "新密码",
+    "confirmPassword": "确认新密码",
+    "mismatch": "两次输入的新密码不一致",
+    "submit": "修改密码",
+    "done": "密码已修改"
+  },
+  "layout": {
+    "sideMenu": "侧边菜单",
+    "collapse": "收起侧边栏",
+    "expand": "展开侧边栏",
+    "breadcrumb": "面包屑导航",
+    "language": "切换语言",
+    "userMenu": "用户菜单",
+    "changePassword": "修改密码"
+  },
+  "language": {
+    "zhCN": "简体中文",
+    "enUS": "English"
+  },
+  "tags": {
+    "label": "已打开的页面",
+    "refresh": "刷新",
+    "close": "关闭",
+    "closeOthers": "关闭其它",
+    "closeLeft": "关闭左侧",
+    "closeRight": "关闭右侧",
+    "closeAll": "关闭全部",
+    "settings": "标签栏设置",
+    "style": "标签风格",
+    "styleCard": "卡片",
+    "styleChrome": "Chrome",
+    "persist": "刷新后保留已打开的标签"
+  },
+  "home": {
+    "greeting": {
+      "morning": "早上好，{name}",
+      "afternoon": "下午好，{name}",
+      "evening": "晚上好，{name}"
+    },
+    "dept": "所属部门",
+    "roles": "角色",
+    "entries": "快捷入口",
+    "entriesHint": "你有权访问的页面，一键直达",
+    "noPages": "暂无可访问的页面",
+    "noPagesHint": "账号尚未分配功能页面，请联系管理员开通。",
+    "lastSignIn": "上次登录",
+    "stats": {
+      "label": "工作概览",
+      "todo": "我的待办",
+      "mine": "审批中的申请",
+      "unread": "未读消息"
+    }
+  },
+  "ref": {
+    "deleted": "#{id}（已删除）"
+  },
+  "empty": {
+    "title": "暂无数据",
+    "noMatch": "没有符合条件的结果",
+    "noMatchHint": "换个关键词，或清空筛选条件后再试。"
+  },
+  "dateRange": {
+    "today": "今天",
+    "last7Days": "最近 7 天",
+    "last30Days": "最近 30 天"
+  }
+}

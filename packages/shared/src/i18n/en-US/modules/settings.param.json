@@ -1,0 +1,17 @@
+{
+  "field": {
+    "settings": {
+      "param": {
+        "paramKey": "Key",
+        "paramValue": "Value",
+        "name": "Name",
+        "nameI18n": "Name per language",
+        "groupCode": "Group",
+        "isBuiltin": "Built-in",
+        "isSecret": "Secret",
+        "isPublic": "Public",
+        "note": "Note"
+      }
+    }
+  }
+}

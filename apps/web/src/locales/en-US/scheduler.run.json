@@ -1,0 +1,15 @@
+{
+  "scheduler": {
+    "run": {
+      "entity": "run",
+      "clean": "Clear all",
+      "cleanConfirm": "Clear the whole run log? Cleared entries are no longer shown and cannot be restored here.",
+      "cleaned": "Cleared"
+    }
+  },
+  "menu": {
+    "scheduler": {
+      "run": "Job log"
+    }
+  }
+}

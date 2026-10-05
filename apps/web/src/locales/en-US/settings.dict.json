@@ -1,0 +1,15 @@
+{
+  "settings": {
+    "dict": {
+      "entity": "dictionary",
+      "entries": "Entries",
+      "refreshCache": "Refresh cache",
+      "cacheRefreshed": "Cache refreshed: every dictionary is read again"
+    }
+  },
+  "menu": {
+    "settings": {
+      "dict": "Dictionaries"
+    }
+  }
+}

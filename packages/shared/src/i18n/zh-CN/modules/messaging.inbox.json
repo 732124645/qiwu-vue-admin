@@ -1,0 +1,19 @@
+{
+  "field": {
+    "messaging": {
+      "inbox": {
+        "userId": "收件人",
+        "templateCode": "模板编码",
+        "locale": "语言",
+        "category": "分类",
+        "senderLabel": "发送方名称",
+        "title": "标题",
+        "body": "正文",
+        "params": "参数",
+        "status": "状态",
+        "attempts": "发送次数",
+        "readAt": "阅读时间"
+      }
+    }
+  }
+}

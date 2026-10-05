@@ -1,0 +1,20 @@
+{
+  "messaging": {
+    "smsTemplate": {
+      "entity": "SMS template",
+      "defaultChannel": "Default channel",
+      "otpChannelUnset": "Not set — no codes are sent",
+      "otpChannelHint": "Code templates must use an enabled channel of their own; for security they never fall back to the default channel",
+      "testSend": "Test send",
+      "recipient": "Recipient mobile number",
+      "invalidRecipient": "Enter a valid mobile number and parameters",
+      "testOk": "Test SMS sent, record #{id}",
+      "testFailed": "Test SMS failed, record #{id}"
+    }
+  },
+  "menu": {
+    "messaging": {
+      "smsTemplate": "SMS templates"
+    }
+  }
+}

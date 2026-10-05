@@ -1,0 +1,13 @@
+{
+  "field": {
+    "demo": {
+      "topic": {
+        "parentId": "Parent topic",
+        "treePath": "Tree path",
+        "title": "Title",
+        "sortNo": "Sort order",
+        "enabled": "Enabled"
+      }
+    }
+  }
+}

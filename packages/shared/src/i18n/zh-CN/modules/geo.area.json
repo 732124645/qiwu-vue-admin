@@ -1,0 +1,15 @@
+{
+  "field": {
+    "geo": {
+      "area": {
+        "code": "区划代码",
+        "name": "名称",
+        "ip": "IP 地址",
+        "country": "国家",
+        "province": "省份",
+        "city": "城市",
+        "isp": "运营商"
+      }
+    }
+  }
+}

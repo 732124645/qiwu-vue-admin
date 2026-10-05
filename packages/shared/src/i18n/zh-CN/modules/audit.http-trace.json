@@ -1,0 +1,26 @@
+{
+  "field": {
+    "audit": {
+      "httpTrace": {
+        "url": "请求路径",
+        "traceId": "追踪 ID",
+        "userId": "用户 ID",
+        "username": "登录名",
+        "userType": "用户类型",
+        "clientId": "客户端",
+        "method": "请求方法",
+        "query": "查询参数",
+        "body": "请求体",
+        "statusCode": "HTTP 状态码",
+        "bizCode": "结果码",
+        "msg": "错误消息",
+        "ip": "IP 地址",
+        "userAgent": "User-Agent",
+        "startedAt": "请求时间",
+        "startedAtFrom": "请求时间起",
+        "startedAtTo": "请求时间止",
+        "costMs": "耗时"
+      }
+    }
+  }
+}

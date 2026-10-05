@@ -1,0 +1,14 @@
+{
+  "storage": {
+    "config": {
+      "entity": "storage config",
+      "setPrimary": "Make primary",
+      "secretRequired": "Re-enter the secret key after changing the storage connection settings."
+    }
+  },
+  "menu": {
+    "storage": {
+      "config": "Storage configs"
+    }
+  }
+}

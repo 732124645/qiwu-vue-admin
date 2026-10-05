@@ -1,0 +1,15 @@
+{
+  "oauth": {
+    "sso": {
+      "title": "授权登录",
+      "subtitle": "以 {name} 的身份继续",
+      "wants": "{client} 请求访问你的账号：",
+      "redirectHost": "授权后将跳转到 {host}",
+      "approve": "同意授权",
+      "deny": "拒绝",
+      "switchAccount": "切换账号",
+      "redirecting": "正在跳转…",
+      "invalid": "授权请求无效"
+    }
+  }
+}

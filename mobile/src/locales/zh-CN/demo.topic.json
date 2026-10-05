@@ -1,0 +1,12 @@
+{
+  "demo": {
+    "topic": {
+      "entity": "主题"
+    }
+  },
+  "menu": {
+    "demo": {
+      "topic": "知识主题"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "field": {
+    "biz": {
+      "leave": {
+        "userId": "申请人",
+        "deptId": "部门",
+        "leaveKind": "请假类型",
+        "startAt": "开始时间",
+        "startAtFrom": "开始时间起",
+        "startAtTo": "开始时间止",
+        "endAt": "结束时间",
+        "days": "请假天数",
+        "reason": "请假事由",
+        "state": "状态",
+        "instanceId": "流程实例"
+      }
+    }
+  }
+}

@@ -1,0 +1,92 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["eslint", "typescript", "unicorn", "oxc", "import", "vue", "vitest"],
+  "categories": {
+    "correctness": "error"
+  },
+  "env": {
+    "node": true,
+    "es2024": true
+  },
+  "ignorePatterns": ["**/dist/**", "**/coverage/**", "**/node_modules/**", "mobile/**"],
+  "rules": {
+    "no-eval": "error",
+    "no-new-func": "error",
+    "typescript/no-explicit-any": "off"
+  },
+  "overrides": [
+    {
+      "files": ["apps/web/**"],
+      "env": {
+        "browser": true
+      },
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "wangeditor",
+                "message": "wangeditor@4 is banned (unfixed XSS); see docs/adr/004-form-create.md"
+              }
+            ],
+            "patterns": [
+              {
+                "group": ["@form-create/designer/dist/*"],
+                "message": "the designer dist bundles wangeditor; import '@form-create/designer' (aliased to src) — docs/adr/004-form-create.md"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["apps/server/src/core/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["**/modules/**"],
+                "message": "core must not import modules (docs/design-notes.md#layering)"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["apps/server/src/modules/platform/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["**/modules/workflow/**", "**/modules/biz/**"],
+                "message": "platform must not import workflow/biz (docs/design-notes.md#layering)"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["apps/server/src/modules/workflow/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["**/modules/biz/**"],
+                "message": "workflow must not import biz (docs/design-notes.md#layering)"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

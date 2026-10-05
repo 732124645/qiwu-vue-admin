@@ -1,0 +1,37 @@
+{
+  "field": {
+    "monitor": {
+      "server": {
+        "cpu": "CPU",
+        "model": "Model",
+        "cores": "Cores",
+        "usage": "Usage",
+        "loadAvg": "Load average",
+        "mem": "Memory",
+        "total": "Total",
+        "used": "Used",
+        "disks": "Disks",
+        "mount": "Mount point",
+        "fs": "File system",
+        "type": "Type",
+        "size": "Size",
+        "os": "Operating system",
+        "platform": "Platform",
+        "distro": "Distribution",
+        "release": "Release",
+        "arch": "Architecture",
+        "hostname": "Host name",
+        "uptime": "Uptime",
+        "node": "Node.js",
+        "version": "Version",
+        "v8": "V8 version",
+        "process": "Process",
+        "pid": "PID",
+        "rss": "Resident memory",
+        "heapTotal": "Heap total",
+        "heapUsed": "Heap used",
+        "external": "External memory"
+      }
+    }
+  }
+}

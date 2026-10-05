@@ -1,0 +1,17 @@
+{
+  "menu": {
+    "wf": {
+      "data": "Approval data"
+    }
+  },
+  "wf": {
+    "data": {
+      "model": "Process",
+      "pickModel": "Pick a process",
+      "currentVersion": "Current (v{version})",
+      "versionOption": "v{version}",
+      "addFilter": "Add field filter",
+      "withheld": "{n} field hidden in the process is visible to its process admins only | {n} fields hidden in the process are visible to its process admins only"
+    }
+  }
+}

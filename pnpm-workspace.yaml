@@ -1,0 +1,46 @@
+packages:
+  - apps/*
+  - packages/*
+
+catalog:
+  typescript: ~6.0.3
+  zod: ^4.6.5
+  vitest: 5.0.1
+  '@vitest/coverage-v8': 5.0.1
+  vite: ^8.3.1
+  '@vue/test-utils': ^2.5.1
+  happy-dom: ^20.14.5
+  '@types/node': ^22.18.0
+
+# security overrides for vulnerable transitive versions (exceljs)
+overrides:
+  'uuid@<11.1.1': ^11.1.1
+  'tmp@<0.2.6': ^0.2.6
+  # exceljs 4.4.0 pins unzipper ^0.10 whose binary -> buffers@0.1.1 has no licence; 0.12.5 drops both
+  # (probe: streaming write/read, normal read and data validation round-trip OK)
+  unzipper: 0.12.5
+  # @nestjs/platform-socket.io 12.1.0 pins socket.io 4.8.3; one copy (the gateway's own `socket.io` import)
+  'socket.io@<4.8.4': 4.8.4
+
+# supply chain: packages must be ≥ 1 day old; strict = fail instead of silently falling back
+minimumReleaseAge: 1440
+minimumReleaseAgeStrict: true
+minimumReleaseAgeExclude: []
+
+# install scripts are opt-in (pnpm 11 strictDepBuilds); every dependency change updates this map
+allowBuilds:
+  # install-time usage telemetry (via @nestjs/swagger -> swagger-ui-dist); never allowed to run
+  '@scarf/scarf': false
+  # geo-conditional "call for peace" console message (via @wangeditor-next/core -> event-emitter -> d);
+  # the library works without it; never allowed to run
+  es5-ext: false
+  # postinstall `npm install`s an old typescript/@types/node on Node 10/12 only (a no-op on 22); dist is
+  # prebuilt (via @alicloud/dysmsapi20170525, SMS); never allowed to run
+  '@alicloud/openapi-core': false
+
+# braces <=3.0.3 stack-exhaustion DoS has no patched release (2026-10-05). It is only reached via
+# chokidar glob patterns (nestjs-i18n watch mode, not enabled; build tooling), never with user input.
+# Remove this entry and upgrade as soon as a fixed braces is published.
+auditConfig:
+  ignoreGhsas:
+    - GHSA-vfj7-8cjw-p6xm

@@ -1,0 +1,66 @@
+{
+  "action": {
+    "search": "Search",
+    "reset": "Reset",
+    "create": "Add",
+    "edit": "Edit",
+    "delete": "Delete",
+    "batchDelete": "Delete selected",
+    "save": "Save",
+    "refresh": "Refresh",
+    "toggleSearch": "Show or hide search",
+    "columns": "Columns",
+    "resetColumns": "Restore defaults",
+    "resetFilters": "Clear filters",
+    "operations": "Actions",
+    "export": "Export",
+    "more": "More",
+    "import": "Import",
+    "addChild": "Add below",
+    "expandAll": "Expand all",
+    "collapseAll": "Collapse all",
+    "addRow": "Add row"
+  },
+  "title": {
+    "create": "Add {name}",
+    "edit": "Edit {name}",
+    "import": "Import {name} records",
+    "detail": "View {name}"
+  },
+  "editTable": {
+    "empty": "No rows yet: add one below"
+  },
+  "tree": {
+    "topLevel": "None (top level)"
+  },
+  "placeholder": {
+    "secretKeep": "Leave blank to keep the current value"
+  },
+  "confirm": {
+    "title": "Confirm",
+    "delete": "Delete this record? It will no longer be shown and cannot be restored here.",
+    "batchDelete": "Delete the {count} selected records? They will no longer be shown and cannot be restored here."
+  },
+  "msg": {
+    "created": "Added",
+    "updated": "Saved",
+    "deleted": "Deleted"
+  },
+  "import": {
+    "template": "Download the template",
+    "templateName": "{name} import template",
+    "drop": "Drop an .xlsx file here, or",
+    "choose": "choose a file",
+    "hint": "Fill in the import template; at most 10 MB and 5000 rows per file",
+    "mode": "Mode",
+    "insert": "Add new only",
+    "upsert": "Add new and update existing",
+    "submit": "Import",
+    "done": "Imported: {inserted} added, {updated} updated",
+    "partial": "{inserted} added, {updated} updated, {failed} row(s) not imported",
+    "report": "Download the error report",
+    "reportName": "{name} import errors",
+    "close": "Close"
+  },
+  "loading": "Loading"
+}

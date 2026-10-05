@@ -1,0 +1,19 @@
+{
+  "field": {
+    "demo": {
+      "book": {
+        "isbn": "ISBN",
+        "title": "书名",
+        "author": "作者",
+        "coverUrl": "封面",
+        "publishedOn": "出版日期",
+        "publishedOnFrom": "出版日期起",
+        "publishedOnTo": "出版日期止",
+        "price": "定价",
+        "genre": "分类",
+        "deptId": "所属部门",
+        "enabled": "启用状态"
+      }
+    }
+  }
+}

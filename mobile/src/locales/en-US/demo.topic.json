@@ -1,0 +1,12 @@
+{
+  "demo": {
+    "topic": {
+      "entity": "topic"
+    }
+  },
+  "menu": {
+    "demo": {
+      "topic": "Knowledge topics"
+    }
+  }
+}

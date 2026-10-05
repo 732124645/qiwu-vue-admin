@@ -1,0 +1,101 @@
+{
+  "role": {
+    "root": "Super administrator",
+    "demo": "Demo role",
+    "member": "Registered member",
+    "staff": "Staff"
+  },
+  "dept": {
+    "hq": "Headquarters",
+    "rd": "R&D Center",
+    "platform": "Platform Team",
+    "product": "Product Team",
+    "ops": "Operations Center",
+    "support": "Customer Support Team",
+    "finance": "Finance & Administration"
+  },
+  "position": {
+    "engLead": "Engineering lead",
+    "developer": "Software engineer",
+    "designer": "Product designer",
+    "support": "Support specialist"
+  },
+  "task": {
+    "auditPurge": "Purge expired logs",
+    "sessionSweep": "Sweep ended online sessions",
+    "notifyDispatch": "Dispatch pending notifications",
+    "demoEcho": "Sample: echo a message",
+    "wfTaskRemind": "Send overdue to-do reminders"
+  },
+  "inboxTemplate": {
+    "schedulerJobTimeout": "Job timeout alert"
+  },
+  "storage": {
+    "local": "Local storage"
+  },
+  "smsTemplate": {
+    "authCode": "Authentication verification code"
+  },
+  "wfTemplate": {
+    "taskAssigned": "Approval to-do",
+    "instanceApproved": "Process approved",
+    "instanceRejected": "Process rejected",
+    "cc": "Process CC",
+    "taskCanceled": "Approval to-do canceled",
+    "instanceSentBack": "Process sent back to initiator",
+    "taskUrged": "Approval reminder from initiator",
+    "taskOverdue": "Approval to-do overdue",
+    "taskTimeout": "Approval to-do timed out"
+  },
+  "wf": {
+    "leave": "Leave approval",
+    "leaveDescription": "Routed by days: over 2 days adds the director, over 5 days HR as well",
+    "node": {
+      "begin": "Initiator",
+      "supervisor": "Supervisor approval",
+      "byDays": "By leave days",
+      "hrAndDirector": "HR and director in parallel",
+      "hr": "HR approval",
+      "director": "Director approval",
+      "twoLevels": "Two levels of supervisors in turn",
+      "byAmount": "By claimed amount"
+    },
+    "path": {
+      "over5": "Over 5 days",
+      "over2": "Over 2 and up to 5 days",
+      "otherwise": "Otherwise",
+      "hr": "HR",
+      "director": "Director",
+      "over3Days": "Over 3 days",
+      "over5000": "Over 5,000"
+    },
+    "tpl": {
+      "general": "General approval",
+      "generalDescription": "Any request, approved by the initiator's supervisor",
+      "leave": "Leave",
+      "leaveDescription": "Days computed from the start and end dates: up to 3 days the supervisor approves, over 3 days two levels of supervisors in turn",
+      "expense": "Expense claim",
+      "expenseDescription": "By the total of the items: up to 5,000 the supervisor approves, over 5,000 two levels of supervisors in turn",
+      "overtime": "Overtime",
+      "overtimeDescription": "Approved by the initiator's supervisor"
+    },
+    "form": {
+      "general": "General request form",
+      "leave": "Leave form",
+      "expense": "Expense claim form",
+      "overtime": "Overtime form"
+    },
+    "timeout": {
+      "autoPass": "Not handled in time; approved automatically",
+      "autoReject": "Not handled in time; rejected automatically",
+      "toManager": "Not handled in time; transferred to the assignee's superior",
+      "toAdmin": "Not handled in time; transferred to a process manager",
+      "remindOnly": "Not handled in time and nobody to transfer it to; the assignee was reminded. Someone with process admin rights should reassign it under Approval tasks.",
+      "failed": "Not handled in time and automatic handling failed (for example, nobody can review the next step); the assignee was reminded. Someone with process admin rights should reassign it under Approval tasks.",
+      "ofTask": "{assignee}'s to-do: {outcome}"
+    }
+  },
+  "oauth": {
+    "console": "Admin console"
+  }
+}

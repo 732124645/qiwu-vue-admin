@@ -1,0 +1,23 @@
+{
+  "field": {
+    "audit": {
+      "httpFault": {
+        "traceId": "Trace ID",
+        "userId": "User ID",
+        "username": "Username",
+        "method": "Method",
+        "url": "Path",
+        "query": "Query parameters",
+        "body": "Request body",
+        "ip": "IP address",
+        "userAgent": "User agent",
+        "errorName": "Exception",
+        "errorMessage": "Message",
+        "stack": "Stack",
+        "state": "State",
+        "handledBy": "Handler ID",
+        "handledAt": "Handled at"
+      }
+    }
+  }
+}

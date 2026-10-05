@@ -1,0 +1,8 @@
+{
+  "error": {
+    "messaging": {
+      "mail_host_refused": "不允许连接此邮件服务器",
+      "mail_password_required": "修改服务器地址、端口、用户名或加密方式时须重新输入密码"
+    }
+  }
+}

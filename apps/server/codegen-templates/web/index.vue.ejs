@@ -1,0 +1,453 @@
+<%_
+const b = m.biz
+const B = m.Biz
+const perms = b + 'Perms'
+// a read-only page (crud.ts `readonly`): no create / edit / delete / enabled toggle, no selection
+const w = !m.readonly
+const toggle = w && m.enabled
+const dictFilter = (c) => c.queryOp !== 'between' && !!c.web.dict
+// dict labels; `enabled` is a switch unless the page is read-only
+const dictCell = (c) => (c !== m.enabled || !toggle) && !!c.web.dict
+const dates = m.list.filter((c) => c.tsType === 'Date')
+const dateRanges = m.filters.some((c) => c.queryOp === 'between' && ['date', 'datetime'].includes(c.widget))
+const seeded = m.list.some((c) => c.seedName) || (!!toggle && !!m.label && m.label.seedName)
+const link = m.withDetail && m.label && m.label.inList ? m.label : undefined
+// a tree (crud.ts `kind`, docs/codegen-golden.md "Tree page"): the whole forest, expand / collapse all,
+// add below a row; no paging, selection, batch delete or server sort
+const tree = m.kind === 'tree'
+const Row = B + (tree ? 'Node' : 'Vo')
+_%>
+<script setup lang="ts">
+import { <%= names([(w || link) && 'computed', 'ref']) %> } from 'vue'
+import { useI18n } from 'vue-i18n'
+<%_ if (dates.length) { _%>
+import dayjs from 'dayjs'
+<%_ } _%>
+import { <%= names([perms, (toggle || link) && 'type ' + Row]) %> } from '@qiwu/shared'
+import { <%= b %>Api } from '@/api/<%= m.home %>'
+<%_ if (m.filters.some((c) => c.widget === 'dept-tree-select')) { _%>
+import DeptTreeSelect from '@/core/components/DeptTreeSelect.vue'
+<%_ } _%>
+<%_ if (m.filters.some(dictFilter)) { _%>
+import DictSelect from '@/core/components/DictSelect.vue'
+<%_ } _%>
+<%_ if (m.enabled || m.list.some(dictCell)) { _%>
+import DictTag from '@/core/components/DictTag.vue'
+<%_ } _%>
+<%_ if (m.withImport) { _%>
+import ImportDialog from '@/core/components/ImportDialog.vue'
+<%_ } _%>
+import QwTable from '@/core/components/QwTable.vue'
+<%_ if (!tree) { _%>
+import Pagination from '@/core/components/Pagination.vue'
+<%_ } _%>
+import TableToolbar from '@/core/components/TableToolbar.vue'
+<%_ if (m.filters.some((c) => c.widget === 'user-picker' && !dictFilter(c))) { _%>
+import UserSelect from '@/core/components/UserSelect.vue'
+<%_ } _%>
+import { <%= tree ? 'useTreeList' : 'useCrudList' %> } from '@/core/composables/use-crud'
+import type { QwColumn } from '@/core/composables/use-table-prefs'
+<%_ if (m.list.some((c) => c.widget === 'file-upload')) { _%>
+import { uploadName } from '@/core/composables/use-upload'
+<%_ } _%>
+<%_ if (dateRanges) { _%>
+import { useDateRangeShortcuts } from '@/core/date-shortcuts'
+<%_ } _%>
+<%_ if (m.list.some((c) => c.widget === 'richtext')) { _%>
+import { htmlText } from '@/core/html'
+<%_ } _%>
+<%_ if (w || m.withImport) { _%>
+import { openDialog } from '@/core/dialog'
+<%_ } _%>
+<%_ if (seeded) { _%>
+import { tx } from '@/core/i18n'
+<%_ } _%>
+import { Icon } from '@/core/icons'
+<%_ if (w || link) { _%>
+import { usePerm } from '@/core/permission'
+<%_ } _%>
+<%_ if (m.withDetail) { _%>
+import <%= B %>Detail from './detail.vue'
+<%_ } _%>
+<%_ if (w) { _%>
+import <%= B %>Form from './form.vue'
+<%_ } _%>
+
+// keep-alive name = the seeded menu's component_name
+defineOptions({ name: '<%= m.componentName %>' })
+
+const { t } = useI18n()
+<%_ if (dateRanges) { _%>
+const dateRangeShortcuts = useDateRangeShortcuts()
+<%_ } _%>
+<%_ if (tree) { _%>
+const { query, rows, loading, filtered, search, reset, refresh, remove, expanded, toggleExpand } =
+  useTreeList({
+    api: <%= b %>Api,
+  <%_ if (m.filters.length) { _%>
+    filters: { <% for (const c of m.filters) { %><%= c.web.filterKey %>: <%= c.web.filterInit %>, <% } %>},
+  <%_ } _%>
+  })
+<%_ } else { _%>
+const {
+  query,
+  rows,
+  total,
+  loading,
+  filtered,
+<%_ if (w) { _%>
+  selection,
+<%_ } _%>
+  search,
+  reset,
+  refresh,
+<%_ if (w) { _%>
+  onSelectionChange,
+<%_ } _%>
+  onSortChange,
+<%_ if (w) { _%>
+  remove,
+  batchRemove,
+<%_ } _%>
+<%_ if (m.withExport) { _%>
+  exporting,
+  exportXlsx,
+<%_ } _%>
+} = useCrudList({
+  api: <%= b %>Api,
+<%_ if (m.filters.length) { _%>
+  filters: { <% for (const c of m.filters) { %><%= c.web.filterKey %>: <%= c.web.filterInit %>, <% } %>},
+<%_ } _%>
+  sort: '<%= m.listSort %>',
+})
+<%_ } _%>
+const showSearch = ref(true)
+<%_ if (tree) { _%>
+// the tree column (expand arrows) is the first shown one; order and visibility are the user's column
+// settings (table id `<%= m.key %>`); no server sort: siblings come by sort order
+<%_ } else { _%>
+// order and visibility are the user's column settings (table id `<%= m.key %>`); short columns get a
+// fixed width (longest locale's header + sort caret); the free text, else the name, takes the rest
+<%_ } _%>
+const columns: QwColumn[] = [
+<%_ for (const c of m.list) { _%>
+  <%= c.web.column %>,
+<%_ } _%>
+]
+<%_ if (w || link) { _%>
+// computed: the perms reload when the server's permission version moves
+const perm = usePerm()
+<%_ } _%>
+<%_ if (toggle) { _%>
+const canModify = computed(() => perm.has(<%= perms %>.modify))
+<%_ } _%>
+<%_ if (link) { _%>
+// the detail drawer<% if (w) { %> and the edit form<% } %> load<% if (!w) { %>s<% } %> GET /:id, which needs `view`
+const canView = computed(() => perm.has(<%= perms %>.view))
+<%_ } else if (w) { _%>
+// the edit form loads GET /:id, which needs `view` too
+<%_ } _%>
+<%_ if (w) { _%>
+const canEdit = computed(() => perm.all([<%= perms %>.modify, <%= perms %>.view]))
+
+<%_ if (tree) { _%>
+/** Add (no id; under `parentId`, else at the top) or edit in the form dialog; reload once saved. */
+async function openForm(id?: number, parentId?: number) {
+<%_ } else { _%>
+/** Add (no id) or edit in the form dialog; reload once saved. */
+async function openForm(id?: number) {
+<%_ } _%>
+  const name = () => t('<%= m.key %>.entity')
+  const saved = await openDialog(
+    <%= B %>Form,
+    { id<% if (tree) { %>, parentId<% } %> },
+<%_ if (m.subs.length) { _%>
+    // wide: the form edits its <%= comment(m.subs.map((s) => s.prop).join(', ')) %> in a table
+    { title: () => t(id ? 'crud.title.edit' : 'crud.title.create', { name: name() }), width: '<%= m.formCols > 2 ? 1200 : 880 %>px' },
+<%_ } else if (m.formCols > 1) { _%>
+    // the form's fields in <%= m.formCols %> columns
+    { title: () => t(id ? 'crud.title.edit' : 'crud.title.create', { name: name() }), width: '<%= m.formCols > 2 ? 1200 : 880 %>px' },
+<%_ } else { _%>
+    { title: () => t(id ? 'crud.title.edit' : 'crud.title.create', { name: name() }) },
+<%_ } _%>
+  )
+  if (saved) await refresh()
+}
+<%_ } _%>
+<%_ if (toggle) { _%>
+
+async function setEnabled(row: <%= Row %>, enabled: boolean) {
+  // failures are toasted by the request layer; the reload shows the stored state either way
+  await <%= b %>Api.setEnabled(row.id, enabled).catch(() => undefined)
+  await refresh()
+}
+<%_ } _%>
+<%_ if (link) { _%>
+
+const detailId = ref<number>()
+const detailOpen = ref(false)
+function openDetail(row: <%= Row %>) {
+  detailId.value = row.id
+  detailOpen.value = true
+}
+<%_ } _%>
+<%_ if (m.withImport) { _%>
+
+/** The list reloads as soon as an import wrote rows; the dialog stays open with the result. */
+function openImport() {
+  void openDialog(
+    ImportDialog,
+    {
+      name: () => t('menu.<%= m.key %>'),
+  <%_ if (!m.importKey) { _%>
+      // no unique column among the imported ones: nothing to match rows by, so no upsert
+      modes: ['insert'],
+  <%_ } _%>
+      template: (filename: string) => <%= b %>Api.importTemplate(filename),
+      upload: async (...args: Parameters<typeof <%= b %>Api.importFile>) => {
+        const result = await <%= b %>Api.importFile(...args)
+        if (result.inserted || result.updated) void refresh()
+        return result
+      },
+    },
+    { title: () => t('crud.title.import', { name: t('<%= m.key %>.entity') }), width: '560px' },
+  )
+}
+<%_ } _%>
+</script>
+
+<template>
+  <div class="qw-page">
+    <el-card v-show="showSearch" class="qw-search-panel">
+      <el-form :model="query" inline @submit.prevent="search">
+<%_ for (const c of m.filters) { _%>
+<%_ const q = 'query.' + c.web.filterKey _%>
+  <%_ if (c.queryOp === 'between') { _%>
+        <el-form-item :label="t('<%= c.labelKey %>')" class="qw-search-wide">
+          <el-date-picker
+            v-model="<%= q %>"
+            type="daterange"
+    <%_ if (['date', 'datetime'].includes(c.widget)) { _%>
+            :shortcuts="dateRangeShortcuts"
+    <%_ } _%>
+            value-format="YYYY-MM-DD"
+            :start-placeholder="t('<%= c.labelKey %>From')"
+            :end-placeholder="t('<%= c.labelKey %>To')"
+          />
+        </el-form-item>
+  <%_ } else { _%>
+        <el-form-item :label="t('<%= c.labelKey %>')">
+    <%_ if (dictFilter(c)) { _%>
+          <DictSelect v-model="<%= q %>" code="<%= c.web.dict %>" />
+    <%_ } else if (c.widget === 'dept-tree-select') { _%>
+          <DeptTreeSelect v-model="<%= q %>" />
+    <%_ } else if (c.widget === 'user-picker') { _%>
+          <UserSelect v-model="<%= q %>" />
+    <%_ } else if (c.tsType === 'number') { _%>
+          <el-input-number v-model="<%= q %>" controls-position="right" />
+    <%_ } else { _%>
+          <el-input v-model="<%= q %>" name="<%= c.field %>" clearable />
+    <%_ } _%>
+        </el-form-item>
+  <%_ } _%>
+<%_ } _%>
+        <el-form-item class="qw-search-actions">
+          <!-- plain: the toolbar's create stays the page's one solid primary button (§1) -->
+          <el-button type="primary" plain native-type="submit">
+            <el-icon class="el-icon--left"><Icon icon="lucide:search" /></el-icon>
+            {{ t('crud.action.search') }}
+          </el-button>
+          <el-button @click="reset">{{ t('crud.action.reset') }}</el-button>
+        </el-form-item>
+      </el-form>
+    </el-card>
+
+    <el-card class="qw-table-panel">
+      <TableToolbar
+        v-model:search="showSearch"
+        table-id="<%= m.key %>"
+        :columns="columns"
+        @refresh="refresh"
+      >
+<%_ if (w) { _%>
+        <el-button v-perm="<%= perms %>.create" type="primary" @click="openForm()">
+          <el-icon class="el-icon--left"><Icon icon="lucide:plus" /></el-icon>
+          {{ t('crud.action.create') }}
+        </el-button>
+<%_ } _%>
+<%_ if (m.withImport) { _%>
+        <el-button v-perm="<%= perms %>.import" @click="openImport">
+          <el-icon class="el-icon--left"><Icon icon="lucide:upload" /></el-icon>
+          {{ t('crud.action.import') }}
+        </el-button>
+<%_ } _%>
+<%_ if (m.withExport) { _%>
+        <el-button
+          v-perm="<%= perms %>.export"
+          :loading="exporting"
+          @click="exportXlsx(`${t('menu.<%= m.key %>')}.xlsx`)"
+        >
+          <el-icon class="el-icon--left"><Icon icon="lucide:download" /></el-icon>
+          {{ t('crud.action.export') }}
+        </el-button>
+<%_ } _%>
+<%_ if (tree) { _%>
+        <el-button @click="toggleExpand">
+          <el-icon class="el-icon--left">
+            <Icon :icon="expanded ? 'lucide:chevrons-down-up' : 'lucide:chevrons-up-down'" />
+          </el-icon>
+          {{ t(expanded ? 'crud.action.collapseAll' : 'crud.action.expandAll') }}
+        </el-button>
+<%_ } else if (w) { _%>
+        <el-button
+          v-if="selection.length"
+          v-perm="<%= perms %>.remove"
+          type="danger"
+          plain
+          @click="batchRemove"
+        >
+          {{ t('crud.action.batchDelete') }}
+        </el-button>
+<%_ } _%>
+      </TableToolbar>
+
+<%_ if (tree) { _%>
+      <!-- a new key re-renders the rows with every node expanded or collapsed -->
+      <QwTable
+        :key="`${expanded}`"
+        table-id="<%= m.key %>"
+        :columns="columns"
+        :data="rows"
+        :loading="loading"
+        :filtered
+        :default-expand-all="expanded"
+        :actions-width="230"
+        @reset-filters="reset"
+      >
+<%_ } else { _%>
+      <QwTable
+        table-id="<%= m.key %>"
+        :columns="columns"
+        :data="rows"
+        :loading="loading"
+        :filtered
+<%_ if (w) { _%>
+        selection
+        @selection-change="onSelectionChange"
+<%_ } _%>
+        @sort-change="onSortChange"
+        @reset-filters="reset"
+      >
+<%_ } _%>
+<%_ for (const c of m.list) { _%>
+  <%_ if (c === link) { _%>
+        <template #cell-<%= c.field %>="{ row }">
+          <el-button v-if="canView" link type="primary" class="qw-cell-link" @click="openDetail(row)">
+            {{ <% if (c.seedName) { %>tx(row.<%= c.field %>)<% } else { %>row.<%= c.field %><% } %> }}
+          </el-button>
+          <template v-else>{{ <% if (c.seedName) { %>tx(row.<%= c.field %>)<% } else { %>row.<%= c.field %><% } %> }}</template>
+        </template>
+  <%_ } else if (c.seedName) { _%>
+        <!-- seeded names are i18n keys (seed.<%= b %>.*) -->
+        <template #cell-<%= c.field %>="{ row }">{{ tx(row.<%= c.field %>) }}</template>
+  <%_ } else if (c === m.enabled && toggle) { _%>
+        <template #cell-<%= c.field %>="{ row }">
+          <el-switch
+            v-if="canModify"
+            size="small"
+            :model-value="row.<%= c.field %>"
+            :aria-label="`${t('<%= c.labelKey %>')} ${<% if (!m.label) { %>row.id<% } else if (m.label.seedName) { %>tx(row.<%= m.label.field %>)<% } else { %>row.<%= m.label.field %><% } %>}`"
+            @change="setEnabled(row, $event as boolean)"
+          />
+          <DictTag v-else code="<%= c.web.dict %>" :value="row.<%= c.field %>" />
+        </template>
+  <%_ } else if (dictCell(c)) { _%>
+        <template #cell-<%= c.field %>="{ row }">
+          <DictTag code="<%= c.web.dict %>" :value="row.<%= c.field %>" />
+        </template>
+  <%_ } else if (c.tsType === 'Date') { _%>
+        <template #cell-<%= c.field %>="{ row }">{{ <% if (c.nullable) { %>row.<%= c.field %> ? <% } %>dayjs(row.<%= c.field %>).format('YYYY-MM-DD HH:mm')<% if (c.nullable) { %> : ''<% } %> }}</template>
+  <%_ } else if (c.widget === 'image-upload') { _%>
+        <template #cell-<%= c.field %>="{ row }">
+          <el-image
+            v-if="row.<%= c.field %>"
+            class="qw-cell-image"
+            :src="row.<%= c.field %>"
+            :preview-src-list="[row.<%= c.field %>]"
+            fit="cover"
+            preview-teleported
+          />
+        </template>
+  <%_ } else if (c.widget === 'file-upload') { _%>
+        <template #cell-<%= c.field %>="{ row }">{{ uploadName(row.<%= c.field %>) }}</template>
+  <%_ } else if (c.widget === 'richtext') { _%>
+        <!-- rich text: its text only (the markup is for the detail drawer) -->
+        <template #cell-<%= c.field %>="{ row }">{{ htmlText(row.<%= c.field %>) }}</template>
+  <%_ } else if (c.web.scale) { _%>
+        <template #cell-<%= c.field %>="{ row }">{{ row.<%= c.field %><% if (c.nullable) { %>?<% } %>.toFixed(<%= c.web.scale %>) }}</template>
+  <%_ } _%>
+<%_ } _%>
+<%_ if (tree) { _%>
+        <template #actions="{ row }">
+          <el-button v-if="canEdit" link type="primary" @click="openForm(row.id)">
+            {{ t('crud.action.edit') }}
+          </el-button>
+  <%_ if (m.enabled) { _%>
+          <!-- nothing is added under a disabled row (the server refuses it too) -->
+  <%_ } _%>
+          <el-button
+            v-perm="<%= perms %>.create"
+            link
+            type="primary"
+  <%_ if (m.enabled) { _%>
+            :disabled="!row.<%= m.enabled.field %>"
+  <%_ } _%>
+            @click="openForm(undefined, row.id)"
+          >
+            {{ t('crud.action.addChild') }}
+          </el-button>
+          <el-button
+            v-perm="<%= perms %>.remove"
+            link
+            type="danger"
+            :disabled="row.children.length > 0"
+            @click="remove(row.id)"
+          >
+            {{ t('crud.action.delete') }}
+          </el-button>
+        </template>
+<%_ } else if (w) { _%>
+        <template #actions="{ row }">
+          <el-button v-if="canEdit" link type="primary" @click="openForm(row.id)">
+            {{ t('crud.action.edit') }}
+          </el-button>
+          <el-button v-perm="<%= perms %>.remove" link type="danger" @click="remove([row.id])">
+            {{ t('crud.action.delete') }}
+          </el-button>
+        </template>
+<%_ } _%>
+      </QwTable>
+<%_ if (!tree) { _%>
+
+      <Pagination
+        v-model:page="query.page"
+        v-model:page-size="query.pageSize"
+        :total="total"
+        @change="refresh"
+      />
+<%_ } _%>
+    </el-card>
+<%_ if (link) { _%>
+
+    <!-- destroy-on-close: each opening loads the row anew (it may have been edited meanwhile) -->
+    <el-drawer
+      v-model="detailOpen"
+      :title="t('crud.title.detail', { name: t('<%= m.key %>.entity') })"
+      size="480px"
+      destroy-on-close
+    >
+      <<%= B %>Detail v-if="detailId" :id="detailId" />
+    </el-drawer>
+<%_ } _%>
+  </div>
+</template>

@@ -1,0 +1,13 @@
+{
+  "field": {
+    "messaging": {
+      "bulletin": {
+        "title": "Title",
+        "kind": "Kind",
+        "body": "Body",
+        "published": "Published",
+        "publishedAt": "Published at"
+      }
+    }
+  }
+}

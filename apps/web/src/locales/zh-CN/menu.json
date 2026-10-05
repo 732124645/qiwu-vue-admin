@@ -1,0 +1,79 @@
+{
+  "home": "首页",
+  "system": {
+    "title": "系统管理"
+  },
+  "monitor": {
+    "title": "系统监控"
+  },
+  "messaging": {
+    "title": "消息中心"
+  },
+  "storage": {
+    "title": "文件管理"
+  },
+  "audit": {
+    "title": "日志管理"
+  },
+  "iam": {
+    "user": "用户管理",
+    "userRoles": "分配角色"
+  },
+  "devtools": {
+    "title": "系统工具",
+    "uiDocs": "Element Plus 文档",
+    "apiDocs": "系统接口"
+  },
+  "formkit": {
+    "design": "表单构建"
+  },
+  "demo": {
+    "title": "生成示例"
+  },
+  "workflow": {
+    "title": "流程审批",
+    "start": "发起申请",
+    "todo": "我的待办",
+    "done": "我的已办",
+    "mine": "我的发起",
+    "cc": "抄送我的",
+    "detail": "审批详情"
+  },
+  "wf": {
+    "title": "流程管理",
+    "model": "模型管理",
+    "instance": "实例管理",
+    "task": "任务管理",
+    "modelDesign": "流程设计"
+  },
+  "biz": {
+    "title": "业务管理",
+    "leave": "请假申请",
+    "leaveNew": "新建请假",
+    "leaveView": "请假详情"
+  },
+  "action": {
+    "browse": "浏览",
+    "view": "查看",
+    "create": "新增",
+    "modify": "修改",
+    "remove": "删除",
+    "export": "导出",
+    "import": "导入",
+    "resetPassword": "重置密码",
+    "resetSecret": "重置密钥",
+    "assignRoles": "分配角色",
+    "grant": "授权",
+    "assignUsers": "分配用户",
+    "publish": "发布",
+    "unlock": "解锁账户",
+    "generate": "生成代码",
+    "write": "写入工作区",
+    "handle": "处理错误",
+    "run": "执行一次",
+    "send": "发送",
+    "broadcast": "发送给全员",
+    "manage": "改派与终止",
+    "managers": "任命流程管理员"
+  }
+}

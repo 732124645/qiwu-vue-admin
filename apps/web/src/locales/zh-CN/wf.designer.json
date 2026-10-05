@@ -1,0 +1,217 @@
+{
+  "wf": {
+    "designer": {
+      "add": "添加节点",
+      "copy": "复制",
+      "remove": "删除",
+      "end": "流程结束",
+      "type": {
+        "begin": "发起人",
+        "review": "审批人",
+        "notify": "抄送人",
+        "fork": "分支"
+      },
+      "path": {
+        "name": "分支 {n}",
+        "fallback": "其他情况",
+        "fallbackHint": "其他分支的条件都不满足时进入此分支。"
+      },
+      "fork": {
+        "mode": "分支类型",
+        "modes": {
+          "exclusive": "排他",
+          "inclusive": "包容",
+          "parallel": "并行"
+        },
+        "addPath": "添加分支",
+        "removePath": "删除分支",
+        "moveLeft": "左移",
+        "moveRight": "右移"
+      },
+      "summary": {
+        "begin": "发起人提交申请",
+        "unset": "请设置{kind}",
+        "count": "{n} 项",
+        "levels": "{n} 级",
+        "parallel": "与其他分支同时进行。",
+        "fallback": "其他分支都不满足时进入",
+        "noCondition": "请设置条件",
+        "toTop": "直到最高层"
+      },
+      "check": {
+        "title": "发布前需修改 {n} 处问题",
+        "quote": "“{name}”",
+        "at": "{node}：{message}",
+        "field": {
+          "name": "名称",
+          "paths": "分支",
+          "when": "条件",
+          "value": "条件值",
+          "ids": "所选对象",
+          "other": "此项设置"
+        }
+      },
+      "confirm": {
+        "title": "提示",
+        "ok": "确定",
+        "removeFork": "删除分支节点会一并删除各分支中的节点，确定删除吗？",
+        "removePath": "删除此分支会一并删除其中的节点，确定删除吗？",
+        "parallel": "并行分支没有条件，切换后各分支的条件将被清除，确定切换吗？"
+      },
+      "drawer": {
+        "name": "名称",
+        "begin": "发起人设置",
+        "review": "审批人设置",
+        "notify": "抄送人设置",
+        "path": "分支设置"
+      },
+      "assignee": {
+        "kind": "人员来源",
+        "kinds": {
+          "users": "指定成员",
+          "roles": "指定角色",
+          "positions": "指定岗位",
+          "deptMembers": "部门成员",
+          "deptHead": "部门负责人",
+          "deptHeadChain": "连续多级部门负责人",
+          "initiator": "发起人本人",
+          "initiatorPicks": "发起人自选",
+          "initiatorDeptHead": "发起人部门负责人",
+          "formFieldUser": "表单中的人员",
+          "formFieldDeptHead": "表单中部门的负责人"
+        },
+        "hints": {
+          "users": "由这里选择的成员处理。",
+          "roles": "拥有任一所选角色的启用用户。",
+          "positions": "担任任一所选岗位的启用用户。",
+          "deptMembers": "所选部门的成员，不含下级部门。",
+          "deptHead": "所选部门的负责人。",
+          "deptHeadChain": "从发起人所在部门起逐级向上的部门负责人，最多到所设级数或最高层部门。",
+          "initiator": "由发起人自己处理。",
+          "initiatorPicks": "发起流程时由发起人选择。",
+          "initiatorDeptHead": "发起人所在部门的负责人。",
+          "formFieldUser": "所选表单字段中填写的人员。",
+          "formFieldDeptHead": "所选表单字段中填写的部门的负责人。"
+        },
+        "users": "成员",
+        "pickUsers": "选择成员",
+        "roles": "角色",
+        "rolesPlaceholder": "选择角色",
+        "positions": "岗位",
+        "positionsPlaceholder": "选择岗位",
+        "depts": "部门",
+        "levels": "级数",
+        "field": "表单字段",
+        "noField": "表单中没有{type}类型的字段。",
+        "toTop": "逐级直到最高层部门",
+        "orderHint": "选择「依次审批」时，按这里显示的顺序审批。",
+        "earlier": "前移",
+        "later": "后移"
+      },
+      "review": {
+        "sign": {
+          "label": "多人审批方式",
+          "any": "或签（一人通过即可）",
+          "all": "会签（需全部通过）",
+          "ordered": "依次审批（按顺序全部通过）"
+        },
+        "whenNobody": {
+          "label": "审批人为空时",
+          "autoPass": "自动通过",
+          "toManager": "转交流程管理员",
+          "toUser": "转交指定人员"
+        },
+        "whenInitiatorIsReviewer": {
+          "label": "审批人是发起人时",
+          "self": "由发起人自己审批",
+          "skip": "自动跳过",
+          "deptHead": "转交部门负责人"
+        },
+        "onReject": {
+          "label": "驳回后",
+          "finish": "结束流程",
+          "sendBack": "退回上一审批节点"
+        },
+        "resubmitTo": {
+          "label": "本节点退回发起人后，重新提交时",
+          "restart": "从第一个节点重新审批",
+          "sender": "直接回到本节点"
+        },
+        "commentRequired": "审批意见必填",
+        "timeout": {
+          "label": "超时提醒",
+          "hours": "办理时限（小时）",
+          "repeat": "之后每隔（小时）重复提醒",
+          "every": "重复提醒间隔（小时）",
+          "hint": "只提醒办理人，不会自动通过或驳回。",
+          "after": {
+            "label": "到期后",
+            "remind": "仅提醒",
+            "autoPass": "自动通过",
+            "autoReject": "自动驳回",
+            "toManager": "转给上级"
+          },
+          "afterHint": {
+            "autoPass": "系统以办理人的名义通过；自动通过的审批不能撤回。",
+            "autoReject": "系统以办理人的名义驳回，按本节点的“驳回后”设置：{onReject}。",
+            "toManager": "转给办理人所在部门的负责人，本人即负责人时转给上级部门负责人；找不到合适的人时转给流程管理员，再没有则只提醒。",
+            "common": "到期后约 5 分钟内处理；发起人、流程管理员以及被处理待办的原办理人会收到通知。"
+          }
+        }
+      },
+      "cond": {
+        "hint": "满足任一条件组即进入此分支；组内条件需全部满足。",
+        "group": "条件组 {n}",
+        "and": "且",
+        "or": "或",
+        "field": "字段",
+        "op": "运算",
+        "value": "值",
+        "values": "输入后按回车",
+        "formFields": "表单字段",
+        "initiator": "发起人",
+        "initiatorDept": "发起人部门",
+        "initiatorRoles": "发起人角色",
+        "addCond": "添加条件",
+        "addGroup": "添加条件组",
+        "remove": "删除条件"
+      },
+      "op": {
+        "eq": "等于",
+        "ne": "不等于",
+        "gt": "大于",
+        "gte": "大于等于",
+        "lt": "小于",
+        "lte": "小于等于",
+        "in": "属于",
+        "contains": "包含",
+        "inDeptTree": "属于（含下级部门）",
+        "hasRole": "拥有任一"
+      },
+      "access": {
+        "title": "字段权限",
+        "field": "字段",
+        "edit": "可编辑",
+        "read": "只读",
+        "hide": "隐藏",
+        "setAll": "全部设为{access}",
+        "empty": "表单没有字段"
+      },
+      "fieldTypes": {
+        "number": "数字",
+        "string": "文本",
+        "date": "日期",
+        "user": "人员",
+        "dept": "部门"
+      },
+      "progress": {
+        "legend": "节点状态",
+        "done": "已完成",
+        "active": "进行中",
+        "pending": "未到达",
+        "skipped": "未经过",
+        "stopped": "在此结束"
+      }
+    }
+  }
+}

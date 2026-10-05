@@ -1,0 +1,17 @@
+{
+  "field": {
+    "messaging": {
+      "smsTemplate": {
+        "code": "Code",
+        "locale": "Locale",
+        "channelId": "SMS channel",
+        "name": "Name",
+        "purpose": "Purpose",
+        "body": "Body",
+        "paramNames": "Param names",
+        "providerTemplateId": "Provider template ID",
+        "enabled": "Enabled"
+      }
+    }
+  }
+}

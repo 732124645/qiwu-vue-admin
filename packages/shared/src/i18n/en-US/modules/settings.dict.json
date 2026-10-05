@@ -1,0 +1,13 @@
+{
+  "field": {
+    "settings": {
+      "dict": {
+        "code": "Dictionary code",
+        "name": "Dictionary name",
+        "nameI18n": "Name per language",
+        "enabled": "Enabled",
+        "note": "Note"
+      }
+    }
+  }
+}

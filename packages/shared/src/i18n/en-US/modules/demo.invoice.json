@@ -1,0 +1,19 @@
+{
+  "field": {
+    "demo": {
+      "invoice": {
+        "invoiceNo": "Invoice no.",
+        "buyer": "Buyer",
+        "total": "Total",
+        "issuedAt": "Issued at",
+        "issuedAtFrom": "Issued at (from)",
+        "issuedAtTo": "Issued at (to)",
+        "state": "State",
+        "lines": "Lines",
+        "item": "Item",
+        "qty": "Quantity",
+        "unitPrice": "Unit price"
+      }
+    }
+  }
+}

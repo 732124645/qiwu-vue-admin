@@ -1,0 +1,15 @@
+{
+  "wf": {
+    "form": {
+      "entity": "表单",
+      "invalid": "表单无法保存：{reason}",
+      "removedTitle": "不支持的设置",
+      "removed": "流程表单不允许以下设置，保存时将被移除：{settings}"
+    }
+  },
+  "menu": {
+    "wf": {
+      "form": "表单管理"
+    }
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "field": {
+    "messaging": {
+      "smsRecord": {
+        "channelId": "短信渠道 ID",
+        "templateCode": "模板编码",
+        "mobile": "手机号",
+        "userId": "收件用户",
+        "body": "正文",
+        "params": "参数",
+        "status": "状态",
+        "error": "错误信息",
+        "providerMsgId": "服务商消息 ID",
+        "receiptStatus": "回执状态",
+        "receiptAt": "回执时间",
+        "attempts": "发送尝试次数"
+      }
+    }
+  }
+}

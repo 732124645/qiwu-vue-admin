@@ -1,0 +1,23 @@
+{
+  "wf": {
+    "admin": {
+      "instanceId": "实例编号",
+      "dept": "发起部门",
+      "taskState": "任务状态",
+      "dueAt": "到期时间",
+      "terminate": {
+        "action": "终止",
+        "title": "终止实例 #{id}",
+        "hint": "终止后流程立即结束，全部未处理的待办被取消，无法恢复。",
+        "submit": "终止",
+        "done": "已终止"
+      },
+      "reassign": {
+        "action": "改派",
+        "title": "改派：{node}",
+        "submit": "改派",
+        "done": "已改派"
+      }
+    }
+  }
+}

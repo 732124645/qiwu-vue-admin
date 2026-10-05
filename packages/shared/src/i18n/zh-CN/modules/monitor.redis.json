@@ -1,0 +1,25 @@
+{
+  "field": {
+    "monitor": {
+      "redis": {
+        "info": "服务信息",
+        "server": "服务",
+        "clients": "客户端",
+        "memory": "内存",
+        "persistence": "持久化",
+        "stats": "统计",
+        "cpu": "CPU",
+        "commandStats": "命令统计",
+        "command": "命令",
+        "calls": "调用次数",
+        "usec": "总耗时（微秒）",
+        "usecPerCall": "平均耗时（微秒）",
+        "keyspace": "键空间",
+        "db": "数据库",
+        "keys": "键数量",
+        "expires": "带过期键数",
+        "avgTtl": "平均 TTL（毫秒）"
+      }
+    }
+  }
+}

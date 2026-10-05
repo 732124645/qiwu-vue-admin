@@ -1,0 +1,16 @@
+{
+  "hello": "Hello, {name}",
+  "stats": {
+    "todo": "To-dos",
+    "unread": "Unread",
+    "running": "In progress"
+  },
+  "shortcuts": "Shortcuts",
+  "shortcut": {
+    "start": "New request",
+    "leave": "Leave",
+    "bulletin": "Bulletins"
+  },
+  "recent": "Awaiting me",
+  "viewAll": "View all"
+}

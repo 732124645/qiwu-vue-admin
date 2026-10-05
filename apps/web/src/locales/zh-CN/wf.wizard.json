@@ -1,0 +1,40 @@
+{
+  "wf": {
+    "wizard": {
+      "untitled": "新建审批",
+      "saved": "已保存",
+      "fromTemplate": "从模板创建",
+      "replace": "替换",
+      "replaceConfirm": "从模板创建会替换当前已填写的内容，是否继续？",
+      "notDynamic": "该流程使用业务表单，不能在向导中编辑。",
+      "saveDraft": "保存草稿",
+      "publish": "发布",
+      "tab": "{n}. {name}",
+      "steps": {
+        "basics": "基础设置",
+        "form": "表单设计",
+        "flow": "流程设计",
+        "advanced": "高级设置"
+      },
+      "flowHint": "条件分支、表单字段指定的审批人和字段权限都来自上一步设计的表单字段。",
+      "badForm": "表单无法保存：{reason}",
+      "draftSaved": "草稿已保存",
+      "published": "已发布为版本 {version}",
+      "failedTitle": "保存失败",
+      "failed": "{step}失败：{reason}。已完成的步骤会保留，重试将从失败的步骤继续。",
+      "retry": "重试",
+      "step": {
+        "form": "保存表单",
+        "model": "保存流程模型",
+        "draft": "保存流程草稿",
+        "publish": "发布流程版本"
+      }
+    }
+  },
+  "menu": {
+    "wf": {
+      "wizard": "新建审批",
+      "wizardEdit": "审批向导"
+    }
+  }
+}

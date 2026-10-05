@@ -1,0 +1,17 @@
+{
+  "field": {
+    "messaging": {
+      "inboxTemplate": {
+        "code": "Template code",
+        "locale": "Language",
+        "name": "Template name",
+        "title": "Title",
+        "body": "Body",
+        "category": "Category",
+        "senderLabel": "Sender name",
+        "paramNames": "Param names",
+        "enabled": "Enabled"
+      }
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "app": {
+    "name": "Qiwu"
+  },
+  "action": {
+    "signIn": "Sign in",
+    "cancel": "Cancel",
+    "back": "Back"
+  },
+  "language": {
+    "title": "Change language",
+    "zhCN": "简体中文",
+    "enUS": "English"
+  },
+  "error": {
+    "network": "Network error, please try again later",
+    "kicked": "An administrator signed you out. Please sign in again."
+  },
+  "tab": {
+    "home": "Workbench",
+    "approval": "Approvals",
+    "message": "Messages",
+    "mine": "Me"
+  },
+  "version": "Version",
+  "tabBadge": {
+    "approval": "Approvals, {n} to-dos",
+    "message": "Messages, {n} unread"
+  }
+}

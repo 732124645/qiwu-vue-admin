@@ -1,0 +1,13 @@
+{
+  "settings": {
+    "dictEntry": {
+      "entity": "字典项",
+      "back": "返回字典列表"
+    }
+  },
+  "menu": {
+    "settings": {
+      "dictEntry": "字典数据"
+    }
+  }
+}

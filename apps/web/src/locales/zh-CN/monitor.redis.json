@@ -1,0 +1,28 @@
+{
+  "monitor": {
+    "redis": {
+      "ops": "操作数",
+      "ofMax": "占 {max} 的 {percent}",
+      "opsUnit": "每秒命令数",
+      "commandTip": "{command}：调用 {calls} 次，平均 {usec} 微秒",
+      "keysOfDb": "{keys}（db {db}）",
+      "field": "字段",
+      "value": "值",
+      "stat": {
+        "version": "版本",
+        "mode": "运行模式",
+        "uptime": "运行时长",
+        "clients": "客户端连接",
+        "memory": "已用内存",
+        "keys": "键数量",
+        "expires": "带过期键数",
+        "hitRate": "命中率"
+      }
+    }
+  },
+  "menu": {
+    "monitor": {
+      "redis": "缓存监控"
+    }
+  }
+}

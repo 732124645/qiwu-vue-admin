@@ -1,0 +1,22 @@
+{
+  "iam": {
+    "session": {
+      "current": "当前会话",
+      "kick": "强退",
+      "kickUser": "强退该用户",
+      "batchKick": "批量强退",
+      "kickConfirm": "强退 {username} 来自 {ip} 的会话？对方需要重新登录。",
+      "kickUserConfirm": "强退 {username} 的全部会话？对方需要重新登录。",
+      "batchConfirm": "强退选中的 {count} 个会话？对方需要重新登录。",
+      "kicked": "已强退 {count} 个会话"
+    }
+  },
+  "menu": {
+    "iam": {
+      "session": "在线用户"
+    },
+    "action": {
+      "kick": "强退"
+    }
+  }
+}

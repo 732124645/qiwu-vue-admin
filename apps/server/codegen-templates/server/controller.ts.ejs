@@ -1,0 +1,229 @@
+<%_
+const B = m.Biz
+const b = m.biz
+const Nouns = m.nouns[0].toUpperCase() + m.nouns.slice(1)
+// a read-only page (crud.ts `readonly`) has the GET routes only
+const w = !m.readonly
+// a tree (crud.ts `kind`): the whole filtered forest instead of pages, one delete at a time
+const tree = m.kind === 'tree'
+const batch = w && !tree
+const verbs = [w && 'Body', 'Controller', w && 'Delete', 'Get', (batch || m.withImport) && 'HttpCode', 'Param', 'ParseIntPipe', w && 'Post', w && 'Put', 'Query', m.withImport && 'UploadedFile']
+const enabled = w && m.enabled
+// import modes: `upsert` only with a natural key to match rows by (crud.ts importKey)
+const upsert = !!m.importKey
+const importBody = upsert ? 'importBody' : 'insertImportBody'
+const ImportBody = upsert ? 'ImportBody' : 'InsertImportBody'
+const MODES = upsert ? 'IMPORT_MODES' : 'INSERT_ONLY_MODES'
+// a master-sub module (crud.ts `subs`): GET /:id and POST answer the row with its sub rows
+const subs = m.subs
+const one = subs.length ? `${b}DetailVo` : `${b}Vo`
+const withSubs = subs.length ? ` with its ${subs.map((s) => s.prop).join(', ')}` : ''
+_%>
+import { <%= names(verbs) %> } from '@nestjs/common'
+import { <%= names([m.withImport && 'ApiBody', 'ApiOperation', (m.withExport || m.withImport) && 'ApiProduces', 'ApiTags']) %> } from '@nestjs/swagger'
+import {
+  <%= names([
+    m.withImport && 'DEFAULT_EXCEL_IMPORT_LIMITS',
+    enabled && 'type EnabledBody', enabled && 'enabledBody',
+    m.withImport && 'excelImportParams',
+    batch && 'type IdsBody', batch && 'idsBody',
+    m.withImport && MODES, m.withImport && 'type ' + ImportBody, m.withImport && importBody, m.withImport && 'importResultVo',
+    !tree && 'pageVo',
+    w && `type ${B}Create`, w && `${b}Create`, subs.length && `${b}DetailVo`, tree && `${b}NodeVo`, m.withOptions && `${b}OptionVo`, `${b}Perms`,
+    `type ${B}Query`, `${b}Query`, w && `type ${B}Update`, w && `${b}Update`, `${b}Vo`,
+  ]) %>,
+} from '@qiwu/shared'
+<%_ if (m.withOptions || tree) { _%>
+import { z } from 'zod'
+<%_ } _%>
+<%_ if (w || m.withExport) { _%>
+import { ActionLog } from '<%= m.up %>core/audit/action-log.js'
+<%_ } _%>
+import { RequirePerm } from '<%= m.up %>core/auth/decorators.js'
+<%_ if (m.withExport || m.withImport) { _%>
+import { ExcelService, XLSX_TYPE } from '<%= m.up %>core/excel/excel.service.js'
+<%_ } _%>
+<%_ if (w) { _%>
+import { Idempotent } from '<%= m.up %>core/guard/idempotent.js'
+<%_ } _%>
+import { ApiEnvelope } from '<%= m.up %>core/http/api-envelope.decorator.js'
+<%_ if (m.withImport) { _%>
+import { UploadFile, type UploadedFileData } from '<%= m.up %>core/http/upload.js'
+<%_ } _%>
+<%_ if (w) { _%>
+import type { <%= B %> } from './<%= m.business %>.entity.js'
+<%_ } _%>
+<%_ if (m.withExport || m.withImport) { _%>
+import { <%= names([`${b}Columns`, `${B}Service`]) %> } from './<%= m.business %>.service.js'
+<%_ } else { _%>
+import { <%= B %>Service } from './<%= m.business %>.service.js'
+<%_ } _%>
+
+@ApiTags('<%= m.domain %>')
+@Controller('<%= m.url %>')
+export class <%= B %>Controller {
+<%_ if (m.withExport || m.withImport) { _%>
+  constructor(
+    private readonly <%= m.bizs %>: <%= B %>Service,
+    private readonly excel: ExcelService,
+  ) {}
+<%_ } else { _%>
+  constructor(private readonly <%= m.bizs %>: <%= B %>Service) {}
+<%_ } _%>
+
+<%_ if (tree) { _%>
+  @Get()
+  @RequirePerm(<%= b %>Perms.browse)
+  @ApiOperation({ summary: <%= str(`${Nouns} matching the filters as a forest (not paged)`) %> })
+  @ApiEnvelope(z.array(<%= b %>NodeVo))
+  list(@Query({ schema: <%= b %>Query }) query: <%= B %>Query) {
+    return this.<%= m.bizs %>.list(query)
+  }
+<%_ } else { _%>
+  @Get()
+  @RequirePerm(<%= b %>Perms.browse)
+  @ApiOperation({ summary: <%= str(`Page of ${m.nouns}`) %> })
+  @ApiEnvelope(pageVo(<%= b %>Vo))
+  page(@Query({ schema: <%= b %>Query }) query: <%= B %>Query) {
+    return this.<%= m.bizs %>.page(query)
+  }
+<%_ } _%>
+<%_ if (m.withExport) { _%>
+
+  /** The list's rows (same filters and sort, no paging) as .xlsx. */
+  @Get('export')
+  @RequirePerm(<%= b %>Perms.export)
+  @ActionLog({ domain: '<%= m.key %>', verb: 'export' })
+  @ApiOperation({ summary: <%= str(`Export the filtered ${m.nouns} (.xlsx)`) %> })
+  @ApiProduces(XLSX_TYPE)
+  export(@Query({ schema: <%= b %>Query }) query: <%= B %>Query) {
+    return this.excel.export('<%= m.bizs %>', <%= b %>Columns, this.<%= m.bizs %>.exportRows(query))
+  }
+<%_ } _%>
+<%_ if (m.withImport) { _%>
+
+  /** Dict columns come with a dropdown of their labels. */
+  @Get('import-template')
+  @RequirePerm(<%= b %>Perms.import)
+  @ApiOperation({ summary: 'Import template (.xlsx)' })
+  @ApiProduces(XLSX_TYPE)
+  importTemplate() {
+    return this.excel.template('<%= m.bizs %>', <%= b %>Columns)
+  }
+
+  @Post('import')
+  @HttpCode(200)
+  @RequirePerm(<%= b %>Perms.import)
+  // above @UploadFile: its interceptors run first, so the key covers the file (a double submit)
+  @Idempotent()
+  @UploadFile('file', excelImportParams.maxMb, DEFAULT_EXCEL_IMPORT_LIMITS.maxMb)
+  @ActionLog({ domain: '<%= m.key %>', verb: 'import' })
+  @ApiOperation({
+    summary: <%= str(`Import ${m.nouns} (multipart: file + mode ${upsert ? 'insert|upsert' : 'insert'}); failed rows → error report`) %>,
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['file'],
+      properties: {
+        file: { type: 'string', format: 'binary' },
+        mode: { type: 'string', enum: [...<%= MODES %>], default: 'insert' },
+      },
+    },
+  })
+  @ApiEnvelope(importResultVo)
+  importXlsx(
+    @UploadedFile() file: UploadedFileData | undefined,
+    @Body({ schema: <%= importBody %> }) { mode }: <%= ImportBody %>,
+  ) {
+    return this.<%= m.bizs %>.importXlsx(file, mode)
+  }
+<%_ } _%>
+<%_ if (m.withOptions) { _%>
+
+  /** Any signed-in user: pickers in other modules list id + <%= m.label.field %> only. */
+  @Get('options')
+  @ApiOperation({ summary: <%= str(`${m.enabled ? 'Enabled ' + m.nouns : Nouns} for pickers`) %> })
+  @ApiEnvelope(z.array(<%= b %>OptionVo))
+  options() {
+    return this.<%= m.bizs %>.options()
+  }
+<%_ } _%>
+
+  @Get(':id')
+  @RequirePerm(<%= b %>Perms.view)
+  @ApiOperation({ summary: <%= str(`One ${m.noun}${withSubs}`) %> })
+  @ApiEnvelope(<%= one %>)
+  get(@Param('id', ParseIntPipe) id: number) {
+    return this.<%= m.bizs %>.<%= subs.length ? 'detail' : 'get' %>(id)
+  }
+
+<%_ if (w) { _%>
+  @Post()
+  @RequirePerm(<%= b %>Perms.create)
+  @Idempotent()
+  @ActionLog({
+    domain: '<%= m.key %>',
+    verb: 'create',
+    bizId: (_req, row) => (row as <%= B %> | undefined)?.id,
+  })
+  @ApiOperation({ summary: <%= str(`Add ${m.aNoun}${tree ? ' under an enabled parent (0 = top level)' : ''}${withSubs}`) %> })
+  @ApiEnvelope(<%= one %>, 201)
+  create(@Body({ schema: <%= b %>Create }) dto: <%= B %>Create) {
+    return this.<%= m.bizs %>.create(dto)
+  }
+
+  @Put(':id')
+  @RequirePerm(<%= b %>Perms.modify)
+  @ActionLog({ domain: '<%= m.key %>', verb: 'modify' })
+  @ApiOperation({ summary: <%= str(`Change ${m.aNoun}${tree ? ' (a new parent moves its whole subtree)' : ''}${subs.length ? ` (${subs.map((s) => s.prop).join(', ')} sent: the whole new list)` : ''}`) %> })
+  @ApiEnvelope()
+  update(
+    @Param('id', ParseIntPipe) id: number,
+    @Body({ schema: <%= b %>Update }) dto: <%= B %>Update,
+  ) {
+    return this.<%= m.bizs %>.update(id, dto)
+  }
+<%_ if (enabled) { _%>
+
+  @Put(':id/enabled')
+  @RequirePerm(<%= b %>Perms.modify)
+  @ActionLog({ domain: '<%= m.key %>', verb: 'modify' })
+<%_ if (tree) { _%>
+  @ApiOperation({
+    summary: <%= str(`Enable (with its disabled ancestors) or disable (no enabled child) ${m.aNoun}`) %>,
+  })
+<%_ } else { _%>
+  @ApiOperation({ summary: <%= str(`Enable or disable ${m.aNoun}`) %> })
+<%_ } _%>
+  @ApiEnvelope()
+  setEnabled(
+    @Param('id', ParseIntPipe) id: number,
+    @Body({ schema: enabledBody }) dto: EnabledBody,
+  ) {
+    return this.<%= m.bizs %>.update(id, dto)
+  }
+<%_ } _%>
+
+  @Delete(':id')
+  @RequirePerm(<%= b %>Perms.remove)
+  @ActionLog({ domain: '<%= m.key %>', verb: 'remove' })
+  @ApiOperation({ summary: <%= str(`Delete ${m.aNoun}${tree ? ' without children' : ''}${withSubs}`) %> })
+  @ApiEnvelope()
+  remove(@Param('id', ParseIntPipe) id: number) {
+    return this.<%= m.bizs %>.remove([id])
+  }
+<%_ if (batch) { _%>
+
+  @Post('batch-delete')
+  @HttpCode(200)
+  @RequirePerm(<%= b %>Perms.remove)
+  @ActionLog({ domain: '<%= m.key %>', verb: 'remove' })
+  @ApiOperation({ summary: <%= str(`Delete ${m.nouns}: all or none`) %> })
+  @ApiEnvelope()
+  batchRemove(@Body({ schema: idsBody }) { ids }: IdsBody) {
+    return this.<%= m.bizs %>.remove(ids)
+  }
+<%_ } _%>
+<%_ } _%>
+}

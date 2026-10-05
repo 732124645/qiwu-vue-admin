@@ -1,0 +1,226 @@
+<%_
+// the uni-app list page (docs/codegen-golden.md "Mobile"): a z-paging list of cards (crud /
+// master-sub) or one level of the forest (tree), a row opens the detail page. No DB text is printed
+// in a .vue file (a `</script>` would end the block even inside a comment): texts only through t()
+const b = m.biz
+const B = m.Biz
+const perms = b + 'Perms'
+const w = !m.readonly
+const tree = m.kind === 'tree'
+const created = m.audit.created_at && m.list.includes(m.audit.created_at) ? m.audit.created_at : undefined
+const enabled = m.enabled && m.list.includes(m.enabled) ? m.enabled : undefined
+// the row's title: the label column when listed, else the first list column (none: the id)
+const title = m.label && m.list.includes(m.label) ? m.label : m.list[0]
+// one line of up to two more columns (not free text, images, the sort number or the ones above)
+const plain = (c) => !c.freeText && c.widget !== 'image-upload' && c.tsType !== 'unknown'
+const metas = m.list
+  .filter((c) => c !== title && c !== created && c !== enabled && c !== m.sortNo && plain(c))
+  .slice(0, 2)
+const shown = [title, ...metas].filter(Boolean)
+const dicts = [...new Set([...shown, enabled].filter((c) => c && c.web.dict).map((c) => c.web.dict))]
+const dictShown = shown.some((c) => c.web.dict)
+// one search box: the label column's like filter, else the first like filter (none: no box)
+const likes = m.filters.filter((c) => c.queryOp === 'like')
+const search = tree ? undefined : (likes.find((c) => c === m.label) ?? likes[0])
+const page = '/pages-biz/' + m.home
+_%>
+<%_ function text(c, v) { _%>
+<%_ if (c.web.dict) { _%>dictText('<%= c.web.dict %>', <%= v %>)<%_ } else if (c.tsType === 'Date') { _%><%= v %> ? formatShort(<%= v %>) : ''<%_ } else if (c.seedName) { _%>tx(<%= v %>)<%_ } else if (c.widget === 'file-upload') { _%>uploadName(<%= v %>)<%_ } else if (c.web.scale) { _%><%= v %><% if (c.nullable) { %>?<% } %>.toFixed(<%= c.web.scale %>)<%_ } else { _%><%= v %><%_ } _%>
+<%_ } _%>
+<%_ function row() { _%>
+      <view
+        v-for="row in rows"
+        :key="row.id"
+        class="qw-card qw-row"
+        :role="canView ? 'link' : undefined"
+        @click="open(row.id)"
+      >
+        <view class="qw-row__main">
+          <view class="qw-row__line">
+            <text class="qw-row__title">{{ <% if (title) { text(title, 'row.' + title.field) } else { %>row.id<% } %> }}</text>
+  <%_ if (enabled) { _%>
+            <text :class="`qw-tag qw-tag--${dictTag('<%= enabled.web.dict %>', row.<%= enabled.field %>).type}`">{{ dictTag('<%= enabled.web.dict %>', row.<%= enabled.field %>).label }}</text>
+  <%_ } _%>
+  <%_ if (created) { _%>
+            <text class="qw-row__time">{{ formatShort(row.<%= created.field %>) }}</text>
+  <%_ } _%>
+          </view>
+  <%_ if (metas.length) { _%>
+          <text class="qw-row__sub">{{ metaLine(<% for (const [i, c] of metas.entries()) { %><% if (i) { %>, <% } %><% text(c, 'row.' + c.field) %><% } %>) }}</text>
+  <%_ } _%>
+        </view>
+  <%_ if (tree) { _%>
+        <!-- a node with children: their level, one tap -->
+        <text
+          v-if="row.children.length"
+          class="qw-sec__link"
+          @click.stop="drill(row.id)"
+        >{{ t('crud.tree.children', { n: row.children.length }) }}</text>
+  <%_ } _%>
+      </view>
+<%_ } _%>
+<template>
+<%_ if (tree) { _%>
+  <view class="qw-detail qw-stack">
+  <%_ if (w) { _%>
+    <QwPerm :perm="<%= perms %>.create">
+      <wd-button custom-class="qw-btn qw-btn--primary" type="primary" block @click="create">
+        {{ t('crud.action.create') }}
+      </wd-button>
+    </QwPerm>
+  <%_ } _%>
+<%_ row() _%>
+    <QwEmpty v-if="loaded && !rows.length" :title="error || t('crud.empty')" />
+  </view>
+<%_ } else { _%>
+  <z-paging
+    ref="paging"
+    v-model="rows"
+    :default-page-size="PAGE_SIZE_DEFAULT"
+    :empty-view-center="false"
+    :default-theme-style="pagingTheme.style"
+    :loading-more-title-custom-style="pagingTheme.title"
+    :loading-more-no-more-line-custom-style="pagingTheme.line"
+    @query="query"
+  >
+    <view class="qw-detail qw-stack">
+  <%_ if (search) { _%>
+      <wd-search
+        v-model="keyword"
+        hide-cancel
+        placeholder-left
+        :placeholder="t('<%= search.labelKey %>')"
+        @search="reload"
+        @clear="reload"
+      />
+  <%_ } _%>
+  <%_ if (w) { _%>
+      <QwPerm :perm="<%= perms %>.create">
+        <wd-button custom-class="qw-btn qw-btn--primary" type="primary" block @click="create">
+          {{ t('crud.action.create') }}
+        </wd-button>
+      </QwPerm>
+  <%_ } _%>
+<%_ row() _%>
+    </view>
+    <template #empty="{ isLoadFailed }">
+      <QwEmpty :title="isLoadFailed ? error || t('common.error.network') : t('crud.empty')" />
+    </template>
+  </z-paging>
+<%_ } _%>
+</template>
+
+<script setup lang="ts">
+import { <%= names(tree ? ['computed', 'ref', 'shallowRef'] : ['computed', 'ref']) %> } from 'vue'
+import { <%= names(['onLoad', 'onShow']) %> } from '@dcloudio/uni-app'
+import { <%= names([...(tree ? [] : ['PAGE_SIZE_DEFAULT', 'PAGE_SIZE_MAX']), perms, 'type ' + B + 'Vo', shown.some((c) => c.widget === 'file-upload') && 'uploadName']) %> } from '@qiwu/shared'
+import { <%= b %>Api } from '@/api/<%= m.home %>'
+import QwEmpty from '@/core/components/QwEmpty.vue'
+<%_ if (w) { _%>
+import QwPerm from '@/core/components/QwPerm.vue'
+<%_ } _%>
+<%_ if (dicts.length || metas.length || tree) { _%>
+import { <%= names([tree && 'findNode', metas.length && 'metaLine', tree && 'type TreeRow', dicts.length && 'useDicts']) %> } from '@/core/crud'
+<%_ } _%>
+<%_ if (created || shown.some((c) => c.tsType === 'Date')) { _%>
+import { formatShort } from '@/core/format'
+<%_ } _%>
+import { <%= names(['t', shown.some((c) => c.seedName) && 'tx']) %> } from '@/core/i18n'
+import { errorText } from '@/core/request'
+import { hasPerm } from '@/core/stores/auth'
+<%_ if (!tree) { _%>
+import { pagingTheme } from '@/core/theme'
+<%_ } _%>
+
+<%_ if (tree) { _%>
+/**
+ * The <%= comment(m.nouns) %> (mobile, generated): one level of the tree, `?parentId=` (default: the
+ * top level). The API answers the whole forest (no paging); a row opens its detail, its children link the
+ * next level down. Showing again (back from a form or detail) reloads.
+ */
+const parentId = ref(0)
+const forest = shallowRef<TreeRow<<%= B %>Vo>[]>([])
+const loaded = ref(false)
+const error = ref('')
+const parent = computed(() => (parentId.value ? findNode(forest.value, parentId.value) : undefined))
+const rows = computed(() => (parentId.value ? (parent.value?.children ?? []) : forest.value))
+<%_ } else { _%>
+/**
+ * The <%= comment(m.nouns) %> (mobile, generated): sorted by `<%= m.listSort %>`, paged by z-paging (pull to
+ * refresh, load on scroll)<% if (search) { %>, searched by `<%= search.field %>`<% } %>; a row opens its detail.
+ */
+const paging = ref<ZPagingRef<<%= B %>Vo>>()
+const rows = ref<<%= B %>Vo[]>([])
+const error = ref('')
+<%_ if (search) { _%>
+const keyword = ref('')
+<%_ } _%>
+<%_ } _%>
+<%_ if (dicts.length) { _%>
+const { <%= names([dictShown && 'dictText', enabled && 'dictTag']) %> } = useDicts([<% for (const d of dicts) { %>'<%= d %>', <% } %>])
+<%_ } _%>
+
+const canView = computed(() => hasPerm(<%= perms %>.view))
+const open = (id: number) => canView.value && uni.navigateTo({ url: `<%= page %>/detail?id=${id}` })
+<%_ if (w) { _%>
+<%_ if (tree) { _%>
+const create = () => uni.navigateTo({ url: `<%= page %>/form?parentId=${parentId.value}` })
+<%_ } else { _%>
+const create = () => uni.navigateTo({ url: '<%= page %>/form' })
+<%_ } _%>
+<%_ } _%>
+<%_ if (tree) { _%>
+const drill = (id: number) => uni.navigateTo({ url: `<%= page %>/index?parentId=${id}` })
+
+async function load() {
+  try {
+    forest.value = await <%= b %>Api.list()
+    error.value = ''
+  } catch (e) {
+    error.value = errorText(e)
+  } finally {
+    loaded.value = true
+  }
+  const label = parent.value?.<%= m.label.field %>
+  uni.setNavigationBarTitle({ title: <% if (m.label.seedName) { %>label ? tx(label) : t('menu.<%= m.key %>')<% } else { %>label || t('menu.<%= m.key %>')<% } %> })
+}
+
+onLoad((query) => (parentId.value = Number(query?.parentId) || 0))
+// the first show loads too
+onShow(() => void load())
+<%_ } else { _%>
+
+// only the latest request's answer shows: a search sent meanwhile drops the earlier one's
+let seq = 0
+function query(page: number, pageSize: number) {
+  const mine = ++seq
+  <%= b %>Api
+    .page({ page, pageSize, sort: '<%= m.listSort %>'<% if (search) { %>, ...(keyword.value ? { <%= search.field %>: keyword.value } : {})<% } %> })
+    .then(
+      (res) => {
+        if (mine !== seq) return
+        error.value = ''
+        void paging.value?.completeByTotal(res.items, res.total)
+      },
+      (e) => {
+        if (mine !== seq) return
+        error.value = errorText(e)
+        void paging.value?.complete(false)
+      },
+    )
+}
+<%_ if (search) { _%>
+const reload = () => void paging.value?.reload()
+<%_ } _%>
+
+onLoad(() => uni.setNavigationBarTitle({ title: t('menu.<%= m.key %>') }))
+// z-paging loads the first page itself; showing again (back from a form or detail) reloads the loaded pages
+// in one request, within the API's page size limit
+let shown = false
+onShow(() => {
+  if (shown && paging.value)
+    void (rows.value.length >= PAGE_SIZE_MAX ? paging.value.reload() : paging.value.refresh())
+  shown = true
+})
+<%_ } _%>
+</script>

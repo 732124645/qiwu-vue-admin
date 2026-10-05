@@ -1,0 +1,15 @@
+{
+  "settings": {
+    "param": {
+      "entity": "parameter",
+      "refreshCache": "Refresh cache",
+      "cacheRefreshed": "Cache refreshed: every parameter is read again",
+      "secretHint": "Secret values only show masked: left as is, the stored value stays; a new value replaces it."
+    }
+  },
+  "menu": {
+    "settings": {
+      "param": "Parameters"
+    }
+  }
+}

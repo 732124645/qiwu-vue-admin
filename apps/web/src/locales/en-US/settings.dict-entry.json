@@ -1,0 +1,13 @@
+{
+  "settings": {
+    "dictEntry": {
+      "entity": "dictionary entry",
+      "back": "Back to dictionaries"
+    }
+  },
+  "menu": {
+    "settings": {
+      "dictEntry": "Dictionary entries"
+    }
+  }
+}

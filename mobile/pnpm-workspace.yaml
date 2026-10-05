@@ -1,0 +1,26 @@
+# mobile/ is its own pnpm root, outside the main workspace: own lockfile, own install
+# (`pnpm mobile:install`). Every dependency change updates allowBuilds in the same commit.
+
+# supply chain, as the main workspace: packages must be ≥ 1 day old
+minimumReleaseAge: 1440
+minimumReleaseAgeStrict: true
+
+allowBuilds:
+  # vite 5's esbuild binary check
+  esbuild: true
+  # "please donate" banners (via @dcloudio/* -> @vitejs/plugin-legacy / babel); never allowed to run
+  core-js: false
+  core-js-pure: false
+  # pinia 2 -> vue-demi picks its Vue 2/3 build at install; the default build is the Vue 3 one
+  vue-demi: false
+
+overrides:
+  # uni-app pins vite 5.2.8 (peer); vitest's own range would add a second vite
+  vite: 5.2.8
+
+# braces <=3.0.3 stack-exhaustion DoS has no patched release (2026-10-05). It is only reached via
+# chokidar glob patterns (nestjs-i18n watch mode, not enabled; build tooling), never with user input.
+# Remove this entry and upgrade as soon as a fixed braces is published.
+auditConfig:
+  ignoreGhsas:
+    - GHSA-vfj7-8cjw-p6xm

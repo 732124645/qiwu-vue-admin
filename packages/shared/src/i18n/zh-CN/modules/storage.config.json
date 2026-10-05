@@ -1,0 +1,14 @@
+{
+  "field": {
+    "storage": {
+      "config": {
+        "name": "名称",
+        "driver": "驱动",
+        "isPrimary": "主配置",
+        "config": "驱动配置",
+        "enabled": "启用状态",
+        "note": "备注"
+      }
+    }
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "iam": {
+    "session": {
+      "current": "This session",
+      "kick": "End session",
+      "kickUser": "End all sessions",
+      "batchKick": "End selected sessions",
+      "kickConfirm": "End the session of {username} from {ip}? They will need to sign in again.",
+      "kickUserConfirm": "End all sessions of {username}? They will need to sign in again.",
+      "batchConfirm": "End the {count} selected session(s)? Affected users will need to sign in again.",
+      "kicked": "{count} session(s) ended"
+    }
+  },
+  "menu": {
+    "iam": {
+      "session": "Online users"
+    },
+    "action": {
+      "kick": "End sessions"
+    }
+  }
+}

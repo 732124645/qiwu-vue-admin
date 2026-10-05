@@ -1,0 +1,12 @@
+{
+  "messaging": {
+    "smsRecord": {
+      "entity": "SMS record"
+    }
+  },
+  "menu": {
+    "messaging": {
+      "smsRecord": "SMS records"
+    }
+  }
+}

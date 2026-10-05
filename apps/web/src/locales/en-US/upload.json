@@ -1,0 +1,31 @@
+{
+  "action": {
+    "upload": "Upload file",
+    "uploadImage": "Upload image",
+    "preview": "Preview {name}",
+    "remove": "Remove {name}"
+  },
+  "hint": {
+    "file": "Up to {limit} files, {size} each",
+    "image": "PNG, JPG, GIF or WebP; up to {limit}, {size} each"
+  },
+  "error": {
+    "limit": "You can upload up to {limit}",
+    "imageOnly": "\"{name}\" is not a PNG, JPG, GIF or WebP image",
+    "tooLarge": "\"{name}\" is larger than {size}"
+  },
+  "uploading": "Uploading {name}: {percent}%",
+  "avatar": {
+    "title": "Change avatar",
+    "image": "Image to crop",
+    "empty": "Choose an image to crop",
+    "choose": "Choose image",
+    "preview": "Preview",
+    "rotateLeft": "Rotate left",
+    "rotateRight": "Rotate right",
+    "zoomIn": "Zoom in",
+    "zoomOut": "Zoom out",
+    "reset": "Reset",
+    "failed": "This image could not be cropped. Try another one."
+  }
+}

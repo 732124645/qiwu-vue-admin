@@ -1,0 +1,17 @@
+{
+  "field": {
+    "messaging": {
+      "smsTemplate": {
+        "code": "模板编码",
+        "locale": "语言",
+        "channelId": "短信渠道",
+        "name": "模板名称",
+        "purpose": "用途",
+        "body": "正文",
+        "paramNames": "参数名称",
+        "providerTemplateId": "服务商模板 ID",
+        "enabled": "是否启用"
+      }
+    }
+  }
+}

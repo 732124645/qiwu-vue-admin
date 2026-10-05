@@ -1,0 +1,20 @@
+{
+  "title": "登录",
+  "subtitle": "欢迎回来，请登录你的账号",
+  "passwordTab": "密码登录",
+  "smsTab": "短信登录",
+  "rememberUsername": "记住用户名",
+  "getCode": "获取验证码",
+  "resendIn": "{seconds} 秒后重发",
+  "sentNote": "若该手机号已关联账号，验证码将稍后送达。",
+  "wxBind": {
+    "title": "绑定微信",
+    "hint": "该微信尚未绑定账号。用账号密码或短信验证码登录一次即完成绑定，之后可用微信直接登录。",
+    "submit": "绑定并登录"
+  },
+  "motto": "良禽择木而栖",
+  "slogan": "审批、待办与消息，随时随地处理",
+  "privacy": "隐私政策",
+  "terms": "用户协议",
+  "showPassword": "显示密码"
+}

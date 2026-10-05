@@ -1,0 +1,46 @@
+{
+  "topMenu": "顶部菜单",
+  "footer": "© {year} 栖梧 · MIT 许可证",
+  "lock": {
+    "action": "锁定屏幕",
+    "title": "屏幕已锁定",
+    "hint": "{name}，请输入密码解锁",
+    "unlock": "解锁"
+  },
+  "search": {
+    "placeholder": "搜索菜单"
+  },
+  "fullscreen": {
+    "enter": "全屏",
+    "exit": "退出全屏"
+  },
+  "size": {
+    "label": "组件尺寸",
+    "large": "大",
+    "default": "默认",
+    "small": "小"
+  },
+  "settings": {
+    "title": "页面设置",
+    "layout": "布局",
+    "layouts": {
+      "side": "侧边菜单",
+      "top": "顶部菜单",
+      "mix": "混合"
+    },
+    "primary": "主题色",
+    "interface": "界面显示",
+    "dark": "暗色模式",
+    "grey": "灰色模式",
+    "fixedHeader": "固定页头",
+    "showLogo": "显示 Logo",
+    "showFooter": "显示页脚",
+    "dynamicTitle": "浏览器标题显示页面名称",
+    "watermark": "显示水印",
+    "sideTheme": "侧栏外观",
+    "sideThemes": {
+      "light": "浅色",
+      "dark": "深色"
+    }
+  }
+}

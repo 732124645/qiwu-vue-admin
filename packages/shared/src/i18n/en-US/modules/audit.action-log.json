@@ -1,0 +1,26 @@
+{
+  "field": {
+    "audit": {
+      "actionLog": {
+        "traceId": "Trace ID",
+        "domain": "Domain",
+        "verb": "Action",
+        "bizId": "Business ID",
+        "userId": "Operator ID",
+        "username": "Operator",
+        "deptName": "Department",
+        "httpMethod": "Method",
+        "url": "URL",
+        "ip": "IP address",
+        "location": "Location",
+        "userAgent": "User agent",
+        "params": "Parameters",
+        "result": "Result",
+        "ok": "Succeeded",
+        "errorMsg": "Error",
+        "costMs": "Duration (ms)",
+        "userType": "User type"
+      }
+    }
+  }
+}

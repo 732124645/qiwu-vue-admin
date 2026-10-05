@@ -1,0 +1,54 @@
+{
+  "name": "@qiwu/mobile",
+  "version": "0.0.0",
+  "private": true,
+  "license": "MIT",
+  "packageManager": "pnpm@11.28.3",
+  "engines": {
+    "node": ">=22.22.1"
+  },
+  "scripts": {
+    "dev:h5": "uni",
+    "dev:mp-weixin": "uni -p mp-weixin",
+    "dev:app": "uni -p app",
+    "build:h5": "uni build",
+    "build:mp-weixin": "uni build -p mp-weixin && node scripts/mp-size.mjs",
+    "build:app": "uni build -p app && node -e \"require('node:fs').cpSync('unpackage/res', 'dist/build/app/unpackage/res', { recursive: true })\"",
+    "typecheck": "vue-tsc --noEmit -p tsconfig.json && vue-tsc --noEmit -p tsconfig.node.json",
+    "test": "vitest run",
+    "e2e": "playwright test",
+    "license:check": "node ../scripts/license-check.mjs --dir .",
+    "audit:report": "node scripts/audit-report.mjs",
+    "verify": "pnpm typecheck && pnpm license:check"
+  },
+  "dependencies": {
+    "@dcloudio/uni-app": "3.0.0-5020620260917001",
+    "@dcloudio/uni-app-plus": "3.0.0-5020620260917001",
+    "@dcloudio/uni-components": "3.0.0-5020620260917001",
+    "@dcloudio/uni-h5": "3.0.0-5020620260917001",
+    "@dcloudio/uni-mp-weixin": "3.0.0-5020620260917001",
+    "@wot-ui/ui": "2.3.2",
+    "go-captcha-uni": "1.0.7",
+    "pinia": "2.2.4",
+    "socket.io-client": "4.8.4",
+    "vue": "3.4.21",
+    "vue-i18n": "9.1.9",
+    "z-paging": "2.8.8",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@dcloudio/types": "3.4.31",
+    "@dcloudio/uni-cli-shared": "3.0.0-5020620260917001",
+    "@dcloudio/uni-stacktracey": "3.0.0-5020620260917001",
+    "@dcloudio/vite-plugin-uni": "3.0.0-5020620260917001",
+    "@playwright/test": "1.63.0",
+    "@types/node": "22.20.4",
+    "@vue/runtime-core": "3.4.21",
+    "@vue/tsconfig": "0.9.1",
+    "sass": "1.77.8",
+    "typescript": "6.0.3",
+    "vite": "5.2.8",
+    "vitest": "3.2.7",
+    "vue-tsc": "3.3.11"
+  }
+}

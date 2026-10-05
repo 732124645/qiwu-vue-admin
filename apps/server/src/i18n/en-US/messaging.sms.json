@@ -1,0 +1,8 @@
+{
+  "error": {
+    "messaging": {
+      "sms_channel_incomplete": "The SMS channel is missing provider fields",
+      "sms_too_frequent": "Too many SMS requests; try again later"
+    }
+  }
+}

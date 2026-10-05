@@ -1,0 +1,58 @@
+name: 缺陷报告 / Bug report
+description: 报告可复现的问题 / Report a reproducible problem
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        安全漏洞请勿在此提交，见 SECURITY.md。请勿粘贴密钥、凭据或个人数据。
+        Do not report security vulnerabilities here; see SECURITY.md. Never paste secrets, credentials or personal data.
+  - type: input
+    id: version
+    attributes:
+      label: 版本 / Version
+      description: 版本号或提交 / Release or commit
+      placeholder: v1.0.0
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: 环境 / Environment
+      description: 操作系统、Node、pnpm、MySQL、Redis 版本 / OS, Node, pnpm, MySQL and Redis versions
+      value: |
+        - OS:
+        - Node:
+        - pnpm:
+        - MySQL:
+        - Redis:
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤 / Steps to reproduce
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望结果 / Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际结果 / Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志 / Logs
+      description: 相关日志或报错，含 traceId / Relevant logs or errors, including the traceId
+      render: shell

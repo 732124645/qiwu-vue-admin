@@ -1,0 +1,24 @@
+{
+  "user": {
+    "entity": "user",
+    "keywordHint": "Username or display name",
+    "passwordHint": "Leave empty to use the initial password; it must be changed at the first sign-in",
+    "detail": "User details",
+    "noRoles": "No roles",
+    "noPositions": "No positions",
+    "resetPassword": {
+      "title": "Reset the password of {name}",
+      "hint": "All sessions of this user end at once; the new password must be changed at the next sign-in.",
+      "done": "Password reset"
+    },
+    "assignRoles": {
+      "user": "User",
+      "roles": "Roles you can assign",
+      "kept": "This user also holds {count} disabled role(s) or role(s) you cannot assign; saving keeps them.",
+      "done": "Roles updated",
+      "back": "Back to users",
+      "roleName": "Role name",
+      "roleCode": "Role code"
+    }
+  }
+}

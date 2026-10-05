@@ -1,0 +1,26 @@
+{
+  "aliases": [
+    {
+      "package": "qrcode-terminal",
+      "version": "0.12.0",
+      "from": "Apache 2.0",
+      "to": "Apache-2.0",
+      "reason": "non-SPDX spelling of Apache-2.0; via @dcloudio/uni-mp-weixin (prints the dev-server QR code in the terminal, build tool only)"
+    },
+    {
+      "package": "z-paging",
+      "version": "2.8.8",
+      "from": "Unknown",
+      "to": "MIT",
+      "reason": "the npm package has no license field or LICENSE file; its repository github.com/SmileZXLee/uni-z-paging is MIT (GitHub license API, checked 2026-09-30); pinned to this version, re-check on upgrade"
+    }
+  ],
+  "exceptions": [
+    {
+      "packagePattern": "caniuse-lite",
+      "license": "CC-BY-4.0",
+      "reason": "browser-support data read at build time by autoprefixer/browserslist (via @dcloudio/uni-cli-shared); not bundled into the app; CC-BY-4.0 only asks for attribution",
+      "approved": "2026-10-01"
+    }
+  ]
+}

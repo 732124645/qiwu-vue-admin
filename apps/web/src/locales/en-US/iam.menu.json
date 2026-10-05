@@ -1,0 +1,28 @@
+{
+  "iam": {
+    "menu": {
+      "entity": "menu",
+      "keyword": "Name, permission or route",
+      "target": "Route or link",
+      "placeholder": {
+        "name": "The name shown, or an i18n key (e.g. menu.iam.user)",
+        "routePath": "/reports, or reports (under the parent's path)",
+        "component": "A path under src/views, e.g. platform/iam/user/index",
+        "componentName": "The component name pages are cached by, e.g. IamUser",
+        "routeName": "A unique route name, e.g. iam-user",
+        "groupRouteName": "Lowercase letters, digits and hyphens, e.g. erp-sale (from the route path)",
+        "perms": "e.g. iam.user.browse"
+      },
+      "sort": {
+        "start": "Reorder",
+        "save": "Save order"
+      },
+      "routeNameFixed": "A group's route name is fixed once saved: seeds and generated pages find the group by it"
+    }
+  },
+  "menu": {
+    "iam": {
+      "menu": "Menus"
+    }
+  }
+}

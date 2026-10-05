@@ -1,0 +1,1047 @@
+<%_
+const b = m.biz
+const T = m.table
+// a read-only module (crud.ts `readonly`) has no write routes: its rows go straight into the table
+const w = !m.readonly
+const toggle = w && m.enabled
+// translated messages: the 400 cases, the export and import headers
+const texts = w || m.withExport
+// a data-scoped module (crud.ts `scope`): an own_dept operator ('own') and two depts of the spec's own
+const scope = m.scope
+const deptField = m.dept && m.dept.field
+const text = (c) => c.tsType === 'string' && c.base !== 'date' && c.base !== 'decimal' && !c.dict
+// rows are found by the ids they were added with; a text column searched by `like` (crud.ts `specKey`)
+// also gets the list filter cases and keys the tags
+const key = m.specKey
+// tags are PREFIX + a number + up to 4 more characters: the prefix is cut to fit the key column
+const PREFIX = `e2e-${m.business}-`.slice(0, (key ? key.length ?? 64 : 64) - 6)
+// a text column shorter than a tag gets the tag's end
+const TAG_MAX = PREFIX.length + 8
+// a second text column long enough for `${tag} <field>`: changed by the update case, too long in the 400 case
+const change = m.form.find((c) => c !== key && !c.secret && text(c) && (c.length ?? 0) >= 32)
+// test data: required, unique (distinct per tag) and example fields
+const inBody = m.form.filter((c) => !c.secret && (c === key || c.required || c.example || c.unique))
+const rest = m.form.filter((c) => !c.secret && !inBody.includes(c) && (c.dflt || c.nullable))
+// a unique number: counted down from its maximum, one per tag
+const counted = inBody.filter((c) => c.unique && !c.example && c.tsType === 'number')
+// the field the 400 case leaves out: the key, else a required one
+const bad = key ?? m.form.find((c) => c.required && !c.secret)
+const exported = m.excel.filter((c) => c.inList)
+const imported = m.excel.filter((c) => c.inForm)
+const col = (c) => exported.indexOf(c)
+// a text column besides the key to hold a formula in the export case
+const formula = [m.own.find((c) => c.freeText && text(c)), change].find((c) => c && c !== key && exported.includes(c))
+const createdAt = exported.includes(m.audit.created_at)
+const unsortable = m.form.find((c) => !m.sortFields.includes(c.field))
+const unique = m.uniques[0]
+// the configured examples document the POST body (crud.ts `create`)
+const examples = w ? m.form.filter((c) => c.example && !c.secret) : []
+const secrets = m.secrets
+// a master-sub module (crud.ts `subs`): every body carries the sub-row lists (empty in the standard cases),
+// the sub rows get their own cases; a row's test data: its first text field (made of the tag), the
+// required, unique and example ones
+const subs = m.subs
+const rowKey = (sub) => sub.form.find((c) => text(c))
+const rowIn = (sub) => sub.form.filter((c) => c === rowKey(sub) || c.required || c.example || c.unique)
+// a dict column's test data (not a switch, no example, not unique): an entry of its dict that fits the
+// column, read in beforeAll (DICT_VALUES); by dict code, the shortest column's length
+const dictValue = (c) => !!c.dict && c.base !== 'boolean' && c.tsType === 'string' && !c.unique && !c.example
+const dictUses = new Map()
+for (const c of [...inBody, ...subs.flatMap(rowIn)].filter(dictValue))
+  dictUses.set(c.dict, Math.min(dictUses.get(c.dict) ?? 64, c.length ?? 64))
+// a column's text by its length: the tag's end when shorter than a tag (dict codes too)
+const short = (c) => (text(c) || (c.dict && c.tsType === 'string' && c.base !== 'boolean')) && (c.length ?? 64) < TAG_MAX
+// the export test's dict label case (the enabled column listed)
+const labelled = m.withExport && m.enabled && col(m.enabled) >= 0
+_%>
+<%_ if (w) { _%>
+// <%= m.key %> (generated CRUD; see docs/design-notes.md#codegen, #api-envelope): list filters/sort/paging, get, create, update, delete,
+// batch delete<% if (m.enabled) { %>, enabled toggle<% } %><% if (m.withOptions) { %>, options<% } %><% if (m.withExport) { %>, export<% } %><% if (m.withImport) { %>, import<% } %><% if (subs.length) { %>, the sub rows (<%= comment(subs.map((s) => s.prop).join(', ')) %>) diffed<% } %>;
+// 403 per permission, 400 translated<% if (m.uniques.length) { %>, 409 duplicate<% } %>, 404 unknown ids, @Idempotent, @ActionLog rows,
+// Swagger. Only the standard cases: module-specific ones go into a hand-written
+// <%= m.domain %>-<%= m.business %>-extra.e2e-spec.ts.
+<%_ } else { _%>
+// <%= m.key %> (generated CRUD; see docs/design-notes.md#codegen, #api-envelope), read-only: list filters/sort/paging, get<% if (m.withOptions) { %>, options<% } %><% if (m.withExport) { %>, export<% } %>,
+// no write routes; 403 per permission, 400, 404 unknown ids<% if (m.withExport) { %>, @ActionLog export rows<% } %>, Swagger. Rows go straight into the
+// table. Only the standard cases: module-specific ones go into a hand-written
+// <%= m.domain %>-<%= m.business %>-extra.e2e-spec.ts.
+<%_ } _%>
+import type { NestExpressApplication } from '@nestjs/platform-express'
+import { Test } from '@nestjs/testing'
+import { getDataSourceToken } from '@nestjs/typeorm'
+import { <%= names(['Err', b + 'Perms']) %> } from '@qiwu/shared'
+<%_ if (m.withExport || m.withImport) { _%>
+import ExcelJS from 'exceljs'
+<%_ } _%>
+<%_ if (texts) { _%>
+import { I18nService } from 'nestjs-i18n'
+<%_ } _%>
+import request from 'supertest'
+import type { DataSource } from 'typeorm'
+import { AppModule } from '../../src/app.module.js'
+import { setupApp } from '../../src/app.setup.js'
+<%_ if (secrets.length && w) { _%>
+import { SecretBox } from '../../src/core/crypto/secret-box.js'
+<%_ } _%>
+import { REDIS, type Redis } from '../../src/core/redis/redis.module.js'
+import { findId, insertRow } from '../../src/db/seeds/upsert.js'
+<%_ if (!w) { _%>
+import { <%= m.Biz %> } from '../../src/modules/<%= m.home %>/<%= m.business %>.entity.js'
+<%_ } _%>
+<%_ if (w || m.withExport) { _%>
+import { logOf } from '../setup/audit.js'
+<%_ } _%>
+import { bearer, signIn } from '../setup/auth.js'
+import { cleanRedis } from '../setup/redis.js'
+
+const PREFIX = '<%= PREFIX %>'
+const URL = '/api/<%= m.url %>'
+const MISSING = 999_999
+<%_ if (w) { _%>
+/** the form's fields, as the edit form sends them back */
+const FORM = [<% [...m.form.filter((c) => !c.secret).map((c) => c.field), ...subs.map((s) => s.prop)].forEach((f, i) => { %><% if (i) { %>, <% } %>'<%= f %>'<% }) %>]
+<%_ } _%>
+<%_ if (m.withExport) { _%>
+/** export column labels, in order */
+const HEADERS = [<% exported.forEach((c, i) => { %><% if (i) { %>, <% } %>'<%= c.labelKey %>'<% }) %>]
+<%_ } _%>
+<%_ if (m.withImport) { _%>
+/** import columns: field → label */
+const IMPORT: [string, string][] = [<% imported.forEach((c, i) => { %><% if (i) { %>, <% } %>['<%= c.field %>', '<%= c.labelKey %>']<% }) %>]
+<%_ } _%>
+
+let app: NestExpressApplication
+let ds: DataSource
+let redis: Redis
+<%_ if (texts) { _%>
+let i18n: I18nService
+<%_ } _%>
+<%_ if (scope) { _%>
+const tokens: Record<'admin' | 'reader' | 'plain' | 'own', string> = {
+  admin: '',
+  reader: '',
+  plain: '',
+  own: '',
+}
+<%_ } else { _%>
+const tokens: Record<'admin' | 'reader' | 'plain', string> = { admin: '', reader: '', plain: '' }
+<%_ } _%>
+const userIds: number[] = []
+let roleId: number
+<%_ if (scope) { _%>
+/** the data scope cases: an own_dept role holding every perm of the module, and two depts */
+let ownRoleId: number
+const DEPT = { mine: 0, other: 0 }
+<%_ } _%>
+/** the table's last id before this spec: every row above it is this spec's (cleanup) */
+let lastId = 0
+
+const call = (
+  who: keyof typeof tokens,
+  method: 'get' | 'post' | 'put' | 'delete',
+  path = '',
+  body?: object,
+) => {
+  const req = request(app.getHttpServer())[method](`${URL}${path}`).set(bearer(tokens[who]))
+  return body ? req.send(body) : req
+}
+<%_ if (w) { _%>
+const create = (body: object) => call('admin', 'post', '', body)
+/** A row added through the API, as POST answers it. */
+const add = async (body: object) => (await create(body).expect(201)).body.data
+<%_ } else { _%>
+/** A row added straight to the table (the module takes no writes), as GET answers it. */
+async function add(body: object) {
+  const repo = ds.getRepository(<%= m.Biz %>)
+  const { id } = await repo.save(repo.create(body))
+  return (await call('admin', 'get', `/${id}`).expect(200)).body.data
+}
+<%_ } _%>
+let seq = 0
+const unique = () => `${PREFIX}${++seq}`
+<%_ if (dictUses.size) { _%>
+/** A value of each dict column's dict (test data, read in beforeAll): an entry that fits the column. */
+const DICT_VALUES: Record<string, string> = {}
+<%_ } _%>
+<%_ if (counted.length) { _%>
+const numbers = new Map<string, number>()
+/** A number of its own for `tag` (1, 2, … in the order tags are first seen). */
+const numberOf = (tag: string) => {
+  if (!numbers.has(tag)) numbers.set(tag, numbers.size + 1)
+  return numbers.get(tag)!
+}
+<%_ } _%>
+/** A valid POST body made of `tag` (required and unique fields, the configured examples). */
+const body = (tag: string, over: object = {}) => ({
+<%_ for (const c of inBody) { _%>
+  <%_ if (c === key) { _%>
+  <%= c.field %>: tag,
+  <%_ } else if (c.example) { _%>
+  <%= c.field %>: <%= c.example %>,
+  <%_ } else if (c.base === 'decimal' && c.tsType === 'string') { _%>
+  <%= c.field %>: '<%= c.scale ? '1.' + '0'.repeat(c.scale) : '1' %>',
+  <%_ } else if (dictValue(c)) { _%>
+  <%= c.field %>: DICT_VALUES['<%= c.dict %>'],
+  <%_ } else if (short(c)) { _%>
+  <%= c.field %>: tag.slice(-<%= c.length %>),
+  <%_ } else if (text(c) && (c.length ?? 0) < 32) { _%>
+  <%= c.field %>: tag,
+  <%_ } else if (text(c)) { _%>
+  <%= c.field %>: `${tag} <%= c.field %>`,
+  <%_ } else if (c.base === 'boolean') { _%>
+  <%= c.field %>: true,
+  <%_ } else if (counted.includes(c)) { _%>
+  <%= c.field %>: <%= c.web.max ?? '999_999_999' %> - numberOf(tag),
+  <%_ } else if (c.tsType === 'number') { _%>
+  <%= c.field %>: 1,
+  <%_ } else if (c.base === 'date') { _%>
+  <%= c.field %>: '2024-01-01',
+  <%_ } else if (c.tsType === 'Date' && w) { _%>
+  <%= c.field %>: '2024-01-01T08:00:00.000Z',
+  <%_ } else if (c.tsType === 'Date') { _%>
+  <%= c.field %>: new Date('2024-01-01T08:00:00.000Z'),
+  <%_ } else { _%>
+  <%= c.field %>: tag,
+  <%_ } _%>
+<%_ } _%>
+<%_ for (const sub of subs) { _%>
+  <%= sub.prop %>: [],
+<%_ } _%>
+  ...over,
+})
+<%_ for (const sub of subs) { _%>
+/** A valid row of `<%= sub.prop %>` made of `tag` (no id: a new one). */
+const <%= sub.biz %> = (tag: string, over: object = {}) => ({
+  <%_ for (const c of rowIn(sub)) { _%>
+    <%_ if (c.example) { _%>
+  <%= c.field %>: <%= c.example %>,
+    <%_ } else if (c.base === 'decimal' && c.tsType === 'string') { _%>
+  <%= c.field %>: '<%= c.scale ? '1.' + '0'.repeat(c.scale) : '1' %>',
+    <%_ } else if (dictValue(c)) { _%>
+  <%= c.field %>: DICT_VALUES['<%= c.dict %>'],
+    <%_ } else if (short(c)) { _%>
+  <%= c.field %>: tag.slice(-<%= c.length %>),
+    <%_ } else if (text(c)) { _%>
+  <%= c.field %>: tag,
+    <%_ } else if (c.base === 'boolean') { _%>
+  <%= c.field %>: true,
+    <%_ } else if (c.tsType === 'number') { _%>
+  <%= c.field %>: 1,
+    <%_ } else if (c.base === 'date') { _%>
+  <%= c.field %>: '2024-01-01',
+    <%_ } else if (c.tsType === 'Date') { _%>
+  <%= c.field %>: '2024-01-01T08:00:00.000Z',
+    <%_ } else { _%>
+  <%= c.field %>: tag,
+    <%_ } _%>
+  <%_ } _%>
+  ...over,
+})
+<%_ } _%>
+<%_ if (texts) { _%>
+/** A translated message (the app's own translations). */
+const t = (lang: string, key: string, args?: object) => i18n.t(key, { lang, args }) as string
+<%_ } _%>
+<%_ if (w) { _%>
+const label = (lang: string, field: string) => t(lang, `field.<%= m.key %>.${field}`)
+<%_ } _%>
+/** Live rows of the table (a list's total without filters). */
+const count = async () => Number((await ds.query('SELECT COUNT(*) AS n FROM <%= T %> WHERE deleted_at IS NULL'))[0].n)
+const idsOf = (res: request.Response) => res.body.data.items.map((r: { id: number }) => r.id)
+<%_ if (scope && w && !m.dept.inForm) { _%>
+/** A row of `dept` made of `tag` (the form has no dept field: set straight in the table). */
+async function addIn(dept: number, tag = unique()) {
+  const { id } = await add(body(tag))
+  await ds.query('UPDATE <%= T %> SET <%= m.dept.column %> = ? WHERE id = ?', [dept, id])
+  return (await call('admin', 'get', `/${id}`).expect(200)).body.data
+}
+<%_ } else if (scope) { _%>
+/** A row of `dept` made of `tag`. */
+const addIn = (dept: number, tag = unique()) => add(body(tag, { <%= deptField %>: dept }))
+<%_ } _%>
+<%_ if (labelled) { _%>
+/** A dict entry's label (what exports write for a dict column). */
+async function dictLabel(code: string, value: string, lang = 'zh-CN') {
+  const [row] = await ds.query(
+    'SELECT label, label_i18n AS labels FROM cfg_dict_entry WHERE dict_code = ? AND value = ?',
+    [code, value],
+  )
+  return row?.labels?.[lang] ?? row?.label ?? value
+}
+<%_ } _%>
+
+<%_ if (scope) { _%>
+async function user(name: string, roles: number[], deptId: number | null = null) {
+<%_ } else { _%>
+async function user(name: string, roles: number[]) {
+<%_ } _%>
+  const id = await insertRow(ds.manager, 'iam_user', {
+    username: PREFIX + name,
+    display_name: name,
+    password_hash: 'not-used-by-this-spec',
+    password_changed_at: new Date(),
+<%_ if (scope) { _%>
+    dept_id: deptId,
+<%_ } _%>
+  })
+  for (const r of roles)
+    await ds.query('INSERT INTO iam_user_roles (user_id, role_id) VALUES (?, ?)', [id, r])
+  userIds.push(id)
+  return (await signIn(app, PREFIX + name)).accessToken
+}
+
+beforeAll(async () => {
+  const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile()
+  app = setupApp(moduleRef.createNestApplication<NestExpressApplication>({ logger: false }))
+  await app.listen(0, '127.0.0.1')
+  ds = app.get<DataSource>(getDataSourceToken())
+  redis = app.get(REDIS)
+<%_ if (texts) { _%>
+  i18n = app.get(I18nService)
+<%_ } _%>
+  await cleanRedis(redis)
+  lastId = Number((await ds.query('SELECT COALESCE(MAX(id), 0) AS n FROM <%= T %>'))[0].n)
+<%_ if (dictUses.size) { _%>
+  for (const [code, max] of [<% [...dictUses].forEach(([code, max], i) => { %><% if (i) { %>, <% } %>['<%= code %>', <%= max %>]<% }) %>] as const) {
+    const [entry] = await ds.query(
+      'SELECT value FROM cfg_dict_entry WHERE dict_code = ? AND enabled = 1 AND CHAR_LENGTH(value) <= ? ORDER BY sort_no, id LIMIT 1',
+      [code, max],
+    )
+    DICT_VALUES[code] = entry?.value ?? 'x'
+  }
+<%_ } _%>
+  roleId = await insertRow(ds.manager, 'iam_role', {
+    code: `${PREFIX}reader`,
+    name: `${PREFIX}reader`,
+    data_scope: 'all',
+  })
+  const browse = await findId(ds.manager, 'iam_menu', { perms: <%= b %>Perms.browse })
+  await ds.query('INSERT INTO iam_role_menus (role_id, menu_id) VALUES (?, ?)', [roleId, browse])
+  tokens.admin = (await signIn(app)).accessToken
+  tokens.reader = await user('reader', [roleId])
+  tokens.plain = await user('plain', [])
+<%_ if (scope) { _%>
+  // two top-level depts of this spec (tree_path is their own id); the operator sits in `mine`
+  for (const k of ['mine', 'other'] as const) {
+    DEPT[k] = await insertRow(ds.manager, 'iam_dept', { tree_path: '/', name: `${PREFIX}${k}` })
+    await ds.query('UPDATE iam_dept SET tree_path = ? WHERE id = ?', [`/${DEPT[k]}/`, DEPT[k]])
+  }
+  ownRoleId = await insertRow(ds.manager, 'iam_role', {
+    code: `${PREFIX}own`,
+    name: `${PREFIX}own`,
+    data_scope: 'own_dept',
+  })
+  for (const perms of Object.values(<%= b %>Perms))
+    await ds.query('INSERT INTO iam_role_menus (role_id, menu_id) VALUES (?, ?)', [
+      ownRoleId,
+      await findId(ds.manager, 'iam_menu', { perms }),
+    ])
+  tokens.own = await user('own', [ownRoleId], DEPT.mine)
+<%_ } _%>
+})
+
+afterAll(async () => {
+  if (ds) {
+<%_ for (const sub of subs) { _%>
+    await ds.query('DELETE FROM <%= sub.table %> WHERE <%= sub.fk.column %> > ?', [lastId])
+<%_ } _%>
+    await ds.query('DELETE FROM <%= T %> WHERE id > ?', [lastId])
+    if (userIds.length) {
+      await ds.query('DELETE FROM iam_user_roles WHERE user_id IN (?)', [userIds])
+      await ds.query('DELETE FROM iam_user WHERE id IN (?)', [userIds])
+    }
+<%_ if (scope) { _%>
+    await ds.query('DELETE FROM iam_role_menus WHERE role_id IN (?)', [[roleId, ownRoleId]])
+    await ds.query('DELETE FROM iam_role WHERE id IN (?)', [[roleId, ownRoleId]])
+    await ds.query('DELETE FROM iam_dept WHERE id IN (?)', [Object.values(DEPT)])
+<%_ } else { _%>
+    await ds.query('DELETE FROM iam_role_menus WHERE role_id = ?', [roleId])
+    await ds.query('DELETE FROM iam_role WHERE id = ?', [roleId])
+<%_ } _%>
+  }
+  if (redis) await cleanRedis(redis)
+  await app?.close()
+})
+
+describe('CRUD', () => {
+<%_ if (!w) { _%>
+  it('get: a row by id, as the list shows it', async () => {
+    const row = await add(body(unique()))
+    const res = await call('admin', 'get').query({ sort: '-id', pageSize: 1 }).expect(200)
+    expect(res.body.data.items).toEqual([row])
+  })
+<%_ } else { _%>
+  it('create → 201 with the row (defaults filled, audit columns set); get returns it', async () => {
+    const tag = unique()
+    const res = await create(body(tag)).expect(201)
+    const row = res.body.data
+    expect(row).toMatchObject({
+      id: expect.any(Number),
+      ...body(tag),
+<%_ for (const c of rest) { _%>
+      <%= c.field %>: <%= c.dflt ?? 'null' %>,
+<%_ } _%>
+      createdBy: expect.any(Number),
+    })
+    expect(new Date(row.createdAt).toISOString()).toBe(row.createdAt)
+    const got = await call('admin', 'get', `/${row.id}`).expect(200)
+    expect(got.body.data).toEqual(row)
+  })
+<%_ } _%>
+
+  it('list: newest first by the sort whitelist, all live rows counted, paging<% if (m.enabled) { %>, enabled equals<% } %><% if (m.filters.includes(m.audit.created_at)) { %>, created_at range<% } %>', async () => {
+    const ids: number[] = []
+    for (let i = 0; i < 3; i++) ids.push((await add(body(unique()))).id)
+    const list = (query: object) => call('admin', 'get').query(query).expect(200)
+    const res = await list({ sort: '-id', pageSize: 3 })
+    expect(idsOf(res)).toEqual([...ids].reverse())
+    expect(res.body.data.total).toBe(await count())
+    expect(idsOf(await list({ sort: '-id', page: 2, pageSize: 2 }))[0]).toBe(ids[0])
+<%_ if (m.enabled) { _%>
+    const off = (await add(body(unique(), { enabled: false }))).id
+    expect(idsOf(await list({ enabled: 'false', sort: '-id', pageSize: 1 }))).toEqual([off])
+    expect(idsOf(await list({ enabled: 'true', sort: '-id', pageSize: 1 }))).toEqual([ids[2]])
+<%_ } _%>
+<%_ if (m.filters.includes(m.audit.created_at)) { _%>
+    // created_at from / to: instants (ISO-8601 with an offset)
+    const [{ at }] = await ds.query('SELECT created_at AS at FROM <%= T %> WHERE id = ?', [ids[0]])
+    const around = (ms: number) => new Date(at.getTime() + ms).toISOString()
+    expect(idsOf(await list({ createdAtFrom: around(-1000), createdAtTo: around(1000), sort: '-id' }))).toContain(ids[0])
+    expect(idsOf(await list({ createdAtTo: around(-1000), sort: '-id' }))).not.toContain(ids[0])
+<%_ } _%>
+  })
+<%_ if (key) { _%>
+
+  it('list: text filters contain (LIKE wildcards literal)<% if (m.enabled) { %> and combine with enabled<% } %>', async () => {
+    const tag = unique()
+    for (const suffix of ['a', 'b', 'c']) await add(body(`${tag}-${suffix}`))
+  <%_ if (m.enabled) { _%>
+    await add(body(`${tag}-off`, { enabled: false }))
+  <%_ } _%>
+    await add(body(`${tag}_x`))
+
+    const list = (query: object) => call('admin', 'get').query(query).expect(200)
+    const keys = (res: request.Response) =>
+      res.body.data.items.map((r: { <%= key.field %>: string }) => r.<%= key.field %>)
+    const res = await list({ <%= key.field %>: `${tag}-`<% if (m.enabled) { %>, enabled: 'true'<% } %>, sort: '-id' })
+    expect(keys(res)).toEqual([`${tag}-c`, `${tag}-b`, `${tag}-a`])
+    expect(res.body.data.total).toBe(3)
+  <%_ if (m.enabled) { _%>
+    expect(keys(await list({ <%= key.field %>: tag, enabled: 'false' }))).toEqual([`${tag}-off`])
+  <%_ } _%>
+    // `%` and `_` in the filter are plain characters
+    expect(keys(await list({ <%= key.field %>: `${tag}_` }))).toEqual([`${tag}_x`])
+  <%_ for (const c of m.filters.filter((c) => c !== key && c.queryOp === 'like' && inBody.includes(c) && !c.example && text(c) && (c.length ?? 0) >= 32)) { _%>
+    expect(keys(await list({ <%= c.field %>: `${tag}-b <%= c.field %>` }))).toEqual([`${tag}-b`])
+  <%_ } _%>
+  <%_ for (const c of m.filters.filter((c) => c.queryOp === 'between' && c.base === 'date' && c.example)) { _%>
+    // a date range includes both ends
+    expect(keys(await list({ <%= key.field %>: `${tag}-a`, <%= c.field %>From: <%= c.example %>, <%= c.field %>To: <%= c.example %> }))).toEqual([`${tag}-a`])
+    expect(keys(await list({ <%= key.field %>: `${tag}-a`, <%= c.field %>To: '1970-01-01' }))).toEqual([])
+  <%_ } _%>
+    const page2 = await list({ <%= key.field %>: `${tag}-`, sort: 'id', page: 2, pageSize: 2 })
+  <%_ if (m.enabled) { _%>
+    expect(keys(page2)).toEqual([`${tag}-c`, `${tag}-off`])
+    expect(page2.body.data.total).toBe(4)
+  <%_ } else { _%>
+    expect(keys(page2)).toEqual([`${tag}-c`])
+    expect(page2.body.data.total).toBe(3)
+  <%_ } _%>
+  })
+<%_ } _%>
+<%_ if (w) { _%>
+
+<%_ if (secrets.length) { _%>
+  it('secrets are boxed on create and replace, hidden on every read, and kept when omitted', async () => {
+    const first = { <% for (const c of secrets) { %><%= c.secret.body %>: 'first-<%= c.secret.body %>', <% } %> }
+    const next = { <% for (const c of secrets) { %><%= c.secret.body %>: 'next-<%= c.secret.body %>', <% } %> }
+    const posted = (await create(body(unique(), first)).expect(201)).body.data
+    const id = posted.id as number
+    const box = app.get(SecretBox)
+    const stored = async () => (await ds.query('SELECT <% secrets.forEach((c, i) => { %><% if (i) { %>, <% } %><%= c.column %> AS <%= c.field %><% }) %> FROM <%= T %> WHERE id = ?', [id]))[0] as Record<string, string>
+    const hidden = (row: object) => {
+<%_ for (const c of secrets) { _%>
+      expect(row).not.toHaveProperty('<%= c.field %>')
+      expect(row).not.toHaveProperty('<%= c.secret.body %>')
+<%_ } _%>
+    }
+    hidden(posted)
+    hidden((await call('admin', 'get', `/${id}`).expect(200)).body.data)
+    for (const row of (await call('admin', 'get').query({ sort: '-id' }).expect(200)).body.data.items) hidden(row)
+    const before = await stored()
+<%_ for (const c of secrets) { _%>
+    expect(box.decrypt(before.<%= c.field %>)).toBe(first.<%= c.secret.body %>)
+<%_ } _%>
+    await call('admin', 'put', `/${id}`, {}).expect(200)
+    expect(await stored()).toEqual(before)
+    await call('admin', 'put', `/${id}`, { <% for (const c of secrets) { %><%= c.secret.body %>: '', <% } %> }).expect(200)
+    expect(await stored()).toEqual(before)
+    await call('admin', 'put', `/${id}`, next).expect(200)
+    const after = await stored()
+<%_ for (const c of secrets) { _%>
+    expect(after.<%= c.field %>).not.toBe(before.<%= c.field %>)
+    expect(box.decrypt(after.<%= c.field %>)).toBe(next.<%= c.secret.body %>)
+<%_ } _%>
+    hidden((await call('admin', 'get', `/${id}`).expect(200)).body.data)
+    // deleted (soft): the secret does not outlive the row
+    await call('admin', 'delete', `/${id}`).expect(200)
+    expect(await stored()).toEqual({ <% for (const c of secrets) { %><%= c.field %>: null, <% } %> })
+  })
+<%_ } _%>
+
+  it('update changes the fields sent and keeps the others<% if (m.enabled) { %>; enabled toggles<% } %>', async () => {
+    const tag = unique()
+    const { id } = await add(body(tag))
+<%_ if (change) { _%>
+    await call('admin', 'put', `/${id}`, { <%= change.field %>: `${tag} renamed` }).expect(200)
+<%_ } else if (key) { _%>
+    await call('admin', 'put', `/${id}`, { <%= key.field %>: `${tag}r` }).expect(200)
+<%_ } else { _%>
+    // nothing sent: nothing changes
+    await call('admin', 'put', `/${id}`, {}).expect(200)
+<%_ } _%>
+<%_ if (m.enabled) { _%>
+    await call('admin', 'put', `/${id}/enabled`, { enabled: false }).expect(200)
+<%_ } _%>
+    expect((await call('admin', 'get', `/${id}`)).body.data).toMatchObject({
+      ...body(tag),
+<%_ if (change) { _%>
+      <%= change.field %>: `${tag} renamed`,
+<%_ } else if (key) { _%>
+      <%= key.field %>: `${tag}r`,
+<%_ } _%>
+<%_ if (m.enabled) { _%>
+      enabled: false,
+<%_ } _%>
+    })
+  })
+
+  it('a row PUT back as loaded (nulls included, as the edit form sends it) → 200, unchanged', async () => {
+    const row = await add(body(unique()))
+    const loaded = Object.fromEntries(FORM.map((f) => [f, row[f]]))
+    await call('admin', 'put', `/${row.id}`, loaded).expect(200)
+    expect((await call('admin', 'get', `/${row.id}`)).body.data).toMatchObject(loaded)
+  })
+
+
+  it('delete and batch delete (soft: the rows stay, marked deleted)', async () => {
+    const ids: number[] = []
+    for (let i = 0; i < 3; i++) ids.push((await add(body(unique()))).id)
+    await call('admin', 'delete', `/${ids[0]}`).expect(200)
+    await call('admin', 'post', '/batch-delete', { ids: ids.slice(1) }).expect(200)
+    expect(await ds.query('SELECT id FROM <%= T %> WHERE id IN (?) AND deleted_at IS NULL', [ids])).toEqual([])
+    expect(await ds.query('SELECT id FROM <%= T %> WHERE id IN (?)', [ids])).toHaveLength(3)
+    await call('admin', 'get', `/${ids[0]}`).expect(404)
+<%_ if (unique) { _%>
+    // unique among live rows only: a deleted row's <%= unique.field %> can be used again
+    const { <%= unique.field %> } = (await ds.query('SELECT <%= unique.column %> AS <%= unique.field %> FROM <%= T %> WHERE id = ?', [ids[0]]))[0]
+    await create({ ...body(unique()), <%= unique.field %> }).expect(201)
+<%_ } _%>
+  })
+<%_ } _%>
+<%_ for (const c of m.rich) { _%>
+
+  it('rich text: <%= c.field %> <% if (w) { %>stored and <% } %>read as the core/sanitize.ts allow-list leaves it', async () => {
+  <%_ if (w) { _%>
+    const { id } = await add(body(unique(), { <%= c.field %>: '<p onclick="evil()">a</p><script>evil()</script>' }))
+    const stored = async () => (await ds.query('SELECT <%= c.column %> AS html FROM <%= T %> WHERE id = ?', [id]))[0].html
+    expect(await stored()).toBe('<p>a</p>')
+    await call('admin', 'put', `/${id}`, { <%= c.field %>: '<a href="javascript:evil()">b</a>' }).expect(200)
+    expect(await stored()).not.toMatch(/evil|javascript/)
+    // a row written behind the API's back is read sanitized
+    await ds.query('UPDATE <%= T %> SET <%= c.column %> = ? WHERE id = ?', ['<img src="x" onerror="evil()">', id])
+  <%_ } else { _%>
+    const { id } = await add(body(unique(), { <%= c.field %>: '<img src="x" onerror="evil()">' }))
+  <%_ } _%>
+    expect((await call('admin', 'get', `/${id}`).expect(200)).body.data.<%= c.field %>).toBe('<img src="x" />')
+  })
+<%_ } _%>
+<%_ if (m.withOptions) { _%>
+
+  it('options: <% if (m.enabled) { %>enabled <% } %>rows as { id, <%= m.label.field %> } in display order, for any signed-in user', async () => {
+    const { id } = await add(body(unique()<% if (m.enabled) { %>, { enabled: false }<% } %>))
+    const res = await call('plain', 'get', '/options').expect(200)
+    const all = await ds.query(
+      'SELECT id, <%= m.label.column %> AS <%= m.label.field %> FROM <%= T %> WHERE<% if (m.enabled) { %> enabled = 1 AND<% } %> deleted_at IS NULL ORDER BY <% if (m.sortNo) { %><%= m.sortNo.column %>, <% } %>id',
+    )
+    expect(res.body.data).toEqual(all.map((r: { id: number; <%= m.label.field %>: string }) => ({ ...r })))
+  <%_ if (m.enabled) { _%>
+    expect(res.body.data.map((r: { id: number }) => r.id)).not.toContain(id)
+  <%_ } else { _%>
+    expect(res.body.data.map((r: { id: number }) => r.id)).toContain(id)
+  <%_ } _%>
+    await request(app.getHttpServer()).get(`${URL}/options`).expect(401)
+  })
+<%_ } _%>
+})
+
+<%_ for (const sub of subs) { _%>
+<%_
+const P = sub.prop
+const row = sub.biz
+const F = sub.fk.field
+const bad = sub.form.find((c) => c.required && text(c))
+// the invoice field changed together with a refused row write (rolled back with it)
+const also = change ?? key
+_%>
+
+describe('<%= P %> (master-sub): saved with the <%= comment(m.noun) %> as one document', () => {
+  it('create with rows → 201 with them in order (ids, <%= F %> set); GET /:id answers the same', async () => {
+    const tag = unique()
+    const saved = await add(body(tag, { <%= P %>: [<%= row %>(`${tag}-a`), <%= row %>(`${tag}-b`)] }))
+    expect(saved.<%= P %>).toMatchObject([<%= row %>(`${tag}-a`), <%= row %>(`${tag}-b`)])
+    expect(saved.<%= P %>.map((r: { id: number; <%= F %>: number }) => [typeof r.id, r.<%= F %>])).toEqual([
+      ['number', saved.id],
+      ['number', saved.id],
+    ])
+    expect((await call('admin', 'get', `/${saved.id}`).expect(200)).body.data).toEqual(saved)
+  })
+
+  it('update diffs the rows: with an id changed, without one added, not sent deleted (soft); left out kept', async () => {
+    const tag = unique()
+    const saved = await add(body(tag, { <%= P %>: [<%= row %>(`${tag}-a`), <%= row %>(`${tag}-b`)] }))
+    const [a, b] = saved.<%= P %>
+    await call('admin', 'put', `/${saved.id}`, {
+      <%= P %>: [{ ...<%= row %>(`${tag}-a2`), id: a.id }, <%= row %>(`${tag}-c`)],
+    }).expect(200)
+    const rows = async () => (await call('admin', 'get', `/${saved.id}`).expect(200)).body.data.<%= P %>
+    const after = await rows()
+    expect(after).toMatchObject([{ ...<%= row %>(`${tag}-a2`), id: a.id }, <%= row %>(`${tag}-c`)])
+    expect(await ds.query('SELECT deleted_at IS NOT NULL AS gone FROM <%= sub.table %> WHERE id = ?', [b.id])).toEqual([{ gone: 1 }])
+    // no list sent: the rows stay as they are
+    await call('admin', 'put', `/${saved.id}`, {}).expect(200)
+    expect(await rows()).toEqual(after)
+    await call('admin', 'put', `/${saved.id}`, { <%= P %>: [] }).expect(200)
+    expect(await rows()).toEqual([])
+  })
+
+  it('a row id of another <%= comment(m.noun) %> → 404 and nothing written (the fields sent with it neither)', async () => {
+    const tag = unique()
+    const other = await add(body(unique(), { <%= P %>: [<%= row %>(`${tag}-x`)] }))
+    const mine = await add(body(tag, { <%= P %>: [<%= row %>(`${tag}-a`)] }))
+    const stolen = { ...<%= row %>(`${tag}-y`), id: other.<%= P %>[0].id }
+<%_ if (also) { _%>
+    const res = await call('admin', 'put', `/${mine.id}`, { <%= also.field %>: `${tag} changed`.slice(0, <%= also.length ?? 64 %>), <%= P %>: [stolen] })
+<%_ } else { _%>
+    const res = await call('admin', 'put', `/${mine.id}`, { <%= P %>: [stolen] })
+<%_ } _%>
+    expect(res.status).toBe(404)
+    expect(res.body.code).toBe(Err.NOT_FOUND.code)
+    for (const kept of [mine, other])
+      expect((await call('admin', 'get', `/${kept.id}`).expect(200)).body.data).toEqual(kept)
+    const before = await count()
+    expect((await create(body(unique(), { <%= P %>: [stolen] }))).status).toBe(404)
+    expect(await count()).toBe(before)
+  })
+
+
+  it('delete: the <%= comment(m.noun) %> goes with its rows (soft: they stay, marked deleted)', async () => {
+    const tag = unique()
+    const { id } = await add(body(tag, { <%= P %>: [<%= row %>(`${tag}-a`), <%= row %>(`${tag}-b`)] }))
+    await call('admin', 'delete', `/${id}`).expect(200)
+    expect(await ds.query('SELECT deleted_at IS NOT NULL AS gone FROM <%= sub.table %> WHERE <%= sub.fk.column %> = ?', [id])).toEqual([{ gone: 1 }, { gone: 1 }])
+  })
+<%_ if (bad) { _%>
+
+  it('400: a bad row field, with its path and translated label; nothing written', async () => {
+    const tag = unique()
+    const before = await count()
+    const res = await create(
+      body(tag, { <%= P %>: [<%= row %>(`${tag}-a`), <%= row %>(`${tag}-b`, { <%= bad.field %>: '' })] }),
+    ).expect(400)
+    expect(res.body.errors).toEqual([
+      {
+        path: '<%= P %>.1.<%= bad.field %>',
+        msg: t('zh-CN', 'validation.required', { field: label('zh-CN', '<%= bad.field %>') }),
+      },
+    ])
+    expect(label('en-US', '<%= bad.field %>')).not.toMatch(/^field\./)
+    expect(await count()).toBe(before)
+  })
+<%_ } _%>
+})
+<%_ } _%>
+
+describe('errors', () => {
+  it('403 per permission: browse-only may list, not view<% if (w) { %>/create/modify/delete<% } %>; no perm → no list', async () => {
+    const { id } = await add(body(unique()))
+    await call('reader', 'get').expect(200)
+    const forbidden = [
+      call('reader', 'get', `/${id}`),
+<%_ if (w) { _%>
+      call('reader', 'post', '', body(unique())),
+      call('reader', 'put', `/${id}`, {}),
+  <%_ if (toggle) { _%>
+      call('reader', 'put', `/${id}/enabled`, { enabled: false }),
+  <%_ } _%>
+      call('reader', 'delete', `/${id}`),
+      call('reader', 'post', '/batch-delete', { ids: [id] }),
+<%_ } _%>
+      call('plain', 'get'),
+    ]
+    for (const res of await Promise.all(forbidden)) {
+      expect(res.status).toBe(403)
+      expect(res.body.code).toBe(Err.FORBIDDEN.code)
+    }
+  })
+
+  it('400: invalid <% if (w) { %>body / <% } %>query / id<% if (w) { %>, with translated field messages<% } %>', async () => {
+<%_ if (toggle) { _%>
+    const { id } = await add(body(unique()))
+<%_ } _%>
+<%_ if (bad && w) { _%>
+    const required = (lang: string, field: string) =>
+      t(lang, 'validation.required', { field: label(lang, field) })
+    expect(label('zh-CN', '<%= bad.field %>')).not.toMatch(/^field\./)
+    expect(label('en-US', '<%= bad.field %>')).not.toMatch(/^field\./)
+  <%_ if (change && bad === key) { _%>
+    const zh = await create({ ...body(unique()), <%= key.field %>: '', <%= change.field %>: 'x'.repeat(<%= change.length + 1 %>) }).expect(400)
+  <%_ } else if (bad === key) { _%>
+    const zh = await create({ ...body(unique()), <%= key.field %>: '' }).expect(400)
+  <%_ } else { _%>
+    const { <%= bad.field %>: _left, ...left } = body(unique())
+    const zh = await create(left).expect(400)
+  <%_ } _%>
+    expect(zh.body).toMatchObject({ code: Err.VALIDATION_FAILED.code, msg: required('zh-CN', '<%= bad.field %>') })
+    expect(zh.body.errors).toEqual([
+      { path: '<%= bad.field %>', msg: required('zh-CN', '<%= bad.field %>') },
+  <%_ if (change && bad === key) { _%>
+      {
+        path: '<%= change.field %>',
+        msg: t('zh-CN', 'validation.too_big.string', { field: label('zh-CN', '<%= change.field %>'), maximum: <%= change.length %> }),
+      },
+  <%_ } _%>
+    ])
+    const { <%= bad.field %>: _, ...keyless } = body(unique())
+    const en = await create(keyless).set('Accept-Language', 'en-US').expect(400)
+    expect(en.body.errors).toEqual([{ path: '<%= bad.field %>', msg: required('en-US', '<%= bad.field %>') }])
+<%_ } _%>
+    await call('admin', 'get').query({ sort: '<%= unsortable ? unsortable.field : 'nope' %>' }).expect(400)
+<%_ if (toggle) { _%>
+    await call('admin', 'put', `/${id}/enabled`, { enabled: 'no' }).expect(400)
+<%_ } _%>
+<%_ if (w) { _%>
+    await call('admin', 'post', '/batch-delete', { ids: [] }).expect(400)
+<%_ } _%>
+    await call('admin', 'get', '/abc').expect(400)
+  })
+<%_ if (w && m.uniques.length) { _%>
+
+  it('409 duplicate: a unique value already taken (create and update; case-insensitive)', async () => {
+    const tag = unique()
+    const taken = await add(body(tag))
+    const other = await add(body(unique()))
+    for (const res of [
+  <%_ for (const u of m.uniques) { _%>
+      await create({ ...body(unique()), <%= u.field %>: <% if (text(u)) { %>taken.<%= u.field %>.toUpperCase()<% } else { %>taken.<%= u.field %><% } %> }),
+  <%_ } _%>
+      await call('admin', 'put', `/${taken.id}`, { <%= unique.field %>: other.<%= unique.field %> }),
+    ]) {
+      expect(res.status).toBe(409)
+      expect(res.body).toMatchObject({ code: Err.DUPLICATE.code, msg: t('zh-CN', Err.DUPLICATE.key) })
+    }
+  })
+<%_ } _%>
+
+<%_ if (w) { _%>
+
+  it('404: unknown ids for get, update<% if (m.enabled) { %>, enabled<% } %>, delete; a batch with one unknown id deletes nothing', async () => {
+    const { id } = await add(body(unique()))
+    for (const res of [
+      await call('admin', 'get', `/${MISSING}`),
+      await call('admin', 'put', `/${MISSING}`, {}),
+  <%_ if (m.enabled) { _%>
+      await call('admin', 'put', `/${MISSING}/enabled`, { enabled: true }),
+  <%_ } _%>
+      await call('admin', 'delete', `/${MISSING}`),
+      await call('admin', 'post', '/batch-delete', { ids: [id, MISSING] }),
+    ]) {
+      expect(res.status).toBe(404)
+      expect(res.body.code).toBe(Err.NOT_FOUND.code)
+    }
+    await call('admin', 'get', `/${id}`).expect(200)
+  })
+
+  it('the same create submitted twice within 3 s → 429 (@Idempotent)', async () => {
+    const tag = unique()
+    await create(body(tag)).expect(201)
+    const again = await create(body(tag)).expect(429)
+    expect(again.body.code).toBe(Err.TOO_MANY_REQUESTS.code)
+  })
+<%_ } else { _%>
+
+  it('404: an unknown id; no write routes (POST / PUT / DELETE → 404, nothing written)', async () => {
+    const row = await add(body(unique()))
+    for (const res of [
+      await call('admin', 'get', `/${MISSING}`),
+      await call('admin', 'post', '', body(unique())),
+      await call('admin', 'put', `/${row.id}`, {}),
+      await call('admin', 'delete', `/${row.id}`),
+      await call('admin', 'post', '/batch-delete', { ids: [row.id] }),
+    ])
+      expect(res.status).toBe(404)
+    expect((await call('admin', 'get', `/${row.id}`).expect(200)).body.data).toEqual(row)
+  })
+<%_ } _%>
+})
+<%_ if (scope) { _%>
+
+describe('data scope (see docs/design-notes.md#data-scope): an own_dept operator', () => {
+  const denied = (res: request.Response) => {
+    expect(res.status).toBe(404)
+    expect(res.body.code).toBe(Err.NOT_FOUND.code)
+  }
+
+  it('list and get leave out rows of another dept<% if (w) { %>; update<% if (toggle) { %>, enabled<% } %>, delete and batch delete of one → 404, nothing written<% } %>', async () => {
+    const mine = await addIn(DEPT.mine)
+    const other = await addIn(DEPT.other)
+    const listed = idsOf(await call('own', 'get').query({ sort: '-id', pageSize: 100 }).expect(200))
+    expect(listed).toContain(mine.id)
+    expect(listed).not.toContain(other.id)
+    denied(await call('own', 'get', `/${other.id}`))
+  <%_ if (w) { _%>
+    denied(await call('own', 'put', `/${other.id}`, {}))
+    <%_ if (toggle) { _%>
+    denied(await call('own', 'put', `/${other.id}/enabled`, { enabled: false }))
+    <%_ } _%>
+    denied(await call('own', 'delete', `/${other.id}`))
+    // one id out of scope: the whole batch is refused
+    denied(await call('own', 'post', '/batch-delete', { ids: [mine.id, other.id] }))
+  <%_ } _%>
+    expect((await call('admin', 'get', `/${other.id}`).expect(200)).body.data).toEqual(other)
+    await call('own', 'get', `/${mine.id}`).expect(200)
+  })
+  <%_ if (w && m.dept.inForm) { _%>
+
+  it('create / update into another dept → 404, nothing written; into its own → 201', async () => {
+    const before = await count()
+    denied(await call('own', 'post', '', body(unique(), { <%= deptField %>: DEPT.other })))
+    expect(await count()).toBe(before)
+    const mine = (await call('own', 'post', '', body(unique(), { <%= deptField %>: DEPT.mine })).expect(201)).body.data
+    denied(await call('own', 'put', `/${mine.id}`, { <%= deptField %>: DEPT.other }))
+    expect((await call('admin', 'get', `/${mine.id}`).expect(200)).body.data).toEqual(mine)
+  })
+  <%_ } _%>
+})
+<%_ } _%>
+<%_ if (m.withExport || m.withImport) { _%>
+
+/** A binary (xlsx) response body as a Buffer. */
+const binary = (r: request.Response, cb: (err: Error | null, body: Buffer) => void) => {
+  const chunks: Buffer[] = []
+  r.on('data', (c: Buffer) => chunks.push(c))
+  r.on('end', () => cb(null, Buffer.concat(chunks)))
+}
+/** The first sheet of an xlsx body (or none). */
+async function sheet(body: unknown) {
+  const wb = new ExcelJS.Workbook()
+  await wb.xlsx.load(body as Parameters<typeof wb.xlsx.load>[0])
+  return wb.worksheets[0]
+}
+const cells = (ws: ExcelJS.Worksheet, row: number, length: number) =>
+  Array.from({ length }, (_, i) => ws.getRow(row).getCell(i + 1).value ?? null)
+<%_ } _%>
+<%_ if (m.withExport) { _%>
+
+describe('export', () => {
+  /** GET /export as the parsed first sheet, with the response. */
+  async function exported(who: keyof typeof tokens, query: object, headers: object = {}) {
+    const res = await call(who, 'get', '/export')
+      .query(query)
+      .set(headers as Record<string, string>)
+      .buffer(true)
+      .parse(binary)
+    return { res, ws: res.status === 200 ? await sheet(res.body) : undefined }
+  }
+  const row = (ws: ExcelJS.Worksheet, n: number) => cells(ws, n, HEADERS.length)
+
+  it('export: every row (no paging) in list order as .xlsx, headers translated<% if (formula) { %>, formulas escaped<% } %><% if (createdAt) { %>, times in the zone<% } %>', async () => {
+    const tag = unique()
+    await add(body(`${tag}-a`<% if (m.enabled) { %>, { enabled: false }<% } %>))
+    <% if (createdAt) { %>const { id } = <% } %>await add(body(`${tag}-b`<% if (formula) { %>, { <%= formula.field %>: '=1+1' }<% } %>))
+    // counted before: an export of the action log adds its own row right after
+    const rows = await count()
+    const { res, ws } = await exported('admin', { sort: '-id', pageSize: 1 })
+    expect(res.status).toBe(200)
+    expect(res.headers['content-type']).toContain('spreadsheetml.sheet')
+    expect(res.headers['content-disposition']).toBe('attachment; filename="<%= m.bizs %>.xlsx"')
+    expect(row(ws!, 1)).toEqual(HEADERS.map((k) => t('zh-CN', k)))
+    // all live rows, newest first<% if (formula) { %>; `=…` gets a `'` prefix<% } %>
+    expect(ws!.actualRowCount).toBe(rows + 1)
+<%_ if (key && col(key) >= 0) { _%>
+    expect(row(ws!, 2)[<%= col(key) %>]).toBe(`${tag}-b`)
+    expect(row(ws!, 3)[<%= col(key) %>]).toBe(`${tag}-a`)
+<%_ } _%>
+<%_ if (formula) { _%>
+    expect(row(ws!, 2)[<%= col(formula) %>]).toBe("'=1+1")
+<%_ } _%>
+<%_ if (labelled) { _%>
+    // a dict column as its label
+    expect(row(ws!, 3)[<%= col(m.enabled) %>]).toBe(await dictLabel('core.enabled', 'false'))
+<%_ } _%>
+<%_ if (createdAt) { _%>
+    // created_at (UTC) in core.default_timezone (Asia/Shanghai, +8h) unless X-Timezone says otherwise
+    const [{ at }] = await ds.query('SELECT created_at AS at FROM <%= T %> WHERE id = ?', [id])
+    const local = (d: Date, hours: number) =>
+      new Date(d.getTime() + hours * 3600_000).toISOString().slice(0, 19).replace('T', ' ')
+    expect(row(ws!, 2)[<%= col(m.audit.created_at) %>]).toBe(local(at, 8))
+    const utc = await exported('admin', { sort: '-id' }, { 'X-Timezone': 'UTC' })
+    expect(row(utc.ws!, 2)[<%= col(m.audit.created_at) %>]).toBe(local(at, 0))
+<%_ } _%>
+  })
+
+  it('export: English headers<% if (m.enabled) { %> and labels<% } %> for an en-US request', async () => {
+    await add(body(unique()))
+    const { ws } = await exported('admin', { sort: '-id' }, { 'Accept-Language': 'en-US' })
+    expect(row(ws!, 1)).toEqual(HEADERS.map((k) => t('en-US', k)))
+<%_ if (labelled) { _%>
+    expect(row(ws!, 2)[<%= col(m.enabled) %>]).toBe(await dictLabel('core.enabled', 'true', 'en-US'))
+<%_ } _%>
+  })
+
+  it('export: 403 without <%= m.key %>.export, 400 for a bad query, action-logged', async () => {
+    expect((await exported('reader', {})).res.status).toBe(403)
+    expect((await exported('admin', { sort: '<%= unsortable ? unsortable.field : 'nope' %>' })).res.status).toBe(400)
+    const traceId = `${PREFIX}${process.pid}-export`
+    await exported('admin', <% if (key) { %>{ <%= key.field %>: unique() }<% } else { %>{}<% } %>, { 'X-Request-Id': traceId })
+    expect(await logOf(ds, traceId)).toMatchObject({ domain: '<%= m.key %>', verb: 'export', ok: 1 })
+  })
+})
+<%_ } _%>
+<%_ if (m.withImport) { _%>
+
+describe('import', () => {
+  /** An .xlsx with the import headers (zh-CN labels) and `rows` (cells by field). */
+  async function xlsx(rows: Record<string, unknown>[]) {
+    const wb = new ExcelJS.Workbook()
+    const ws = wb.addWorksheet('import')
+    ws.addRow(IMPORT.map(([, key]) => t('zh-CN', key)))
+    for (const r of rows) ws.addRow(IMPORT.map(([field]) => r[field] ?? null))
+    return Buffer.from(await wb.xlsx.writeBuffer())
+  }
+  const upload = (who: keyof typeof tokens, file: Buffer, mode = 'insert', traceId = unique()) =>
+    request(app.getHttpServer())
+      .post(`${URL}/import`)
+      .set(bearer(tokens[who]))
+      .set('X-Request-Id', traceId)
+      .field('mode', mode)
+      .attach('file', file, 'import.xlsx')
+  /** The newest row of the list. */
+  const newest = async () =>
+    (await call('admin', 'get').query({ sort: '-id', pageSize: 1 }).expect(200)).body.data.items
+
+  it('import template: the importable columns as translated headers', async () => {
+    const res = await call('admin', 'get', '/import-template').buffer(true).parse(binary).expect(200)
+    expect(res.headers['content-disposition']).toBe('attachment; filename="<%= m.bizs %>.xlsx"')
+    expect(cells((await sheet(res.body))!, 1, IMPORT.length)).toEqual(IMPORT.map(([, key]) => t('zh-CN', key)))
+  })
+
+  it('import: valid rows are inserted<% if (bad) { %>, failed ones reported<% } %><% if (m.importKey) { %>; upsert updates by <%= m.importKey.field %><% } else { %>; no upsert (no unique column to match by)<% } %>', async () => {
+    const tag = unique()
+<%_ if (bad) { _%>
+    const res = await upload('admin', await xlsx([body(`${tag}-a`), body(`${tag}-b`, { <%= bad.field %>: '' })])).expect(200)
+    expect(res.body.data).toMatchObject({ inserted: 1, updated: 0, failed: 1, reportId: expect.any(String) })
+<%_ } else { _%>
+    const res = await upload('admin', await xlsx([body(`${tag}-a`)])).expect(200)
+    expect(res.body.data).toMatchObject({ inserted: 1, updated: 0, failed: 0 })
+<%_ } _%>
+    expect(await newest()).toMatchObject([body(`${tag}-a`)])
+<%_ if (m.importKey && change) { _%>
+    const again = { ...body(`${tag}-a`), <%= change.field %>: `${tag} imported` }
+    const up = await upload('admin', await xlsx([again]), 'upsert').expect(200)
+    expect(up.body.data).toMatchObject({ inserted: 0, updated: 1, failed: 0 })
+    expect(await newest()).toMatchObject([again])
+<%_ } else if (!m.importKey) { _%>
+    const before = await count()
+    await upload('admin', await xlsx([body(`${tag}-a`)]), 'upsert').expect(400)
+    expect(await count()).toBe(before)
+<%_ } _%>
+  })
+
+<%_ if (scope && m.importKey) { _%>
+  it('import upsert matches only rows in the data scope: a <%= m.importKey.field %> of another dept fails, nothing overwritten', async () => {
+    const tag = unique()
+    const other = await addIn(DEPT.other, tag)
+    const res = await upload('own', await xlsx([body(tag, { <%= deptField %>: DEPT.mine })]), 'upsert').expect(200)
+    expect(res.body.data).toMatchObject({ inserted: 0, updated: 0, failed: 1 })
+    expect((await call('admin', 'get', `/${other.id}`).expect(200)).body.data).toEqual(other)
+  })
+
+<%_ } _%>
+  it('import: 403 without <%= m.key %>.import, action-logged', async () => {
+    const file = await xlsx([body(unique())])
+    await upload('reader', file).expect(403)
+    const traceId = `${PREFIX}${process.pid}-import`
+    await upload('admin', file, 'insert', traceId).expect(200)
+    expect(await logOf(ds, traceId)).toMatchObject({ domain: '<%= m.key %>', verb: 'import', ok: 1 })
+  })
+})
+<%_ } _%>
+
+<%_ if (w) { _%>
+it('@ActionLog: every write leaves a row with domain <%= m.key %>, its verb and the id', async () => {
+  const trace = `${PREFIX}${process.pid}-`
+  const created = await create(body(unique())).set('X-Request-Id', `${trace}c`).expect(201)
+  const { id } = created.body.data
+  await call('admin', 'put', `/${id}`, {}).set('X-Request-Id', `${trace}u`)
+<%_ if (m.enabled) { _%>
+  await call('admin', 'put', `/${id}/enabled`, { enabled: false }).set('X-Request-Id', `${trace}e`)
+<%_ } _%>
+  await call('admin', 'delete', `/${id}`).set('X-Request-Id', `${trace}d`)
+  await call('admin', 'post', '/batch-delete', { ids: [MISSING] }).set('X-Request-Id', `${trace}b`)
+  const expected: [string, object][] = [
+    ['c', { verb: 'create', biz_id: String(id), ok: 1 }],
+    ['u', { verb: 'modify', biz_id: String(id), ok: 1 }],
+<%_ if (m.enabled) { _%>
+    ['e', { verb: 'modify', biz_id: String(id), ok: 1 }],
+<%_ } _%>
+    ['d', { verb: 'remove', biz_id: String(id), ok: 1 }],
+    ['b', { verb: 'remove', biz_id: null, ok: 0, error_msg: Err.NOT_FOUND.key }],
+  ]
+  for (const [suffix, row] of expected)
+    expect(await logOf(ds, `${trace}${suffix}`)).toMatchObject({
+      domain: '<%= m.key %>',
+      username: 'admin',
+      ...row,
+    })
+})
+<%_ } _%>
+
+it('Swagger documents every route', async () => {
+  const doc = (await request(app.getHttpServer()).get('/api/docs-json').expect(200)).body
+  expect(
+    Object.keys(doc.paths)
+      .filter((p) => p.startsWith(URL))
+      .sort(),
+  ).toEqual([
+    URL,
+<%_ if (w) { _%>
+    `${URL}/batch-delete`,
+<%_ } _%>
+<%_ if (m.withExport) { _%>
+    `${URL}/export`,
+<%_ } _%>
+<%_ if (m.withImport) { _%>
+    `${URL}/import`,
+    `${URL}/import-template`,
+<%_ } _%>
+<%_ if (m.withOptions) { _%>
+    `${URL}/options`,
+<%_ } _%>
+    `${URL}/{id}`,
+<%_ if (toggle) { _%>
+    `${URL}/{id}/enabled`,
+<%_ } _%>
+  ])
+  expect(
+    doc.paths[URL].get.responses['200'].content['application/json'].schema.properties.data,
+  ).toMatchObject({ properties: { items: { type: 'array' }, total: { type: 'integer' } } })
+<%_ if (examples.length) { _%>
+  // the configured examples
+  expect(doc.paths[URL].post.requestBody.content['application/json'].schema.properties).toMatchObject({
+  <%_ for (const c of examples) { _%>
+    <%= c.field %>: { example: <%= c.example %> },
+  <%_ } _%>
+  })
+<%_ } _%>
+})

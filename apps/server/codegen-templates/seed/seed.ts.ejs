@@ -1,0 +1,64 @@
+<%_
+const b = m.biz
+const Noun = m.noun[0].toUpperCase() + m.noun.slice(1)
+const fn = 'seed' + m.Biz
+_%>
+// <%= comment(Noun) %> menus: the page under the `<%= m.parentMenu %>` group (found by route_name, never by id) and
+// one action row per permission, upserted by route_name / perms. Names are i18n keys: the page's in
+// the module's web locale fragment (<%= m.domain %>.<%= m.business %>.json), the actions' in menu.json (menu.action.*).
+import { <%= b %>Perms } from '@qiwu/shared'
+import type { EntityManager } from 'typeorm'
+import { findRow, upsert } from '<%= m.up %>db/seeds/upsert.js'
+
+const ACTIONS: [perms: string, name: string][] = [
+<%_ for (const v of m.verbs) { _%>
+  [<%= b %>Perms.<%= v %>, 'menu.action.<%= v %>'],
+<%_ } _%>
+]
+
+export async function <%= fn %>(q: EntityManager): Promise<string[]> {
+  // the group menu: one an administrator deleted skips these menus, a missing one is an error
+  const parent = await findRow(q, 'iam_menu', { route_name: '<%= m.parentMenu %>', kind: 'group' })
+  if (!parent)
+<%_ if (m.parentBuiltin) { _%>
+    throw new Error('<%= fn %>: the <%= m.parentMenu %> menu group is missing')
+<%_ } else { _%>
+    throw new Error(
+      '<%= fn %>: the <%= m.parentMenu %> menu group is missing: add it to apps/server/src/db/seeds/project/menu-groups.seed.ts',
+    )
+<%_ } _%>
+  if (parent.deleted)
+    return [<%= str(`seed: the ${m.parentMenu} menu group was deleted: the ${m.noun} menus are skipped`) %>]
+  const pageId = await upsert(
+    q,
+    'iam_menu',
+    { route_name: '<%= m.routeName %>' },
+    {
+<%_ if (!m.project) { _%>
+      parent_id: parent.id,
+<%_ } _%>
+      kind: 'page',
+      name: 'menu.<%= m.key %>',
+      route_path: '<%= m.routePath %>',
+      component: '<%= m.component %>',
+      component_name: '<%= m.componentName %>',
+      keep_alive: 1,
+<%_ if (!m.project) { _%>
+      icon: '<%= m.menuIcon %>',
+      sort_no: <%= m.menuSortNo %>,
+<%_ } _%>
+    },
+<%_ if (m.project) { _%>
+    // written once: an administrator may move the page and change its icon and sort in the menu page
+    { parent_id: parent.id, icon: '<%= m.menuIcon %>', sort_no: <%= m.menuSortNo %> },
+<%_ } _%>
+  )
+  for (const [i, [perms, name]] of ACTIONS.entries())
+    await upsert(
+      q,
+      'iam_menu',
+      { kind: 'action', perms },
+      { parent_id: pageId, name, sort_no: (i + 1) * 10 },
+    )
+  return []
+}

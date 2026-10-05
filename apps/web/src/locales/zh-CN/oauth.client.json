@@ -1,0 +1,27 @@
+{
+  "oauth": {
+    "client": {
+      "entity": "客户端",
+      "grant": {
+        "authorization_code": "授权码",
+        "refresh_token": "刷新令牌",
+        "client_credentials": "客户端凭证"
+      },
+      "redirectHint": "回车添加；须为 https，本机调试可用 http://localhost",
+      "secretTitle": "保存客户端密钥",
+      "secretOnce": "密钥只显示这一次，请立即保存；丢失后只能重置",
+      "secretSaved": "我已保存",
+      "copy": "复制",
+      "copyFailed": "复制失败，请手动选中复制",
+      "resetConfirm": "重置后旧密钥立即失效，使用它的应用需要换上新密钥。确定重置 {id} 的密钥？"
+    },
+    "scope": {
+      "user_read": "读取你的基本资料（用户名、姓名、头像）"
+    }
+  },
+  "menu": {
+    "oauth": {
+      "client": "客户端管理"
+    }
+  }
+}

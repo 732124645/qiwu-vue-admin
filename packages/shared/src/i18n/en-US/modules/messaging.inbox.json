@@ -1,0 +1,19 @@
+{
+  "field": {
+    "messaging": {
+      "inbox": {
+        "userId": "Recipient",
+        "templateCode": "Template code",
+        "locale": "Language",
+        "category": "Category",
+        "senderLabel": "Sender name",
+        "title": "Title",
+        "body": "Body",
+        "params": "Params",
+        "status": "Status",
+        "attempts": "Attempts",
+        "readAt": "Read at"
+      }
+    }
+  }
+}

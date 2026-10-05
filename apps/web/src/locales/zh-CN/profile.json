@@ -1,0 +1,25 @@
+{
+  "title": "个人中心",
+  "tabs": {
+    "info": "基本资料",
+    "password": "修改密码",
+    "prefs": "偏好设置",
+    "socials": "账号绑定"
+  },
+  "changeAvatar": "更换头像",
+  "avatarDone": "头像已更新",
+  "saved": "资料已保存",
+  "mobileHint": "修改手机号需要当前密码和发送到新号码的验证码；未配置短信验证码时，请联系管理员修改。其他会话将退出。",
+  "mobileRemoveHint": "移除手机号需要当前密码，其他会话将退出。",
+  "language": "界面语言",
+  "languageHint": "切换后立即生效，系统发给你的通知和导出文件也使用该语言。",
+  "passwordHint": "修改后，你在其他设备和浏览器上的登录会话将立即失效。",
+  "socials": {
+    "wxMp": "微信小程序",
+    "boundAt": "已绑定，绑定时间",
+    "unboundHint": "未绑定。在小程序中用微信登录后按提示绑定本账号。",
+    "unbind": "解绑",
+    "unbindConfirm": "解绑后该微信不能再直接登录本账号，需重新绑定。确定解绑吗？",
+    "unbound": "已解绑"
+  }
+}

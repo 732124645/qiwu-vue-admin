@@ -1,0 +1,15 @@
+{
+  "field": {
+    "geo": {
+      "area": {
+        "code": "Division code",
+        "name": "Name",
+        "ip": "IP address",
+        "country": "Country",
+        "province": "Province",
+        "city": "City",
+        "isp": "ISP"
+      }
+    }
+  }
+}

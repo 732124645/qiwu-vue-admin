@@ -1,0 +1,15 @@
+{
+  "audit": {
+    "actionLog": {
+      "entity": "操作日志",
+      "clean": "清空",
+      "cleanConfirm": "确定清空全部操作日志吗？清空后不再显示，也无法在页面上恢复（清空本身会记下一条新日志）。",
+      "cleaned": "已清空"
+    }
+  },
+  "menu": {
+    "audit": {
+      "actionLog": "操作日志"
+    }
+  }
+}

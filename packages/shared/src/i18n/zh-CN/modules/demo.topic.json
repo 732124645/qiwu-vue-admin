@@ -1,0 +1,13 @@
+{
+  "field": {
+    "demo": {
+      "topic": {
+        "parentId": "上级主题",
+        "treePath": "祖先路径",
+        "title": "主题名称",
+        "sortNo": "排序号",
+        "enabled": "启用状态"
+      }
+    }
+  }
+}

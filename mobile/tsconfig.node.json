@@ -1,0 +1,9 @@
+// Node-side files: the build/test configs and the Playwright specs
+{
+  "extends": "@vue/tsconfig/tsconfig.json",
+  "compilerOptions": {
+    "lib": ["es2023"],
+    "types": ["node"]
+  },
+  "include": ["vite.config.ts", "playwright.config.ts", "e2e/**/*.ts"]
+}

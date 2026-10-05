@@ -1,0 +1,36 @@
+{
+  "name": "@qiwu/shared",
+  "version": "0.0.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./testing": {
+      "source": "./src/validation/testing.ts",
+      "types": "./dist/validation/testing.d.ts",
+      "default": "./dist/validation/testing.js"
+    },
+    "./i18n/*": "./src/i18n/*"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json -w --preserveWatchOutput",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

@@ -1,0 +1,66 @@
+{
+  "action": {
+    "search": "搜索",
+    "reset": "重置",
+    "create": "新增",
+    "edit": "编辑",
+    "delete": "删除",
+    "batchDelete": "批量删除",
+    "save": "保存",
+    "refresh": "刷新",
+    "toggleSearch": "显示或隐藏搜索",
+    "columns": "列设置",
+    "resetColumns": "恢复默认",
+    "resetFilters": "清空筛选",
+    "operations": "操作",
+    "export": "导出",
+    "more": "更多",
+    "import": "导入",
+    "addChild": "新增下级",
+    "expandAll": "全部展开",
+    "collapseAll": "全部收起",
+    "addRow": "添加一行"
+  },
+  "title": {
+    "create": "新增{name}",
+    "edit": "编辑{name}",
+    "import": "导入{name}",
+    "detail": "查看{name}"
+  },
+  "editTable": {
+    "empty": "暂无数据，点击下方按钮添加"
+  },
+  "tree": {
+    "topLevel": "无（顶级）"
+  },
+  "placeholder": {
+    "secretKeep": "留空则不修改"
+  },
+  "confirm": {
+    "title": "提示",
+    "delete": "确定删除这条记录吗？删除后不再显示，也无法在页面上恢复。",
+    "batchDelete": "确定删除选中的 {count} 条记录吗？删除后不再显示，也无法在页面上恢复。"
+  },
+  "msg": {
+    "created": "新增成功",
+    "updated": "保存成功",
+    "deleted": "删除成功"
+  },
+  "import": {
+    "template": "下载导入模板",
+    "templateName": "{name}导入模板",
+    "drop": "将 .xlsx 文件拖到此处，或",
+    "choose": "选择文件",
+    "hint": "请使用导入模板填写，单个文件不超过 10 MB、5000 行",
+    "mode": "导入方式",
+    "insert": "仅新增",
+    "upsert": "新增并更新已有记录",
+    "submit": "开始导入",
+    "done": "导入完成：新增 {inserted} 条，更新 {updated} 条",
+    "partial": "新增 {inserted} 条，更新 {updated} 条，{failed} 行未导入",
+    "report": "下载错误报告",
+    "reportName": "{name}导入错误报告",
+    "close": "关闭"
+  },
+  "loading": "正在加载"
+}

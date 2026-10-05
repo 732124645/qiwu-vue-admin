@@ -1,0 +1,16 @@
+{
+  "field": {
+    "wf": {
+      "task": {
+        "comment": "意见",
+        "formValues": "表单",
+        "to": "退回节点",
+        "userId": "目标人员",
+        "userIds": "人员",
+        "kind": "加签方式",
+        "taskIds": "加签任务",
+        "reason": "抄送说明"
+      }
+    }
+  }
+}

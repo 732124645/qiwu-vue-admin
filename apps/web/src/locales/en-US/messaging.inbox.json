@@ -1,0 +1,13 @@
+{
+  "messaging": {
+    "inbox": {
+      "entity": "message",
+      "recipient": "Recipient"
+    }
+  },
+  "menu": {
+    "messaging": {
+      "inbox": "Inbox messages"
+    }
+  }
+}

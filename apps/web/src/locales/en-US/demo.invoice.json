@@ -1,0 +1,12 @@
+{
+  "demo": {
+    "invoice": {
+      "entity": "invoice"
+    }
+  },
+  "menu": {
+    "demo": {
+      "invoice": "Invoices"
+    }
+  }
+}

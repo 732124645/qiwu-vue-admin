@@ -1,0 +1,63 @@
+{
+  "name": "qiwu-vue-admin",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "packageManager": "pnpm@11.28.3",
+  "engines": {
+    "node": ">=22.22.1"
+  },
+  "scripts": {
+    "dev": "pnpm -r --parallel dev",
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "oxlint . && eslint apps/web",
+    "format": "prettier --write .",
+    "verify": "pnpm lint && pnpm arch:check && pnpm -r typecheck && pnpm i18n:check && pnpm originality:check && pnpm license:check",
+    "ci:local": "node scripts/ci-local.mjs",
+    "smoke:boot": "node scripts/smoke-boot.mjs",
+    "smoke:web-dev": "node scripts/web-dev-smoke.mjs",
+    "arch:check": "node scripts/arch/run.mjs",
+    "i18n:check": "node scripts/i18n-check.mjs",
+    "license:check": "node scripts/license-check.mjs",
+    "originality:check": "node scripts/originality-check.mjs",
+    "db:migrate": "pnpm --filter @qiwu/server db:migrate",
+    "db:seed": "pnpm --filter @qiwu/server db:seed",
+    "db:reset": "pnpm --filter @qiwu/server db:reset",
+    "gen": "pnpm --filter @qiwu/server gen",
+    "gen:check-golden": "node scripts/gen-check-golden.mjs",
+    "codegen:report": "node scripts/codegen-report.mjs",
+    "mobile:install": "pnpm -C mobile i --frozen-lockfile",
+    "mobile:verify": "pnpm -C mobile verify",
+    "mobile:test": "pnpm -C mobile test",
+    "mobile:e2e": "pnpm -C mobile e2e",
+    "mobile:build:h5": "pnpm -C mobile build:h5",
+    "mobile:build:mp-weixin": "pnpm -C mobile build:mp-weixin",
+    "mobile:build:app": "pnpm -C mobile build:app",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^21.2.3",
+    "@commitlint/config-conventional": "^21.2.3",
+    "@vitest/eslint-plugin": "^1.6.27",
+    "@vue/eslint-config-typescript": "^14.9.0",
+    "eslint": "^10.11.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-oxlint": "^1.85.0",
+    "eslint-plugin-vue": "^10.11.1",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.5.1",
+    "oxlint": "^1.85.0",
+    "prettier": "^3.9.9",
+    "typescript": "catalog:"
+  },
+  "lint-staged": {
+    "*.{js,mjs,cjs,ts,vue}": [
+      "oxlint --fix --no-error-on-unmatched-pattern",
+      "eslint --fix --no-warn-ignored",
+      "prettier --write"
+    ],
+    "*.{json,md,yml,yaml,css}": "prettier --write"
+  }
+}

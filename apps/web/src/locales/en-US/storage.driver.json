@@ -1,0 +1,14 @@
+{
+  "storage": {
+    "driver": {
+      "local": "Local disk",
+      "s3": "S3-compatible",
+      "localHint": "Files are kept in the server's STORAGE_LOCAL_ROOT directory (set in its environment, not here). Public files are served under this prefix: /files when blank, or the URL of a CDN in front of it.",
+      "secretUnchanged": "Unchanged: type a new key to replace it",
+      "test": "Test connection",
+      "testHint": "Connects with the saved settings: save your changes first",
+      "testOk": "Connection succeeded",
+      "testFailed": "Connection failed. Check the endpoint, region, bucket and access keys."
+    }
+  }
+}

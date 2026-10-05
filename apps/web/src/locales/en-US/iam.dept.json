@@ -1,0 +1,12 @@
+{
+  "iam": {
+    "dept": {
+      "entity": "department"
+    }
+  },
+  "menu": {
+    "iam": {
+      "dept": "Departments"
+    }
+  }
+}

@@ -1,0 +1,202 @@
+<%_
+const b = m.biz
+const B = m.Biz
+const has = (...widgets) => m.form.some((c) => widgets.includes(c.widget))
+const radios = m.form.filter((c) => c.widget === 'radio' && c.dict)
+const uploads = m.form.filter((c) => c.widget === 'image-upload' || c.widget === 'file-upload')
+// a tree (crud.ts `kind`): the parent column is picked in the tree of the page's rows, starting at the
+// `parentId` prop (add below a row) or 0 (top level)
+const parent = m.kind === 'tree' ? m.parent : undefined
+// a master-sub module (crud.ts `subs`): each sub table's rows in an QwEditTable below the fields, every
+// cell a form item of its own (`<prop>.<index>.<field>`, the row schema's rules); dict radios become
+// selects there, uploads text inputs (a row keeps its cells compact)
+const subs = m.subs
+const cells = subs.flatMap((s) => s.form)
+const anyHas = (...widgets) => has(...widgets) || cells.some((c) => widgets.includes(c.widget))
+const cellDict = (c) => !!c.dict && (c.widget === 'select' || c.widget === 'radio')
+// `form_cols` 2 / 3: the fields in that many label + field pairs a row (styles/element.css); free text and
+// uploads keep a whole row
+const wide = (c) => m.formCols > 1 && (c.freeText || c.widget === 'image-upload' || c.widget === 'file-upload')
+_%>
+<script setup lang="ts">
+import { useI18n } from 'vue-i18n'
+import { <%= names([b + 'Create', ...subs.flatMap((s) => [s.biz + 'Input', 'type ' + s.Biz + 'Input'])]) %> } from '@qiwu/shared'
+import { <%= b %>Api } from '@/api/<%= m.home %>'
+<%_ if (anyHas('dept-tree-select')) { _%>
+import DeptTreeSelect from '@/core/components/DeptTreeSelect.vue'
+<%_ } _%>
+<%_ if (m.form.some((c) => c.widget === 'select' && c.dict) || cells.some(cellDict)) { _%>
+import DictSelect from '@/core/components/DictSelect.vue'
+<%_ } _%>
+<%_ if (has('file-upload')) { _%>
+import FileUpload from '@/core/components/FileUpload.vue'
+<%_ } _%>
+<%_ if (has('image-upload')) { _%>
+import ImageUpload from '@/core/components/ImageUpload.vue'
+<%_ } _%>
+<%_ if (subs.length) { _%>
+import QwEditTable from '@/core/components/QwEditTable.vue'
+<%_ } _%>
+<%_ if (has('richtext')) { _%>
+import RichEditor from '@/core/components/RichEditor.vue'
+<%_ } _%>
+<%_ if (parent) { _%>
+import TreeParentSelect from '@/core/components/TreeParentSelect.vue'
+<%_ } _%>
+<%_ if (anyHas('user-picker')) { _%>
+import UserSelect from '@/core/components/UserSelect.vue'
+<%_ } _%>
+import { useCrudForm } from '@/core/composables/use-crud'
+<%_ if (radios.length) { _%>
+import { useDict } from '@/core/composables/use-dict'
+<%_ } _%>
+<%_ if (uploads.length) { _%>
+import { uploadField } from '@/core/composables/use-upload'
+<%_ } _%>
+<%_ if (subs.length) { _%>
+import { zodRules } from '@/core/form/zod-rules'
+<%_ } _%>
+<%_ if (parent && m.label.seedName) { _%>
+import { tx } from '@/core/i18n'
+<%_ } _%>
+
+<%_ if (parent) { _%>
+/**
+ * Add / edit form of the <%= comment(m.noun) %> tree, opened with `openDialog(<%= B %>Form, { id })` or, to add
+ * below a row, `{ parentId }`. The parent picker leaves out the row itself and its subtree (the server
+ * refuses them too: 422); cleared = top level.
+ */
+defineOptions({ name: '<%= m.componentName %>Form' })
+const { id, parentId = 0 } = defineProps<{ id?: number; parentId?: number }>()
+<%_ } else if (subs.length) { _%>
+/**
+ * Add / edit form of the <%= comment(m.noun) %> list with its <%= comment(subs.map((s) => s.prop).join(', ')) %>, opened with `openDialog(<%= B %>Form, { id })`:
+ * saved as one document (the server diffs the rows by their ids).
+ */
+defineOptions({ name: '<%= m.componentName %>Form' })
+const { id } = defineProps<{ id?: number }>()
+<%_ } else { _%>
+/** Add / edit form of the <%= comment(m.noun) %> list, opened with `openDialog(<%= B %>Form, { id })`. */
+defineOptions({ name: '<%= m.componentName %>Form' })
+const { id } = defineProps<{ id?: number }>()
+<%_ } _%>
+const emit = defineEmits<{ done: [saved: { id: number }]; cancel: [] }>()
+const { t } = useI18n()
+const { model, formRef, rules, loading, submitting, submit } = useCrudForm({
+  api: <%= b %>Api,
+  schema: <%= b %>Create,
+  emptyModel: () => ({ <% for (const c of m.form) { %><% if (c === parent) { %>parentId, <% } else { %><%= c.secret ? c.secret.body : c.field %>: <%= c.secret ? str('') : c.web.empty %>, <% } %><% } %><% for (const sub of subs) { %><%= sub.prop %>: [], <% } %>}),
+  id,
+  emit,
+})
+<%_ for (const c of radios) { _%>
+const { options: <%= c.field %>Options } = useDict('<%= c.dict %>')
+<%_ } _%>
+<%_ if (uploads.length) { _%>
+// the column keeps one upload: an image's public URL (a public tag), a file's `<id>/<name>`
+<%_ } _%>
+<%_ for (const c of uploads) { _%>
+const <%= c.field %>Files = uploadField(model, '<%= c.field %>', '<%= c.widget === 'image-upload' ? 'image' : 'file' %>')
+<%_ } _%>
+<%_ for (const sub of subs) { _%>
+
+// <%= comment(sub.prop) %>: each cell is checked by its field's rule of the row schema
+const <%= sub.biz %>Rules = zodRules(<%= sub.biz %>Input, useI18n())
+const <%= sub.biz %>Columns = [
+<%_ for (const col of sub.columns) { _%>
+  <%= col %>,
+<%_ } _%>
+]
+const new<%= sub.Biz %> = (): <%= sub.Biz %>Input => ({ <% for (const c of sub.form) { %><%= c.field %>: <%= c.web.empty %>, <% } %>})
+<%_ } _%>
+</script>
+
+<template>
+  <el-form ref="formRef" v-loading="loading" :model="model" :rules="rules" label-position="left"<% if (m.formCols > 1) { %> class="qw-form-cols-<%= m.formCols %>"<% } %>>
+<%_ for (const c of m.form) { _%>
+<%_ const v = 'model.' + (c.secret ? c.secret.body : c.field) _%>
+    <el-form-item :label="t('<%= c.labelKey %>')" prop="<%= c.secret ? c.secret.body : c.field %>"<% if (wide(c)) { %> class="qw-form-wide"<% } %>>
+  <%_ if (c.secret) { _%>
+      <el-input v-model="<%= v %>" type="password" show-password autocomplete="new-password" maxlength="<%= c.secret.max %>" :placeholder="id == null ? '' : t('crud.placeholder.secretKeep')" />
+  <%_ } else if (c === parent) { _%>
+      <!-- the page's enabled rows (a disabled parent is refused), without this one and its subtree -->
+      <TreeParentSelect
+        v-model="<%= v %>"
+        :load="() => <%= b %>Api.list({<% if (m.enabled) { %> <%= m.enabled.field %>: true <% } %>})"
+        :label="(n) => <% if (m.label.seedName) { %>tx(n.<%= m.label.field %>)<% } else { %>n.<%= m.label.field %><% } %>"
+        :exclude="id"
+      />
+  <%_ } else if (c.widget === 'number' && c.tsType === 'number') { _%>
+      <el-input-number v-model="<%= v %>"<% if (c.web.min) { %> :min="<%= c.web.min %>"<% } %><% if (c.web.max) { %> :max="<%= c.web.max %>"<% } %><% if (c.web.scale !== undefined) { %> :precision="<%= c.web.scale %>"<% if (c.web.scale) { %> :step="<%= '0.' + '0'.repeat(c.web.scale - 1) + '1' %>"<% } %><% } %> controls-position="right" />
+  <%_ } else if (c.widget === 'switch') { _%>
+      <el-switch v-model="<%= v %>" />
+  <%_ } else if (c.widget === 'select' && c.dict) { _%>
+      <DictSelect v-model="<%= v %>" code="<%= c.dict %>" />
+  <%_ } else if (c.widget === 'radio' && c.dict) { _%>
+      <el-radio-group v-model="<%= v %>">
+        <el-radio v-for="o in <%= c.field %>Options" :key="o.value" :value="o.value">{{ o.label }}</el-radio>
+      </el-radio-group>
+  <%_ } else if (c.widget === 'date') { _%>
+      <el-date-picker v-model="<%= v %>" type="date" value-format="YYYY-MM-DD" />
+  <%_ } else if (c.widget === 'datetime') { _%>
+      <!-- sent as an instant with the browser's offset (the API takes ISO-8601 with an offset) -->
+      <el-date-picker v-model="<%= v %>" type="datetime" value-format="YYYY-MM-DD[T]HH:mm:ss.SSSZ" />
+  <%_ } else if (c.widget === 'image-upload') { _%>
+      <ImageUpload v-model="<%= c.field %>Files" biz-tag="cover" />
+  <%_ } else if (c.widget === 'file-upload') { _%>
+      <FileUpload v-model="<%= c.field %>Files" :limit="1" />
+  <%_ } else if (c.widget === 'user-picker') { _%>
+      <UserSelect v-model="<%= v %>" />
+  <%_ } else if (c.widget === 'dept-tree-select') { _%>
+      <DeptTreeSelect v-model="<%= v %>" />
+  <%_ } else if (c.widget === 'richtext') { _%>
+      <!-- HTML: the server keeps only the core/sanitize.ts allow-list when it saves it -->
+      <RichEditor v-model="<%= v %>" :height="320" />
+  <%_ } else if (c.freeText) { _%>
+      <el-input v-model="<%= v %>" type="textarea" :rows="3"<% if (c.web.maxlength) { %> maxlength="<%= c.web.maxlength %>" show-word-limit<% } %> />
+  <%_ } else { _%>
+      <el-input v-model="<%= v %>"<% if (c.web.maxlength) { %> maxlength="<%= c.web.maxlength %>"<% } %> />
+  <%_ } _%>
+    </el-form-item>
+<%_ } _%>
+<%_ for (const sub of subs) { _%>
+    <QwEditTable
+      v-model="model.<%= sub.prop %>"
+      label="field.<%= m.key %>.<%= sub.prop %>"
+      :columns="<%= sub.biz %>Columns"
+      :create="new<%= sub.Biz %>"
+    >
+  <%_ for (const c of sub.form) { _%>
+  <%_ const v = 'row.' + c.field _%>
+      <template #cell-<%= c.field %>="{ row, index }">
+        <el-form-item :prop="`<%= sub.prop %>.${index}.<%= c.field %>`" :rules="<%= sub.biz %>Rules.<%= c.field %>">
+    <%_ if (c.widget === 'number' && c.tsType === 'number') { _%>
+          <el-input-number v-model="<%= v %>"<% if (c.web.min) { %> :min="<%= c.web.min %>"<% } %><% if (c.web.max) { %> :max="<%= c.web.max %>"<% } %><% if (c.web.scale !== undefined) { %> :precision="<%= c.web.scale %>"<% if (c.web.scale) { %> :step="<%= '0.' + '0'.repeat(c.web.scale - 1) + '1' %>"<% } %><% } %> controls-position="right" />
+    <%_ } else if (c.widget === 'switch') { _%>
+          <el-switch v-model="<%= v %>" />
+    <%_ } else if (cellDict(c)) { _%>
+          <DictSelect v-model="<%= v %>" code="<%= c.dict %>" />
+    <%_ } else if (c.widget === 'date') { _%>
+          <el-date-picker v-model="<%= v %>" type="date" value-format="YYYY-MM-DD" />
+    <%_ } else if (c.widget === 'datetime') { _%>
+          <el-date-picker v-model="<%= v %>" type="datetime" value-format="YYYY-MM-DD[T]HH:mm:ss.SSSZ" />
+    <%_ } else if (c.widget === 'user-picker') { _%>
+          <UserSelect v-model="<%= v %>" />
+    <%_ } else if (c.widget === 'dept-tree-select') { _%>
+          <DeptTreeSelect v-model="<%= v %>" />
+    <%_ } else { _%>
+          <el-input v-model="<%= v %>"<% if (c.web.maxlength) { %> maxlength="<%= c.web.maxlength %>"<% } %> />
+    <%_ } _%>
+        </el-form-item>
+      </template>
+  <%_ } _%>
+    </QwEditTable>
+<%_ } _%>
+  </el-form>
+  <div class="qw-dialog-footer">
+    <el-button @click="emit('cancel')">{{ t('common.action.cancel') }}</el-button>
+    <el-button type="primary" :loading="submitting" @click="submit">
+      {{ t('crud.action.save') }}
+    </el-button>
+  </div>
+</template>

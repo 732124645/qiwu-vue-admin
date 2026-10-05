@@ -1,0 +1,15 @@
+{
+  "messaging": {
+    "mailAccount": {
+      "entity": "邮件账号",
+      "testConnection": "测试连接",
+      "testOk": "邮件服务器连接成功",
+      "testFailed": "邮件服务器连接失败"
+    }
+  },
+  "menu": {
+    "messaging": {
+      "mailAccount": "邮件账号"
+    }
+  }
+}

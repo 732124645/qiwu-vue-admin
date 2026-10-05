@@ -1,0 +1,10 @@
+{
+  "common": {
+    "updatedAt": "Updated at {time}"
+  },
+  "duration": {
+    "dhm": "{d} d {h} h {m} min",
+    "hm": "{h} h {m} min",
+    "m": "{m} min"
+  }
+}

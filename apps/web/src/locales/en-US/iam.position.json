@@ -1,0 +1,12 @@
+{
+  "iam": {
+    "position": {
+      "entity": "position"
+    }
+  },
+  "menu": {
+    "iam": {
+      "position": "Positions"
+    }
+  }
+}

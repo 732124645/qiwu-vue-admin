@@ -1,0 +1,15 @@
+{
+  "field": {
+    "wf": {
+      "admin": {
+        "modelKey": "Model key",
+        "state": "State",
+        "initiatorId": "Initiator",
+        "assigneeId": "Assignee",
+        "instanceId": "Instance",
+        "to": "New assignee",
+        "comment": "Comment"
+      }
+    }
+  }
+}

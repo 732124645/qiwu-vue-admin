@@ -1,0 +1,8 @@
+{
+  "title": "Version {version} is available",
+  "content": "A new version has been released. Update now?",
+  "now": "Update now",
+  "later": "Later",
+  "downloading": "Downloading the update…",
+  "failed": "Update failed. Please try again later."
+}

@@ -1,0 +1,20 @@
+{
+  "title": "Sign in",
+  "subtitle": "Welcome back. Sign in to your account.",
+  "passwordTab": "Password",
+  "smsTab": "SMS code",
+  "rememberUsername": "Remember username",
+  "getCode": "Get code",
+  "resendIn": "Resend in {seconds}s",
+  "sentNote": "If this number has an account, a code will arrive shortly.",
+  "wxBind": {
+    "title": "Link WeChat",
+    "hint": "This WeChat account is not linked yet. Sign in once with your password or an SMS code to link it; after that, WeChat signs you in directly.",
+    "submit": "Link and sign in"
+  },
+  "motto": "",
+  "slogan": "Approvals, to-dos and messages, on the go",
+  "privacy": "Privacy",
+  "terms": "Terms",
+  "showPassword": "Show password"
+}

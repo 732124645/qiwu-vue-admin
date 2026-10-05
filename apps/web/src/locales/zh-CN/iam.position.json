@@ -1,0 +1,12 @@
+{
+  "iam": {
+    "position": {
+      "entity": "岗位"
+    }
+  },
+  "menu": {
+    "iam": {
+      "position": "岗位管理"
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "field": {
+    "demo": {
+      "realtime": {
+        "target": "Send to",
+        "userIds": "Users",
+        "roleIds": "Roles",
+        "text": "Message"
+      }
+    }
+  }
+}

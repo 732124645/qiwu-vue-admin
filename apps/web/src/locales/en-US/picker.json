@@ -1,0 +1,31 @@
+{
+  "tree": {
+    "filter": "Filter by name",
+    "collapse": "Collapse {title}",
+    "expand": "Expand {title}",
+    "resize": "Resize {title}"
+  },
+  "dept": {
+    "title": "Departments",
+    "placeholder": "Select a department"
+  },
+  "user": {
+    "title": "Select users",
+    "placeholder": "Select a user",
+    "unpick": "Clear the selected user",
+    "keyword": "Search by username or display name",
+    "nameKeyword": "Search by display name",
+    "pickAll": "Select every user listed",
+    "picked": "No one selected | 1 selected | {count} selected",
+    "clear": "Clear all",
+    "truncated": "Showing the first {count}. Narrow the search to find others.",
+    "confirm": "OK"
+  },
+  "icon": {
+    "placeholder": "Pick an icon",
+    "search": "Search icons (e.g. house)",
+    "clear": "Clear the icon",
+    "none": "No icon matches",
+    "more": "{count} more icons: type to narrow them down"
+  }
+}

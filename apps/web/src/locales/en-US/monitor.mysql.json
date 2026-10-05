@@ -1,0 +1,16 @@
+{
+  "monitor": {
+    "mysql": {
+      "qps": "Queries per second (average)",
+      "connections": "Connections",
+      "bufferPool": "InnoDB buffer pool",
+      "hitRate": "Hit rate",
+      "noPool": "The connection pool's state is not available from the database driver."
+    }
+  },
+  "menu": {
+    "monitor": {
+      "mysql": "Database monitor"
+    }
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "notify": {
+    "tabs": { "bulletins": "Bulletins", "inbox": "Messages" },
+    "inbox": {
+      "pageTitle": "My messages",
+      "viewAll": "View all messages",
+      "empty": "No messages yet",
+      "systemSender": "System",
+      "close": "Close",
+      "state": "Status",
+      "title": "Title",
+      "categoryLabel": "Category",
+      "sender": "Sender",
+      "receivedAt": "Received at",
+      "readFilter": "Read status",
+      "all": "All",
+      "unreadOnly": "Unread only",
+      "read": "Read",
+      "unread": "Unread",
+      "view": "View",
+      "category": { "system": "System", "business": "Business" }
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "field": {
+    "monitor": {
+      "mysql": {
+        "status": "Status",
+        "variables": "Variables",
+        "pool": "Connection pool",
+        "limit": "Limit",
+        "total": "Connections",
+        "idle": "Idle",
+        "queued": "Queued",
+        "Uptime": "Uptime",
+        "Threads_connected": "Threads connected",
+        "Threads_running": "Threads running",
+        "Questions": "Questions",
+        "Slow_queries": "Slow queries",
+        "Innodb_buffer_pool_pages_total": "Buffer pool pages",
+        "Innodb_buffer_pool_pages_free": "Buffer pool free pages",
+        "Innodb_buffer_pool_read_requests": "Buffer pool read requests",
+        "Innodb_buffer_pool_reads": "Buffer pool disk reads",
+        "Bytes_received": "Bytes received",
+        "Bytes_sent": "Bytes sent",
+        "version": "MySQL version",
+        "max_connections": "Max connections"
+      }
+    }
+  }
+}

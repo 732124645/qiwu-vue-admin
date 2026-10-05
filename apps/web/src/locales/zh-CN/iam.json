@@ -1,0 +1,24 @@
+{
+  "user": {
+    "entity": "用户",
+    "keywordHint": "用户名或显示名",
+    "passwordHint": "留空则使用系统初始密码；首次登录时须修改密码",
+    "detail": "用户详情",
+    "noRoles": "未分配角色",
+    "noPositions": "未分配岗位",
+    "resetPassword": {
+      "title": "重置 {name} 的密码",
+      "hint": "重置后该用户的所有登录会话立即失效，下次登录须修改密码。",
+      "done": "密码已重置"
+    },
+    "assignRoles": {
+      "user": "用户",
+      "roles": "可分配的角色",
+      "kept": "该用户另有 {count} 个已停用或你无权分配的角色，保存时保留不变。",
+      "done": "角色已更新",
+      "back": "返回用户列表",
+      "roleName": "角色名称",
+      "roleCode": "角色编码"
+    }
+  }
+}

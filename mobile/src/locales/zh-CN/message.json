@@ -1,0 +1,21 @@
+{
+  "bulletins": "公告",
+  "noBulletin": "暂无公告",
+  "inbox": "站内信",
+  "readAll": "全部已读",
+  "empty": "暂无站内信",
+  "systemSender": "系统",
+  "category": {
+    "system": "系统",
+    "business": "业务"
+  },
+  "detail": "消息详情",
+  "bulletinDetail": "公告详情",
+  "kind": {
+    "notice": "通知",
+    "announcement": "公告"
+  },
+  "summary": "{n} 条未读",
+  "summaryNone": "没有未读消息",
+  "unread": "未读"
+}

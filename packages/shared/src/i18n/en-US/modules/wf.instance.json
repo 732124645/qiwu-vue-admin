@@ -1,0 +1,14 @@
+{
+  "field": {
+    "wf": {
+      "instance": {
+        "modelKey": "Model key",
+        "businessKey": "Business document",
+        "formValues": "Form",
+        "initiatorPicks": "Picked users",
+        "state": "State",
+        "unread": "Unread only"
+      }
+    }
+  }
+}

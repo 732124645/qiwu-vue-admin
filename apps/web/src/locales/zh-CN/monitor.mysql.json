@@ -1,0 +1,16 @@
+{
+  "monitor": {
+    "mysql": {
+      "qps": "每秒查询数（平均）",
+      "connections": "连接数",
+      "bufferPool": "InnoDB 缓冲池",
+      "hitRate": "命中率",
+      "noPool": "数据库驱动未提供连接池状态。"
+    }
+  },
+  "menu": {
+    "monitor": {
+      "mysql": "数据库监控"
+    }
+  }
+}

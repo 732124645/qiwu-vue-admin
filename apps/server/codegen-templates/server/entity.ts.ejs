@@ -1,0 +1,28 @@
+import { Column, Entity } from 'typeorm'
+<%_ if (m.scope) { _%>
+import { DataScoped } from '<%= m.up %>core/data-scope/data-scope.js'
+<%_ } _%>
+import { <%= names([m.own.some((c) => c.base === 'decimal' && c.tsType === 'number') && 'decimalNumber', m.entityBase]) %> } from '<%= m.up %>core/db/base.entity.js'
+<%_ if (m.refs.length) { _%>
+import { referencedBy } from '<%= m.up %>core/db/references.js'
+
+// other tables' rows holding these ids, checked on delete (no foreign keys: core/db/references.ts)
+<%_ for (const r of m.refs) { _%>
+// <%= r.label %>
+referencedBy('<%= m.table %>', { table: '<%= r.table %>', column: '<%= r.column %>'<% if (r.cascade) { %>, cascade: true<% } %> })
+<%_ } _%>
+<%_ } _%>
+
+/** `<%= m.table %>`: <%= m.about %><% if (m.entityBase === 'CreatedEntity' || m.entityBase === 'IdEntity') { %> (append-only: no audit columns, read-only page)<% } %><% if (m.scope) { %>, data-scoped (see docs/design-notes.md#data-scope)<% } %> */
+@Entity('<%= m.table %>')
+<%_ if (m.scope) { _%>
+@DataScoped({ dept: '<%= m.scope.dept %>', owner: <% if (m.scope.owner) { %>'<%= m.scope.owner %>'<% } else { %>null<% } %> })
+<%_ } _%>
+export class <%= m.Biz %> extends <%= m.entityBase %> {
+<% for (const c of m.own) { -%>
+  /** <%= c.comment %> */
+  @Column(<%= c.entity %>)
+  <%= c.field %>: <%= c.ts %>
+
+<% } -%>
+}

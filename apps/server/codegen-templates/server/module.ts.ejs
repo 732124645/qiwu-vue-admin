@@ -1,0 +1,15 @@
+import { Module } from '@nestjs/common'
+import { TypeOrmModule } from '@nestjs/typeorm'
+import { <%= m.Biz %>Controller } from './<%= m.business %>.controller.js'
+import { <%= m.Biz %> } from './<%= m.business %>.entity.js'
+import { <%= m.Biz %>Service } from './<%= m.business %>.service.js'
+<%_ for (const sub of m.subs) { _%>
+import { <%= sub.Biz %> } from './<%= sub.file %>.entity.js'
+<%_ } _%>
+
+@Module({
+  imports: [TypeOrmModule.forFeature([<%= m.Biz %><% for (const sub of m.subs) { %>, <%= sub.Biz %><% } %>])],
+  controllers: [<%= m.Biz %>Controller],
+  providers: [<%= m.Biz %>Service],
+})
+export class <%= m.Biz %>Module {}

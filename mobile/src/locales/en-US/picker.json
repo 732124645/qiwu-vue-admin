@@ -1,0 +1,23 @@
+{
+  "select": "Select",
+  "empty": "Nothing matches",
+  "confirmCount": "Done ({count})",
+  "user": {
+    "title": "Select people",
+    "placeholder": "Select people",
+    "keyword": "Search username or name",
+    "nameKeyword": "Search name",
+    "allDepts": "All departments"
+  },
+  "dept": {
+    "title": "Select department",
+    "placeholder": "Select a department"
+  },
+  "upload": {
+    "file": "Upload file",
+    "image": "Upload image",
+    "hint": "Up to {limit} files, {size} each at most",
+    "limit": "At most {limit} files",
+    "tooLarge": "{name} is larger than {size} and was not uploaded"
+  }
+}

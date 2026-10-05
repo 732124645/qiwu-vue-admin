@@ -1,0 +1,29 @@
+{
+  "field": {
+    "iam": {
+      "menu": {
+        "parentId": "上级菜单",
+        "treePath": "祖先路径",
+        "kind": "菜单类型",
+        "name": "菜单名称",
+        "nameI18n": "多语言名称",
+        "zh-CN": "中文名称",
+        "en-US": "英文名称",
+        "routePath": "路由路径",
+        "component": "视图组件",
+        "componentName": "组件名",
+        "routeName": "路由名",
+        "routeQuery": "路由参数",
+        "linkType": "链接方式",
+        "linkUrl": "链接地址",
+        "perms": "权限点",
+        "icon": "图标",
+        "sortNo": "排序号",
+        "visible": "显示",
+        "keepAlive": "缓存页面",
+        "alwaysShow": "总是显示目录",
+        "enabled": "启用状态"
+      }
+    }
+  }
+}

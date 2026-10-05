@@ -1,0 +1,18 @@
+{
+  "messaging": {
+    "smsChannel": {
+      "entity": "短信渠道",
+      "debugHint": "调试模式只写一条日志，不会发送短信。",
+      "testConnection": "测试连接",
+      "testOk": "短信渠道连接成功",
+      "testFailed": "短信渠道连接失败",
+      "receiptUrl": "服务商回执推送地址（末尾接上回执密钥）：{url}",
+      "receiptUrlLater": "保存后在此显示服务商的回执推送地址。"
+    }
+  },
+  "menu": {
+    "messaging": {
+      "smsChannel": "短信渠道"
+    }
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "field": {
+    "monitor": {
+      "server": {
+        "cpu": "CPU",
+        "model": "型号",
+        "cores": "核心数",
+        "usage": "使用率",
+        "loadAvg": "平均负载",
+        "mem": "内存",
+        "total": "总量",
+        "used": "已用",
+        "disks": "磁盘",
+        "mount": "挂载点",
+        "fs": "文件系统",
+        "type": "类型",
+        "size": "容量",
+        "os": "操作系统",
+        "platform": "平台",
+        "distro": "发行版",
+        "release": "版本",
+        "arch": "架构",
+        "hostname": "主机名",
+        "uptime": "运行时长",
+        "node": "Node.js",
+        "version": "版本",
+        "v8": "V8 版本",
+        "process": "进程",
+        "pid": "进程 ID",
+        "rss": "常驻内存",
+        "heapTotal": "堆总量",
+        "heapUsed": "堆已用",
+        "external": "外部内存"
+      }
+    }
+  }
+}

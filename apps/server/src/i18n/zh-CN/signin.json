@@ -1,0 +1,17 @@
+{
+  "ok": "登录成功",
+  "unknown_user": "用户名不存在",
+  "disabled": "用户已停用",
+  "sms_code_invalid": "短信验证码错误或已过期",
+  "credentials_changed": "登录期间密码被修改或用户被停用，未创建会话",
+  "bind_refused": "账号已验证，但微信绑定被拒绝或已在此期间解除（该微信或该用户已绑定、凭据已变更或已解绑），未创建会话",
+  "bad_password": "密码错误",
+  "locked": "登录失败次数过多，该用户名在此 IP 锁定 {minutes} 分钟",
+  "ip_blocked": "IP 在登录黑名单中",
+  "captcha_required": "验证码票据缺失、无效或已过期",
+  "signout": "退出登录",
+  "refresh_reuse": "刷新令牌被重放，会话已吊销",
+  "lock_screen_exceeded": "锁屏密码错误次数过多，会话已吊销",
+  "password_check_exceeded": "当前密码错误次数过多，所有会话已吊销",
+  "kicked": "被管理员 {by} 强制下线"
+}

@@ -1,0 +1,95 @@
+/*
+ * bpmn-js in the app's look, loaded with bpmn-js by WfBpmnDesigner and WfBpmnViewer: the
+ * bpmn-io theme tokens behind the canvas, palette, context pad and popup menus resolve to --qw-* tokens (light
+ * and dark follow them; the renderer's default colors are tokens too, diagram.ts). Scoped to `.wf-bpmn`, so it
+ * wins over the bpmn-js sheets whatever order they load in. Markers: `qw-cond` = a flow with a condition
+ * (bpmn-js draws a gateway's conditional flows like plain ones), `qw-error` = a publish check error,
+ * `qw-done` / `qw-active` / `qw-stopped` / `qw-skipped` = the read-only diagram's progress. The
+ * renderer writes colors inline, hence `!important` on the markers. Nothing here targets the bpmn.io
+ * watermark (arch check bpmn-watermark).
+ */
+.wf-bpmn .bio-theme-parent {
+  --bio-surface: var(--qw-surface);
+  --bio-surface-overlay: var(--qw-surface);
+  --bio-surface-subtle: var(--qw-surface-2);
+  --bio-surface-medium: var(--qw-neutral-weak);
+  --bio-surface-inverted: var(--qw-text);
+  --bio-surface-inverted-subtle: var(--qw-text-2);
+  --bio-text: var(--qw-text);
+  --bio-text-subtle: var(--qw-text-2);
+  --bio-text-subtlest: var(--qw-text-3);
+  --bio-text-on-inverted: var(--qw-surface);
+  --bio-text-on-primary: var(--qw-on-brand);
+  --bio-border: var(--qw-border);
+  --bio-border-disabled: var(--qw-border);
+  --bio-primary: var(--qw-brand);
+  --bio-primary-surface: var(--qw-brand-weak);
+  --bio-danger: var(--qw-danger);
+  --bio-danger-surface-subtle: var(--qw-danger-weak);
+  --bio-focus: var(--qw-brand);
+  --bio-focus-surface: var(--qw-brand-weak);
+  --bio-canvas-accent: var(--qw-brand);
+  --bio-canvas-accent-subtle: var(--qw-brand-weak);
+  --bio-radius-sm: var(--qw-radius-sm);
+  --bio-radius-md: var(--qw-radius-sm);
+  --bio-radius-lg: var(--qw-radius);
+  --bjs-font-family: var(--qw-font);
+}
+
+.wf-bpmn .djs-connection.qw-cond .djs-visual > path {
+  stroke-dasharray: 8 4 !important;
+}
+
+.wf-bpmn .djs-shape.qw-error .djs-visual > :first-child {
+  fill: var(--qw-danger-weak) !important;
+  stroke: var(--qw-danger) !important;
+}
+
+.wf-bpmn .djs-connection.qw-error .djs-visual > path {
+  stroke: var(--qw-danger) !important;
+}
+
+/* progress: the canvas's outline and tint, a flow's line */
+.wf-bpmn .qw-done {
+  --wf-mark: var(--qw-success);
+  --wf-tint: var(--qw-success-weak);
+}
+.wf-bpmn .qw-active {
+  --wf-mark: var(--qw-brand);
+  --wf-tint: var(--qw-brand-weak);
+}
+.wf-bpmn .qw-stopped {
+  --wf-mark: var(--qw-danger);
+  --wf-tint: var(--qw-danger-weak);
+}
+.wf-bpmn .qw-skipped {
+  --wf-mark: var(--qw-text-3);
+  --wf-tint: var(--qw-canvas);
+}
+.wf-bpmn .djs-shape:is(.qw-done, .qw-active, .qw-stopped, .qw-skipped) .djs-visual > :first-child {
+  fill: var(--wf-tint) !important;
+  stroke: var(--wf-mark) !important;
+}
+.wf-bpmn .djs-connection:is(.qw-done, .qw-active, .qw-stopped, .qw-skipped) .djs-visual > path {
+  stroke: var(--wf-mark) !important;
+}
+.wf-bpmn .djs-shape.qw-skipped .djs-visual > text {
+  fill: var(--qw-text-3) !important;
+}
+
+/*
+ * The plate under the bpmn.io logo (designer and read-only diagram): the logo is 53 × 21 px, 15 px
+ * from the bottom and right edges; the plate reaches 6 px beyond it. Its own element under the logo (z-index
+ * 99 < 100, the same stacking context): nothing here styles the logo.
+ */
+.wf-bpmn .wf-bpmn__plate {
+  position: absolute;
+  right: 9px;
+  bottom: 9px;
+  z-index: 99;
+  width: 65px;
+  height: 33px;
+  pointer-events: none;
+  background: var(--qw-logo-plate);
+  border-radius: var(--qw-radius-sm);
+}

@@ -1,0 +1,16 @@
+{
+  "messaging": {
+    "inboxTemplate": {
+      "entity": "站内信模板",
+      "addTranslation": "添加翻译",
+      "testSend": "测试发送",
+      "testSent": "测试消息已发送",
+      "testFailed": "测试消息推送失败"
+    }
+  },
+  "menu": {
+    "messaging": {
+      "inboxTemplate": "站内信模板"
+    }
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "field": {
+    "monitor": {
+      "cache": {
+        "name": "Namespace",
+        "prefix": "Key prefix",
+        "clearable": "Clearable",
+        "masked": "Value hidden",
+        "ns": "Namespace",
+        "key": "Key",
+        "keys": "Keys",
+        "truncated": "Truncated",
+        "type": "Type",
+        "ttl": "TTL (s)",
+        "value": "Value",
+        "deleted": "Keys deleted"
+      }
+    }
+  }
+}

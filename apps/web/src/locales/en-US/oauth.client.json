@@ -1,0 +1,27 @@
+{
+  "oauth": {
+    "client": {
+      "entity": "client",
+      "grant": {
+        "authorization_code": "Authorization code",
+        "refresh_token": "Refresh token",
+        "client_credentials": "Client credentials"
+      },
+      "redirectHint": "Press Enter to add; HTTPS only, http://localhost for local testing",
+      "secretTitle": "Save the client secret",
+      "secretOnce": "The secret is shown this once only: save it now. If it is lost, reset it.",
+      "secretSaved": "I have saved it",
+      "copy": "Copy",
+      "copyFailed": "Copying failed: select the text and copy it yourself",
+      "resetConfirm": "The old secret stops working at once; apps using it need the new one. Reset the secret of {id}?"
+    },
+    "scope": {
+      "user_read": "Read your basic profile (username, name and avatar)"
+    }
+  },
+  "menu": {
+    "oauth": {
+      "client": "OAuth2 clients"
+    }
+  }
+}

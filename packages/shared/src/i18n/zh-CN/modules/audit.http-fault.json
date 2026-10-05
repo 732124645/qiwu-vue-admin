@@ -1,0 +1,23 @@
+{
+  "field": {
+    "audit": {
+      "httpFault": {
+        "traceId": "追踪 ID",
+        "userId": "用户 ID",
+        "username": "登录名",
+        "method": "请求方法",
+        "url": "请求路径",
+        "query": "查询参数",
+        "body": "请求体",
+        "ip": "IP 地址",
+        "userAgent": "User-Agent",
+        "errorName": "异常类型",
+        "errorMessage": "异常消息",
+        "stack": "堆栈",
+        "state": "处理状态",
+        "handledBy": "处理人 ID",
+        "handledAt": "处理时间"
+      }
+    }
+  }
+}

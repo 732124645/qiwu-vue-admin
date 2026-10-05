@@ -1,0 +1,310 @@
+<%_
+const like = m.filters.filter((c) => c.queryOp === 'like')
+const seeded = like.filter((c) => c.seedName)
+const excel = m.withExport || m.withImport
+const key = m.importKey
+const Nouns = m.nouns[0].toUpperCase() + m.nouns.slice(1)
+const ends = (c) => c.queryOp === 'between' ? [c.field + 'From', c.field + 'To'] : [c.field]
+// a tree (crud.ts `kind`): BaseTreeService, no options / import (crud.ts turns them off)
+const tree = m.kind === 'tree'
+const Base = tree ? 'BaseTreeService' : 'BaseCrudService'
+// a master-sub module (crud.ts `subs`): the document (the row with its sub rows) is written in one
+// transaction, the sub rows diffed against the stored ones
+const subs = m.subs
+// rich-text columns (crud.ts `rich`): sanitized on every write and on `get`; a master-sub service
+// already overrides create / update (its document), a writable other one gets the two overrides
+const rich = m.rich
+const secrets = m.secrets
+const own = (rich.length || secrets.length) && !subs.length && !m.readonly
+const sanitized = rich.length || subs.some((s) => s.rich.length)
+const typeorm = [own && 'type DeepPartial', own && 'type QueryDeepPartialEntity', m.filters.length && 'type SelectQueryBuilder'].filter(Boolean)
+_%>
+import { <%= names(['Injectable', subs.length && 'NotFoundException']) %> } from '@nestjs/common'
+import { TransactionHost } from '@nestjs-cls/transactional'
+import type { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm'
+<%_ if (subs.length) { _%>
+import type { <%= names([m.Biz + 'Create', ...subs.map((s) => s.Biz + 'Input'), m.filters.length && m.Biz + 'Query', m.withOptions && m.Biz + 'Option', m.Biz + 'Update']) %> } from '@qiwu/shared'
+<%_ } else if (m.withImport) { _%>
+import { <%= names([m.biz + 'Create', 'Err', 'type ImportMode', 'type ImportResult', m.withOptions && 'type ' + m.Biz + 'Option', m.filters.length && 'type ' + m.Biz + 'Query']) %> } from '@qiwu/shared'
+<%_ } else if (m.withOptions || m.filters.length) { _%>
+import type { <%= names([m.withOptions && m.Biz + 'Option', m.filters.length && m.Biz + 'Query']) %> } from '@qiwu/shared'
+<%_ } _%>
+<%_ if (typeorm.some((n) => !n.startsWith('type '))) { _%>
+import { <%= names(typeorm) %> } from 'typeorm'
+<%_ } else if (typeorm.length) { _%>
+import type { <%= names(typeorm.map((n) => n.slice(5))) %> } from 'typeorm'
+<%_ } _%>
+<%_ if (tree) { _%>
+import { BaseTreeService } from '<%= m.up %>core/db/base-tree.service.js'
+<%_ } else { _%>
+import { BaseCrudService } from '<%= m.up %>core/db/base-crud.service.js'
+<%_ } _%>
+<%_ if (secrets.length) { _%>
+import { SecretBox } from '<%= m.up %>core/crypto/secret-box.js'
+<%_ } _%>
+<%_ if (like.length) { _%>
+import { contains } from '<%= m.up %>core/db/page.js'
+<%_ } _%>
+<%_ if (subs.length) { _%>
+import { assertReferencesLive, softDeleteRows } from '<%= m.up %>core/db/references.js'
+<%_ } _%>
+<%_ if (m.withImport) { _%>
+import { type ExcelColumn, ExcelService } from '<%= m.up %>core/excel/excel.service.js'
+import { BizError } from '<%= m.up %>core/http/biz-error.js'
+import type { UploadedFileData } from '<%= m.up %>core/http/upload.js'
+<%_ } else if (excel) { _%>
+import type { ExcelColumn } from '<%= m.up %>core/excel/excel.service.js'
+<%_ } _%>
+<%_ if (seeded.length) { _%>
+import { seedKeysLike } from '<%= m.up %>core/i18n/seed-names.js'
+<%_ } _%>
+<%_ if (sanitized) { _%>
+import { sanitizeFields } from '<%= m.up %>core/sanitize.js'
+<%_ } _%>
+<%_ for (const sub of subs) { _%>
+import { <%= sub.Biz %> } from './<%= sub.file %>.entity.js'
+<%_ } _%>
+import { <%= m.Biz %> } from './<%= m.business %>.entity.js'
+<%_ if (excel) { _%>
+
+/** Excel columns in list order (headers: the field labels; dict columns as their labels). */
+export const <%= m.biz %>Columns: ExcelColumn[] = [
+<%_ for (const c of m.excel) { _%>
+  <%= c.excel %>,
+<%_ } _%>
+]
+<%_ } _%>
+<%_ if (rich.length) { _%>
+
+/** Rich-text columns: stored as the core/sanitize.ts allow-list leaves them (see docs/design-notes.md#security), whatever was sent. */
+const RICH_TEXT = [<% rich.forEach((c, i) => { %><% if (i) { %>, <% } %>'<%= c.field %>'<% }) %>]
+<%_ } _%>
+
+<%_ if (tree) { _%>
+/**
+ * <%= comment(Nouns) %>, a tree over BaseTreeService (docs/codegen-golden.md "Tree"): the forest list, the
+ * paths, moves with the whole subtree and the enable / delete rules are the base's. Uniqueness is the
+ * DB's (`unique(…, alive)`, errno 1062 → 409 `duplicate`); deletes are soft and check the references the
+ * entity registers (409 `in_use`).
+ */
+<%_ } else if (subs.length) { _%>
+/**
+ * <%= comment(Nouns) %> over BaseCrudService, each saved as one document with its <%= comment(subs.map((s) => s.prop).join(', ')) %>
+ * (docs/codegen-golden.md "Master-sub"): create / update write the row and its sub rows in one
+ * transaction, the base remove soft-deletes the row with its sub rows (the entity registers them as
+ * cascaded). Uniqueness is the DB's (`unique(…, alive)`, errno 1062 → 409 `duplicate`).
+ */
+<%_ } else { _%>
+/**
+ * <%= comment(Nouns) %> over BaseCrudService. Uniqueness is the DB's (`unique(…, alive)`, errno 1062 → 409
+ * `duplicate`); remove is the base soft delete, which checks the references the entity registers (409
+ * `in_use`). So create/update/remove are the base ones.
+ */
+<%_ } _%>
+@Injectable()
+export class <%= m.Biz %>Service extends <%= Base %><<%= m.Biz %>> {
+<%_ if (m.withImport) { _%>
+  constructor(
+    txHost: TransactionHost<TransactionalAdapterTypeOrm>,
+    private readonly excel: ExcelService,
+<%_ if (secrets.length) { _%>
+    private readonly box: SecretBox,
+<%_ } _%>
+  ) {
+<%_ } else { _%>
+<%_ if (secrets.length) { _%>
+  constructor(txHost: TransactionHost<TransactionalAdapterTypeOrm>, private readonly box: SecretBox) {
+<%_ } else { _%>
+  constructor(txHost: TransactionHost<TransactionalAdapterTypeOrm>) {
+<%_ } _%>
+<%_ } _%>
+    super(txHost, <%= m.Biz %>)
+  }
+<%_ if (rich.length) { _%>
+
+  /** GET /:id (the form, the detail drawer): the rich text as the allow-list leaves it, older rows too. */
+  override async get(id: number): Promise<<%= m.Biz %>> {
+    return sanitizeFields(await super.get(id), RICH_TEXT)
+  }
+<%_ } _%>
+<%_ if (own) { _%>
+
+<%_ if (secrets.length) { _%>
+  /** The request's plaintext fields are write-only; the insert answer is read with select:false. */
+  override async create(dto: DeepPartial<<%= m.Biz %>> & { <% for (const c of secrets) { %><%= c.secret.body %>?: string; <% } %> }): Promise<<%= m.Biz %>> {
+    const { <% for (const c of secrets) { %><%= c.secret.body %>, <% } %>...$rest } = dto
+    const row = await super.create(<% if (rich.length) { %>sanitizeFields(<% } %>{ ...$rest,<% for (const c of secrets) { %> <%= c.field %>: <%= c.secret.body %> ? this.box.encrypt(<%= c.secret.body %>) : null,<% } %> }<% if (rich.length) { %>, RICH_TEXT)<% } %>)
+    return this.get(row.id)
+  }
+
+  override update(id: number, dto: QueryDeepPartialEntity<<%= m.Biz %>> & { <% for (const c of secrets) { %><%= c.secret.body %>?: string; <% } %> }): Promise<void> {
+    const { <% for (const c of secrets) { %><%= c.secret.body %>, <% } %>...$rest } = dto
+    return super.update(id, <% if (rich.length) { %>sanitizeFields(<% } %>{ ...$rest,<% for (const c of secrets) { %> <%= c.field %>: <%= c.secret.body %> ? this.box.encrypt(<%= c.secret.body %>) : undefined,<% } %> }<% if (rich.length) { %>, RICH_TEXT)<% } %>)
+  }
+<%_ } else { _%>
+  override create(dto: DeepPartial<<%= m.Biz %>>): Promise<<%= m.Biz %>> {
+    return super.create(sanitizeFields(dto, RICH_TEXT))
+  }
+
+  override update(id: number, dto: QueryDeepPartialEntity<<%= m.Biz %>>): Promise<void> {
+    return super.update(id, sanitizeFields(dto, RICH_TEXT))
+  }
+<%_ } _%>
+<%_ } _%>
+<%_ if (subs.length) { _%>
+<%_ const rest = names(subs.map((s) => s.prop)) _%>
+
+  /** GET /:id: the row of the caller's scope (else 404) with its <%= comment(subs.map((s) => s.prop).join(', ')) %>. */
+  async detail(id: number): Promise<<%= m.Biz %> & {<% for (const sub of subs) { %> <%= sub.prop %>: <%= sub.Biz %>[];<% } %> }> {
+    const row = await this.get(id)
+    return Object.assign(row, {
+  <%_ for (const sub of subs) { _%>
+      <%= sub.prop %>: await this.txHost.tx.getRepository(<%= sub.Biz %>).find({
+        where: { <%= sub.fk.field %>: id },
+        order: { <% if (sub.sortNo) { %><%= sub.sortNo.field %>: 'ASC', <% } %>id: 'ASC' },
+      }),
+  <%_ } _%>
+    })
+  }
+
+  /** The row and its sub rows in one transaction; answers what GET /:id does. */
+  override create({ <%= rest %>, ...dto }: <%= m.Biz %>Create): Promise<<%= m.Biz %> & {<% for (const sub of subs) { %> <%= sub.prop %>: <%= sub.Biz %>[];<% } %> }> {
+    return this.txHost.withTransaction(async () => {
+      const { id } = await super.create(<% if (rich.length) { %>sanitizeFields(dto, RICH_TEXT)<% } else { %>dto<% } %>)
+  <%_ for (const sub of subs) { _%>
+      await this.save<%= sub.Prop %>(id, <%= sub.prop %>)
+  <%_ } _%>
+      return this.detail(id)
+    })
+  }
+
+  /** The fields sent; a sub-row list sent is the whole new list (diffed), one left out is kept. */
+  override update(id: number, { <%= rest %>, ...dto }: <%= m.Biz %>Update): Promise<void> {
+    return this.txHost.withTransaction(async () => {
+      // locks the row in the caller's scope first: the sub rows below are this document's
+      await super.update(id, <% if (rich.length) { %>sanitizeFields(dto, RICH_TEXT)<% } else { %>dto<% } %>)
+  <%_ for (const sub of subs) { _%>
+      if (<%= sub.prop %>) await this.save<%= sub.Prop %>(id, <%= sub.prop %>)
+  <%_ } _%>
+    })
+  }
+  <%_ for (const sub of subs) { _%>
+
+  /**
+   * The <%= comment(sub.prop) %> of row `<%= sub.fk.field %>` as sent, inside its write's transaction (the row locked or just
+   * added): one with the id of a stored one is updated, one without an id added, stored ones not sent
+   * deleted (soft, like every row); an id of any other row → 404 and the whole write is rolled back.
+   * A reference a row holds (registered by the table it points at) must name a live row, else 404
+   * (`assertReferencesLive`, as BaseCrudService does for the master); an update judges changed values only.
+   */
+  private async save<%= sub.Prop %>(<%= sub.fk.field %>: number, rows: <%= sub.Biz %>Input[]): Promise<void> {
+    const repo = this.txHost.tx.getRepository(<%= sub.Biz %>)
+    const stored = new Map((await repo.find({ where: { <%= sub.fk.field %> } })).map((r) => [r.id, r]))
+    const sent = new Set(rows.flatMap((r) => (r.id === undefined ? [] : [r.id])))
+    if ([...sent].some((id) => !stored.has(id))) throw new NotFoundException()
+    const gone = [...stored.keys()].filter((id) => !sent.has(id))
+    await softDeleteRows(this.txHost.tx, '<%= sub.table %>', gone)
+  <%_ if (sub.rich.length) { _%>
+    // rich text as the core/sanitize.ts allow-list leaves it
+    const clean = <T extends object>(row: T) => sanitizeFields(row, [<% sub.rich.forEach((c, i) => { %><% if (i) { %>, <% } %>'<%= c.field %>'<% }) %>])
+  <%_ } _%>
+    for (const { id, ...row } of rows)
+      if (id === undefined) {
+        const added = { ...<% if (sub.rich.length) { %>clean(row)<% } else { %>row<% } %>, <%= sub.fk.field %> }
+        await assertReferencesLive(this.txHost.tx, '<%= sub.table %>', added)
+        await repo.insert(added)
+      } else {
+        await assertReferencesLive(this.txHost.tx, '<%= sub.table %>', row, async () => stored.get(id)!)
+        await repo.update(id, <% if (sub.rich.length) { %>clean(row)<% } else { %>row<% } %>)
+      }
+  }
+  <%_ } _%>
+<%_ } _%>
+<%_ if (m.filters.length) { _%>
+
+  protected override filter(
+    qb: SelectQueryBuilder<<%= m.Biz %>>,
+    { <% m.filters.flatMap(ends).forEach((f, i) => { %><% if (i) { %>, <% } %><%= f %><% }) %> }: <%= m.Biz %>Query,
+  ): SelectQueryBuilder<<%= m.Biz %>> {
+  <%_ for (const c of m.filters) { _%>
+    <%_ if (c.queryOp === 'like' && c.seedName) { _%>
+    if (<%= c.field %>) {
+      // seeded names are keys (seed.<%= m.biz %>.*): also match the text users see, in any language
+      const seeded = seedKeysLike('seed.<%= m.biz %>.', <%= c.field %>)
+      qb.andWhere(
+        seeded.length ? '(t.<%= c.column %> LIKE :<%= c.field %> OR t.<%= c.column %> IN (:...seeded))' : 't.<%= c.column %> LIKE :<%= c.field %>',
+        { <%= c.field %>: contains(<%= c.field %>), seeded },
+      )
+    }
+    <%_ } else if (c.queryOp === 'like') { _%>
+    if (<%= c.field %>) qb.andWhere('t.<%= c.column %> LIKE :<%= c.field %>', { <%= c.field %>: contains(<%= c.field %>) })
+    <%_ } else if (c.queryOp === 'between') { _%>
+      <%_ const [from, to] = ends(c) _%>
+    if (<%= from %><% if (c.tsType === 'number') { %> !== undefined<% } %>) qb.andWhere('t.<%= c.column %> >= :<%= from %>', { <%= from %><% if (c.tsType === 'Date') { %>: new Date(<%= from %>)<% } %> })
+    if (<%= to %><% if (c.tsType === 'number') { %> !== undefined<% } %>) qb.andWhere('t.<%= c.column %> <= :<%= to %>', { <%= to %><% if (c.tsType === 'Date') { %>: new Date(<%= to %>)<% } %> })
+    <%_ } else if (c.tsType === 'string') { _%>
+    if (<%= c.field %>) qb.andWhere('t.<%= c.column %> = :<%= c.field %>', { <%= c.field %> })
+    <%_ } else { _%>
+    if (<%= c.field %> !== undefined) qb.andWhere('t.<%= c.column %> = :<%= c.field %>', { <%= c.field %> })
+    <%_ } _%>
+  <%_ } _%>
+    return qb
+  }
+<%_ } _%>
+<%_ if (m.withOptions) { _%>
+
+  /** <%= comment((m.enabled ? 'Enabled ' + m.nouns : Nouns) + ' in display order.') %> */
+  options(): Promise<<%= m.Biz %>Option[]> {
+    return this.scopedQb('t')
+      .select(['t.id', 't.<%= m.label.field %>'])
+  <%_ if (m.enabled) { _%>
+      .andWhere('t.enabled = :enabled', { enabled: true })
+  <%_ } _%>
+  <%_ if (m.sortNo) { _%>
+      .orderBy('t.<%= m.sortNo.field %>')
+      .addOrderBy('t.id')
+  <%_ } else { _%>
+      .orderBy('t.id')
+  <%_ } _%>
+      .getMany()
+  }
+<%_ } _%>
+<%_ if (m.withImport) { _%>
+
+  /**
+   * POST /import: each valid row through `create`<% if (key) { %>; `upsert` updates the row with that
+   * `<%= key.field %>` instead when the caller's data scope sees it (one outside it fails as a duplicate)<% } %>.
+   * Failed rows go to the downloadable error report.
+   */
+  async importXlsx(file: UploadedFileData | undefined, <% if (!key) { %>_<% } %>mode: ImportMode): Promise<ImportResult> {
+    if (!file) throw new BizError(Err.STORAGE_FILE_REQUIRED)
+    const { rows, failures } = await this.excel.read(file.buffer, <%= m.biz %>Columns, <%= m.biz %>Create)
+    const counts = { inserted: 0, updated: 0 }
+    for (const row of rows)
+      try {
+  <%_ if (key) { _%>
+        const found =
+          mode === 'upsert'
+            ? await this.scopedQb('t')
+                .select('t.id')
+                .andWhere('t.<%= key.column %> = :<%= key.field %>', { <%= key.field %>: row.value.<%= key.field %> })
+                .getOne()
+            : null
+        if (found) {
+          await this.update(found.id, row.value)
+          counts.updated++
+        } else {
+          await this.create(row.value)
+          counts.inserted++
+        }
+  <%_ } else { _%>
+        await this.create(row.value)
+        counts.inserted++
+  <%_ } _%>
+      } catch (e) {
+        failures.push(this.excel.failure(row, e))
+      }
+    return this.excel.result(counts, failures, <%= m.biz %>Columns)
+  }
+<%_ } _%>
+}

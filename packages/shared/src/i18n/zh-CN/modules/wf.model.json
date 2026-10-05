@@ -1,0 +1,31 @@
+{
+  "field": {
+    "wf": {
+      "model": {
+        "modelKey": "模型标识",
+        "name": "模型名称",
+        "category": "分类",
+        "icon": "图标",
+        "description": "说明",
+        "formKind": "表单类型",
+        "flowKind": "流程类型",
+        "formId": "绑定表单",
+        "createRoute": "发起页路由",
+        "viewComponent": "单据查看组件",
+        "initiatorScope": "发起范围",
+        "userIds": "用户",
+        "deptIds": "部门",
+        "roleIds": "角色",
+        "managerUserIds": "流程管理员",
+        "allowCancel": "允许发起人撤销",
+        "allowWithdraw": "允许审批人撤回",
+        "enabled": "是否启用",
+        "sortNo": "排序号",
+        "items": "模型",
+        "tree": "流程",
+        "xml": "BPMN 流程图",
+        "fields": "表单字段"
+      }
+    }
+  }
+}

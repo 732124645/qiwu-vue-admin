@@ -1,0 +1,30 @@
+<%_
+// the uni-app client's api file (docs/codegen-golden.md "Mobile"): mobile/src/core/crud.ts calls
+const B = m.Biz
+// a master-sub module (crud.ts `subs`): GET /:id answers the row with its sub rows
+const subs = m.subs.length > 0
+// a tree (crud.ts `kind`): the list is the whole filtered forest
+const tree = m.kind === 'tree'
+const base = tree ? 'treeApi' : 'crudApi'
+_%>
+import type { <%= names([!m.readonly && B + 'Create', subs && B + 'Detail', B + 'Vo']) %> } from '@qiwu/shared'
+import { <%= base %> } from '@/core/crud'
+<%_ if (subs) { _%>
+import { api } from '@/core/request'
+<%_ } _%>
+
+const BASE = '/<%= m.url %>'
+
+/** /api/<%= m.url %> for the mobile pages: the standard <%= tree ? 'tree' : 'CRUD' %> calls. */
+export const <%= m.biz %>Api = {
+<%_ if (m.readonly) { _%>
+  // read-only: the list and one row
+  ...crudApi<<%= B %>Vo>(BASE),
+<%_ } else { _%>
+  ...<%= base %><<%= B %>Vo, <%= B %>Create>(BASE),
+<%_ } _%>
+<%_ if (subs) { _%>
+  /** the row with its <%= comment(m.subs.map((s) => s.prop).join(', ')) %> (what the form edits and saves whole) */
+  get: (id: number) => api.get<<%= B %>Detail>(`${BASE}/${id}`),
+<%_ } _%>
+}

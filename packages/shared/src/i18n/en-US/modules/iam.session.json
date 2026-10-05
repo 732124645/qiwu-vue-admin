@@ -1,0 +1,26 @@
+{
+  "field": {
+    "iam": {
+      "session": {
+        "sid": "Session ID",
+        "userId": "User ID",
+        "username": "Username",
+        "deptName": "Department",
+        "userType": "User type",
+        "clientId": "Client",
+        "ip": "IP address",
+        "location": "Location",
+        "browser": "Browser",
+        "os": "OS",
+        "userAgent": "User agent",
+        "keepSignedIn": "Keep signed in",
+        "loginAt": "Signed in at",
+        "lastSeenAt": "Last seen",
+        "expiresAt": "Expires at",
+        "current": "Current session",
+        "sids": "Sessions",
+        "kicked": "Sessions ended"
+      }
+    }
+  }
+}

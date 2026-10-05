@@ -1,0 +1,43 @@
+{
+  "iam": {
+    "role": {
+      "entity": "角色",
+      "grant": {
+        "action": "菜单权限",
+        "title": "菜单权限：{name}",
+        "hint": "勾选该角色可以访问的菜单与操作。开启父子联动时，勾选下级会带上其上级，勾选上级会带上全部下级。",
+        "done": "菜单权限已保存"
+      },
+      "dataScope": {
+        "action": "数据权限",
+        "title": "数据权限：{name}",
+        "kept": "另有 {count} 个已选部门不在你可见的范围内，保存时保持不变",
+        "done": "数据权限已保存"
+      },
+      "tree": {
+        "link": "父子联动",
+        "checkAll": "全选",
+        "checkNone": "全不选"
+      },
+      "members": {
+        "back": "返回角色列表",
+        "role": "角色",
+        "assigned": "已分配用户",
+        "unassigned": "未分配用户",
+        "add": "分配",
+        "revoke": "取消分配",
+        "batchAdd": "批量分配",
+        "batchRevoke": "批量取消分配",
+        "confirmRevoke": "确定将选中的 {count} 个用户移出该角色吗？",
+        "added": "已分配",
+        "revoked": "已取消分配"
+      }
+    }
+  },
+  "menu": {
+    "iam": {
+      "role": "角色管理",
+      "roleUsers": "分配用户"
+    }
+  }
+}

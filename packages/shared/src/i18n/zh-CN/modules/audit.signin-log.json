@@ -1,0 +1,22 @@
+{
+  "field": {
+    "audit": {
+      "signinLog": {
+        "traceId": "追踪 ID",
+        "kind": "类型",
+        "userId": "用户 ID",
+        "username": "登录名",
+        "clientId": "客户端",
+        "ip": "IP 地址",
+        "location": "登录地点",
+        "browser": "浏览器",
+        "os": "操作系统",
+        "ok": "是否成功",
+        "msgKey": "提示键",
+        "msgParams": "提示参数",
+        "msg": "提示",
+        "userType": "用户类型"
+      }
+    }
+  }
+}

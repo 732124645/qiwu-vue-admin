@@ -1,0 +1,22 @@
+{
+  "field": {
+    "iam": {
+      "role": {
+        "name": "角色名称",
+        "code": "角色编码",
+        "sortNo": "排序号",
+        "dataScope": "数据范围",
+        "menuLink": "菜单父子联动",
+        "deptLink": "部门父子联动",
+        "isBuiltin": "内置",
+        "enabled": "启用状态",
+        "note": "备注",
+        "menuIds": "菜单权限",
+        "deptIds": "指定部门",
+        "userIds": "用户",
+        "keyword": "用户名或姓名",
+        "assigned": "是否已分配"
+      }
+    }
+  }
+}

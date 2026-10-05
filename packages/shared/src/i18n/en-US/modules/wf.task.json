@@ -1,0 +1,16 @@
+{
+  "field": {
+    "wf": {
+      "task": {
+        "comment": "Comment",
+        "formValues": "Form",
+        "to": "Send back to",
+        "userId": "User",
+        "userIds": "Users",
+        "kind": "Add-sign kind",
+        "taskIds": "Add-sign tasks",
+        "reason": "Note"
+      }
+    }
+  }
+}

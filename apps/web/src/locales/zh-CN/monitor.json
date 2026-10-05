@@ -1,0 +1,10 @@
+{
+  "common": {
+    "updatedAt": "更新于 {time}"
+  },
+  "duration": {
+    "dhm": "{d} 天 {h} 小时 {m} 分钟",
+    "hm": "{h} 小时 {m} 分钟",
+    "m": "{m} 分钟"
+  }
+}

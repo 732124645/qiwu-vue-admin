@@ -1,0 +1,31 @@
+{
+  "field": {
+    "wf": {
+      "model": {
+        "modelKey": "Model key",
+        "name": "Model name",
+        "category": "Category",
+        "icon": "Icon",
+        "description": "Description",
+        "formKind": "Form type",
+        "flowKind": "Process type",
+        "formId": "Form",
+        "createRoute": "Start page route",
+        "viewComponent": "Document view component",
+        "initiatorScope": "Who may start",
+        "userIds": "Users",
+        "deptIds": "Departments",
+        "roleIds": "Roles",
+        "managerUserIds": "Process managers",
+        "allowCancel": "Initiator may cancel",
+        "allowWithdraw": "Approver may withdraw",
+        "enabled": "Enabled",
+        "sortNo": "Sort order",
+        "items": "Models",
+        "tree": "Process",
+        "xml": "BPMN diagram",
+        "fields": "Form fields"
+      }
+    }
+  }
+}

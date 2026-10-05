@@ -1,0 +1,194 @@
+{
+  "easycom": {
+    "autoscan": true,
+    "custom": {
+      "^wd-(.*)": "@wot-ui/ui/components/wd-$1/wd-$1.vue",
+      "^(?!z-paging-refresh|z-paging-load-more)z-paging(.*)": "z-paging/components/z-paging$1/z-paging$1.vue"
+    }
+  },
+  "pages": [
+    {
+      "path": "pages/login/index",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTextStyle": "white"
+      }
+    },
+    {
+      "path": "pages/home/index",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTextStyle": "white",
+        "backgroundColorTop": "@heroBg"
+      }
+    },
+    {
+      "path": "pages/approval/index",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTextStyle": "white",
+        "backgroundColorTop": "@heroBg"
+      }
+    },
+    {
+      "path": "pages/message/index",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTextStyle": "white",
+        "backgroundColorTop": "@heroBg"
+      }
+    },
+    {
+      "path": "pages/mine/index",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTextStyle": "white",
+        "backgroundColorTop": "@heroBg"
+      }
+    }
+  ],
+  "subPackages": [
+    {
+      "root": "pages-wf",
+      "pages": [
+        {
+          "path": "start/index",
+          "style": {}
+        },
+        {
+          "path": "start/form",
+          "style": {}
+        },
+        {
+          "path": "detail/index",
+          "style": {}
+        }
+      ]
+    },
+    {
+      "root": "pages-biz",
+      "pages": [
+        {
+          "path": "leave/index",
+          "style": {}
+        },
+        {
+          "path": "leave/view",
+          "style": {}
+        },
+        {
+          "path": "demo/book/index",
+          "style": {}
+        },
+        {
+          "path": "demo/book/detail",
+          "style": {}
+        },
+        {
+          "path": "demo/book/form",
+          "style": {}
+        },
+        {
+          "path": "demo/topic/index",
+          "style": {}
+        },
+        {
+          "path": "demo/topic/detail",
+          "style": {}
+        },
+        {
+          "path": "demo/topic/form",
+          "style": {}
+        },
+        {
+          "path": "demo/invoice/index",
+          "style": {}
+        },
+        {
+          "path": "demo/invoice/detail",
+          "style": {}
+        },
+        {
+          "path": "demo/invoice/form",
+          "style": {}
+        }
+      ]
+    },
+    {
+      "root": "pages-sys",
+      "pages": [
+        {
+          "path": "inbox/detail",
+          "style": {}
+        },
+        {
+          "path": "bulletin/index",
+          "style": {}
+        },
+        {
+          "path": "bulletin/detail",
+          "style": {}
+        },
+        {
+          "path": "profile/index",
+          "style": {}
+        },
+        {
+          "path": "password/index",
+          "style": {}
+        },
+        {
+          "path": "about/index",
+          "style": {}
+        },
+        {
+          "path": "wx-bind/index",
+          "style": {
+            "navigationStyle": "custom",
+            "navigationBarTextStyle": "white"
+          }
+        }
+      ]
+    }
+  ],
+  "tabBar": {
+    "color": "@tabColor",
+    "selectedColor": "@tabSelected",
+    "backgroundColor": "@tabBg",
+    "borderStyle": "@tabBorder",
+    "list": [
+      {
+        "pagePath": "pages/home/index",
+        "text": "Workbench"
+      },
+      {
+        "pagePath": "pages/approval/index",
+        "text": "Approvals"
+      },
+      {
+        "pagePath": "pages/message/index",
+        "text": "Messages"
+      },
+      {
+        "pagePath": "pages/mine/index",
+        "text": "Me"
+      }
+    ]
+  },
+  "globalStyle": {
+    "navigationBarBackgroundColor": "@navBg",
+    "navigationBarTextStyle": "@navText",
+    "navigationBarTitleText": "Qiwu",
+    "backgroundColor": "@bg",
+    "backgroundTextStyle": "@bgText",
+    "backgroundColorTop": "@bg",
+    "backgroundColorBottom": "@bg",
+    "app-plus": {
+      "titleNView": {
+        "backButton": {
+          "color": "@navBack"
+        }
+      }
+    }
+  }
+}

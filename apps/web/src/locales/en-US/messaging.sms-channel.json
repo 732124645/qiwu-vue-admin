@@ -1,0 +1,18 @@
+{
+  "messaging": {
+    "smsChannel": {
+      "entity": "SMS channel",
+      "debugHint": "Debug writes one log line and sends no SMS.",
+      "testConnection": "Test connection",
+      "testOk": "SMS provider connection succeeded",
+      "testFailed": "SMS provider connection failed",
+      "receiptUrl": "Delivery-receipt callback URL for the provider (append the receipt secret): {url}",
+      "receiptUrlLater": "The delivery-receipt callback URL for the provider shows here once saved."
+    }
+  },
+  "menu": {
+    "messaging": {
+      "smsChannel": "SMS channels"
+    }
+  }
+}

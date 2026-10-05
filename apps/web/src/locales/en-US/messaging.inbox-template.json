@@ -1,0 +1,16 @@
+{
+  "messaging": {
+    "inboxTemplate": {
+      "entity": "inbox template",
+      "addTranslation": "Add translation",
+      "testSend": "Test send",
+      "testSent": "Test message sent",
+      "testFailed": "Test message delivery failed"
+    }
+  },
+  "menu": {
+    "messaging": {
+      "inboxTemplate": "Inbox templates"
+    }
+  }
+}

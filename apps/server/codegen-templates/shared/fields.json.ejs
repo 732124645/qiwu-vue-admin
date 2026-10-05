@@ -1,0 +1,20 @@
+<%_
+// field labels of the module's own columns, plus both ends of their ranges (created_at's are common)
+const RANGE = { 'zh-CN': ['起', '止'], 'en-US': [' (from)', ' (to)'] }[lang]
+const labels = {}
+for (const c of m.own) {
+  labels[c.secret ? c.secret.body : c.field] = c.label[lang]
+  if (c.inQuery && c.queryOp === 'between') {
+    labels[c.field + 'From'] = c.label[lang] + RANGE[0]
+    labels[c.field + 'To'] = c.label[lang] + RANGE[1]
+  }
+}
+// a master-sub module's sub rows: their list's label and their fields' (one validation domain for the
+// whole document; a sub field named like one of the master's shares its label)
+for (const sub of m.subs) {
+  labels[sub.prop] = sub.label[lang]
+  for (const c of sub.form) if (!(c.field in labels)) labels[c.field] = c.label[lang]
+}
+const [domain, biz] = m.key.split('.')
+_%>
+<%= json({ field: { [domain]: { [biz]: labels } } }) %>

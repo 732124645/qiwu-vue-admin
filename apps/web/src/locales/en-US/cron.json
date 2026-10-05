@@ -1,0 +1,6 @@
+{
+  "expression": "Cron expression",
+  "fields": "Second, minute, hour, day, month, weekday (0 = Sunday), separated by spaces",
+  "next": "Next {count} runs",
+  "nextFailed": "The next runs could not be loaded"
+}

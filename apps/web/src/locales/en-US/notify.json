@@ -1,0 +1,13 @@
+{
+  "bell": {
+    "label": "Notifications",
+    "labelUnread": "Notifications, {count} unread",
+    "title": "Bulletins",
+    "readAll": "Mark all as read",
+    "unreadMark": "Unread",
+    "empty": "No bulletins yet"
+  },
+  "bulletin": {
+    "close": "Close"
+  }
+}

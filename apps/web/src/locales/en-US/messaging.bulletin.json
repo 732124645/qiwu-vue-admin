@@ -1,0 +1,14 @@
+{
+  "messaging": {
+    "bulletin": {
+      "entity": "bulletin",
+      "receipts": "Readers",
+      "receiptsTitle": "Readers of “{title}”"
+    }
+  },
+  "menu": {
+    "messaging": {
+      "bulletin": "Bulletins"
+    }
+  }
+}

@@ -1,0 +1,71 @@
+{
+  "wf": {
+    "model": {
+      "entity": "流程模型",
+      "formKinds": {
+        "dynamic": "动态表单",
+        "custom": "业务表单"
+      },
+      "flowKinds": {
+        "tree": "树形",
+        "bpmn": "BPMN"
+      },
+      "list": {
+        "published": "已发布",
+        "yes": "已发布",
+        "no": "未发布",
+        "versions": "版本",
+        "moveUp": "上移 {name}",
+        "moveDown": "下移 {name}",
+        "design": "设计",
+        "wizard": "向导",
+        "truncated": "共 {total} 个模型，仅显示前 {max} 个，且此时不能调整顺序。请缩小筛选范围查找其余模型。",
+        "wizardTreeOnly": "向导只适用于树形流程，BPMN 流程请在设计页编辑"
+      },
+      "form": {
+        "scopeHint": "可以发起此流程的人：所列用户、所列部门（含下级部门）的成员、持有所列角色的用户；都不选表示所有人可发起。",
+        "managersHint": "审批节点找不到审批人且设置为“转交流程管理员”时，由这些用户处理。流程管理员还能在“审批数据”中查看并导出此流程的全部字段，包括任一节点隐藏的字段。修改流程管理员需要单独的权限（wf.model.managers）。",
+        "managersLocked": "你没有修改流程管理员的权限（wf.model.managers），此项保持不变。",
+        "noView": "找不到页面组件 src/views/{path}.vue",
+        "formHint": "发布时使用该表单的字段与布局；不选表单时沿用上一版本的字段。",
+        "flowKindHint": "创建后不能更改。树形：在节点树上添加审批、抄送与分支，简单直观；BPMN：以标准 BPMN 流程图绘制，可导入导出 .bpmn 文件。两种流程的审批方式相同。"
+      },
+      "versions": {
+        "title": "版本列表：{name}",
+        "version": "版本",
+        "current": "当前",
+        "publishedAt": "发布时间",
+        "publishedBy": "发布人",
+        "seeded": "系统初始化",
+        "none": "尚未发布",
+        "importJson": "导入 JSON",
+        "importTitle": "导入流程",
+        "badJson": "不是流程 JSON：需要一个含 tree 对象的 JSON 文件",
+        "exportJson": "导出 JSON",
+        "exportBpmn": "导出 BPMN"
+      },
+      "design": {
+        "back": "返回列表",
+        "saveDraft": "保存草稿",
+        "publish": "发布",
+        "draftSaved": "草稿已保存",
+        "draftUnreadable": "已保存的流程图草稿无法打开，现显示只含发起人节点的新流程图。请导入 .bpmn 文件或重新绘制，保存草稿后将替换原草稿。",
+        "confirmTitle": "发布流程",
+        "publishConfirm": "发布为 v{version}？之后发起的流程使用新版本，进行中的流程不受影响。",
+        "published": "已发布 v{version}",
+        "current": "当前版本 v{version}",
+        "leaveTitle": "未保存的修改",
+        "leaveConfirm": "流程设计有未保存的修改，确定离开并放弃这些修改吗？",
+        "leave": "离开",
+        "import": "导入",
+        "importTitle": "导入流程图",
+        "importHint": "支持 .bpmn / .xml 文件，以及从版本列表导出的流程 JSON；导入后请在画布上检查，再保存草稿或发布。",
+        "importConfirm": "导入会替换画布上的流程图，确定继续吗？",
+        "importWarnings": "导入时有以下提示：",
+        "importRenamed": "以下标识不符合 BPMN 的要求，已改为新标识：{ids}",
+        "badFile": "无法读取该文件：需要 BPMN 2.0 XML（.bpmn / .xml）或流程 JSON",
+        "exportBpmn": "导出 BPMN"
+      }
+    }
+  }
+}

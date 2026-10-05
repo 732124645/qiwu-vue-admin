@@ -1,0 +1,18 @@
+{
+  "field": {
+    "settings": {
+      "dictEntry": {
+        "dictCode": "Dictionary code",
+        "value": "Value",
+        "label": "Label",
+        "labelI18n": "Label per language",
+        "sortNo": "Sort order",
+        "tagType": "Tag style",
+        "cssClass": "CSS class",
+        "isDefault": "Default",
+        "enabled": "Enabled",
+        "note": "Note"
+      }
+    }
+  }
+}

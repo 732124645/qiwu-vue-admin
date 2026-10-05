@@ -1,0 +1,523 @@
+<%_
+const b = m.biz
+const T = m.table
+const P = m.parent.field
+const toggle = !!m.enabled
+const sorted = !!m.sortNo && m.sortNo.inForm
+const text = (c) => c.tsType === 'string' && c.base !== 'date' && c.base !== 'decimal' && !c.dict
+// rows are found by their ids; a text column searched by `like` (crud.ts `specKey`) also keys the tags
+// and gets the filter case
+const key = m.specKey
+// tags are PREFIX + a number + up to 4 more characters: the prefix is cut to fit the key column
+const PREFIX = `e2e-${m.business}-`.slice(0, (key ? key.length ?? 64 : 64) - 6)
+// a text column shorter than a tag gets the tag's end
+const TAG_MAX = PREFIX.length + 8
+// test data: required, unique (distinct per tag) and example fields; the parent is set per row
+const inBody = m.form.filter((c) => c !== m.parent && !c.secret && (c === key || c.required || c.example || c.unique))
+const rest = m.form.filter((c) => c !== m.parent && !c.secret && !inBody.includes(c) && (c.dflt || c.nullable))
+// a unique number: counted down from its maximum, one per tag
+const counted = inBody.filter((c) => c.unique && !c.example && c.tsType === 'number')
+// the field the 400 case empties or leaves out: the key, else a required one
+const bad = key ?? m.form.find((c) => c.required && !c.secret)
+const secrets = m.secrets
+const Node = m.Biz + 'Node'
+_%>
+// <%= m.key %> (generated tree, docs/codegen-golden.md "Tree"; see docs/design-notes.md#codegen, #api-envelope): the list as a filtered
+// forest, create under an enabled parent (tree_path = the parent's + own id), a move rewriting the whole
+// subtree's paths (never below itself)<% if (toggle) { %>, enable with the ancestors / no disable over an enabled child<% } %>,
+// no delete with children; 403 per permission, 400 translated, 404 unknown ids, @Idempotent, @ActionLog
+// rows, Swagger. Only the standard cases: module-specific ones go into a hand-written
+// <%= m.domain %>-<%= m.business %>-extra.e2e-spec.ts.
+import type { NestExpressApplication } from '@nestjs/platform-express'
+import { Test } from '@nestjs/testing'
+import { getDataSourceToken } from '@nestjs/typeorm'
+import { <%= names([b + 'Perms', 'Err', 'type ' + Node]) %> } from '@qiwu/shared'
+import { I18nService } from 'nestjs-i18n'
+import request from 'supertest'
+import type { DataSource } from 'typeorm'
+import { AppModule } from '../../src/app.module.js'
+import { setupApp } from '../../src/app.setup.js'
+<%_ if (secrets.length) { _%>
+import { SecretBox } from '../../src/core/crypto/secret-box.js'
+<%_ } _%>
+import { REDIS, type Redis } from '../../src/core/redis/redis.module.js'
+import { findId, insertRow } from '../../src/db/seeds/upsert.js'
+import { logOf } from '../setup/audit.js'
+import { bearer, signIn } from '../setup/auth.js'
+import { cleanRedis } from '../setup/redis.js'
+
+const PREFIX = '<%= PREFIX %>'
+const URL = '/api/<%= m.url %>'
+const MISSING = 999_999
+/** the form's fields, as the edit form sends them back */
+const FORM = [<% m.form.filter((c) => !c.secret).forEach((c, i) => { %><% if (i) { %>, <% } %>'<%= c.field %>'<% }) %>]
+
+let app: NestExpressApplication
+let ds: DataSource
+let redis: Redis
+let i18n: I18nService
+const tokens: Record<'admin' | 'reader' | 'plain', string> = { admin: '', reader: '', plain: '' }
+const userIds: number[] = []
+let roleId: number
+/** the table's last id before this spec: every row above it is this spec's (cleanup) */
+let lastId = 0
+
+const call = (
+  who: keyof typeof tokens,
+  method: 'get' | 'post' | 'put' | 'delete',
+  path = '',
+  body?: object,
+) => {
+  const req = request(app.getHttpServer())[method](`${URL}${path}`).set(bearer(tokens[who]))
+  return body ? req.send(body) : req
+}
+const create = (body: object) => call('admin', 'post', '', body)
+let seq = 0
+const unique = () => `${PREFIX}${++seq}`
+<%_ if (counted.length) { _%>
+const numbers = new Map<string, number>()
+/** A number of its own for `tag` (1, 2, … in the order tags are first seen). */
+const numberOf = (tag: string) => {
+  if (!numbers.has(tag)) numbers.set(tag, numbers.size + 1)
+  return numbers.get(tag)!
+}
+<%_ } _%>
+/** A valid POST body made of `tag` (required and unique fields, the configured examples), top level. */
+const body = (tag: string, over: object = {}) => ({
+<%_ for (const c of inBody) { _%>
+  <%_ if (c === key) { _%>
+  <%= c.field %>: tag,
+  <%_ } else if (c.example) { _%>
+  <%= c.field %>: <%= c.example %>,
+  <%_ } else if (c.base === 'decimal' && c.tsType === 'string') { _%>
+  <%= c.field %>: '<%= c.scale ? '1.' + '0'.repeat(c.scale) : '1' %>',
+  <%_ } else if (text(c) && (c.length ?? 64) < TAG_MAX) { _%>
+  <%= c.field %>: tag.slice(-<%= c.length %>),
+  <%_ } else if (text(c) && (c.length ?? 0) < 32) { _%>
+  <%= c.field %>: tag,
+  <%_ } else if (text(c)) { _%>
+  <%= c.field %>: `${tag} <%= c.field %>`,
+  <%_ } else if (c.base === 'boolean') { _%>
+  <%= c.field %>: true,
+  <%_ } else if (counted.includes(c)) { _%>
+  <%= c.field %>: <%= c.web.max ?? '999_999_999' %> - numberOf(tag),
+  <%_ } else if (c.tsType === 'number') { _%>
+  <%= c.field %>: 1,
+  <%_ } else if (c.base === 'date') { _%>
+  <%= c.field %>: '2024-01-01',
+  <%_ } else if (c.tsType === 'Date') { _%>
+  <%= c.field %>: '2024-01-01T08:00:00.000Z',
+  <%_ } else { _%>
+  <%= c.field %>: tag,
+  <%_ } _%>
+<%_ } _%>
+  ...over,
+})
+/** A row added through the API under `parent` (0 = top level), as POST answers it. */
+const add = async (parent: number, over: object = {}, tag = unique()) =>
+  (await create(body(tag, { <%= P %>: parent, ...over })).expect(201)).body.data
+/** The forest GET / answers for `query`. */
+const list = async (query: object = {}): Promise<<%= Node %>[]> =>
+  (await call('admin', 'get').query(query).expect(200)).body.data
+/** The node `id` anywhere in `nodes`. */
+const find = (nodes: <%= Node %>[], id: number): <%= Node %> | undefined => {
+  for (const n of nodes) {
+    const hit = n.id === id ? n : find(n.children, id)
+    if (hit) return hit
+  }
+}
+/** Id tree of nodes: `id` or `[id, children]`. */
+type Shape = number | [number, Shape[]]
+const shape = (nodes: <%= Node %>[]): Shape[] =>
+  nodes.map((n) => (n.children.length ? [n.id, shape(n.children)] : n.id))
+const pathOf = async (id: number): Promise<string> =>
+  (await ds.query('SELECT tree_path AS p FROM <%= T %> WHERE id = ?', [id]))[0].p
+/** Synthetic ASCII ancestor ids, ending in the real id, for exact column-length fixtures. */
+const setPathLength = async (id: number, length: number): Promise<string> => {
+  const prefix = `/${MISSING}/`
+  const padding = length - prefix.length - `${id}/`.length
+  const odd = padding % 2
+  const path = `${prefix}${'1/'.repeat((padding - odd * 3) / 2)}${odd ? '11/' : ''}${id}/`
+  expect(path).toHaveLength(length)
+  await ds.query('UPDATE <%= T %> SET tree_path = ? WHERE id = ?', [path, id])
+  return path
+}
+/** A translated message (the app's own translations). */
+const t = (lang: string, key: string, args?: object) => i18n.t(key, { lang, args }) as string
+const label = (lang: string, field: string) => t(lang, `field.<%= m.key %>.${field}`)
+const expectErr = (res: request.Response, status: number, code: string) => {
+  expect(res.status).toBe(status)
+  expect(res.body.code).toBe(code)
+}
+
+async function user(name: string, roles: number[]) {
+  const id = await insertRow(ds.manager, 'iam_user', {
+    username: PREFIX + name,
+    display_name: name,
+    password_hash: 'not-used-by-this-spec',
+    password_changed_at: new Date(),
+  })
+  for (const r of roles)
+    await ds.query('INSERT INTO iam_user_roles (user_id, role_id) VALUES (?, ?)', [id, r])
+  userIds.push(id)
+  return (await signIn(app, PREFIX + name)).accessToken
+}
+
+beforeAll(async () => {
+  const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile()
+  app = setupApp(moduleRef.createNestApplication<NestExpressApplication>({ logger: false }))
+  await app.listen(0, '127.0.0.1')
+  ds = app.get<DataSource>(getDataSourceToken())
+  redis = app.get(REDIS)
+  i18n = app.get(I18nService)
+  await cleanRedis(redis)
+  lastId = Number((await ds.query('SELECT COALESCE(MAX(id), 0) AS n FROM <%= T %>'))[0].n)
+  roleId = await insertRow(ds.manager, 'iam_role', {
+    code: `${PREFIX}reader`,
+    name: `${PREFIX}reader`,
+    data_scope: 'all',
+  })
+  const browse = await findId(ds.manager, 'iam_menu', { perms: <%= b %>Perms.browse })
+  await ds.query('INSERT INTO iam_role_menus (role_id, menu_id) VALUES (?, ?)', [roleId, browse])
+  tokens.admin = (await signIn(app)).accessToken
+  tokens.reader = await user('reader', [roleId])
+  tokens.plain = await user('plain', [])
+})
+
+afterAll(async () => {
+  if (ds) {
+    await ds.query('DELETE FROM <%= T %> WHERE id > ?', [lastId])
+    if (userIds.length) {
+      await ds.query('DELETE FROM iam_user_roles WHERE user_id IN (?)', [userIds])
+      await ds.query('DELETE FROM iam_user WHERE id IN (?)', [userIds])
+    }
+    await ds.query('DELETE FROM iam_role_menus WHERE role_id = ?', [roleId])
+    await ds.query('DELETE FROM iam_role WHERE id = ?', [roleId])
+  }
+  if (redis) await cleanRedis(redis)
+  await app?.close()
+})
+
+describe('tree', () => {
+  it.each([false, true])(
+    'path length: create and a move overflowing only a descendant (deleted=%s) return 422 without writes',
+    async (deleted) => {
+      const a = await add(0)
+      const b = await add(a.id)
+      const x = await add(0)
+      if (deleted) await call('admin', 'delete', `/${b.id}`).expect(200)
+      await setPathLength(x.id, 512)
+      const tag = unique()
+      const created = await create(body(tag, { <%= P %>: x.id })).set('Accept-Language', 'en-US')
+      expectErr(created, 422, Err.TREE_PATH_TOO_LONG.code)
+      expect(created.body.msg).toBe(t('en-US', Err.TREE_PATH_TOO_LONG.key))
+      expect(await ds.query('SELECT id FROM <%= T %> WHERE <%= m.parent.column %> = ?', [x.id])).toEqual([])
+      await ds.query('UPDATE <%= T %> SET updated_by = NULL WHERE id IN (?)', [[a.id, b.id]])
+      const rows = () =>
+        ds.query(
+          'SELECT <%= m.parent.column %>, tree_path, updated_by, updated_at, deleted_at FROM <%= T %> WHERE id IN (?) ORDER BY id',
+          [[a.id, b.id]],
+        )
+      const before = await rows()
+      const suffix = `${a.id}/${b.id}/`
+      const tooDeep = await setPathLength(x.id, 513 - suffix.length)
+      expect(`${tooDeep}${a.id}/`.length).toBeLessThan(512)
+      const moved = await call('admin', 'put', `/${a.id}`, { <%= P %>: x.id })
+      expectErr(moved, 422, Err.TREE_PATH_TOO_LONG.code)
+      expect(moved.body.msg).toBe(t('zh-CN', Err.TREE_PATH_TOO_LONG.key))
+      expect(await rows()).toEqual(before)
+      const boundary = await setPathLength(x.id, 512 - suffix.length)
+      await call('admin', 'put', `/${a.id}`, { <%= P %>: x.id }).expect(200)
+      expect(await pathOf(a.id)).toBe(`${boundary}${a.id}/`)
+      expect(await pathOf(b.id)).toBe(`${boundary}${suffix}`)
+      expect(await pathOf(b.id)).toHaveLength(512)
+      expect((await rows())[1].deleted_at !== null).toBe(deleted)
+    },
+  )
+
+<%_ if (secrets.length) { _%>
+  it('secrets are boxed on create and replace, hidden on every read, and kept when omitted', async () => {
+    const first = { <% for (const c of secrets) { %><%= c.secret.body %>: 'first-<%= c.secret.body %>', <% } %> }
+    const next = { <% for (const c of secrets) { %><%= c.secret.body %>: 'next-<%= c.secret.body %>', <% } %> }
+    const posted = (await create(body(unique(), first)).expect(201)).body.data
+    const id = posted.id as number
+    const box = app.get(SecretBox)
+    const stored = async () => (await ds.query('SELECT <% secrets.forEach((c, i) => { %><% if (i) { %>, <% } %><%= c.column %> AS <%= c.field %><% }) %> FROM <%= T %> WHERE id = ?', [id]))[0] as Record<string, string>
+    const hidden = (row: object) => {
+<%_ for (const c of secrets) { _%>
+      expect(row).not.toHaveProperty('<%= c.field %>')
+      expect(row).not.toHaveProperty('<%= c.secret.body %>')
+<%_ } _%>
+    }
+    hidden(posted)
+    hidden((await call('admin', 'get', `/${id}`).expect(200)).body.data)
+    hidden(find(await list(), id)!)
+    const before = await stored()
+<%_ for (const c of secrets) { _%>
+    expect(box.decrypt(before.<%= c.field %>)).toBe(first.<%= c.secret.body %>)
+<%_ } _%>
+    await call('admin', 'put', `/${id}`, {}).expect(200)
+    expect(await stored()).toEqual(before)
+    await call('admin', 'put', `/${id}`, { <% for (const c of secrets) { %><%= c.secret.body %>: '', <% } %> }).expect(200)
+    expect(await stored()).toEqual(before)
+    await call('admin', 'put', `/${id}`, next).expect(200)
+    const after = await stored()
+<%_ for (const c of secrets) { _%>
+    expect(after.<%= c.field %>).not.toBe(before.<%= c.field %>)
+    expect(box.decrypt(after.<%= c.field %>)).toBe(next.<%= c.secret.body %>)
+<%_ } _%>
+    hidden((await call('admin', 'get', `/${id}`).expect(200)).body.data)
+  })
+
+<%_ } _%>
+  it('create → 201 with the row: tree_path = own id at the top level, the parent path + own id below; get returns it; a PUT of the loaded row changes nothing', async () => {
+    const tag = unique()
+    const top = (await create(body(tag)).expect(201)).body.data
+    expect(top).toMatchObject({
+      id: expect.any(Number),
+      ...body(tag),
+      <%= P %>: 0,
+      treePath: `/${top.id}/`,
+<%_ for (const c of rest) { _%>
+      <%= c.field %>: <%= c.dflt ?? 'null' %>,
+<%_ } _%>
+      createdBy: expect.any(Number),
+    })
+    expect(new Date(top.createdAt).toISOString()).toBe(top.createdAt)
+    expect((await call('admin', 'get', `/${top.id}`).expect(200)).body.data).toEqual(top)
+    const child = await add(top.id)
+    expect(child).toMatchObject({ <%= P %>: top.id, treePath: `${top.treePath}${child.id}/` })
+    const loaded = Object.fromEntries(FORM.map((f) => [f, child[f]]))
+    await call('admin', 'put', `/${child.id}`, loaded).expect(200)
+    expect((await call('admin', 'get', `/${child.id}`).expect(200)).body.data).toMatchObject({
+      ...loaded,
+      treePath: child.treePath,
+    })
+  })
+
+  it('list: the whole forest, children under their parent<% if (sorted) { %> by <%= m.sortNo.field %>, id<% } else { %> by id<% } %>; top-level rows are the roots', async () => {
+    const a = await add(0)
+<%_ if (sorted) { _%>
+    const b = await add(a.id, { <%= m.sortNo.field %>: 2 })
+    const c = await add(a.id, { <%= m.sortNo.field %>: 1 })
+    const d = await add(b.id)
+    expect(shape([find(await list(), a.id)!])).toEqual([[a.id, [c.id, [b.id, [d.id]]]]])
+<%_ } else { _%>
+    const b = await add(a.id)
+    const c = await add(a.id)
+    const d = await add(b.id)
+    expect(shape([find(await list(), a.id)!])).toEqual([[a.id, [[b.id, [d.id]], c.id]]])
+<%_ } _%>
+    const all = await list()
+    expect(all.map((n) => n.id)).toContain(a.id)
+    expect(all.every((n) => n.<%= P %> === 0)).toBe(true)
+  })
+<%_ if (key || toggle) { _%>
+
+  it('list filters<% if (key) { %>: text contains (LIKE wildcards literal)<% } %><% if (toggle) { %><% if (key) { %>,<% } else { %>:<% } %> enabled equals<% } %>; a match whose parent does not match is a root', async () => {
+  <%_ if (key) { _%>
+    const tag = unique()
+    const a = await add(0, {}, `${tag}-a`)
+    const b = await add(a.id, {}, `${tag}-b`)
+    await add(0, {}, `${tag}_x`)
+    expect(shape(await list({ <%= key.field %>: `${tag}-b` }))).toEqual([b.id])
+    expect(shape(await list({ <%= key.field %>: `${tag}-` }))).toEqual([[a.id, [b.id]]])
+    // `%` and `_` in the filter are plain characters
+    expect((await list({ <%= key.field %>: `${tag}_` })).map((n) => n.<%= key.field %>)).toEqual([`${tag}_x`])
+  <%_ } _%>
+  <%_ if (toggle) { _%>
+    const on = await add(0)
+    const off = await add(on.id, { <%= m.enabled.field %>: false })
+    const disabled = await list({ <%= m.enabled.field %>: false })
+    expect(disabled.map((n) => n.id)).toContain(off.id)
+    expect(disabled.every((n) => !n.<%= m.enabled.field %> && !n.children.length)).toBe(true)
+    expect(find(await list({ <%= m.enabled.field %>: true }), off.id)).toBeUndefined()
+  <%_ } _%>
+  })
+<%_ } _%>
+
+  it('parent: <% if (toggle) { %>a disabled one → 422, <% } %>an unknown one → 404 (create and move), nothing written', async () => {
+<%_ if (toggle) { _%>
+    const off = await add(0, { <%= m.enabled.field %>: false })
+    expectErr(await create(body(unique(), { <%= P %>: off.id })), 422, Err.TREE_PARENT_DISABLED.code)
+<%_ } _%>
+    expectErr(await create(body(unique(), { <%= P %>: MISSING })), 404, Err.NOT_FOUND.code)
+    const a = await add(0)
+    expectErr(await call('admin', 'put', `/${a.id}`, { <%= P %>: MISSING }), 404, Err.NOT_FOUND.code)
+<%_ if (toggle) { _%>
+    expectErr(await call('admin', 'put', `/${a.id}`, { <%= P %>: off.id }), 422, Err.TREE_PARENT_DISABLED.code)
+<%_ } _%>
+    expect(await pathOf(a.id)).toBe(`/${a.id}/`)
+  })
+
+  it('move: one statement rewrites the paths of the whole subtree; never below itself (422); to the top level and back', async () => {
+    const a = await add(0)
+    const b = await add(a.id)
+    const c = await add(b.id)
+    const x = await add(0)
+    // a deleted row under it moves too (paths stay consistent)
+    const gone = await add(b.id)
+    await call('admin', 'delete', `/${gone.id}`).expect(200)
+    await call('admin', 'put', `/${a.id}`, { <%= P %>: x.id }).expect(200)
+    expect((await call('admin', 'get', `/${a.id}`).expect(200)).body.data).toMatchObject({
+      <%= P %>: x.id,
+      treePath: `${x.treePath}${a.id}/`,
+    })
+    expect(await pathOf(b.id)).toBe(`${x.treePath}${a.id}/${b.id}/`)
+    expect(await pathOf(c.id)).toBe(`${x.treePath}${a.id}/${b.id}/${c.id}/`)
+    expect(await pathOf(gone.id)).toBe(`${x.treePath}${a.id}/${b.id}/${gone.id}/`)
+    expect(shape([find(await list(), x.id)!])).toEqual([[x.id, [[a.id, [[b.id, [c.id]]]]]]])
+    for (const parent of [a.id, b.id, c.id]) {
+      const res = await call('admin', 'put', `/${a.id}`, { <%= P %>: parent })
+      expectErr(res, 422, Err.TREE_PARENT_INVALID.code)
+      expect(res.body.msg).toBe(t('zh-CN', Err.TREE_PARENT_INVALID.key))
+    }
+    expect(await pathOf(c.id)).toBe(`${x.treePath}${a.id}/${b.id}/${c.id}/`)
+    await call('admin', 'put', `/${b.id}`, { <%= P %>: 0 }).expect(200)
+    expect(await pathOf(c.id)).toBe(`/${b.id}/${c.id}/`)
+    await call('admin', 'put', `/${b.id}`, { <%= P %>: a.id }).expect(200)
+    expect(await pathOf(c.id)).toBe(`${x.treePath}${a.id}/${b.id}/${c.id}/`)
+  })
+<%_ if (toggle) { _%>
+
+  it('enabled: no disable over an enabled child (422); enabling a row enables its disabled ancestors', async () => {
+    const a = await add(0)
+    const b = await add(a.id)
+    const c = await add(b.id)
+    const res = await call('admin', 'put', `/${a.id}/enabled`, { enabled: false })
+    expectErr(res, 422, Err.TREE_CHILD_ENABLED.code)
+    expect(res.body.msg).toBe(t('zh-CN', Err.TREE_CHILD_ENABLED.key))
+    for (const id of [c.id, b.id, a.id])
+      await call('admin', 'put', `/${id}/enabled`, { enabled: false }).expect(200)
+    await call('admin', 'put', `/${c.id}`, { <%= m.enabled.field %>: true }).expect(200)
+    for (const id of [a.id, b.id, c.id])
+      expect((await call('admin', 'get', `/${id}`).expect(200)).body.data.<%= m.enabled.field %>).toBe(true)
+  })
+<%_ } _%>
+
+  it('delete: a row with children → 409 has_children; a leaf, then its parent (soft: the rows stay, marked deleted)', async () => {
+    const a = await add(0)
+    const b = await add(a.id)
+    const res = await call('admin', 'delete', `/${a.id}`)
+    expectErr(res, 409, Err.TREE_HAS_CHILDREN.code)
+    expect(res.body.msg).toBe(t('zh-CN', Err.TREE_HAS_CHILDREN.key))
+    await call('admin', 'delete', `/${b.id}`).expect(200)
+    await call('admin', 'delete', `/${a.id}`).expect(200)
+    await call('admin', 'get', `/${a.id}`).expect(404)
+    expect(await ds.query('SELECT id FROM <%= T %> WHERE id IN (?) AND deleted_at IS NULL', [[a.id, b.id]])).toEqual([])
+    expect(await ds.query('SELECT id FROM <%= T %> WHERE id IN (?)', [[a.id, b.id]])).toHaveLength(2)
+  })
+})
+
+describe('errors', () => {
+  it('403 per permission: browse-only may list, not view/create/modify/delete; no perm → no list', async () => {
+    const { id } = await add(0)
+    await call('reader', 'get').expect(200)
+    for (const res of await Promise.all([
+      call('reader', 'get', `/${id}`),
+      call('reader', 'post', '', body(unique())),
+      call('reader', 'put', `/${id}`, {}),
+<%_ if (toggle) { _%>
+      call('reader', 'put', `/${id}/enabled`, { enabled: false }),
+<%_ } _%>
+      call('reader', 'delete', `/${id}`),
+      call('plain', 'get'),
+    ]))
+      expectErr(res, 403, Err.FORBIDDEN.code)
+  })
+
+  it('400: invalid body<% if (toggle) { %> / query<% } %> / id, with translated field messages', async () => {
+<%_ if (bad) { _%>
+    const required = (lang: string, field: string) =>
+      t(lang, 'validation.required', { field: label(lang, field) })
+    expect(label('zh-CN', '<%= bad.field %>')).not.toMatch(/^field\./)
+    expect(label('en-US', '<%= bad.field %>')).not.toMatch(/^field\./)
+  <%_ if (bad === key) { _%>
+    const invalid = { ...body(unique()), <%= P %>: -1, <%= bad.field %>: '' }
+  <%_ } else { _%>
+    const { <%= bad.field %>: _left, ...left } = body(unique())
+    const invalid = { ...left, <%= P %>: -1 }
+  <%_ } _%>
+    const zh = await create(invalid).expect(400)
+    expect(zh.body.code).toBe(Err.VALIDATION_FAILED.code)
+    expect(zh.body.errors.map((e: { path: string }) => e.path)).toEqual(
+      FORM.filter((f) => f === '<%= P %>' || f === '<%= bad.field %>'),
+    )
+    const en = await create(invalid).set('Accept-Language', 'en-US').expect(400)
+    expect(en.body.errors).toContainEqual({ path: '<%= bad.field %>', msg: required('en-US', '<%= bad.field %>') })
+<%_ } else { _%>
+    const zh = await create(body(unique(), { <%= P %>: -1 })).expect(400)
+    expect(zh.body.code).toBe(Err.VALIDATION_FAILED.code)
+    expect(zh.body.errors.map((e: { path: string }) => e.path)).toEqual(['<%= P %>'])
+<%_ } _%>
+<%_ if (toggle) { _%>
+    const { id } = await add(0)
+    await call('admin', 'get').query({ <%= m.enabled.field %>: 'maybe' }).expect(400)
+    await call('admin', 'put', `/${id}/enabled`, { enabled: 'no' }).expect(400)
+<%_ } _%>
+    await call('admin', 'get', '/abc').expect(400)
+  })
+
+  it('404: unknown ids for get, update<% if (toggle) { %>, enabled<% } %>, delete', async () => {
+    for (const res of [
+      await call('admin', 'get', `/${MISSING}`),
+      await call('admin', 'put', `/${MISSING}`, {}),
+<%_ if (toggle) { _%>
+      await call('admin', 'put', `/${MISSING}/enabled`, { enabled: true }),
+<%_ } _%>
+      await call('admin', 'delete', `/${MISSING}`),
+    ])
+      expectErr(res, 404, Err.NOT_FOUND.code)
+  })
+
+  it('the same create submitted twice within 3 s → 429 (@Idempotent)', async () => {
+    const tag = unique()
+    await create(body(tag)).expect(201)
+    expectErr(await create(body(tag)), 429, Err.TOO_MANY_REQUESTS.code)
+  })
+})
+
+it('@ActionLog: every write leaves a row with domain <%= m.key %>, its verb and the id', async () => {
+  const trace = `${PREFIX}${process.pid}-`
+  const created = await create(body(unique())).set('X-Request-Id', `${trace}c`).expect(201)
+  const { id } = created.body.data
+  await call('admin', 'put', `/${id}`, {}).set('X-Request-Id', `${trace}u`)
+<%_ if (toggle) { _%>
+  await call('admin', 'put', `/${id}/enabled`, { enabled: false }).set('X-Request-Id', `${trace}e`)
+<%_ } _%>
+  await call('admin', 'delete', `/${id}`).set('X-Request-Id', `${trace}d`)
+  await call('admin', 'delete', `/${MISSING}`).set('X-Request-Id', `${trace}m`)
+  const expected: [string, object][] = [
+    ['c', { verb: 'create', biz_id: String(id), ok: 1 }],
+    ['u', { verb: 'modify', biz_id: String(id), ok: 1 }],
+<%_ if (toggle) { _%>
+    ['e', { verb: 'modify', biz_id: String(id), ok: 1 }],
+<%_ } _%>
+    ['d', { verb: 'remove', biz_id: String(id), ok: 1 }],
+    ['m', { verb: 'remove', biz_id: String(MISSING), ok: 0, error_msg: Err.NOT_FOUND.key }],
+  ]
+  for (const [suffix, row] of expected)
+    expect(await logOf(ds, `${trace}${suffix}`)).toMatchObject({
+      domain: '<%= m.key %>',
+      username: 'admin',
+      ...row,
+    })
+})
+
+it('Swagger documents every route', async () => {
+  const doc = (await request(app.getHttpServer()).get('/api/docs-json').expect(200)).body
+  expect(
+    Object.keys(doc.paths)
+      .filter((p) => p.startsWith(URL))
+      .sort(),
+  ).toEqual([
+    URL,
+    `${URL}/{id}`,
+<%_ if (toggle) { _%>
+    `${URL}/{id}/enabled`,
+<%_ } _%>
+  ])
+  expect(
+    doc.paths[URL].get.responses['200'].content['application/json'].schema.properties.data,
+  ).toMatchObject({ type: 'array' })
+})

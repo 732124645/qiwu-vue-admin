@@ -1,0 +1,13 @@
+{
+  "messaging": {
+    "inbox": {
+      "entity": "站内信",
+      "recipient": "收件人"
+    }
+  },
+  "menu": {
+    "messaging": {
+      "inbox": "站内信"
+    }
+  }
+}

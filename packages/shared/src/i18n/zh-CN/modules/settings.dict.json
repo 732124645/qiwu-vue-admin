@@ -1,0 +1,13 @@
+{
+  "field": {
+    "settings": {
+      "dict": {
+        "code": "字典编码",
+        "name": "字典名称",
+        "nameI18n": "多语言名称",
+        "enabled": "启用状态",
+        "note": "备注"
+      }
+    }
+  }
+}

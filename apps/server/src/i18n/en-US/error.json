@@ -1,0 +1,112 @@
+{
+  "common": {
+    "bad_request": "Invalid request",
+    "validation_failed": "The request did not pass validation",
+    "unauthenticated": "You are not signed in or your session has ended. Please sign in again",
+    "forbidden": "You do not have permission to do this",
+    "not_found": "The requested resource does not exist",
+    "conflict": "The data has changed. Please refresh and try again",
+    "duplicate": "This record already exists",
+    "in_use": "This record is in use and cannot be deleted",
+    "payload_too_large": "The request is too large",
+    "unprocessable": "The request cannot be processed",
+    "too_many_requests": "Too many requests. Please try again later",
+    "internal": "Something went wrong on the server. Please try again later",
+    "demo_read_only": "This action is unavailable in demo mode."
+  },
+  "auth": {
+    "bad_credentials": "Incorrect username or password",
+    "locked": "Too many failed sign-in attempts. Please try again later",
+    "ip_blocked": "Access from this IP address is blocked",
+    "signup_disabled": "Sign-up is currently disabled",
+    "sms_code_invalid": "The verification code is wrong or has expired",
+    "password_change_required": "Please change your password first",
+    "session_expired": "Your session has expired. Please sign in again",
+    "refresh_rejected": "Your sign-in is no longer valid. Please sign in again",
+    "origin_rejected": "The request origin is not allowed",
+    "old_password_wrong": "The old password is incorrect",
+    "password_unchanged": "The new password must differ from the old one",
+    "password_wrong": "The password is incorrect",
+    "captcha_invalid": "The verification answer is invalid or has expired. Get a new challenge",
+    "captcha_required": "Complete verification before continuing",
+    "wx_mp_code_invalid": "The WeChat sign-in code is invalid or was used. Please reopen the mini program",
+    "wx_mp_ticket_invalid": "The account linking request has expired. Reopen the mini program and try linking again",
+    "wx_mp_bound": "This WeChat account is linked to another account",
+    "wx_mp_user_bound": "This account is already linked to a WeChat account. Unlink it in your profile first",
+    "wx_mp_refused": "The account linked to this WeChat account is disabled",
+    "wx_mp_upstream": "The WeChat service is unavailable. Please try again later"
+  },
+  "excel": {
+    "invalid": "The file is not a valid Excel (.xlsx) workbook",
+    "unsafe": "The file contains macros, external links or embedded objects and was rejected",
+    "too_many_rows": "More than {max} data rows",
+    "too_many_columns": "More than {max} columns",
+    "no_columns": "The header row does not match the import template. Please use the downloaded template"
+  },
+  "tree": {
+    "parent_invalid": "The parent cannot be the item itself or one below it",
+    "parent_disabled": "The parent is disabled: nothing can be added or moved under it",
+    "child_enabled": "An item below it is still enabled, so it cannot be disabled",
+    "has_children": "It still has items below it and cannot be deleted",
+    "path_too_long": "The tree path is too long. Choose a parent closer to the root."
+  },
+  "iam": {
+    "grant_exceeds_own": "You cannot grant a role beyond your own permissions or data scope",
+    "user_self": "You cannot delete or disable your own account",
+    "user_protected": "The super administrator account is protected against this action",
+    "initial_password_unset": "The initial password parameter is not set or does not meet the password policy. Please enter a password",
+    "dept_has_users": "The department still has users and cannot be deleted",
+    "menu_parent_kind": "This kind of menu cannot go under the chosen parent (actions go under pages, nothing goes under an action)",
+    "menu_granted": "The menu is granted to roles. Remove it from those roles before deleting it",
+    "role_builtin": "Built-in roles are protected against this action",
+    "role_has_users": "The role is assigned to users. Remove them from it before deleting it",
+    "own_mobile_in_profile": "Change your own mobile number in your profile (password and SMS code required)",
+    "mobile_change_unavailable": "SMS codes are not set up, so the mobile number cannot be changed here; ask an administrator to change it",
+    "menu_route_name_fixed": "A group's route name cannot be changed once saved: seeds and generated pages find the group by it"
+  },
+  "storage": {
+    "file_required": "Please choose a file to upload",
+    "type_rejected": "The file type (.{ext}) is not allowed, or the content does not match the extension",
+    "public_image_only": "Only PNG, JPEG, GIF or WebP images can be uploaded here",
+    "endpoint_refused": "This endpoint is not allowed (an internal address or an unregistered port)",
+    "primary_locked": "The primary storage cannot be disabled or deleted, and a disabled storage cannot become primary",
+    "driver_fixed": "A storage keeps the driver it was added with",
+    "direct_unavailable": "The primary storage does not take direct uploads: upload through the server",
+    "upload_mismatch": "The uploaded file does not match the size or type it was signed for, so it was deleted",
+    "ref_invalid": "A referenced file cannot be used: only files you uploaded yourself and have not used yet can be attached. Upload it again",
+    "secret_required": "Re-enter the secret key after changing the storage connection settings."
+  },
+  "codegen": {
+    "table_unavailable": "Table {table} is not available: it does not exist in this database, is a framework table (meta_, test_, cg_) or has already been imported",
+    "identifier_invalid": "{name} cannot be used by the code generator: table and column names may only contain lowercase letters, digits and underscores and must start with a letter, class and property names must not be reserved words or names the generated code uses already, and a project domain must not be a reserved name",
+    "options_label_missing": "Table {table} has no text column to label its options (a name, a title or another text column), so the options endpoint cannot be switched on",
+    "tree_columns": "Table {table} cannot use the tree template: it needs the columns parent_id and tree_path (properties parentId, treePath) and a text label column",
+    "write_disabled": "Writing generated code is off on this server: files are written into the workspace only in development (NODE_ENV=development and CODEGEN_WRITE=true); use preview or download instead",
+    "path_conflict": "Several of the selected configs generate the same file {path} (same group, domain and business name); change one of them and try again",
+    "sub_tables": "Table {table} cannot use the master-detail template: a master needs at least one sub-table config pointing at it, and a sub-table config needs another config as its master and one of its own integer columns as the foreign key",
+    "parent_menu": "The parent menu {name} is not a group menu whose own route name and every parent group's are in the generator format (lowercase letters, digits, hyphens): pick another group from the list",
+    "reference": "The reference {table}.{column} is invalid: it must be a column of a table of this database that has a deleted_at column",
+    "no_deleted_at": "Table {table} has no deleted_at column, so it cannot be imported or generated: the generated code soft-deletes; add the column deleted_at datetime(3) NULL first",
+    "name_conflict": "This conflicts with the generator config of table {table}: the same class name (and exported identifiers) or the same domain and business name; change the class name, domain or business name of one of them",
+    "route_name_clash": "The generated page's route name {name} is already a menu group's or a button's route name, or one of its parent groups': change the domain or business name"
+  },
+  "settings": {
+    "param_builtin": "Built-in parameters cannot be deleted, and their public access setting cannot be changed",
+    "param_secret_public": "A secret parameter cannot be public"
+  },
+  "scheduler": {
+    "handler_unknown": "Handler {handler} does not exist: pick one of the registered handlers"
+  },
+  "wf": {
+    "no_assignee": "Step {node} has no available approver. Ask an administrator to check the process approvers and managers",
+    "bad_target": "Pick enabled users who have no open task on this step",
+    "handler_missing": "Model {modelKey} uses a custom form but has no business handler registered, so it cannot be published",
+    "comment_required": "This step requires a comment"
+  },
+  "oauth": {
+    "client_invalid": "Invalid client: it is unknown, disabled or does not use the authorization code grant, or the redirect URI is not registered",
+    "request_invalid": "Invalid authorization request: response_type must be code and the requested scopes must be among the client's",
+    "insufficient_scope": "This token acts for no user and cannot read user info",
+    "client_builtin": "Built-in clients are protected against this action"
+  }
+}

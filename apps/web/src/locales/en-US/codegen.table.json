@@ -1,0 +1,100 @@
+{
+  "codegen": {
+    "table": {
+      "entity": "generator config",
+      "close": "Close",
+      "templates": {
+        "crud": "Single table",
+        "tree": "Tree",
+        "master_sub": "Master-detail"
+      },
+      "action": {
+        "import": "Import tables",
+        "sync": "Sync",
+        "preview": "Preview",
+        "download": "Download code",
+        "write": "Write to workspace",
+        "batchDownload": "Download selected",
+        "batchWrite": "Write selected"
+      },
+      "import": {
+        "title": "Import tables",
+        "hint": "Tables of this database not imported yet (framework tables meta_, test_, cg_ left out)",
+        "filter": "Filter by name or comment",
+        "empty": "No tables to import",
+        "submit": "Import selected",
+        "done": "{count} table(s) imported",
+        "noDeletedAt": "No deleted_at column: add deleted_at datetime(3) NULL to import it (the generated code soft-deletes)",
+        "noAlive": "The unique key {key} of {table} lacks the alive column, so values in deleted rows cannot be reused. Change the unique key to (…, alive).",
+        "noParentMenu": "Table {table}: no menu group {key} (or subgroup) is available for this page, so its parent defaults to Business (biz). Create a group in Menus, then select it on the Generation tab."
+      },
+      "sync": {
+        "confirm": "Read the columns of {table} from the database again? Config you changed by hand is kept.",
+        "done": "Synced: {added} column(s) added, {removed} removed, {changed} changed"
+      },
+      "edit": {
+        "back": "Back to the list",
+        "basic": "Basic info",
+        "columns": "Columns",
+        "generate": "Generation",
+        "texts": "Texts in both languages",
+        "tree": "Tree settings",
+        "options": "Generated parts",
+        "menu": "Menu",
+        "treeIgnores": "A tree gets no detail drawer, read-only page, export, import or options endpoint",
+        "masterSubHint": "Master-detail: in each detail table's generator config, select this table as the master and specify the foreign key column. Previewing or downloading the master generates the entire module.",
+        "masterNone": "Not a detail table",
+        "dataScope": "Data scope by department",
+        "parentMenuHint": "The generated menu goes into this group",
+        "parentMenuUnpickable": "{name} ({reason})",
+        "parentMenuReason": {
+          "route_name": "its route name is missing or not lowercase letters, digits and hyphens",
+          "ancestor": "a group above it has no such route name"
+        },
+        "column": "Column",
+        "invalid": "{where}: {message}",
+        "referencedByHint": "Columns in other tables that store IDs of this table's records (without database foreign keys). A record cannot be deleted while another record that has not been deleted references it. Select or enter a table in this database with a deleted_at column, and the referencing column."
+      },
+      "widgets": {
+        "input": "Text box",
+        "textarea": "Multi-line text",
+        "richtext": "Rich text",
+        "secret": "Secret (write-only)",
+        "number": "Number",
+        "switch": "Switch",
+        "select": "Dropdown",
+        "radio": "Radio buttons",
+        "date": "Date",
+        "datetime": "Date and time",
+        "image-upload": "Image upload",
+        "file-upload": "File upload",
+        "user-picker": "User picker",
+        "dept-tree-select": "Department picker"
+      },
+      "queryOps": {
+        "eq": "Equals",
+        "like": "Contains",
+        "between": "Range"
+      },
+      "preview": {
+        "title": "Preview: {table}",
+        "registration": "The generator does not modify existing files. Add the following registration code manually.",
+        "files": "{count} file(s)"
+      },
+      "write": {
+        "confirm": "Write the code of {count} config(s) into the workspace? Existing files that differ are never overwritten.",
+        "title": "Write result",
+        "done": "{written} file(s) written, {unchanged} unchanged",
+        "refused": "{count} existing file(s) differ from the generated ones, so nothing was written. Resolve these differences first:",
+        "written": "Files written",
+        "unchanged": "Identical, left as they are"
+      }
+    }
+  },
+  "menu": {
+    "codegen": {
+      "table": "Code generator",
+      "tableEdit": "Generator config"
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "app": {
+    "name": "栖梧"
+  },
+  "action": {
+    "signIn": "登录",
+    "cancel": "取消",
+    "back": "返回"
+  },
+  "language": {
+    "title": "切换语言",
+    "zhCN": "简体中文",
+    "enUS": "English"
+  },
+  "error": {
+    "network": "网络异常，请稍后重试",
+    "kicked": "你已被管理员强制下线，请重新登录"
+  },
+  "tab": {
+    "home": "工作台",
+    "approval": "审批",
+    "message": "消息",
+    "mine": "我的"
+  },
+  "version": "版本",
+  "tabBadge": {
+    "approval": "审批，{n} 项待办",
+    "message": "消息，{n} 条未读"
+  }
+}

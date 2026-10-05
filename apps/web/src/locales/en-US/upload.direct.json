@@ -1,0 +1,7 @@
+{
+  "upload": {
+    "error": {
+      "direct": "The file could not be uploaded to the storage service. Try again, or ask an administrator to check the storage settings."
+    }
+  }
+}

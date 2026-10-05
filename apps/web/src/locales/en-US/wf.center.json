@@ -1,0 +1,83 @@
+{
+  "wf": {
+    "center": {
+      "start": {
+        "title": "Start: {name}",
+        "submit": "Start",
+        "started": "Process started",
+        "confirm": "Start this process now?",
+        "picksHint": "You choose the people for the steps below.",
+        "none": "No processes to start",
+        "noneHint": "Processes an administrator publishes for you show up here.",
+        "badForm": "This process's form cannot be shown, so it cannot be started yet. Ask an administrator to check the form."
+      },
+      "list": {
+        "title": "Title",
+        "model": "Process",
+        "initiator": "Initiator",
+        "node": "Step",
+        "state": "Process state",
+        "result": "Result",
+        "comment": "Comment",
+        "startedAt": "Started",
+        "endedAt": "Ended",
+        "arrivedAt": "Received",
+        "handledAt": "Handled",
+        "from": "From",
+        "fromStep": "Process step",
+        "reason": "Note",
+        "ccAt": "Sent",
+        "readState": "Read state",
+        "read": "Read",
+        "unread": "Unread",
+        "all": "All",
+        "handle": "Handle",
+        "view": "View"
+      },
+      "detail": {
+        "print": "Print",
+        "timeline": "Approval history",
+        "progress": "Progress",
+        "form": "Form"
+      },
+      "timeline": {
+        "system": "System"
+      },
+      "decide": {
+        "approve": "Approve",
+        "reject": "Reject",
+        "sendBack": "Send back",
+        "transfer": "Transfer",
+        "delegate": "Delegate",
+        "commentHint": "Your comment",
+        "delegateHint": "Once they have handled it, the task comes back to you to decide.",
+        "done": "Done",
+        "addSign": "Add signers",
+        "removeSign": "Remove signers",
+        "cc": "Copy to",
+        "comment": "Comment",
+        "withdraw": "Withdraw",
+        "cancel": "Cancel process",
+        "reasonHint": "Why they get a copy",
+        "sign": {
+          "before": "Before me",
+          "after": "After me"
+        },
+        "signHint": {
+          "before": "Once all added signers have approved, the task returns to you for approval.",
+          "after": "You approve now; this step completes once all added signers have approved."
+        },
+        "withdrawHint": "Takes back your approval and the task returns to you; not possible once the next step has been worked on.",
+        "cancelHint": "The process ends and every pending task is canceled.",
+        "resubmit": "Resubmit",
+        "editResubmit": "Edit and resubmit",
+        "resubmitHint": "It was sent back to you: resubmit it as it stands and the approval goes on."
+      },
+      "urge": {
+        "action": "Send reminder",
+        "done": "The current approvers have been reminded",
+        "later": "You can send a reminder once per hour. Please try again later."
+      }
+    }
+  }
+}

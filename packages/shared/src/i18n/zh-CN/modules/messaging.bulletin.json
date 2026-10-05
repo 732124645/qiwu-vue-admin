@@ -1,0 +1,13 @@
+{
+  "field": {
+    "messaging": {
+      "bulletin": {
+        "title": "标题",
+        "kind": "类型",
+        "body": "正文",
+        "published": "已发布",
+        "publishedAt": "发布时间"
+      }
+    }
+  }
+}

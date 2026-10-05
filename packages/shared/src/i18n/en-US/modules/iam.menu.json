@@ -1,0 +1,29 @@
+{
+  "field": {
+    "iam": {
+      "menu": {
+        "parentId": "Parent menu",
+        "treePath": "Tree path",
+        "kind": "Kind",
+        "name": "Name",
+        "nameI18n": "Name per language",
+        "zh-CN": "Chinese name",
+        "en-US": "English name",
+        "routePath": "Route path",
+        "component": "Component",
+        "componentName": "Component name",
+        "routeName": "Route name",
+        "routeQuery": "Route query",
+        "linkType": "Link type",
+        "linkUrl": "Link URL",
+        "perms": "Permission",
+        "icon": "Icon",
+        "sortNo": "Sort order",
+        "visible": "Visible",
+        "keepAlive": "Keep alive",
+        "alwaysShow": "Always show",
+        "enabled": "Enabled"
+      }
+    }
+  }
+}

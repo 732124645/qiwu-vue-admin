@@ -1,0 +1,83 @@
+{
+  "wf": {
+    "center": {
+      "start": {
+        "title": "发起：{name}",
+        "submit": "发起",
+        "started": "已发起",
+        "confirm": "确认发起此流程？",
+        "picksHint": "以下步骤的人员由你选择。",
+        "none": "暂无可发起的流程",
+        "noneHint": "管理员发布流程并允许你发起后，会显示在这里。",
+        "badForm": "此流程的表单无法显示，暂时不能发起。请联系管理员检查表单。"
+      },
+      "list": {
+        "title": "标题",
+        "model": "流程",
+        "initiator": "发起人",
+        "node": "审批节点",
+        "state": "流程状态",
+        "result": "办理结果",
+        "comment": "审批意见",
+        "startedAt": "发起时间",
+        "endedAt": "结束时间",
+        "arrivedAt": "到达时间",
+        "handledAt": "办理时间",
+        "from": "抄送人",
+        "fromStep": "流程抄送",
+        "reason": "抄送说明",
+        "ccAt": "抄送时间",
+        "readState": "阅读状态",
+        "read": "已读",
+        "unread": "未读",
+        "all": "全部",
+        "handle": "办理",
+        "view": "查看"
+      },
+      "detail": {
+        "print": "打印",
+        "timeline": "审批记录",
+        "progress": "流程进度",
+        "form": "表单内容"
+      },
+      "timeline": {
+        "system": "系统"
+      },
+      "decide": {
+        "approve": "通过",
+        "reject": "驳回",
+        "sendBack": "退回",
+        "transfer": "转办",
+        "delegate": "委派",
+        "commentHint": "填写审批意见",
+        "delegateHint": "对方处理后，任务回到你这里再做决定。",
+        "done": "已办理",
+        "addSign": "加签",
+        "removeSign": "减签",
+        "cc": "抄送",
+        "comment": "评论",
+        "withdraw": "撤回",
+        "cancel": "撤销",
+        "reasonHint": "填写抄送说明",
+        "sign": {
+          "before": "前加签",
+          "after": "后加签"
+        },
+        "signHint": {
+          "before": "加签人全部通过后，任务回到你这里再审批。",
+          "after": "你现在即通过，加签人全部通过后本步骤才完成。"
+        },
+        "withdrawHint": "撤回你的通过，任务回到你这里重新办理；下一步已有人处理时无法撤回。",
+        "cancelHint": "撤销后流程结束，所有待办随之取消。",
+        "resubmit": "重新提交",
+        "editResubmit": "修改并重新提交",
+        "resubmitHint": "申请已退回给你：按当前内容重新提交，流程继续审批。"
+      },
+      "urge": {
+        "action": "催办",
+        "done": "已提醒当前审批人",
+        "later": "每小时只能催办一次，请稍后再试"
+      }
+    }
+  }
+}

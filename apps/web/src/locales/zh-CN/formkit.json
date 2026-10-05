@@ -1,0 +1,50 @@
+{
+  "widget": {
+    "menu": "业务组件",
+    "qw-user-select": "人员选择",
+    "qw-dept-select": "部门选择",
+    "qw-dict-select": "字典选择",
+    "qw-upload": "附件",
+    "qw-area-select": "地区选择",
+    "calcMenu": "计算组件",
+    "qw-date-range-days": "天数（自动计算）",
+    "qw-detail-table": "明细表",
+    "days": {
+      "unit": "天"
+    },
+    "detail": {
+      "add": "添加一行",
+      "remove": "删除",
+      "removeRow": "删除第 {row} 行",
+      "cell": "{label}（第 {row} 行）",
+      "total": "合计"
+    },
+    "prop": {
+      "disabled": "禁用",
+      "placeholder": "占位提示",
+      "clearable": "可清空",
+      "multiple": "多选",
+      "code": "字典",
+      "limit": "最多文件数",
+      "maxSize": "单个文件上限（MB）",
+      "accept": "可选文件类型（如 .pdf,.docx）",
+      "startField": "开始日期字段名",
+      "endField": "结束日期字段名",
+      "startHalfField": "开始上午/下午字段名（值 am / pm，可不填）",
+      "endHalfField": "结束上午/下午字段名（值 am / pm，可不填）",
+      "columns": "列",
+      "column": {
+        "prop": "列名",
+        "label": "标题",
+        "sum": "合计字段名（填写即为数字列）"
+      }
+    }
+  },
+  "export": {
+    "action": "导出",
+    "title": "导出表单代码",
+    "download": "下载",
+    "close": "关闭",
+    "invalid": "表单无法导出：{reason}"
+  }
+}

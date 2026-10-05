@@ -1,0 +1,19 @@
+{
+  "field": {
+    "demo": {
+      "invoice": {
+        "invoiceNo": "发票号码",
+        "buyer": "购买方",
+        "total": "价税合计",
+        "issuedAt": "开票时间",
+        "issuedAtFrom": "开票时间起",
+        "issuedAtTo": "开票时间止",
+        "state": "状态",
+        "lines": "发票明细",
+        "item": "品名",
+        "qty": "数量",
+        "unitPrice": "单价"
+      }
+    }
+  }
+}

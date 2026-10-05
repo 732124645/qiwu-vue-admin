@@ -1,0 +1,23 @@
+{
+  "field": {
+    "messaging": {
+      "mailRecord": {
+        "userId": "收件用户",
+        "toList": "收件地址列表",
+        "ccList": "抄送地址列表",
+        "bccList": "密送地址列表",
+        "accountId": "邮件账号 ID",
+        "templateCode": "模板编码",
+        "locale": "语言",
+        "subject": "主题",
+        "body": "正文",
+        "params": "参数",
+        "status": "状态",
+        "providerMsgId": "服务商消息 ID",
+        "error": "错误信息",
+        "attempts": "发送尝试次数",
+        "sentAt": "发送时间"
+      }
+    }
+  }
+}

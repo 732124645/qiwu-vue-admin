@@ -1,0 +1,15 @@
+{
+  "field": {
+    "wf": {
+      "admin": {
+        "modelKey": "模型标识",
+        "state": "状态",
+        "initiatorId": "发起人",
+        "assigneeId": "办理人",
+        "instanceId": "实例",
+        "to": "新办理人",
+        "comment": "意见"
+      }
+    }
+  }
+}

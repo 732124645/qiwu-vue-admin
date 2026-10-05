@@ -1,0 +1,12 @@
+{
+  "messaging": {
+    "mailRecord": {
+      "entity": "mail record"
+    }
+  },
+  "menu": {
+    "messaging": {
+      "mailRecord": "Mail records"
+    }
+  }
+}

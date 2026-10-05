@@ -1,0 +1,25 @@
+{
+  "title": "My profile",
+  "tabs": {
+    "info": "Profile",
+    "password": "Password",
+    "prefs": "Preferences",
+    "socials": "Linked accounts"
+  },
+  "changeAvatar": "Change avatar",
+  "avatarDone": "Avatar updated",
+  "saved": "Profile saved",
+  "mobileHint": "Changing your mobile number requires your current password and a code sent to the new number. If SMS codes are not configured, ask an administrator to change it. Other sessions will end.",
+  "mobileRemoveHint": "Removing your mobile number requires your current password. Other sessions will end.",
+  "language": "Language",
+  "languageHint": "Applies at once; notifications and exported files for you use it too.",
+  "passwordHint": "Changing it signs you out on your other devices and browsers at once.",
+  "socials": {
+    "wxMp": "WeChat mini program",
+    "boundAt": "Linked on",
+    "unboundHint": "Not linked. Sign in with WeChat in the mini program and follow the steps to link this account.",
+    "unbind": "Unlink",
+    "unbindConfirm": "After unlinking, this WeChat account can no longer sign you in until it is linked again. Unlink?",
+    "unbound": "Unlinked"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "field": {
+    "iam": {
+      "position": {
+        "code": "岗位编码",
+        "name": "岗位名称",
+        "sortNo": "排序号",
+        "enabled": "启用状态",
+        "note": "备注"
+      }
+    }
+  }
+}

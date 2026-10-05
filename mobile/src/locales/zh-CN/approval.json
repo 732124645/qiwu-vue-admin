@@ -1,0 +1,87 @@
+{
+  "list": {
+    "todo": "待办",
+    "done": "已办",
+    "mine": "我发起的",
+    "cc": "抄送我的"
+  },
+  "empty": "暂无记录",
+  "fromStep": "流程抄送",
+  "detail": "审批详情",
+  "initiator": "发起人",
+  "startedAt": "发起时间",
+  "endedAt": "结束时间",
+  "form": "表单",
+  "viewForm": "查看",
+  "desktopOnly": "请在电脑端查看",
+  "timeline": "审批记录",
+  "system": "系统",
+  "decide": {
+    "approve": "通过",
+    "reject": "驳回",
+    "sendBack": "退回",
+    "transfer": "转办",
+    "delegate": "委派",
+    "more": "更多",
+    "commentHint": "填写审批意见",
+    "delegateHint": "对方处理后，任务回到你这里再做决定。",
+    "addSign": "加签",
+    "cc": "抄送",
+    "comment": "评论",
+    "removeSign": "减签",
+    "withdraw": "撤回",
+    "cancel": "撤销",
+    "urge": "催办",
+    "reasonHint": "说明为什么抄送给对方",
+    "sign": {
+      "before": "前加签",
+      "after": "后加签"
+    },
+    "signHint": {
+      "before": "他们全部通过后，任务回到你这里再做决定。",
+      "after": "你现在就通过，待他们全部通过后生效。"
+    },
+    "withdrawHint": "下一步还没有人处理时才能撤回，撤回后任务回到你这里。",
+    "cancelHint": "撤销后流程结束，不能恢复。",
+    "urged": "已催办",
+    "urgeLater": "每小时只能催办一次，请稍后再试",
+    "done": "已办理",
+    "resubmit": "重新提交"
+  },
+  "start": {
+    "none": "暂无可发起的流程",
+    "desktopOnly": "该流程请在电脑端发起",
+    "picksHint": "请为以下节点选择人员，每个节点至少一人。",
+    "confirm": "确认发起该流程？",
+    "pick": {
+      "review": "审批人",
+      "notify": "抄送人"
+    },
+    "submit": "发起",
+    "started": "已发起"
+  },
+  "summary": "{n} 项待你处理",
+  "summaryNone": "没有待你处理的审批",
+  "startedBy": "{name} 发起",
+  "startedByAt": "{name} 发起于 {time}",
+  "yourTurn": "待你处理 · {node}",
+  "pending": "待处理",
+  "process": "流程",
+  "fullForm": "查看完整表单",
+  "emptyTodo": "待办都处理完了",
+  "emptyTodoHint": "新的审批到达时，会第一时间提醒你。",
+  "viewDone": "查看已办",
+  "dynamic": {
+    "days": "{n} 天",
+    "yes": "是",
+    "no": "否",
+    "desktopField": "请在电脑端填写",
+    "badForm": "该表单无法在手机上显示，请在电脑端发起",
+    "detail": {
+      "add": "添加明细",
+      "remove": "删除",
+      "row": "明细 {n}",
+      "total": "合计"
+    }
+  }
+}

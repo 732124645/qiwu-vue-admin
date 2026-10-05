@@ -1,0 +1,12 @@
+{
+  "audit": {
+    "httpTrace": {
+      "entity": "API 访问日志"
+    }
+  },
+  "menu": {
+    "audit": {
+      "httpTrace": "API 访问日志"
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "field": {
+    "iam": {
+      "dept": {
+        "parentId": "上级部门",
+        "treePath": "部门路径",
+        "name": "部门名称",
+        "sortNo": "排序号",
+        "headUserId": "负责人",
+        "headUserName": "负责人",
+        "phone": "联系电话",
+        "email": "邮箱",
+        "enabled": "启用状态"
+      }
+    }
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "wf": {
+    "bpmn": {
+      "tool": {
+        "hand": "Hand: move the canvas",
+        "lasso": "Lasso: select several elements",
+        "space": "Space: add or remove room in the diagram",
+        "connect": "Connect: draw a flow between two elements"
+      },
+      "create": {
+        "start": "Start event",
+        "end": "End event",
+        "review": "Approval step",
+        "notify": "CC step",
+        "exclusive": "Exclusive gateway",
+        "parallel": "Parallel gateway",
+        "inclusive": "Inclusive gateway"
+      },
+      "append": {
+        "review": "Add an approval step after it",
+        "notify": "Add a CC step after it",
+        "end": "Add an end event after it"
+      },
+      "block": {
+        "exclusive": "Insert an exclusive branch block after it",
+        "parallel": "Insert a parallel branch block after it",
+        "inclusive": "Insert an inclusive branch block after it"
+      },
+      "edit": {
+        "connect": "Connect to another element",
+        "change": "Change type",
+        "delete": "Delete",
+        "search": "Find in the diagram"
+      },
+      "type": {
+        "review": "Approval step",
+        "notify": "CC step",
+        "exclusive": "Exclusive gateway",
+        "parallel": "Parallel gateway",
+        "inclusive": "Inclusive gateway",
+        "flow": "Plain flow",
+        "defaultFlow": "Default path"
+      },
+      "panel": {
+        "title": "Properties",
+        "empty": "Select an element on the canvas to set it up here.",
+        "fork": "Branching gateway settings",
+        "end": "End event",
+        "join": "Joining gateway",
+        "flow": "Sequence flow",
+        "element": "Element",
+        "makeDefault": "Make default path",
+        "order": "Path order",
+        "orderHint": "An exclusive branch takes the first path in this order whose conditions hold, the default path when none does.",
+        "default": "Default",
+        "up": "Move up",
+        "down": "Move down"
+      }
+    }
+  }
+}

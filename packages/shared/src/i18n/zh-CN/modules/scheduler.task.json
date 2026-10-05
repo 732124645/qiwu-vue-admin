@@ -1,0 +1,21 @@
+{
+  "field": {
+    "scheduler": {
+      "task": {
+        "name": "任务名称",
+        "groupCode": "任务分组",
+        "handler": "处理器",
+        "params": "参数",
+        "cron": "Cron 表达式",
+        "enabled": "启用状态",
+        "retryMax": "失败重试次数",
+        "retryDelayMs": "重试间隔（毫秒）",
+        "timeoutMs": "超时（毫秒）",
+        "allowOverlap": "允许并发执行",
+        "misfire": "错过策略",
+        "lastFireAt": "上次触发时间",
+        "note": "备注"
+      }
+    }
+  }
+}

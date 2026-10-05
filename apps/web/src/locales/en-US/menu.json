@@ -1,0 +1,79 @@
+{
+  "home": "Home",
+  "system": {
+    "title": "System"
+  },
+  "monitor": {
+    "title": "Monitoring"
+  },
+  "messaging": {
+    "title": "Message center"
+  },
+  "storage": {
+    "title": "Files"
+  },
+  "audit": {
+    "title": "Logs"
+  },
+  "iam": {
+    "user": "Users",
+    "userRoles": "Assign roles"
+  },
+  "devtools": {
+    "title": "System tools",
+    "uiDocs": "Element Plus docs",
+    "apiDocs": "API docs"
+  },
+  "formkit": {
+    "design": "Form builder"
+  },
+  "demo": {
+    "title": "Generator samples"
+  },
+  "workflow": {
+    "title": "Approvals",
+    "start": "New request",
+    "todo": "My to-dos",
+    "done": "Handled by me",
+    "mine": "My requests",
+    "cc": "CC to me",
+    "detail": "Approval detail"
+  },
+  "wf": {
+    "title": "Process admin",
+    "model": "Process models",
+    "instance": "Process instances",
+    "task": "Approval tasks",
+    "modelDesign": "Process design"
+  },
+  "biz": {
+    "title": "Business",
+    "leave": "Leave requests",
+    "leaveNew": "New leave request",
+    "leaveView": "Leave request"
+  },
+  "action": {
+    "browse": "Browse",
+    "view": "View",
+    "create": "Add",
+    "modify": "Edit",
+    "remove": "Delete",
+    "export": "Export",
+    "import": "Import",
+    "resetPassword": "Reset password",
+    "resetSecret": "Reset secret",
+    "assignRoles": "Assign roles",
+    "grant": "Grant",
+    "assignUsers": "Assign users",
+    "publish": "Publish",
+    "unlock": "Unlock accounts",
+    "generate": "Generate code",
+    "write": "Write to workspace",
+    "handle": "Handle errors",
+    "run": "Run once",
+    "send": "Send",
+    "broadcast": "Send to everyone",
+    "manage": "Reassign and terminate",
+    "managers": "Appoint process managers"
+  }
+}

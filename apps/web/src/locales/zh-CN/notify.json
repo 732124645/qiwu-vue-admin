@@ -1,0 +1,13 @@
+{
+  "bell": {
+    "label": "通知",
+    "labelUnread": "通知，{count} 条未读",
+    "title": "通知公告",
+    "readAll": "全部已读",
+    "unreadMark": "未读",
+    "empty": "暂无公告"
+  },
+  "bulletin": {
+    "close": "关闭"
+  }
+}

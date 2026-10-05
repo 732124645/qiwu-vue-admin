@@ -1,0 +1,9 @@
+{
+  "view": "Leave request",
+  "edit": "Edit leave request",
+  "submit": "Submit for approval",
+  "submitted": "Submitted",
+  "sentBack": "Sent back to you: edit and resubmit, or cancel the request in Approval detail.",
+  "resubmitted": "Resubmitted",
+  "form": "Leave request"
+}

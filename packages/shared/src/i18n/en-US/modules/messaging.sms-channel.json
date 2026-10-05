@@ -1,0 +1,17 @@
+{
+  "field": {
+    "messaging": {
+      "smsChannel": {
+        "driver": "Driver",
+        "name": "Name",
+        "signName": "Sign name",
+        "appId": "App ID",
+        "apiKey": "API key",
+        "apiSecret": "API secret",
+        "region": "Region",
+        "receiptSecret": "Receipt secret",
+        "enabled": "Enabled"
+      }
+    }
+  }
+}

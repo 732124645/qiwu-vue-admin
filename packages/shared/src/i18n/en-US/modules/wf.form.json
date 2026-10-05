@@ -1,0 +1,12 @@
+{
+  "field": {
+    "wf": {
+      "form": {
+        "name": "Form name",
+        "schemaJson": "Form schema",
+        "enabled": "Enabled",
+        "note": "Note"
+      }
+    }
+  }
+}

@@ -1,0 +1,85 @@
+<%_
+const b = m.biz
+const B = m.Biz
+const dates = m.detail.filter((c) => c.tsType === 'Date')
+_%>
+<script setup lang="ts">
+import { ref, shallowRef } from 'vue'
+import { useI18n } from 'vue-i18n'
+<%_ if (dates.length) { _%>
+import dayjs from 'dayjs'
+<%_ } _%>
+import type { <%= B %>Vo } from '@qiwu/shared'
+import { <%= b %>Api } from '@/api/<%= m.home %>'
+<%_ if (m.detail.some((c) => c.widget === 'dept-tree-select')) { _%>
+import DeptTreeSelect from '@/core/components/DeptTreeSelect.vue'
+<%_ } _%>
+<%_ if (m.detail.some((c) => c.web.dict)) { _%>
+import DictTag from '@/core/components/DictTag.vue'
+<%_ } _%>
+<%_ if (m.detail.some((c) => c.widget === 'file-upload')) { _%>
+import { uploadName } from '@/core/composables/use-upload'
+<%_ } _%>
+<%_ if (m.detail.some((c) => c.seedName)) { _%>
+import { tx } from '@/core/i18n'
+<%_ } _%>
+
+/** One <%= comment(m.noun) %> in the list's detail drawer (GET /:id). */
+defineOptions({ name: '<%= m.componentName %>Detail' })
+const { id } = defineProps<{ id: number }>()
+const { t } = useI18n()
+
+const row = shallowRef<<%= B %>Vo>()
+const loading = ref(true)
+// failures are toasted by the request layer (404 out of scope included)
+<%= b %>Api
+  .get(id)
+  .then((r) => (row.value = r))
+  .catch(() => undefined)
+  .finally(() => (loading.value = false))
+<%_ if (dates.length) { _%>
+const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm') : '')
+<%_ } _%>
+</script>
+
+<template>
+  <div v-loading="loading" class="qw-detail">
+    <el-descriptions v-if="row" :column="1" border>
+<%_ for (const c of m.detail) { _%>
+<%_ const v = 'row.' + c.field _%>
+      <el-descriptions-item :label="t('<%= c.labelKey %>')">
+  <%_ if (c.web.dict) { _%>
+        <DictTag code="<%= c.web.dict %>" :value="<%= v %>" />
+  <%_ } else if (c.tsType === 'Date') { _%>
+        {{ time(<%= v %>) }}
+  <%_ } else if (c.seedName) { _%>
+        {{ tx(<%= v %>) }}
+  <%_ } else if (c.widget === 'dept-tree-select') { _%>
+        <!-- the dept's name from the caller's dept tree; outside it (an own_rows caller) its id -->
+        <DeptTreeSelect :model-value="<%= v %>" disabled />
+  <%_ } else if (c.widget === 'image-upload') { _%>
+        <el-image
+          v-if="<%= v %>"
+          class="qw-detail__image"
+          :src="<%= v %>"
+          :preview-src-list="[<%= v %>]"
+          fit="cover"
+          preview-teleported
+        />
+  <%_ } else if (c.widget === 'file-upload') { _%>
+        {{ uploadName(<%= v %>) }}
+  <%_ } else if (c.web.scale) { _%>
+        {{ <%= v %><% if (c.nullable) { %>?<% } %>.toFixed(<%= c.web.scale %>) }}
+  <%_ } else if (m.rich.includes(c)) { _%>
+        <!-- sanitized when saved (core/sanitize.ts allow-list): the one v-html of this drawer -->
+        <div class="qw-detail__html" v-html="<%= v %>" />
+  <%_ } else if (c.freeText) { _%>
+        <span class="qw-detail__text">{{ <%= v %> }}</span>
+  <%_ } else { _%>
+        {{ <%= v %> }}
+  <%_ } _%>
+      </el-descriptions-item>
+<%_ } _%>
+    </el-descriptions>
+  </div>
+</template>

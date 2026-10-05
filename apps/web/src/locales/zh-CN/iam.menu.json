@@ -1,0 +1,28 @@
+{
+  "iam": {
+    "menu": {
+      "entity": "菜单",
+      "keyword": "名称、权限点或路由",
+      "target": "路由或链接",
+      "placeholder": {
+        "name": "显示名称，或 i18n 键（如 menu.iam.user）",
+        "routePath": "/reports，或 reports（接在上级路径后）",
+        "component": "src/views 下的路径，如 platform/iam/user/index",
+        "componentName": "页面缓存用的组件名，如 IamUser",
+        "routeName": "唯一的路由名，如 iam-user",
+        "groupRouteName": "小写字母、数字与连字符，如 erp-sale（按路由路径预填）",
+        "perms": "如 iam.user.browse"
+      },
+      "sort": {
+        "start": "调整排序",
+        "save": "保存排序"
+      },
+      "routeNameFixed": "分组的路由名称保存后不能修改：种子与生成的页面按它查找分组"
+    }
+  },
+  "menu": {
+    "iam": {
+      "menu": "菜单管理"
+    }
+  }
+}

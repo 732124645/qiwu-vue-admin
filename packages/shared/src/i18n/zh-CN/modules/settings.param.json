@@ -1,0 +1,17 @@
+{
+  "field": {
+    "settings": {
+      "param": {
+        "paramKey": "参数键",
+        "paramValue": "参数值",
+        "name": "参数名称",
+        "nameI18n": "多语言名称",
+        "groupCode": "分组",
+        "isBuiltin": "内置",
+        "isSecret": "敏感",
+        "isPublic": "登录前可读",
+        "note": "备注"
+      }
+    }
+  }
+}

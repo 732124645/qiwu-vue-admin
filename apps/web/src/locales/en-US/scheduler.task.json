@@ -1,0 +1,12 @@
+{
+  "scheduler": {
+    "task": {
+      "entity": "task"
+    }
+  },
+  "menu": {
+    "scheduler": {
+      "task": "Scheduled tasks"
+    }
+  }
+}

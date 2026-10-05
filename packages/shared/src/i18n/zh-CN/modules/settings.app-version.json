@@ -1,0 +1,17 @@
+{
+  "field": {
+    "settings": {
+      "appVersion": {
+        "platform": "平台",
+        "packageKind": "包类型",
+        "version": "版本号",
+        "nativeMin": "最低原生版本",
+        "url": "下载地址",
+        "isForced": "强制更新",
+        "notes": "更新说明",
+        "enabled": "发布状态",
+        "nativeVersion": "原生版本"
+      }
+    }
+  }
+}

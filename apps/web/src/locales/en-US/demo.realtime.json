@@ -1,0 +1,36 @@
+{
+  "demo": {
+    "realtime": {
+      "status": {
+        "label": "Realtime connection",
+        "up": "Connected",
+        "reconnecting": "Reconnecting",
+        "down": "Disconnected"
+      },
+      "send": {
+        "title": "Send a message",
+        "target": {
+          "user": "Users",
+          "role": "Roles",
+          "all": "Everyone"
+        },
+        "rolePlaceholder": "Select roles",
+        "textPlaceholder": "Plain text, up to 500 characters",
+        "submit": "Send",
+        "done": "Sent; no one online received it | Sent to 1 online user | Sent to {count} online users"
+      },
+      "log": {
+        "title": "Received messages",
+        "hint": "Newest first, the latest {max} kept",
+        "clear": "Clear",
+        "empty": "No messages yet",
+        "emptyHint": "Messages sent to you show up here as they arrive."
+      }
+    }
+  },
+  "menu": {
+    "demo": {
+      "realtime": "Realtime push"
+    }
+  }
+}

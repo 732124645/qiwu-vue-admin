@@ -1,0 +1,27 @@
+{
+  "storage": {
+    "object": {
+      "uploader": "上传人",
+      "uploadedAt": "上传时间",
+      "uploaded": "“{name}”已上传",
+      "preview": "预览",
+      "copyLink": "复制链接",
+      "copied": "链接已复制",
+      "copyFailed": "链接复制失败",
+      "deleteConfirm": "确定删除“{name}”吗？文件立即停止访问（公开链接随即失效），存储的文件在保留期满后清理。系统不记录文件在哪里被使用：仍链接或附带它的页面、记录或消息将无法显示该文件。",
+      "tag": {
+        "avatar": "头像",
+        "richtext": "富文本图片",
+        "cover": "封面",
+        "attachment": "附件",
+        "import": "导入文件",
+        "wf": { "attachment": "流程附件" }
+      }
+    }
+  },
+  "menu": {
+    "storage": {
+      "object": "文件列表"
+    }
+  }
+}

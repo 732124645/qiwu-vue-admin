@@ -1,0 +1,28 @@
+{
+  "field": {
+    "monitor": {
+      "mysql": {
+        "status": "运行状态",
+        "variables": "系统变量",
+        "pool": "连接池",
+        "limit": "连接上限",
+        "total": "当前连接",
+        "idle": "空闲连接",
+        "queued": "排队请求",
+        "Uptime": "运行时长",
+        "Threads_connected": "已连接线程",
+        "Threads_running": "运行中线程",
+        "Questions": "语句总数",
+        "Slow_queries": "慢查询数",
+        "Innodb_buffer_pool_pages_total": "缓冲池总页数",
+        "Innodb_buffer_pool_pages_free": "缓冲池空闲页",
+        "Innodb_buffer_pool_read_requests": "缓冲池读请求",
+        "Innodb_buffer_pool_reads": "缓冲池磁盘读",
+        "Bytes_received": "接收字节",
+        "Bytes_sent": "发送字节",
+        "version": "MySQL 版本",
+        "max_connections": "最大连接数"
+      }
+    }
+  }
+}

@@ -1,0 +1,100 @@
+{
+  "codegen": {
+    "table": {
+      "entity": "生成配置",
+      "close": "关闭",
+      "templates": {
+        "crud": "单表",
+        "tree": "树表",
+        "master_sub": "主子表"
+      },
+      "action": {
+        "import": "导入表",
+        "sync": "同步",
+        "preview": "预览",
+        "download": "下载代码",
+        "write": "写入工作区",
+        "batchDownload": "下载选中",
+        "batchWrite": "写入选中"
+      },
+      "import": {
+        "title": "导入表",
+        "hint": "本库中尚未导入的表（框架表 meta_、test_、cg_ 除外）",
+        "filter": "按表名或描述筛选",
+        "empty": "没有可导入的表",
+        "submit": "导入选中",
+        "done": "已导入 {count} 张表",
+        "noDeletedAt": "缺少 deleted_at 列：加列 deleted_at datetime(3) NULL 后才能导入（生成的代码按逻辑删除）",
+        "noAlive": "表 {table} 的唯一键 {key} 不含 alive 列：已删除行的值仍被占用，请把唯一键改为 (…, alive)",
+        "noParentMenu": "表 {table}：没有可挂页面的菜单分组 {key}（或其下级分组），父菜单暂定为“业务管理”（biz）。可先在菜单管理中建好分组，再在“生成信息”页签改选。"
+      },
+      "sync": {
+        "confirm": "按数据库重新读取表 {table} 的列？已手工修改的配置会保留。",
+        "done": "已同步：新增 {added} 列，删除 {removed} 列，变更 {changed} 列"
+      },
+      "edit": {
+        "back": "返回列表",
+        "basic": "基本信息",
+        "columns": "字段",
+        "generate": "生成信息",
+        "texts": "双语文本",
+        "tree": "树表设置",
+        "options": "生成选项",
+        "menu": "菜单",
+        "treeIgnores": "树表不生成详情抽屉、只读页、导出、导入与下拉接口",
+        "masterSubHint": "主子表：各子表在自己的生成配置中选择本表为主表并指定外键列；预览或下载本表即生成整个主子模块。",
+        "masterNone": "不是子表",
+        "dataScope": "按部门做数据权限",
+        "parentMenuHint": "生成的菜单挂在此分组下",
+        "parentMenuUnpickable": "{name}（{reason}）",
+        "parentMenuReason": {
+          "route_name": "路由名称缺失或不是小写字母、数字与连字符",
+          "ancestor": "上级分组的路由名称不合格"
+        },
+        "column": "列",
+        "invalid": "{where}：{message}",
+        "referencedByHint": "其他表中保存本表记录 id 的列（不用外键）：记录仍被未删除的行引用时，删除会以“使用中”拒绝。请选择或输入本库中带 deleted_at 列的表及其列。"
+      },
+      "widgets": {
+        "input": "文本框",
+        "textarea": "多行文本",
+        "richtext": "富文本",
+        "secret": "密文",
+        "number": "数字",
+        "switch": "开关",
+        "select": "下拉框",
+        "radio": "单选框",
+        "date": "日期",
+        "datetime": "日期时间",
+        "image-upload": "图片上传",
+        "file-upload": "文件上传",
+        "user-picker": "选择用户",
+        "dept-tree-select": "选择部门"
+      },
+      "queryOps": {
+        "eq": "等于",
+        "like": "包含",
+        "between": "范围"
+      },
+      "preview": {
+        "title": "预览：{table}",
+        "registration": "生成器不改已有文件，请手工加入以下注册代码",
+        "files": "{count} 个文件"
+      },
+      "write": {
+        "confirm": "把 {count} 个配置生成的代码写入工作区？已存在且内容不同的文件不会被覆盖。",
+        "title": "写入结果",
+        "done": "已写入 {written} 个文件，{unchanged} 个未变",
+        "refused": "{count} 个已存在的文件与生成结果不同，本次没有写入任何文件。请先处理这些差异：",
+        "written": "写入的文件",
+        "unchanged": "内容相同，未改动"
+      }
+    }
+  },
+  "menu": {
+    "codegen": {
+      "table": "代码生成",
+      "tableEdit": "生成配置"
+    }
+  }
+}

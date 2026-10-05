@@ -1,0 +1,18 @@
+{
+  "audit": {
+    "signinLog": {
+      "entity": "登录日志",
+      "clean": "清空",
+      "cleanConfirm": "确定清空全部登录日志吗？清空后不再显示，也无法在页面上恢复。",
+      "cleaned": "已清空",
+      "unlock": "解锁账户",
+      "unlockConfirm": "确定解除用户名「{username}」的登录锁定吗？",
+      "unlocked": "已解锁 {username}"
+    }
+  },
+  "menu": {
+    "audit": {
+      "signinLog": "登录日志"
+    }
+  }
+}

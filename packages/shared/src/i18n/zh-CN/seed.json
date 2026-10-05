@@ -1,0 +1,101 @@
+{
+  "role": {
+    "root": "超级管理员",
+    "demo": "演示角色",
+    "member": "注册成员",
+    "staff": "员工"
+  },
+  "dept": {
+    "hq": "总部",
+    "rd": "研发中心",
+    "platform": "平台组",
+    "product": "产品组",
+    "ops": "运营中心",
+    "support": "客户支持组",
+    "finance": "财务与行政部"
+  },
+  "position": {
+    "engLead": "技术负责人",
+    "developer": "开发工程师",
+    "designer": "产品设计师",
+    "support": "客服专员"
+  },
+  "task": {
+    "auditPurge": "清理过期日志",
+    "sessionSweep": "清理过期在线会话",
+    "notifyDispatch": "派发待发送通知",
+    "demoEcho": "示例：回显消息",
+    "wfTaskRemind": "发送待办超时提醒"
+  },
+  "inboxTemplate": {
+    "schedulerJobTimeout": "任务超时告警"
+  },
+  "storage": {
+    "local": "本地存储"
+  },
+  "smsTemplate": {
+    "authCode": "身份验证短信验证码"
+  },
+  "wfTemplate": {
+    "taskAssigned": "流程待审批通知",
+    "instanceApproved": "流程已通过通知",
+    "instanceRejected": "流程已驳回通知",
+    "cc": "流程抄送通知",
+    "taskCanceled": "流程待办取消通知",
+    "instanceSentBack": "流程退回发起人通知",
+    "taskUrged": "流程催办通知",
+    "taskOverdue": "流程待办超时提醒",
+    "taskTimeout": "流程待办超时处理通知"
+  },
+  "wf": {
+    "leave": "请假审批",
+    "leaveDescription": "按天数审批：超过 2 天加总监审批，超过 5 天另加人事审批",
+    "node": {
+      "begin": "发起人",
+      "supervisor": "主管审批",
+      "byDays": "按请假天数",
+      "hrAndDirector": "人事与总监并行审批",
+      "hr": "人事审批",
+      "director": "总监审批",
+      "twoLevels": "两级主管逐级审批",
+      "byAmount": "按报销金额"
+    },
+    "path": {
+      "over5": "超过 5 天",
+      "over2": "超过 2 天且不超过 5 天",
+      "otherwise": "其他",
+      "hr": "人事",
+      "director": "总监",
+      "over3Days": "超过 3 天",
+      "over5000": "超过 5000"
+    },
+    "tpl": {
+      "general": "通用审批",
+      "generalDescription": "任意事项的审批：发起人的直属主管审批",
+      "leave": "请假",
+      "leaveDescription": "天数由开始与结束日期自动算出：不超过 3 天直属主管审批，超过 3 天两级主管逐级审批",
+      "expense": "报销",
+      "expenseDescription": "按明细合计金额：不超过 5000 直属主管审批，超过 5000 两级主管逐级审批",
+      "overtime": "加班",
+      "overtimeDescription": "发起人的直属主管审批"
+    },
+    "form": {
+      "general": "通用审批单",
+      "leave": "请假单",
+      "expense": "报销单",
+      "overtime": "加班单"
+    },
+    "timeout": {
+      "autoPass": "超时未处理，系统已自动通过",
+      "autoReject": "超时未处理，系统已自动驳回",
+      "toManager": "超时未处理，系统已转给办理人的上级",
+      "toAdmin": "超时未处理，系统已转给流程管理员",
+      "remindOnly": "超时未处理，且没有可以转交的人，已提醒办理人；请有流程管理权限的人员在“任务管理”中改派",
+      "failed": "超时自动处理失败（例如下一个审批节点没有审批人），已提醒办理人；请有流程管理权限的人员在“任务管理”中改派",
+      "ofTask": "{assignee} 的待办：{outcome}"
+    }
+  },
+  "oauth": {
+    "console": "管理后台"
+  }
+}

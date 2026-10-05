@@ -1,0 +1,40 @@
+{
+  "scheduler": {
+    "job": {
+      "recentRuns": "最近执行",
+      "noRuns": "暂无执行记录",
+      "paused": "任务已停用：以下为启用后的触发时间。",
+      "outcome": {
+        "ok": "成功",
+        "failed": "失败",
+        "skipped": "已跳过",
+        "timeout": "超时"
+      },
+      "misfire": {
+        "skip": "跳过错过的执行",
+        "run_once": "启动时补执行一次"
+      },
+      "runConfirm": "确定立即执行一次任务“{name}”吗？使用已保存的参数，执行结果见执行日志。",
+      "runStarted": "已开始执行，结果见执行日志"
+    },
+    "handler": {
+      "audit": {
+        "purge": "清理过期日志"
+      },
+      "session": {
+        "sweep": "清理过期在线会话"
+      },
+      "notify": {
+        "dispatch": "派发待发送通知"
+      },
+      "demo": {
+        "echo": "示例：回显消息"
+      },
+      "wf": {
+        "task": {
+          "remind": "发送待办超时提醒"
+        }
+      }
+    }
+  }
+}

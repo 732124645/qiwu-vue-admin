@@ -1,0 +1,13 @@
+{
+  "field": {
+    "iam": {
+      "position": {
+        "code": "Position code",
+        "name": "Position name",
+        "sortNo": "Sort order",
+        "enabled": "Enabled",
+        "note": "Note"
+      }
+    }
+  }
+}

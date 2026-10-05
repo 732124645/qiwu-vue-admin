@@ -1,0 +1,25 @@
+{
+  "field": {
+    "monitor": {
+      "redis": {
+        "info": "Server info",
+        "server": "Server",
+        "clients": "Clients",
+        "memory": "Memory",
+        "persistence": "Persistence",
+        "stats": "Statistics",
+        "cpu": "CPU",
+        "commandStats": "Command statistics",
+        "command": "Command",
+        "calls": "Calls",
+        "usec": "Total time (µs)",
+        "usecPerCall": "Time per call (µs)",
+        "keyspace": "Keyspace",
+        "db": "Database",
+        "keys": "Keys",
+        "expires": "Keys with expiry",
+        "avgTtl": "Average TTL (ms)"
+      }
+    }
+  }
+}

@@ -1,0 +1,124 @@
+{
+  "app": {
+    "title": "Qiwu Admin",
+    "name": "Qiwu",
+    "suffix": " Admin"
+  },
+  "brand": {
+    "tagline": "A solid starting point for enterprise admin apps",
+    "access": "Access down to every button",
+    "accessDesc": "Menus, buttons and data scope, granted level by level",
+    "global": "Languages and themes",
+    "globalDesc": "Chinese and English, light and dark, out of the box",
+    "audit": "Every step on record",
+    "auditDesc": "Sign-in and action logs, kept automatically"
+  },
+  "action": {
+    "backHome": "Back to home",
+    "signIn": "Sign in",
+    "signOut": "Sign out",
+    "cancel": "Cancel",
+    "retry": "Retry"
+  },
+  "form": {
+    "showPassword": "Show password"
+  },
+  "client": {
+    "console": "Computer",
+    "mobile": "Phone"
+  },
+  "session": {
+    "expiredTitle": "Session expired",
+    "expired": "You have been signed out. Stay on this page to keep unsaved changes, or sign in again to come back here.",
+    "stay": "Stay on this page",
+    "signInAgain": "Sign in again",
+    "kicked": "An administrator signed you out. Please sign in again."
+  },
+  "error": {
+    "network": "Network error. Please try again later.",
+    "forbidden": "Sorry, you are not allowed to access this page",
+    "notFound": "Page not found",
+    "unavailable": "The server is not responding right now. Please try again later."
+  },
+  "login": {
+    "title": "Sign in",
+    "username": "Username",
+    "password": "Password",
+    "keepSignedIn": "Keep me signed in",
+    "rememberUsername": "Remember username",
+    "subtitle": "Welcome back. Sign in to your account."
+  },
+  "passwordChange": {
+    "title": "Change password",
+    "required": "For your account's security, please change your password first",
+    "expired": "Your password has expired. Please change it to continue",
+    "policy": "At least {minLength} characters, including at least {charClasses} of these character types: lowercase letters, uppercase letters, digits, symbols",
+    "policyLength": "At least {minLength} characters",
+    "oldPassword": "Old password",
+    "newPassword": "New password",
+    "confirmPassword": "Confirm new password",
+    "mismatch": "The two new passwords do not match",
+    "submit": "Change password",
+    "done": "Password changed"
+  },
+  "layout": {
+    "sideMenu": "Side menu",
+    "collapse": "Collapse side menu",
+    "expand": "Expand side menu",
+    "breadcrumb": "Breadcrumb",
+    "language": "Change language",
+    "userMenu": "User menu",
+    "changePassword": "Change password"
+  },
+  "language": {
+    "zhCN": "简体中文",
+    "enUS": "English"
+  },
+  "tags": {
+    "label": "Open pages",
+    "refresh": "Refresh",
+    "close": "Close",
+    "closeOthers": "Close others",
+    "closeLeft": "Close tabs to the left",
+    "closeRight": "Close tabs to the right",
+    "closeAll": "Close all",
+    "settings": "Tab bar settings",
+    "style": "Tab style",
+    "styleCard": "Card",
+    "styleChrome": "Chrome",
+    "persist": "Keep open tabs after reload"
+  },
+  "home": {
+    "greeting": {
+      "morning": "Good morning, {name}",
+      "afternoon": "Good afternoon, {name}",
+      "evening": "Good evening, {name}"
+    },
+    "dept": "Department",
+    "roles": "Roles",
+    "entries": "Quick access",
+    "entriesHint": "Pages you have access to, one click away",
+    "noPages": "No pages available yet",
+    "noPagesHint": "Your account has no pages assigned yet. Ask an administrator for access.",
+    "lastSignIn": "Last sign-in",
+    "stats": {
+      "label": "At a glance",
+      "todo": "My to-dos",
+      "mine": "My requests in progress",
+      "unread": "Unread messages"
+    }
+  },
+  "ref": {
+    "deleted": "#{id} (deleted)"
+  },
+  "empty": {
+    "title": "No data yet",
+    "noMatch": "No matching results",
+    "noMatchHint": "Try other keywords or clear the filters."
+  },
+  "dateRange": {
+    "today": "Today",
+    "last7Days": "Last 7 days",
+    "last30Days": "Last 30 days"
+  }
+}

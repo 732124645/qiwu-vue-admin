@@ -1,0 +1,22 @@
+{
+  "field": {
+    "audit": {
+      "signinLog": {
+        "traceId": "Trace ID",
+        "kind": "Kind",
+        "userId": "User ID",
+        "username": "Username",
+        "clientId": "Client",
+        "ip": "IP address",
+        "location": "Location",
+        "browser": "Browser",
+        "os": "OS",
+        "ok": "Succeeded",
+        "msgKey": "Message key",
+        "msgParams": "Message parameters",
+        "msg": "Message",
+        "userType": "User type"
+      }
+    }
+  }
+}

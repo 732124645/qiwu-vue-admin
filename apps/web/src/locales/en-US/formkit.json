@@ -1,0 +1,50 @@
+{
+  "widget": {
+    "menu": "Business",
+    "qw-user-select": "User",
+    "qw-dept-select": "Department",
+    "qw-dict-select": "Dictionary",
+    "qw-upload": "Attachments",
+    "qw-area-select": "Region",
+    "calcMenu": "Calculated",
+    "qw-date-range-days": "Days (calculated)",
+    "qw-detail-table": "Detail table",
+    "days": {
+      "unit": "days"
+    },
+    "detail": {
+      "add": "Add a row",
+      "remove": "Remove",
+      "removeRow": "Remove row {row}",
+      "cell": "{label}, row {row}",
+      "total": "Total"
+    },
+    "prop": {
+      "disabled": "Disabled",
+      "placeholder": "Placeholder",
+      "clearable": "Clearable",
+      "multiple": "Multiple",
+      "code": "Dictionary",
+      "limit": "Maximum files",
+      "maxSize": "Maximum file size (MB)",
+      "accept": "File types (e.g. .pdf,.docx)",
+      "startField": "Start date field name",
+      "endField": "End date field name",
+      "startHalfField": "Start AM/PM field name (values am / pm, optional)",
+      "endHalfField": "End AM/PM field name (values am / pm, optional)",
+      "columns": "Columns",
+      "column": {
+        "prop": "Name",
+        "label": "Title",
+        "sum": "Total field name (makes it a number column)"
+      }
+    }
+  },
+  "export": {
+    "action": "Export",
+    "title": "Export form code",
+    "download": "Download",
+    "close": "Close",
+    "invalid": "The form cannot be exported: {reason}"
+  }
+}

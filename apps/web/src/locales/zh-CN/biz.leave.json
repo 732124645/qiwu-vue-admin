@@ -1,0 +1,16 @@
+{
+  "biz": {
+    "leave": {
+      "entity": "请假申请",
+      "title": "请假申请",
+      "submit": "提交审批",
+      "view": "查看",
+      "backToList": "返回列表",
+      "approval": "审批进度",
+      "sentBack": "申请已退回给你：可修改后重新提交。",
+      "resubmit": "重新提交",
+      "resubmitConfirm": "确认按当前内容重新提交审批？",
+      "resubmitted": "已重新提交"
+    }
+  }
+}

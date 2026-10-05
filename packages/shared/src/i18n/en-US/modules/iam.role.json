@@ -1,0 +1,22 @@
+{
+  "field": {
+    "iam": {
+      "role": {
+        "name": "Role name",
+        "code": "Role code",
+        "sortNo": "Sort order",
+        "dataScope": "Data scope",
+        "menuLink": "Linked menu tree",
+        "deptLink": "Linked department tree",
+        "isBuiltin": "Built-in",
+        "enabled": "Enabled",
+        "note": "Note",
+        "menuIds": "Granted menus",
+        "deptIds": "Selected departments",
+        "userIds": "Users",
+        "keyword": "Username or name",
+        "assigned": "Assigned"
+      }
+    }
+  }
+}

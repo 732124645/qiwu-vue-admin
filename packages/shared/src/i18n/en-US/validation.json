@@ -1,0 +1,89 @@
+{
+  "required": "{field} is required",
+  "invalid_type": "{field} has an invalid type",
+  "integer": "{field} must be an integer",
+  "too_small": {
+    "string": "{field} must be at least {minimum} characters",
+    "number": "{field} must be at least {minimum}",
+    "number_exclusive": "{field} must be greater than {minimum}",
+    "array": "{field} must have at least {minimum} items"
+  },
+  "too_big": {
+    "string": "{field} must be at most {maximum} characters",
+    "number": "{field} must be at most {maximum}",
+    "number_exclusive": "{field} must be less than {maximum}",
+    "array": "{field} must have at most {maximum} items"
+  },
+  "invalid_format": {
+    "email": "{field} must be a valid email address",
+    "url": "{field} must be a valid URL",
+    "other": "{field} has an invalid format"
+  },
+  "invalid_value": "{field} must be one of: {values}",
+  "not_multiple_of": "{field} must be a multiple of {divisor}",
+  "unrecognized_keys": "Unsupported fields: {keys}",
+  "sort": "{field} can only use these fields: {allowed}",
+  "invalid": "{field} is invalid",
+  "route_name_reserved": "{field} is taken by a built-in page",
+  "json_object": "{field} must be a JSON object",
+  "template_params_max": "{field} can contain at most 20 entries",
+  "password": {
+    "too_long_bytes": "{field} must be at most {maxBytes} bytes",
+    "char_classes": "{field} must contain at least {count} of these character types: lowercase letters, uppercase letters, digits, symbols",
+    "same_as_old": "The new password must differ from the old one"
+  },
+  "wf": {
+    "too_large": "The process is too large: at most 200 steps and 100 levels of nesting",
+    "duplicate_id": "Id {node} is used twice",
+    "fallback_count": "Branch {node} needs exactly one default path",
+    "fallback_when": "Default path {node} cannot have conditions",
+    "path_when_required": "Path {node} needs a condition",
+    "parallel_path": "Parallel path {node} cannot have conditions or be the default path",
+    "unknown_field": "A condition of path {node} uses a field the form does not have",
+    "op_mismatch": "A condition of path {node} uses an operator its field does not take",
+    "value_mismatch": "A condition of path {node} has a missing or wrong value",
+    "assignee_ids": "Select the approvers for step {node}",
+    "assignee_field": "Step {node} requires a form field of the matching type for its approvers",
+    "fallback_user": "Pick the fallback user of step {node}",
+    "picks_missing": "Pick the users of step {node}",
+    "picks_unknown_user": "Step {node} can only take enabled users",
+    "filter_unknown_field": "The chosen version's form has no field {name} to filter by",
+    "filter_op_mismatch": "Field {name} cannot be filtered that way",
+    "filter_value_mismatch": "The filter value of field {name} is missing or of the wrong type",
+    "bpmn_parse": "The BPMN diagram cannot be read: it needs BPMN 2.0 XML this system supports",
+    "bpmn_too_large": "The BPMN diagram is too large: at most 80 KiB (about 90 elements)",
+    "bpmn_doctype": "A BPMN diagram cannot contain a DOCTYPE or entity declarations",
+    "bpmn_process": "The diagram must contain exactly one process",
+    "bpmn_pool": "Pools and lanes are not supported ({node})",
+    "bpmn_unsupported": "The type of element {node}, or one of its settings, is not supported",
+    "bpmn_foreign": "Element {node} carries foreign extensions, listeners or settings of other BPMN tools, which are not supported",
+    "bpmn_expression": "Element {node} contains an expression: conditions are set with the condition builder only",
+    "bpmn_condition_misplaced": "Flow {node} has a condition or default path where none may be: only the outgoing flows of a branching gateway take them",
+    "bpmn_ref": "Element {node} refers to an element that does not exist or cannot be connected",
+    "bpmn_di": "The shape of element {node} is missing, doubled, colored, smaller than 10 × 10 or overlapping another, or its line does not run from its source to its target or passes within 5 px of another node",
+    "bpmn_id": "The ID or name of element {node} is not valid: an ID starts with a letter or _, holds only letters, digits, _ and -, has at most 64 characters and does not start with __; a name has at most 64 characters",
+    "bpmn_start": "The process must have exactly one start event",
+    "bpmn_arity": "Element {node} has the wrong number of flows: a start event has one outgoing flow; an approval or CC step has one incoming and one outgoing flow; an end event has incoming flows only; a gateway has one incoming and multiple outgoing flows (split), or multiple incoming and one outgoing flow (join). Use a gateway to merge flows",
+    "bpmn_unreachable": "Element {node} cannot be reached from the start event",
+    "bpmn_cycle": "The process has a loop (through {node}): send back or reject to have work redone",
+    "bpmn_join_type": "Branching gateway {node} and its joining gateway are of different types",
+    "bpmn_unstructured": "Branches and joins do not pair up at gateway {node}: every branch of a branching gateway must meet at one joining gateway of the same type (or all reach an end), without ending early or joining across blocks",
+    "bpmn_config": "The settings of element {node} are not valid"
+  },
+  "form": {
+    "too_large": "The form is too large: at most {rules} fields, {depth} levels of nesting and {values} values",
+    "forbidden_key": "Forms cannot contain \"{key}\" (events, data loading and linkage are not available)",
+    "code": "{path} holds code: forms cannot contain functions or scripts",
+    "unknown_type": "Forms cannot use the component \"{type}\"",
+    "duplicate_field": "Field name {name} is used twice",
+    "calc_ref": "The day count must name fields of this form: date fields for start and end; the AM/PM fields are optional"
+  },
+  "oauth": {
+    "client_id_reserved": "{field} is reserved by the system",
+    "redirect_uri": "{field} must be HTTPS (http://localhost or http://127.0.0.1 for local testing), without #, *, spaces or a user name and password",
+    "logo_url": "{field} must be an HTTPS URL or a path on this site (starting with /)",
+    "duplicate": "{field} has duplicate items",
+    "refresh_needs_code": "The refresh token grant needs the authorization code grant too",
+    "auto_approve_subset": "{field} may only hold scopes the client has"
+  }
+}

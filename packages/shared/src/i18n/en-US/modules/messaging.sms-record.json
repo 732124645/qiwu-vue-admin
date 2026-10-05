@@ -1,0 +1,20 @@
+{
+  "field": {
+    "messaging": {
+      "smsRecord": {
+        "channelId": "Channel ID",
+        "templateCode": "Template code",
+        "mobile": "Mobile number",
+        "userId": "Recipient user",
+        "body": "Body",
+        "params": "Params",
+        "status": "Status",
+        "error": "Error",
+        "providerMsgId": "Provider message ID",
+        "receiptStatus": "Receipt status",
+        "receiptAt": "Receipt at",
+        "attempts": "Attempts"
+      }
+    }
+  }
+}

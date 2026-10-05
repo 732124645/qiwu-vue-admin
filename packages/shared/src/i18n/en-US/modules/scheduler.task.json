@@ -1,0 +1,21 @@
+{
+  "field": {
+    "scheduler": {
+      "task": {
+        "name": "Name",
+        "groupCode": "Group",
+        "handler": "Handler",
+        "params": "Params",
+        "cron": "Cron",
+        "enabled": "Enabled",
+        "retryMax": "Retries",
+        "retryDelayMs": "Retry delay (ms)",
+        "timeoutMs": "Timeout (ms)",
+        "allowOverlap": "Allow overlap",
+        "misfire": "Misfire",
+        "lastFireAt": "Last fired",
+        "note": "Note"
+      }
+    }
+  }
+}

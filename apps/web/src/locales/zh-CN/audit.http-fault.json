@@ -1,0 +1,15 @@
+{
+  "audit": {
+    "httpFault": {
+      "entity": "API 错误日志",
+      "resolve": "标记已处理",
+      "ignore": "忽略",
+      "reopen": "重新打开"
+    }
+  },
+  "menu": {
+    "audit": {
+      "httpFault": "API 错误日志"
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "tree": {
+    "filter": "输入名称筛选",
+    "collapse": "收起{title}",
+    "expand": "展开{title}",
+    "resize": "调整{title}宽度"
+  },
+  "dept": {
+    "title": "部门",
+    "placeholder": "请选择部门"
+  },
+  "user": {
+    "title": "选择用户",
+    "placeholder": "选择一个用户",
+    "unpick": "清除所选用户",
+    "keyword": "搜索用户名或显示名",
+    "nameKeyword": "搜索显示名",
+    "pickAll": "选择列表中的全部用户",
+    "picked": "未选择用户 | 已选 1 人 | 已选 {count} 人",
+    "clear": "全部清空",
+    "truncated": "仅显示前 {count} 条，请缩小范围查找",
+    "confirm": "确定"
+  },
+  "icon": {
+    "placeholder": "选择图标",
+    "search": "搜索图标（英文名，如 house）",
+    "clear": "清除图标",
+    "none": "没有匹配的图标",
+    "more": "还有 {count} 个图标，输入关键字缩小范围"
+  }
+}

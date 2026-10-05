@@ -1,0 +1,12 @@
+{
+  "field": {
+    "wf": {
+      "form": {
+        "name": "表单名称",
+        "schemaJson": "表单结构",
+        "enabled": "是否启用",
+        "note": "备注"
+      }
+    }
+  }
+}

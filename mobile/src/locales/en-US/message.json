@@ -1,0 +1,21 @@
+{
+  "bulletins": "Bulletins",
+  "noBulletin": "No bulletins yet",
+  "inbox": "Messages",
+  "readAll": "Mark all as read",
+  "empty": "No messages yet",
+  "systemSender": "System",
+  "category": {
+    "system": "System",
+    "business": "Business"
+  },
+  "detail": "Message",
+  "bulletinDetail": "Bulletin",
+  "kind": {
+    "notice": "Notice",
+    "announcement": "Announcement"
+  },
+  "summary": "{n} unread",
+  "summaryNone": "All caught up",
+  "unread": "Unread"
+}

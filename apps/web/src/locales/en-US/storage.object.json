@@ -1,0 +1,27 @@
+{
+  "storage": {
+    "object": {
+      "uploader": "Uploaded by",
+      "uploadedAt": "Uploaded at",
+      "uploaded": "\"{name}\" uploaded",
+      "preview": "Preview",
+      "copyLink": "Copy link",
+      "copied": "Link copied",
+      "copyFailed": "The link could not be copied",
+      "deleteConfirm": "Delete \"{name}\"? It stops being served at once (its public link too); the stored file is purged after the retention period. Where a file is used is not recorded: pages, records or messages that still link or attach it will show a broken file.",
+      "tag": {
+        "avatar": "Avatar",
+        "richtext": "Rich-text image",
+        "cover": "Cover",
+        "attachment": "Attachment",
+        "import": "Import file",
+        "wf": { "attachment": "Workflow attachment" }
+      }
+    }
+  },
+  "menu": {
+    "storage": {
+      "object": "Files"
+    }
+  }
+}

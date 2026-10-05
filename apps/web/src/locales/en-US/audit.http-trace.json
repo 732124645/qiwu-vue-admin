@@ -1,0 +1,12 @@
+{
+  "audit": {
+    "httpTrace": {
+      "entity": "API access log entry"
+    }
+  },
+  "menu": {
+    "audit": {
+      "httpTrace": "API access log"
+    }
+  }
+}

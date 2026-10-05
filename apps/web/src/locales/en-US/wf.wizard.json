@@ -1,0 +1,40 @@
+{
+  "wf": {
+    "wizard": {
+      "untitled": "New approval",
+      "saved": "Saved",
+      "fromTemplate": "From template",
+      "replace": "Replace",
+      "replaceConfirm": "Creating from a template replaces what you have entered so far. Continue?",
+      "notDynamic": "This process uses a business form and cannot be edited in the wizard.",
+      "saveDraft": "Save draft",
+      "publish": "Publish",
+      "tab": "{n}. {name}",
+      "steps": {
+        "basics": "Basics",
+        "form": "Form",
+        "flow": "Flow",
+        "advanced": "Advanced"
+      },
+      "flowHint": "Conditions, approvers named by a form field and field access all use the fields of the form designed in the previous step.",
+      "badForm": "The form cannot be saved: {reason}",
+      "draftSaved": "Draft saved",
+      "published": "Published as version {version}",
+      "failedTitle": "Saving failed",
+      "failed": "{step} failed: {reason}. The steps done so far are kept; a retry continues from the failed step.",
+      "retry": "Retry",
+      "step": {
+        "form": "Saving the form",
+        "model": "Saving the process model",
+        "draft": "Saving the flow draft",
+        "publish": "Publishing the flow version"
+      }
+    }
+  },
+  "menu": {
+    "wf": {
+      "wizard": "New approval",
+      "wizardEdit": "Approval wizard"
+    }
+  }
+}

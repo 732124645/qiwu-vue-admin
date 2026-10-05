@@ -1,0 +1,15 @@
+{
+  "audit": {
+    "actionLog": {
+      "entity": "action log entry",
+      "clean": "Clear all",
+      "cleanConfirm": "Clear the whole action log? Cleared entries are no longer shown and cannot be restored here (the clearing itself is logged as a new entry).",
+      "cleaned": "Cleared"
+    }
+  },
+  "menu": {
+    "audit": {
+      "actionLog": "Action log"
+    }
+  }
+}

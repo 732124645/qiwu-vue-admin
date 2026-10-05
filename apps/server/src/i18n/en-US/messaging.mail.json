@@ -1,0 +1,8 @@
+{
+  "error": {
+    "messaging": {
+      "mail_host_refused": "This mail server is not allowed",
+      "mail_password_required": "Enter the password again when changing the server, port, username or security"
+    }
+  }
+}

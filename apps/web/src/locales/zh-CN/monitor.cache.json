@@ -1,0 +1,51 @@
+{
+  "monitor": {
+    "cache": {
+      "clear": "清理",
+      "clearAll": "清理全部命名空间",
+      "clearNsConfirm": "删除“{name}”下的全部键？应用会在需要时重新生成。",
+      "clearKeyConfirm": "删除键 {key}？",
+      "clearAllConfirm": "删除所有可清理命名空间下的键？会话与登录失败计数不受影响。",
+      "cleared": "已删除 {count} 个键",
+      "keysOf": "{name}的键",
+      "filter": "筛选当前列出的键",
+      "truncated": "只列出前 {max} 个键。",
+      "pickNs": "选择一个命名空间以列出其中的键",
+      "pickKey": "选择一个键以查看它的值",
+      "noExpiry": "永不过期",
+      "maskedHint": "该值包含敏感信息，不予显示。",
+      "ns": {
+        "authSession": "会话",
+        "authAccess": "访问令牌",
+        "authRefresh": "刷新令牌",
+        "authRefreshGrace": "已轮换的刷新令牌",
+        "authUser": "用户令牌索引",
+        "authOnline": "在线会话",
+        "authSeen": "会话活动时间",
+        "authPermVer": "权限版本",
+        "authCredVer": "凭据版本",
+        "authFail": "登录失败计数",
+        "captcha": "验证码",
+        "smsLimit": "短信限额",
+        "wxMp": "微信登录",
+        "oauth2Code": "OAuth2 授权码",
+        "presign": "直传授权",
+        "dict": "字典",
+        "dictVer": "字典版本",
+        "param": "参数",
+        "paramVer": "参数版本",
+        "idem": "防重复提交",
+        "throttle": "请求限流",
+        "excelReport": "导入错误报告",
+        "lock": "锁",
+        "jobLock": "任务锁",
+        "jobFire": "任务触发记录"
+      }
+    }
+  },
+  "menu": {
+    "monitor": {
+      "cache": "缓存列表"
+    }
+  }
+}

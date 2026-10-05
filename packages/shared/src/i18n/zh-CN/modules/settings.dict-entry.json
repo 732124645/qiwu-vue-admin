@@ -1,0 +1,18 @@
+{
+  "field": {
+    "settings": {
+      "dictEntry": {
+        "dictCode": "字典编码",
+        "value": "字典值",
+        "label": "字典标签",
+        "labelI18n": "多语言标签",
+        "sortNo": "排序号",
+        "tagType": "标签样式",
+        "cssClass": "样式类名",
+        "isDefault": "默认值",
+        "enabled": "启用状态",
+        "note": "备注"
+      }
+    }
+  }
+}

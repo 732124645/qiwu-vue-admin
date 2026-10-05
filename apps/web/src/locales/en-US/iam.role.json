@@ -1,0 +1,43 @@
+{
+  "iam": {
+    "role": {
+      "entity": "role",
+      "grant": {
+        "action": "Menu permissions",
+        "title": "Menu permissions: {name}",
+        "hint": "Tick the menus and actions this role may use. With the parent-child link on, ticking an item also brings its parents, and ticking a parent brings everything below it.",
+        "done": "Menu permissions saved"
+      },
+      "dataScope": {
+        "action": "Data scope",
+        "title": "Data scope: {name}",
+        "kept": "{count} more selected departments are outside what you can see; they stay as they are",
+        "done": "Data scope saved"
+      },
+      "tree": {
+        "link": "Link parents and children",
+        "checkAll": "Select all",
+        "checkNone": "Select none"
+      },
+      "members": {
+        "back": "Back to roles",
+        "role": "Role",
+        "assigned": "Assigned users",
+        "unassigned": "Other users",
+        "add": "Assign",
+        "revoke": "Remove",
+        "batchAdd": "Assign selected",
+        "batchRevoke": "Remove selected",
+        "confirmRevoke": "Remove the {count} selected users from this role?",
+        "added": "Users assigned",
+        "revoked": "Users removed"
+      }
+    }
+  },
+  "menu": {
+    "iam": {
+      "role": "Roles",
+      "roleUsers": "Role members"
+    }
+  }
+}

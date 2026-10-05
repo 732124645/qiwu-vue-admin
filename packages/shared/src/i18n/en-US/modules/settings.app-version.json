@@ -1,0 +1,17 @@
+{
+  "field": {
+    "settings": {
+      "appVersion": {
+        "platform": "Platform",
+        "packageKind": "Package kind",
+        "version": "Version",
+        "nativeMin": "Min native version",
+        "url": "Download URL",
+        "isForced": "Forced",
+        "notes": "Release notes",
+        "enabled": "Published",
+        "nativeVersion": "Native version"
+      }
+    }
+  }
+}

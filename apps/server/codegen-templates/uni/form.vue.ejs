@@ -1,0 +1,256 @@
+<%_
+// the uni-app add / edit page (docs/codegen-golden.md "Mobile"); not for a read-only module
+const b = m.biz
+const B = m.Biz
+const tree = m.kind === 'tree'
+// a tree's parent comes from the query (add below a node) or the row, shown read-only: moving a node stays a
+// desktop task (no tree picker on mobile)
+const parent = tree ? m.parent : undefined
+const subs = m.subs
+// a secret column is left out: write-only on the web form; a required one makes the create fail with the
+// server's 400 (add a password input when a mobile module needs one)
+const fields = m.form.filter((c) => !c.secret)
+const cells = subs.flatMap((s) => s.form)
+const all = [...fields, ...cells]
+const has = (...widgets) => all.some((c) => widgets.includes(c.widget))
+const number = (c) => c.widget === 'number' && c.tsType === 'number'
+const dictSelect = (c) => !!c.dict && (c.widget === 'select' || c.widget === 'radio')
+const upload = (c) => c.widget === 'image-upload' || c.widget === 'file-upload'
+const dates = has('date', 'datetime')
+_%>
+<%_ function field(c, on, top) { _%>
+<%_ const v = on + '.' + c.field _%>
+      <view class="qw-field">
+<%_ if (c === parent) { _%>
+        <wd-cell :title="t('<%= c.labelKey %>')" :value="parentText" />
+<%_ } else if (c.widget === 'switch') { _%>
+        <wd-cell :title="t('<%= c.labelKey %>')" center>
+          <wd-switch v-model="<%= v %>" />
+        </wd-cell>
+<%_ } else if (dictSelect(c)) { _%>
+        <QwDictSelect v-model="<%= v %>" code="<%= c.dict %>" :label="t('<%= c.labelKey %>')"<% if (c.required) { %> required<% } %> />
+<%_ } else if (c.widget === 'dept-tree-select') { _%>
+        <QwDeptPicker v-model="<%= v %>" :label="t('<%= c.labelKey %>')"<% if (c.required) { %> required<% } %> />
+<%_ } else if (c.widget === 'user-picker') { _%>
+        <QwUserPicker
+          :model-value="usersOf(<%= v %>)"
+          source="iam"
+          :label="t('<%= c.labelKey %>')"
+          <%_ if (c.required) { _%>
+          required
+          <%_ } _%>
+          @update:model-value="<%= v %> = userId($event)"
+        />
+<%_ } else if (c.widget === 'date' || c.widget === 'datetime') { _%>
+        <wd-cell
+          :title="t('<%= c.labelKey %>')"
+          :value="<% if (c.widget === 'date') { %><%= v %> ?? ''<% } else { %><%= v %> ? formatTime(<%= v %>) : ''<% } %>"
+          :placeholder="t('picker.select')"
+          <%_ if (c.required) { _%>
+          required
+          <%_ } _%>
+          is-link
+          @click="pickDate(<%= on %>, '<%= c.field %>', '<%= c.widget %>', t('<%= c.labelKey %>'))"
+        />
+<%_ } else { _%>
+        <text class="qw-field__label<% if (c.required) { %> is-required<% } %>">{{ t('<%= c.labelKey %>') }}</text>
+  <%_ if (number(c)) { _%>
+        <%_ /* wd-input-number rounds to `precision` (default 0): a decimal's scale, 6 for a float / double; */ _%>
+        <%_ /* it hands back '' when emptied and a formatted string when it first shows: numOf makes both numbers */ _%>
+        <wd-input-number
+          :model-value="<%= v %> ?? ''"
+          :min="<%= c.web.min ?? 'Number.MIN_SAFE_INTEGER' %>"
+          <%_ if (c.web.max) { _%>
+          :max="<%= c.web.max %>"
+          <%_ } _%>
+          <%_ if (c.web.scale !== undefined || ['float', 'double'].includes(c.base)) { _%>
+          :precision="<%= c.web.scale ?? 6 %>"
+          <%_ } _%>
+          <%_ if (c.web.scale) { _%>
+          :step="<%= '0.' + '0'.repeat(c.web.scale - 1) + '1' %>"
+          <%_ } _%>
+          allow-null
+          @update:model-value="<%= v %> = numOf($event)"
+        />
+  <%_ } else if (upload(c)) { _%>
+  <%_ const kind = c.widget === 'image-upload' ? 'image' : 'file' _%>
+        <QwUpload
+          :model-value="uploadsOf(<%= v %>, '<%= kind %>')"
+          <%_ if (kind === 'image') { _%>
+          biz-tag="cover"
+          <%_ } _%>
+          :limit="1"
+          @update:model-value="<%= v %> = uploadText($event, '<%= kind %>')"
+        />
+  <%_ } else if (c.freeText) { _%>
+        <%_ /* richtext: its HTML as text (the web's row cells do the same); the server sanitizes it on save */ _%>
+        <wd-textarea v-model="<%= v %>"<% if (c.web.maxlength) { %> :maxlength="<%= c.web.maxlength %>" show-word-limit<% } %> />
+  <%_ } else { _%>
+        <wd-input v-model="<%= v %>"<% if (c.web.maxlength) { %> :maxlength="<%= c.web.maxlength %>"<% } %> clearable />
+  <%_ } _%>
+<%_ } _%>
+<%_ if (top) { _%>
+        <text v-if="errors.<%= c.field %>" class="qw-field__error">{{ errors.<%= c.field %> }}</text>
+<%_ } _%>
+      </view>
+<%_ } _%>
+<template>
+  <view class="qw-detail qw-stack">
+    <view v-if="ready" class="qw-form">
+<%_ for (const c of fields) { _%>
+<%_ field(c, 'form', true) _%>
+<%_ } _%>
+<%_ for (const sub of subs) { _%>
+      <view class="qw-sec">
+        <text class="qw-sec__title">{{ t('field.<%= m.key %>.<%= sub.prop %>') }}</text>
+      </view>
+      <text v-if="!form.<%= sub.prop %>.length" class="qw-form__hint">{{ t('crud.rows.empty') }}</text>
+      <view v-for="(line, i) in form.<%= sub.prop %>" :key="i" class="qw-stack">
+        <view class="qw-sec">
+          <text class="qw-sec__title">{{ t('crud.rows.row', { n: i + 1 }) }}</text>
+          <text class="qw-sec__link" @click="form.<%= sub.prop %>.splice(i, 1)">{{ t('crud.action.removeRow') }}</text>
+        </view>
+  <%_ for (const c of sub.form) { _%>
+<%_ field(c, 'line', false) _%>
+  <%_ } _%>
+      </view>
+      <wd-button custom-class="qw-btn" type="primary" variant="soft" block @click="form.<%= sub.prop %>.push(new<%= sub.Biz %>())">
+        {{ t('crud.action.addRow') }}
+      </wd-button>
+      <text v-if="errors.<%= sub.prop %>" class="qw-field__error">{{ errors.<%= sub.prop %> }}</text>
+<%_ } _%>
+      <text v-if="error" class="qw-form__error" role="alert">{{ error }}</text>
+      <wd-button
+        custom-class="qw-btn qw-btn--primary"
+        type="primary"
+        block
+        :loading="submitting"
+        :disabled="submitting"
+        @click="submit"
+      >
+        {{ t('crud.action.save') }}
+      </wd-button>
+    </view>
+    <QwEmpty v-else-if="error" :title="error" />
+<%_ if (dates) { _%>
+    <!-- one picker for every date field (of a row too) -->
+    <wd-datetime-picker
+      :model-value="pickedAt"
+      :visible="!!picking"
+      :type="picking?.type ?? 'date'"
+      :title="picking?.title ?? ''"
+      root-portal
+      @confirm="pick"
+      @update:visible="closed"
+    />
+<%_ } _%>
+  </view>
+</template>
+
+<script setup lang="ts">
+import { <%= names(['computed', 'reactive', 'ref', 'shallowRef', 'watch']) %> } from 'vue'
+import { onLoad } from '@dcloudio/uni-app'
+import { <%= names([b + 'Create', 'type ' + B + 'Create', parent && 'type ' + B + 'Vo', ...subs.map((s) => 'type ' + s.Biz + 'Input'), has('image-upload', 'file-upload') && 'uploadsOf', has('image-upload', 'file-upload') && 'uploadText', 'type ValidationIssue']) %> } from '@qiwu/shared'
+import { <%= b %>Api } from '@/api/<%= m.home %>'
+<%_ if (has('dept-tree-select')) { _%>
+import QwDeptPicker from '@/core/components/QwDeptPicker.vue'
+<%_ } _%>
+<%_ if (all.some(dictSelect)) { _%>
+import QwDictSelect from '@/core/components/QwDictSelect.vue'
+<%_ } _%>
+import QwEmpty from '@/core/components/QwEmpty.vue'
+<%_ if (all.some(upload)) { _%>
+import QwUpload from '@/core/components/QwUpload.vue'
+<%_ } _%>
+<%_ if (has('user-picker')) { _%>
+import QwUserPicker from '@/core/components/QwUserPicker.vue'
+<%_ } _%>
+import { <%= names(['fillForm', 'type Form', all.some((c) => c !== parent && number(c)) && 'numOf', dates && 'useDatePicker', has('user-picker') && 'userId', has('user-picker') && 'usersOf']) %> } from '@/core/crud'
+<%_ if (has('datetime')) { _%>
+import { formatTime } from '@/core/format'
+<%_ } _%>
+import { <%= names(['fieldErrors', 't', parent && m.label.seedName && 'tx']) %> } from '@/core/i18n'
+import { ApiError, errorText } from '@/core/request'
+
+/**
+ * Add / edit page of the <%= comment(m.noun) %> list (mobile, generated): `?id=` edits that row, else it
+ * adds one<% if (parent) { %> below `?parentId=` (0: at the top level)<% } %>. The rules: the shared `<%= b %>Create`
+ * (the server checks again). The save button shows loading and is disabled while pending.
+ */
+const id = ref(0)
+const ready = ref(false)
+const error = ref('')
+const submitting = ref(false)
+const form = reactive<Form<<%= B %>Create>>({
+<%_ for (const c of fields) { _%>
+  <%= c.field %>: <% if (c === parent) { %>0<% } else { %><%= c.web.empty %><% } %>,
+<%_ } _%>
+<%_ for (const sub of subs) { _%>
+  <%= sub.prop %>: [],
+<%_ } _%>
+})
+const issues = shallowRef<ValidationIssue[]>([])
+const errors = computed(() => fieldErrors(<%= b %>Create, issues.value))
+// once shown, the messages follow the input
+watch(form, () => {
+  if (issues.value.length) issues.value = <%= b %>Create.safeParse(form).error?.issues ?? []
+})
+<%_ if (dates) { _%>
+const { picking, value: pickedAt, open: pickDate, pick, closed } = useDatePicker()
+<%_ } _%>
+<%_ for (const sub of subs) { _%>
+const new<%= sub.Biz %> = (): Form<<%= sub.Biz %>Input> => ({ <% for (const c of sub.form) { %><%= c.field %>: <%= c.web.empty %>, <% } %>})
+<%_ } _%>
+<%_ if (parent) { _%>
+const parentRow = shallowRef<<%= B %>Vo>()
+const parentText = computed(() => {
+  const label = parentRow.value?.<%= m.label.field %>
+  if (label) return <% if (m.label.seedName) { %>tx(label)<% } else { %>label<% } %>
+  return form.<%= parent.field %> ? String(form.<%= parent.field %>) : t('crud.tree.topLevel')
+})
+<%_ } _%>
+
+onLoad(async (query) => {
+  id.value = Number(query?.id) || 0
+  const name = t('<%= m.key %>.entity')
+  uni.setNavigationBarTitle({ title: t(id.value ? 'crud.title.edit' : 'crud.title.create', { name }) })
+<%_ if (parent) { _%>
+  if (!id.value) form.<%= parent.field %> = Number(query?.parentId) || 0
+<%_ } _%>
+  if (id.value)
+    try {
+      fillForm(form, await <%= b %>Api.get(id.value))
+    } catch (e) {
+      return void (error.value = errorText(e))
+    }
+<%_ if (parent) { _%>
+  if (form.<%= parent.field %>)
+    <%= b %>Api.get(form.<%= parent.field %>).then(
+      (r) => (parentRow.value = r),
+      () => {}, // out of the caller's scope: its id shows
+    )
+<%_ } _%>
+  ready.value = true
+})
+
+async function submit() {
+  if (submitting.value) return
+  const parsed = <%= b %>Create.safeParse(form)
+  issues.value = parsed.error?.issues ?? []
+  if (!parsed.success) return
+  submitting.value = true
+  error.value = ''
+  try {
+    if (id.value) await <%= b %>Api.update(id.value, parsed.data)
+    else await <%= b %>Api.create(parsed.data)
+    uni.showToast({ title: t(id.value ? 'crud.msg.updated' : 'crud.msg.created'), icon: 'none' })
+    uni.navigateBack()
+  } catch (e) {
+    // a 400 (the rules), a 404 (gone, out of scope) belongs here; the request layer toasts the rest (409: a
+    // unique value taken)
+    if (e instanceof ApiError && (e.status === 400 || e.status === 404)) error.value = e.message
+  } finally {
+    submitting.value = false
+  }
+}
+</script>

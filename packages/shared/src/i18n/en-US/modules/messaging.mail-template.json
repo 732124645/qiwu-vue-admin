@@ -1,0 +1,17 @@
+{
+  "field": {
+    "messaging": {
+      "mailTemplate": {
+        "code": "Code",
+        "locale": "Locale",
+        "name": "Name",
+        "accountId": "Mail account",
+        "senderLabel": "Sender label",
+        "subject": "Subject",
+        "body": "Body",
+        "paramNames": "Param names",
+        "enabled": "Enabled"
+      }
+    }
+  }
+}

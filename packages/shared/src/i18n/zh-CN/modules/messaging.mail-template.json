@@ -1,0 +1,17 @@
+{
+  "field": {
+    "messaging": {
+      "mailTemplate": {
+        "code": "模板编码",
+        "locale": "语言",
+        "name": "模板名称",
+        "accountId": "邮件账号",
+        "senderLabel": "发件人名称",
+        "subject": "主题",
+        "body": "正文",
+        "paramNames": "参数名称",
+        "enabled": "是否启用"
+      }
+    }
+  }
+}

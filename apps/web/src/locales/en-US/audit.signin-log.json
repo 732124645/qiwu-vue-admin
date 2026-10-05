@@ -1,0 +1,18 @@
+{
+  "audit": {
+    "signinLog": {
+      "entity": "sign-in log entry",
+      "clean": "Clear all",
+      "cleanConfirm": "Clear the whole sign-in log? Cleared entries are no longer shown and cannot be restored here.",
+      "cleaned": "Cleared",
+      "unlock": "Unlock account",
+      "unlockConfirm": "Unlock sign-ins for the username “{username}”?",
+      "unlocked": "{username} unlocked"
+    }
+  },
+  "menu": {
+    "audit": {
+      "signinLog": "Sign-in log"
+    }
+  }
+}

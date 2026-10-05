@@ -1,0 +1,175 @@
+<%_
+const b = m.biz
+const B = m.Biz
+const Nouns = m.nouns[0].toUpperCase() + m.nouns.slice(1)
+// a tree (crud.ts `kind`): the list is the whole filtered forest, never paged
+const tree = m.kind === 'tree'
+// a master-sub module (crud.ts `subs`): the body carries the sub rows, GET /:id answers them
+const subs = m.subs
+_%>
+import { z } from 'zod'
+<%_ if (subs.length) { _%>
+import { SUB_ROWS_MAX } from '<%= m.sharedUp %>common/crud.js'
+<%_ } _%>
+<%_ if (!tree) { _%>
+import { pageQuery } from '<%= m.sharedUp %>common/pagination.js'
+<%_ } _%>
+import { fieldDomains } from '<%= m.sharedUp %>validation/zod-i18n.js'
+
+<%_ if (tree) { _%>
+/**
+ * <%= comment(Nouns) %> (`<%= m.table %>`), `/api/<%= m.url %>` (see docs/design-notes.md#api-envelope), a tree table (`parent_id`, 0 =
+ * top level, + `tree_path`) listed whole as a forest (docs/codegen-golden.md "Tree"). Field labels
+ * `field.<%= m.key %>.<prop>`.
+ */
+<%_ } else { _%>
+/**
+ * <%= comment(Nouns) %> (`<%= m.table %>`), `/api/<%= m.url %>` (see docs/design-notes.md#api-envelope). Field labels
+ * `field.<%= m.key %>.<prop>`.
+ */
+<%_ } _%>
+
+export const <%= b %>Perms = {
+<%_ for (const v of m.verbs) { _%>
+  <%= v %>: '<%= m.key %>.<%= v %>',
+<%_ } _%>
+} as const
+
+<%_ for (const sub of subs) { _%>
+/**
+ * One of the body's `<%= sub.prop %>` (<%= comment(sub.table) %>): with the `id` of a stored one of this <%= comment(m.noun) %> it is
+ * changed, without one added (the server sets `<%= sub.fk.field %>`). Field labels are the <%= comment(m.noun) %>'s.
+ */
+export const <%= sub.biz %>Input = z
+  .object({
+    id: z.number().int().positive().optional(),
+<%_ for (const c of sub.form) { _%>
+    <%= c.field %>: <%= c.create %>,
+<%_ } _%>
+  })
+  .register(fieldDomains, { domain: '<%= m.key %>' })
+export type <%= sub.Biz %>Input = z.infer<typeof <%= sub.biz %>Input>
+
+<%_ } _%>
+<%_ if (!m.readonly) { _%>
+<%_ if (tree) { _%>
+/**
+ * POST body; columns with a DB default may be left out, nullable ones may be null. `<%= m.parent.field %>`: 0 =
+ * top level, else an enabled row (404 / 422 `tree.parent_disabled`); changing it moves the row with its
+ * whole subtree, never below itself (422 `tree.parent_invalid`).
+ */
+<%_ } else if (subs.length) { _%>
+/**
+ * POST body: the <%= comment(m.noun) %> with all its <%= comment(subs.map((s) => s.prop).join(', ')) %>; columns with a DB default may be left out,
+ * nullable ones may be null.
+ */
+<%_ } else { _%>
+/** POST body; columns with a DB default may be left out, nullable ones may be null. */
+<%_ } _%>
+export const <%= b %>Create = z
+  .object({
+<%_ for (const c of m.form) { _%>
+    <% if (c.secret) { %>/** Write-only secret; empty or absent keeps the stored value on update. */
+    <% } %><%= c.secret ? c.secret.body : c.field %>: <%= c.create %>,
+<%_ } _%>
+<%_ for (const sub of subs) { _%>
+    <%= sub.prop %>: z.array(<%= sub.biz %>Input).max(SUB_ROWS_MAX),
+<%_ } _%>
+  })
+  .register(fieldDomains, { domain: '<%= m.key %>' })
+export type <%= B %>Create = z.infer<typeof <%= b %>Create>
+
+<%_ if (subs.length) { _%>
+/**
+ * PUT body: the fields sent are changed, the others kept; a list of sub rows sent replaces the stored
+ * one (rows not sent are deleted), one left out is kept.
+ */
+<%_ } else { _%>
+/** PUT body: the fields sent are changed, the others kept. */
+<%_ } _%>
+export const <%= b %>Update = <%= b %>Create
+  .partial()
+  .register(fieldDomains, { domain: '<%= m.key %>' })
+export type <%= B %>Update = z.infer<typeof <%= b %>Update>
+<%_ } _%>
+
+<%_ if (tree) { _%>
+/**
+ * GET query: the list filters (text contains, ranges from / to, the rest equals). A matching row whose
+ * parent does not match is a root of the result.
+ */
+export const <%= b %>Query = z
+  .object({
+<%_ } else { _%>
+/** GET query: paging, sort and the list filters (text contains, ranges from / to, the rest equals). */
+export const <%= b %>Query = pageQuery([<% m.sortFields.forEach((f, i) => { %><% if (i) { %>, <% } %>'<%= f %>'<% }) %>])
+<%_ } _%>
+<%_ if (m.filters.length || tree) { _%>
+<%_ if (!tree) { _%>
+  .extend({
+<%_ } _%>
+  <%_ for (const c of m.filters) { _%>
+    <%_ if (c.queryOp === 'between') { _%>
+    <%= c.field %>From: <%= c.query %>,
+    <%= c.field %>To: <%= c.query %>,
+    <%_ } else { _%>
+    <%= c.field %>: <%= c.query %>,
+    <%_ } _%>
+  <%_ } _%>
+  })
+<%_ } _%>
+  .register(fieldDomains, { domain: '<%= m.key %>' })
+export type <%= B %>Query = z.output<typeof <%= b %>Query>
+
+export const <%= b %>Vo = z.object({
+  id: z.number().int(),
+<%_ for (const c of m.own.filter((c) => !c.secret)) { _%>
+  <%= c.field %>: <%= c.vo %>,
+<%_ } _%>
+<%_ for (const c of Object.values(m.audit)) { _%>
+  <%= c.field %>: <%= c.vo %>,
+<%_ } _%>
+})
+export type <%= B %>Vo = z.infer<typeof <%= b %>Vo>
+<%_ for (const sub of subs) { _%>
+
+export const <%= sub.biz %>Vo = z.object({
+  id: z.number().int(),
+<%_ for (const c of sub.own) { _%>
+  <%= c.field %>: <%= c.vo %>,
+<%_ } _%>
+<%_ for (const c of Object.values(m.audit)) { _%>
+  <%= c.field %>: <%= c.vo %>,
+<%_ } _%>
+})
+export type <%= sub.Biz %>Vo = z.infer<typeof <%= sub.biz %>Vo>
+<%_ } _%>
+<%_ if (subs.length) { _%>
+
+/** GET /:id and the POST answer: the <%= comment(m.noun) %> with its <%= comment(subs.map((s) => s.prop).join(', ')) %> (<%= comment(subs.map((s) => s.sortNo ? 'sort order, then id' : 'by id').join('; ')) %>). */
+export const <%= b %>DetailVo = <%= b %>Vo.extend({
+<%_ for (const sub of subs) { _%>
+  <%= sub.prop %>: z.array(<%= sub.biz %>Vo),
+<%_ } _%>
+})
+export type <%= B %>Detail = z.infer<typeof <%= b %>DetailVo>
+<%_ } _%>
+<%_ if (tree) { _%>
+
+export interface <%= B %>Node extends <%= B %>Vo {
+  children: <%= B %>Node[]
+}
+
+/** GET / (browse): the caller's <%= comment(m.nouns) %> matching the filters as a forest, siblings by `sort_no, id`. */
+export const <%= b %>NodeVo: z.ZodType<<%= B %>Node> = <%= b %>Vo.extend({
+  get children() {
+    return z.array(<%= b %>NodeVo)
+  },
+})
+<%_ } _%>
+<%_ if (m.withOptions) { _%>
+
+/** GET /options: <%= comment((m.enabled ? 'enabled ' : '') + m.nouns) %> for pickers. */
+export const <%= b %>OptionVo = <%= b %>Vo.pick({ id: true, <%= m.label.field %>: true })
+export type <%= B %>Option = z.infer<typeof <%= b %>OptionVo>
+<%_ } _%>

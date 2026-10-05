@@ -1,0 +1,51 @@
+{
+  "monitor": {
+    "cache": {
+      "clear": "Clear",
+      "clearAll": "Clear all namespaces",
+      "clearNsConfirm": "Delete every key of “{name}”? The app rebuilds them when it needs them.",
+      "clearKeyConfirm": "Delete the key {key}?",
+      "clearAllConfirm": "Delete the keys of every clearable namespace? Sessions and sign-in counters are kept.",
+      "cleared": "{count} key(s) deleted",
+      "keysOf": "Keys of {name}",
+      "filter": "Filter the keys shown",
+      "truncated": "Only the first {max} keys are listed.",
+      "pickNs": "Pick a namespace to list its keys",
+      "pickKey": "Pick a key to see its value",
+      "noExpiry": "No expiry",
+      "maskedHint": "This value holds secrets and is never shown.",
+      "ns": {
+        "authSession": "Sessions",
+        "authAccess": "Access tokens",
+        "authRefresh": "Refresh tokens",
+        "authRefreshGrace": "Rotated refresh tokens",
+        "authUser": "Tokens by user",
+        "authOnline": "Online sessions",
+        "authSeen": "Session activity",
+        "authPermVer": "Permission versions",
+        "authCredVer": "Credential versions",
+        "authFail": "Failed sign-ins",
+        "captcha": "Captchas",
+        "smsLimit": "SMS limits",
+        "wxMp": "WeChat sign-in",
+        "oauth2Code": "OAuth2 codes",
+        "presign": "Upload grants",
+        "dict": "Dictionaries",
+        "dictVer": "Dictionary versions",
+        "param": "Parameters",
+        "paramVer": "Parameter versions",
+        "idem": "Duplicate-submit guards",
+        "throttle": "Request rate limits",
+        "excelReport": "Import error reports",
+        "lock": "Locks",
+        "jobLock": "Job locks",
+        "jobFire": "Job runs"
+      }
+    }
+  },
+  "menu": {
+    "monitor": {
+      "cache": "Cache keys"
+    }
+  }
+}

@@ -1,0 +1,862 @@
+/*
+ * Element Plus on the design tokens (docs/design/visual-system.md §3) — the only place that restyles EP.
+ * Specificity: `html:root` (0,1,1) beats EP's `:root` variables whatever the chunk order and ties its
+ * `html.dark` ones, which main.ts imports before this file. Component rules start with `:root` so they
+ * beat EP component CSS that lazy route chunks append later.
+ */
+
+html:root {
+  /* shades mix toward white in light mode, toward the canvas in dark mode */
+  --qw-el-mix: var(--qw-surface);
+
+  --el-color-primary: var(--qw-brand);
+  --el-color-primary-light-3: color-mix(in srgb, var(--qw-brand) 70%, var(--qw-el-mix));
+  --el-color-primary-light-5: color-mix(in srgb, var(--qw-brand) 50%, var(--qw-el-mix));
+  --el-color-primary-light-7: color-mix(in srgb, var(--qw-brand) 30%, var(--qw-el-mix));
+  --el-color-primary-light-8: color-mix(in srgb, var(--qw-brand) 20%, var(--qw-el-mix));
+  --el-color-primary-light-9: color-mix(in srgb, var(--qw-brand) 10%, var(--qw-el-mix));
+  --el-color-primary-dark-2: color-mix(in srgb, var(--qw-brand) 80%, black);
+
+  --el-color-success: var(--qw-success);
+  --el-color-success-light-3: color-mix(in srgb, var(--qw-success) 70%, var(--qw-el-mix));
+  --el-color-success-light-5: color-mix(in srgb, var(--qw-success) 50%, var(--qw-el-mix));
+  --el-color-success-light-7: color-mix(in srgb, var(--qw-success) 30%, var(--qw-el-mix));
+  --el-color-success-light-8: color-mix(in srgb, var(--qw-success) 20%, var(--qw-el-mix));
+  --el-color-success-light-9: var(--qw-success-weak);
+  --el-color-success-dark-2: color-mix(in srgb, var(--qw-success) 80%, black);
+
+  --el-color-warning: var(--qw-warning);
+  --el-color-warning-light-3: color-mix(in srgb, var(--qw-warning) 70%, var(--qw-el-mix));
+  --el-color-warning-light-5: color-mix(in srgb, var(--qw-warning) 50%, var(--qw-el-mix));
+  --el-color-warning-light-7: color-mix(in srgb, var(--qw-warning) 30%, var(--qw-el-mix));
+  --el-color-warning-light-8: color-mix(in srgb, var(--qw-warning) 20%, var(--qw-el-mix));
+  --el-color-warning-light-9: var(--qw-warning-weak);
+  --el-color-warning-dark-2: color-mix(in srgb, var(--qw-warning) 80%, black);
+
+  --el-color-danger: var(--qw-danger);
+  --el-color-danger-light-3: color-mix(in srgb, var(--qw-danger) 70%, var(--qw-el-mix));
+  --el-color-danger-light-5: color-mix(in srgb, var(--qw-danger) 50%, var(--qw-el-mix));
+  --el-color-danger-light-7: color-mix(in srgb, var(--qw-danger) 30%, var(--qw-el-mix));
+  --el-color-danger-light-8: color-mix(in srgb, var(--qw-danger) 20%, var(--qw-el-mix));
+  --el-color-danger-light-9: var(--qw-danger-weak);
+  --el-color-danger-dark-2: color-mix(in srgb, var(--qw-danger) 80%, black);
+  --el-color-error: var(--el-color-danger);
+  --el-color-error-light-3: var(--el-color-danger-light-3);
+  --el-color-error-light-5: var(--el-color-danger-light-5);
+  --el-color-error-light-7: var(--el-color-danger-light-7);
+  --el-color-error-light-8: var(--el-color-danger-light-8);
+  --el-color-error-light-9: var(--el-color-danger-light-9);
+  --el-color-error-dark-2: var(--el-color-danger-dark-2);
+
+  --el-color-info: var(--qw-neutral);
+  --el-color-info-light-3: color-mix(in srgb, var(--qw-neutral) 70%, var(--qw-el-mix));
+  --el-color-info-light-5: color-mix(in srgb, var(--qw-neutral) 50%, var(--qw-el-mix));
+  --el-color-info-light-7: color-mix(in srgb, var(--qw-neutral) 30%, var(--qw-el-mix));
+  --el-color-info-light-8: color-mix(in srgb, var(--qw-neutral) 20%, var(--qw-el-mix));
+  --el-color-info-light-9: var(--qw-neutral-weak);
+  --el-color-info-dark-2: color-mix(in srgb, var(--qw-neutral) 80%, black);
+
+  --el-bg-color: var(--qw-surface);
+  --el-bg-color-overlay: var(--qw-surface);
+  --el-bg-color-page: var(--qw-canvas);
+  --el-fill-color-blank: var(--qw-surface);
+  --el-fill-color-light: var(--qw-surface-2);
+  --el-fill-color-lighter: var(--qw-surface-2);
+  --el-border-color: var(--qw-border);
+  --el-border-color-light: var(--qw-border);
+  --el-border-color-lighter: var(--qw-border);
+  --el-border-color-extra-light: var(--qw-border);
+  --el-text-color-primary: var(--qw-text);
+  --el-text-color-regular: var(--qw-text-2);
+  --el-text-color-secondary: var(--qw-text-3);
+  --el-text-color-placeholder: var(--qw-text-3);
+  --el-mask-color: color-mix(in srgb, var(--qw-surface) 80%, transparent);
+  --el-overlay-color-lighter: rgba(8, 13, 22, 0.45);
+
+  --el-border-radius-base: var(--qw-radius-sm);
+  --el-border-radius-small: var(--qw-radius-sm);
+  --el-box-shadow-light: var(--qw-shadow-1);
+  --el-box-shadow: var(--qw-shadow-2);
+  --el-font-family: var(--qw-font);
+  --el-font-size-base: 14px;
+  --el-loading-spinner-size: 28px;
+  /* §8: colors 150ms, open/close 220ms */
+  --el-transition-duration: 0.22s;
+  --el-transition-duration-fast: 0.15s;
+
+  /* primary as text (links, selected items, menus): the text shade, readable in dark mode too */
+  --el-menu-active-color: var(--qw-brand-text);
+  --el-menu-hover-text-color: var(--qw-brand-text);
+  --el-menu-hover-bg-color: var(--qw-surface-2);
+  --el-menu-item-hover-fill: var(--qw-surface-2);
+}
+html.dark:root {
+  --qw-el-mix: var(--qw-canvas);
+}
+
+/* ---------- primary color as text ---------- */
+:root .el-button--primary:is(.is-link, .is-text, .is-plain) {
+  --el-button-text-color: var(--qw-brand-text);
+}
+:root .el-button--primary.is-plain {
+  --el-button-bg-color: var(--qw-brand-weak);
+  --el-button-border-color: transparent;
+  /* hover deepens the tint instead of turning solid: the page keeps one solid primary button */
+  --el-button-hover-bg-color: color-mix(in srgb, var(--qw-brand) 16%, var(--qw-surface));
+  --el-button-hover-border-color: transparent;
+  --el-button-hover-text-color: color-mix(in srgb, var(--qw-brand-text) 75%, var(--qw-text));
+  --el-button-active-bg-color: color-mix(in srgb, var(--qw-brand) 22%, var(--qw-surface));
+  --el-button-active-border-color: transparent;
+  --el-button-active-text-color: var(--el-button-hover-text-color);
+}
+:root .el-button.is-link {
+  font-weight: 600;
+}
+/* link hover leans toward the body text: darker in light mode, lighter in dark mode, never fainter */
+:root .el-button--primary.is-link {
+  --el-button-hover-link-text-color: color-mix(in srgb, var(--qw-brand-text) 75%, var(--qw-text));
+}
+:root .el-button--danger.is-link {
+  --el-button-hover-link-text-color: color-mix(in srgb, var(--qw-danger) 75%, var(--qw-text));
+}
+:root .el-link {
+  --el-link-hover-text-color: var(--qw-brand-text);
+}
+:root .el-link.el-link--primary {
+  --el-link-text-color: var(--qw-brand-text);
+}
+:root .el-select-dropdown__item.is-selected,
+:root .el-tabs__item.is-active,
+:root .el-tabs__item:hover,
+:root .el-radio__input.is-checked + .el-radio__label,
+:root .el-radio-button__inner:hover,
+:root .el-switch__label.is-active,
+:root .el-breadcrumb__inner.is-link:hover,
+:root .el-table th.el-table__cell > .cell.highlight {
+  color: var(--qw-brand-text);
+}
+:root .el-checkbox {
+  --el-checkbox-checked-text-color: var(--qw-brand-text);
+}
+:root .el-pagination {
+  --el-pagination-hover-color: var(--qw-brand-text);
+}
+:root .el-dropdown,
+:root .el-dropdown__popper {
+  --el-dropdown-menuItem-hover-color: var(--qw-brand-text);
+  --el-dropdown-menuItem-hover-fill: var(--qw-brand-weak);
+}
+
+/* ---------- focus ring (§9): 2px, 2px offset ---------- */
+:root .el-button:focus-visible,
+:root .el-radio-button__original-radio:focus-visible + .el-radio-button__inner,
+:root .el-switch__input:focus-visible ~ .el-switch__core,
+:root .el-checkbox__original:focus-visible + .el-checkbox__inner {
+  outline: 2px solid var(--qw-brand-text);
+  outline-offset: 2px;
+}
+
+/* ---------- buttons (§5): 32px, 600, primary solid, secondary outlined, ghost bare ---------- */
+:root .el-button {
+  --el-button-font-weight: 600;
+}
+/* default (secondary) buttons: neutral hover instead of a primary tint */
+:root
+  .el-button:not(
+    .el-button--primary,
+    .el-button--success,
+    .el-button--warning,
+    .el-button--danger,
+    .el-button--info
+  ) {
+  --el-button-hover-bg-color: var(--qw-surface-2);
+  --el-button-hover-text-color: var(--qw-text);
+  --el-button-hover-border-color: var(--qw-border);
+  --el-button-active-bg-color: var(--qw-surface-2);
+  --el-button-active-border-color: color-mix(in srgb, var(--qw-text-3) 40%, var(--qw-border));
+  --el-button-active-text-color: var(--qw-text);
+  --el-button-text-color: var(--qw-text);
+}
+/* hover and pressed darken the fill (mixed with black, never white): the white text only gains contrast */
+:root .el-button--primary:not(.is-plain, .is-link, .is-text) {
+  --el-button-text-color: var(--qw-on-brand);
+  --el-button-hover-text-color: var(--qw-on-brand);
+  --el-button-hover-bg-color: color-mix(in srgb, var(--qw-brand) 88%, black);
+  --el-button-hover-border-color: var(--el-button-hover-bg-color);
+  --el-button-active-text-color: var(--qw-on-brand);
+  --el-button-active-bg-color: var(--el-color-primary-dark-2);
+  --el-button-active-border-color: var(--el-button-active-bg-color);
+}
+:root .el-button--danger.is-plain {
+  --el-button-bg-color: var(--qw-surface);
+  --el-button-border-color: color-mix(in srgb, var(--qw-danger) 40%, var(--qw-surface));
+}
+
+/* ---------- inputs (§5): surface-2 fill, 2px primary glow on focus ---------- */
+:root .el-input,
+:root .el-textarea {
+  --el-input-bg-color: var(--qw-surface-2);
+  --el-input-text-color: var(--qw-text);
+  --el-input-border-color: var(--qw-border);
+  --el-input-hover-border-color: color-mix(in srgb, var(--qw-text-3) 45%, var(--qw-border));
+}
+:root .el-select__wrapper {
+  background-color: var(--qw-surface-2);
+}
+:root .el-select__wrapper:not(.is-focused, .is-disabled):hover {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--qw-text-3) 45%, var(--qw-border)) inset;
+}
+:root .el-input__wrapper,
+:root .el-select__wrapper,
+:root .el-textarea__inner {
+  transition:
+    box-shadow 0.15s,
+    background-color 0.15s;
+}
+:root .el-input__wrapper.is-focus,
+:root .el-select__wrapper.is-focused,
+:root .el-textarea__inner:focus {
+  background-color: var(--qw-surface);
+  box-shadow:
+    0 0 0 1px var(--qw-brand) inset,
+    0 0 0 2px color-mix(in srgb, var(--qw-brand) 22%, transparent);
+}
+:root .el-select-dropdown__item.is-selected {
+  font-weight: 600;
+}
+:root .el-switch {
+  --el-switch-off-color: color-mix(in srgb, var(--qw-text-3) 45%, var(--qw-surface));
+}
+/* checkbox and radio edges readable against the surface (non-text 3:1); a checkbox stays square
+   (the small radius would round its 14px box into a radio) */
+:root .el-checkbox {
+  --el-checkbox-input-border: 1px solid color-mix(in srgb, var(--qw-text-3) 60%, var(--qw-surface));
+  --el-checkbox-border-radius: calc(var(--qw-radius-sm) / 2);
+}
+:root .el-radio {
+  --el-radio-input-border: 1px solid color-mix(in srgb, var(--qw-text-3) 60%, var(--qw-surface));
+}
+/* a radio group laid out as a grid (`.qw-radio-grid`): as many columns of 180px or more as fit, a label longer
+   than its column wraps instead of running into its neighbour or out of a narrow panel (long English labels) */
+:root .el-radio-group.qw-radio-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 180px), 1fr));
+  column-gap: 16px;
+  width: 100%;
+}
+:root .qw-radio-grid > .el-radio {
+  min-width: 0;
+  height: auto;
+  min-height: 32px;
+  margin-right: 0;
+  white-space: normal;
+}
+:root .qw-radio-grid > .el-radio > .el-radio__label {
+  min-width: 0;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+
+/* ---------- forms (§5): label color, error text under the field ---------- */
+:root .el-form-item__label {
+  color: var(--qw-text-2);
+  font-weight: 500;
+}
+/* dialog forms (label-position="left", no label-width; a form page's card `.qw-form-card` too): the labels
+   form one column as wide as the longest (96px at least, never wrapped), so every field starts at the same x
+   in any language */
+:root :is(.el-dialog, .qw-form-card) .el-form--label-left {
+  display: grid;
+  grid-template-columns: minmax(96px, max-content) minmax(0, 1fr);
+}
+:root :is(.el-dialog, .qw-form-card) .el-form--label-left > .el-form-item {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+}
+:root :is(.el-dialog, .qw-form-card) .el-form--label-left .el-form-item__label {
+  white-space: nowrap;
+}
+:root :is(.el-dialog, .qw-form-card) .el-form--label-left .el-form-item__content {
+  grid-column: 2;
+}
+/* generated forms with `form_cols` 2 / 3 (see docs/design-notes.md#codegen): that many label + field pairs a row, each label
+   column as wide as its longest; free text and uploads (.qw-form-wide) and row tables span the row */
+:root .el-dialog .el-form--label-left:is(.qw-form-cols-2, .qw-form-cols-3) {
+  column-gap: 24px;
+}
+:root .el-dialog .el-form--label-left.qw-form-cols-2 {
+  grid-template-columns: repeat(2, minmax(96px, max-content) minmax(0, 1fr));
+}
+:root .el-dialog .el-form--label-left.qw-form-cols-3 {
+  grid-template-columns: repeat(3, minmax(96px, max-content) minmax(0, 1fr));
+}
+:root .el-dialog .el-form--label-left:is(.qw-form-cols-2, .qw-form-cols-3) > .el-form-item {
+  grid-column: span 2;
+}
+:root .el-dialog .el-form--label-left:is(.qw-form-cols-2, .qw-form-cols-3) > .qw-form-wide {
+  grid-column: 1 / -1;
+}
+:root .el-dialog .el-form--label-left .qw-form-wide > .el-form-item__content {
+  grid-column: 2 / -1;
+}
+@media (max-width: 600px) {
+  :root .el-dialog .el-form--label-left:is(.qw-form-cols-2, .qw-form-cols-3) {
+    grid-template-columns: minmax(96px, max-content) minmax(0, 1fr);
+    column-gap: 0;
+  }
+  :root .el-dialog .el-checkbox {
+    white-space: normal;
+    height: auto;
+  }
+  /* Keep the slider's 300px image and drag coordinates intact at a 375px viewport. */
+  :root .el-dialog:has(.captcha-dialog) .el-dialog__body {
+    padding-inline: 8px;
+  }
+}
+/* QwEditTable (a master-sub form's rows): a cell's form item fills the cell and keeps the room of its
+   error line (a message appearing or going must not move the rows, nor the save button under them) */
+:root .qw-edit-table__table .el-table__cell {
+  padding-top: 12px;
+  vertical-align: top;
+}
+:root
+  .qw-edit-table__table
+  .el-form-item__content
+  > :is(.el-input, .el-select, .el-date-editor, .el-input-number) {
+  width: 100%;
+}
+/* with the steppers on the right the number reads left like every other field */
+:root .el-input-number.is-controls-right .el-input__inner {
+  text-align: left;
+}
+/* the counter clears the resize grip and sits on the field's own fill */
+:root .el-textarea .el-input__count {
+  right: 20px;
+  bottom: 6px;
+  background: transparent;
+}
+
+/* ---------- table (§5): quiet header, 48px rows, 16px cell padding, no zebra ---------- */
+:root .el-table {
+  --qw-el-row-pad: 12px;
+  --el-table-border-color: var(--qw-border);
+  --el-table-header-bg-color: var(--qw-surface-2);
+  --el-table-header-text-color: var(--qw-text-3);
+  --el-table-text-color: var(--qw-text);
+  --el-table-row-hover-bg-color: var(--qw-surface-2);
+  --el-table-current-row-bg-color: var(--qw-brand-weak);
+  --el-table-bg-color: var(--qw-surface);
+  --el-table-tr-bg-color: var(--qw-surface);
+  --el-table-expanded-cell-bg-color: var(--qw-surface);
+  font-variant-numeric: tabular-nums;
+}
+:root .el-table--large {
+  --qw-el-row-pad: 16px;
+}
+:root .el-table--small {
+  --qw-el-row-pad: 6px;
+}
+:root .el-table .el-table__cell {
+  padding: var(--qw-el-row-pad) 0;
+}
+:root .el-table .cell {
+  padding: 0 16px;
+}
+:root .el-table .el-switch {
+  height: 24px;
+}
+:root .el-table th.el-table__cell {
+  padding: calc(var(--qw-el-row-pad) - 2px) 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+/* a header or a row's buttons never wrap: widths come from the column definitions */
+:root .el-table th.el-table__cell > .cell,
+:root .el-table .cell:has(> .el-button.is-link) {
+  white-space: nowrap;
+}
+/* a lone radio in a cell (UserPicker): no inline-group spacing, so it fits the 48px pick column */
+:root .el-table .cell > .el-radio {
+  margin-right: 0;
+}
+:root .el-table .cell > .el-radio .el-radio__label {
+  padding-left: 0;
+}
+/* sort carets: small and quiet, only the active direction takes the primary text color */
+:root .el-table .caret-wrapper {
+  width: 16px;
+  height: 12px;
+  margin-left: 2px;
+}
+:root .el-table .sort-caret {
+  left: 4px;
+  border-width: 4px;
+}
+:root .el-table .sort-caret.ascending {
+  top: -3px;
+  border-bottom-color: color-mix(in srgb, var(--qw-text-3) 50%, transparent);
+}
+:root .el-table .sort-caret.descending {
+  bottom: -3px;
+  border-top-color: color-mix(in srgb, var(--qw-text-3) 50%, transparent);
+}
+:root .el-table .ascending .sort-caret.ascending {
+  border-bottom-color: var(--qw-brand-text);
+}
+:root .el-table .descending .sort-caret.descending {
+  border-top-color: var(--qw-brand-text);
+}
+/* loading: a thin ring in the primary text color over the table */
+:root .el-loading-spinner .path {
+  stroke: var(--qw-brand-text);
+  stroke-width: 3.5;
+}
+:root .el-loading-spinner .el-loading-text {
+  font-size: 13px;
+  color: var(--qw-text-3);
+}
+:root .qw-table-skeleton {
+  overflow: hidden;
+  pointer-events: none;
+  --el-skeleton-color: var(--qw-surface-2);
+  --el-skeleton-to-color: var(--qw-border);
+}
+:root .qw-table-skeleton > p {
+  margin: 0 0 8px;
+  color: var(--qw-text-3);
+}
+:root .qw-table-skeleton__row {
+  display: flex;
+  align-items: center;
+  height: 48px;
+  border-bottom: 1px solid var(--qw-border);
+}
+:root .qw-table-skeleton__cell {
+  box-sizing: border-box;
+  padding: 0 16px;
+}
+
+/* ---------- side trees (TreePanel): 32px rounded rows, the selected node tinted like a selected tag ---------- */
+:root .tree-panel__tree {
+  --el-tree-node-content-height: 32px;
+  --el-tree-node-hover-bg-color: var(--qw-surface-2);
+  --el-tree-text-color: var(--qw-text);
+  background: transparent;
+}
+:root .tree-panel__tree .el-tree-node__content {
+  border-radius: var(--qw-radius-sm);
+}
+/* labels take the row's color (Element Plus paints them the secondary text color) */
+:root .tree-panel__tree .el-tree-node__label {
+  color: inherit;
+}
+:root
+  .tree-panel__tree.el-tree--highlight-current
+  .el-tree-node.is-current
+  > .el-tree-node__content {
+  font-weight: 600;
+  color: var(--qw-brand-text);
+  background-color: var(--qw-brand-weak);
+}
+
+/* ---------- cards: 10px radius, soft shadow in light mode, border in dark mode ---------- */
+:root .el-card {
+  --el-card-border-radius: var(--qw-radius);
+  --el-card-border-color: var(--qw-border);
+  --el-card-bg-color: var(--qw-surface);
+  --el-card-padding: 16px;
+}
+
+/* ---------- dialogs (§5): 14px radius, 18px title over a divider, blurred mask ---------- */
+:root .el-dialog {
+  --el-dialog-border-radius: var(--qw-radius-lg);
+  --el-dialog-box-shadow: var(--qw-shadow-2);
+  --el-dialog-bg-color: var(--qw-surface);
+  max-width: calc(100vw - 32px);
+  padding: 0;
+}
+:root .el-dialog__header {
+  padding: 16px 56px 16px 24px;
+  border-bottom: 1px solid var(--qw-border);
+}
+:root .el-dialog__title {
+  font-size: 18px;
+  font-weight: 650;
+  line-height: 24px;
+  color: var(--qw-text);
+}
+:root .el-dialog__headerbtn {
+  top: 0;
+  right: 0;
+  width: 56px;
+  height: 56px;
+}
+:root .el-dialog__body {
+  padding: 24px;
+}
+:root .qw-dialog-footer {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--qw-border);
+}
+:root .el-overlay {
+  backdrop-filter: blur(2px);
+}
+:root .el-message-box {
+  --el-messagebox-border-radius: var(--qw-radius-lg);
+  --el-messagebox-padding-primary: 20px;
+  box-shadow: var(--qw-shadow-2);
+}
+:root .el-drawer {
+  --el-drawer-bg-color: var(--qw-surface);
+}
+/* drawers read like dialogs: the same title over a divider */
+:root .el-drawer__header {
+  padding: 16px 16px 16px 24px;
+  margin-bottom: 0;
+  border-bottom: 1px solid var(--qw-border);
+}
+:root .el-drawer__title {
+  font-size: 18px;
+  font-weight: 650;
+  line-height: 24px;
+  color: var(--qw-text);
+}
+:root .el-drawer__body {
+  padding: 24px;
+}
+/* dark mode separates layers with borders (§2): shadows vanish on the dark mask */
+:root.dark :is(.el-dialog, .el-message-box, .el-drawer) {
+  border: 1px solid var(--qw-border);
+}
+
+/* ---------- poppers: dropdowns, selects, popovers, tooltips ---------- */
+:root .el-popper {
+  --el-popper-border-radius: var(--qw-radius);
+}
+:root .el-popper.is-light {
+  box-shadow: var(--qw-shadow-2);
+}
+:root .el-dropdown__popper {
+  --el-dropdown-menu-box-shadow: var(--qw-shadow-2);
+}
+:root .el-dropdown-menu {
+  padding: 6px;
+}
+:root .el-dropdown-menu__item {
+  gap: 2px;
+  border-radius: 6px;
+  line-height: 20px;
+  padding: 7px 12px;
+}
+:root .el-select-dropdown__list {
+  padding: 6px;
+}
+:root .el-select-dropdown__item {
+  border-radius: 6px;
+}
+
+/* ---------- pagination: 28px pages, the current one filled ---------- */
+:root .el-pagination {
+  --el-pagination-bg-color: transparent;
+  --el-pagination-button-bg-color: transparent;
+  --el-pagination-border-radius: var(--qw-radius-sm);
+  --el-pagination-text-color: var(--qw-text-3);
+  --el-pagination-button-color: var(--qw-text-2);
+  font-variant-numeric: tabular-nums;
+}
+:root .el-pagination.is-background .el-pager li.is-active {
+  font-weight: 650;
+}
+:root .el-pagination.is-background :is(.btn-prev, .btn-next):is(:disabled, .is-disabled) {
+  background-color: transparent;
+  opacity: 0.5;
+}
+
+/* ---------- status pills (§5): DictTag and tags in general ---------- */
+:root .el-tag {
+  --el-tag-border-radius: 999px;
+  height: 22px;
+  padding: 0 10px;
+  font-weight: 600;
+  border-color: transparent;
+}
+:root .el-tag.el-tag--primary {
+  --el-tag-bg-color: var(--qw-brand-weak);
+  --el-tag-text-color: var(--qw-brand-text);
+}
+:root .el-tag.qw-dict-tag::before {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  content: '';
+  background: currentColor;
+  border-radius: 50%;
+}
+:root .el-table__empty-text {
+  width: auto;
+  line-height: inherit;
+}
+
+/* ---------- button rows laid out with flex gaps ---------- */
+:root
+  :is(.table-toolbar__actions, .qw-dialog-footer, .qw-page-bar, .qw-search-actions)
+  > .el-button
+  + .el-button {
+  margin-left: 0;
+}
+
+/* ==================== shell (§4) ==================== */
+
+/* The light variant is scoped to the aside / teleported drawer, leaving top and mix headers navy. */
+:root .qw-side-light {
+  --qw-side-bg: var(--qw-side-light-bg);
+  --qw-side-text: var(--qw-side-light-text);
+  --qw-side-text-3: var(--qw-side-light-text-3);
+  --qw-side-hover: var(--qw-side-light-hover);
+  --qw-side-hover-text: var(--qw-side-light-hover-text);
+  --qw-side-logo-text: var(--qw-side-light-logo-text);
+}
+:root .app-layout__aside.qw-side-light {
+  box-shadow: inset -1px 0 0 var(--qw-border);
+}
+/* side menu: 40px items inset 10px; every group is a collapsible title */
+:root .side-menu:not(.side-menu--horizontal) .el-menu {
+  --el-menu-bg-color: transparent;
+  --el-menu-text-color: var(--qw-side-text);
+  --el-menu-hover-text-color: var(--qw-side-hover-text);
+  --el-menu-hover-bg-color: var(--qw-side-hover);
+  --el-menu-active-color: var(--qw-side-active-text);
+  --el-menu-item-height: 40px;
+  --el-menu-sub-item-height: 40px;
+  --el-menu-item-font-size: 14px;
+  --el-menu-base-level-padding: 12px;
+  --el-menu-level-padding: 16px;
+  --el-menu-icon-width: 20px;
+  border: 0;
+}
+:root .side-menu:not(.side-menu--horizontal) > .el-menu {
+  padding: 4px 0 16px;
+}
+:root .side-menu:not(.side-menu--horizontal) :is(.el-menu-item, .el-sub-menu__title) {
+  margin: 2px 10px;
+  border-radius: var(--qw-radius-sm);
+}
+:root .side-menu:not(.side-menu--horizontal) .el-menu-item.is-active {
+  font-weight: 600;
+  background: var(--qw-side-active-bg);
+}
+:root .side-menu:not(.side-menu--horizontal) .el-sub-menu.is-active > .el-sub-menu__title {
+  color: var(--qw-side-hover-text);
+  font-weight: 600;
+  background: var(--qw-side-hover);
+}
+:root
+  .side-menu:not(.side-menu--horizontal)
+  .el-sub-menu.is-opened
+  > .el-sub-menu__title
+  .el-sub-menu__icon-arrow {
+  color: var(--qw-side-hover-text);
+}
+:root .side-menu .el-menu .el-icon:not(.el-sub-menu__icon-arrow, .side-menu__ext) {
+  width: 20px;
+  margin-right: 10px;
+  font-size: 16px;
+  opacity: 0.85;
+}
+:root .side-menu .el-menu .is-active > .el-icon {
+  opacity: 1;
+}
+/* collapsed (64px): the group icons remain the popup triggers */
+:root .side-menu .el-menu--collapse {
+  width: 64px;
+}
+:root .app-layout__drawer.el-drawer {
+  --el-drawer-bg-color: var(--qw-side-bg);
+}
+:root .app-layout__drawer .el-drawer__body {
+  padding: 0;
+}
+/* dark mode: navy and the canvas are close in lightness, a border keeps navigation apart (§1, §2) */
+:root.dark .app-layout__aside {
+  box-shadow: inset -1px 0 0 var(--qw-border);
+}
+:root.dark .app-layout__header--nav {
+  box-shadow: inset 0 -1px 0 var(--qw-border);
+}
+
+/* top / mix layouts: the horizontal menu on the navy bar, the current entry underlined */
+:root .side-menu--horizontal .el-menu {
+  --el-menu-bg-color: transparent;
+  --el-menu-text-color: var(--qw-side-text);
+  --el-menu-hover-text-color: var(--qw-side-active-text);
+  --el-menu-hover-bg-color: var(--qw-side-hover);
+  --el-menu-active-color: var(--qw-side-active-text);
+  --el-menu-base-level-padding: 14px;
+  height: 100%;
+  border-bottom: 0;
+}
+:root .side-menu--horizontal .el-menu--horizontal > .el-menu-item.is-active,
+:root .side-menu--horizontal .el-menu--horizontal > .el-sub-menu.is-active .el-sub-menu__title {
+  font-weight: 600;
+  border-bottom-color: var(--qw-brand);
+}
+:root .side-menu--horizontal .el-menu .el-icon:not(.el-sub-menu__icon-arrow) {
+  margin-right: 8px;
+  font-size: 16px;
+}
+
+/* header: breadcrumb with a bold current page */
+:root .header-bar__crumbs .el-breadcrumb__inner,
+:root .header-bar__crumbs .el-breadcrumb__inner.is-link {
+  font-weight: 400;
+  color: var(--qw-text-3);
+}
+:root .header-bar__crumbs .el-breadcrumb__inner.is-link:hover {
+  color: var(--qw-brand-text);
+}
+:root .header-bar__crumbs .el-breadcrumb__item:last-child .el-breadcrumb__inner {
+  font-weight: 600;
+  color: var(--qw-text);
+}
+:root .header-bar__crumbs .el-breadcrumb__separator {
+  margin: 0 6px;
+  color: var(--qw-text-3);
+}
+
+/* header: the menu search pill */
+:root .menu-search .el-input__wrapper {
+  padding: 0 6px 0 12px;
+  border-radius: 999px;
+}
+:root .menu-search .el-input__wrapper:not(.is-focus) {
+  background: var(--qw-surface-2);
+  box-shadow: 0 0 0 1px var(--qw-border) inset;
+}
+:root .menu-search .el-input__inner {
+  color: var(--qw-text);
+}
+:root .menu-search .el-input__inner::placeholder,
+:root .menu-search .el-input__prefix {
+  color: var(--qw-text-3);
+}
+:root .settings-drawer__switches .el-form-item__content {
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+:root .menu-search__popper {
+  min-width: 260px;
+}
+
+/* ==================== page panels (§4): search card + table card ==================== */
+:root .qw-search-panel > .el-card__body {
+  padding: 16px;
+}
+/* filters in even columns; the buttons end the last row, at its right edge */
+:root .qw-search-panel .el-form--inline {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(224px, 1fr));
+  gap: 16px 24px;
+}
+:root .qw-search-panel .el-form--inline .el-form-item {
+  margin: 0;
+}
+:root
+  .qw-search-panel
+  .el-form-item__content
+  > :is(.el-input, .el-select, .el-date-editor, .el-input-number) {
+  width: 100%;
+}
+:root .qw-search-panel .qw-search-wide {
+  /* a date range shows two dates */
+  grid-column: span 2;
+}
+:root .qw-search-panel .qw-search-actions {
+  grid-column-end: -1;
+  justify-self: end;
+}
+:root .qw-search-panel .qw-search-actions .el-form-item__content {
+  flex-wrap: nowrap;
+  gap: 8px;
+}
+:root .qw-table-panel > .el-card__body {
+  padding: 0;
+}
+/* generated list cells (codegen): a name opening the detail drawer reads as a link on the text line,
+   an image column shows a small thumbnail */
+:root .qw-cell-link {
+  --el-button-font-weight: 500;
+  height: auto;
+  padding: 0;
+  vertical-align: baseline;
+}
+:root .qw-cell-image {
+  display: block;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--qw-radius-sm);
+}
+/* generated detail drawers (codegen): room for the loading mask, free text keeps its line breaks */
+:root .qw-detail {
+  min-height: 200px;
+}
+:root .qw-detail__image {
+  width: 96px;
+  height: 96px;
+  border-radius: var(--qw-radius-sm);
+}
+:root .qw-detail__text {
+  white-space: pre-line;
+}
+/* a rich-text column (HTML sanitized by the server): images fit the drawer, tables and quotes ruled */
+:root .qw-detail__html {
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+:root .qw-detail__html > :first-child {
+  margin-top: 0;
+}
+:root .qw-detail__html img {
+  max-width: 100%;
+  height: auto;
+}
+:root .qw-detail__html a {
+  color: var(--qw-brand-text);
+}
+:root .qw-detail__html blockquote {
+  margin: 12px 0;
+  padding: 4px 12px;
+  color: var(--qw-text-2);
+  border-left: 3px solid var(--qw-border);
+}
+:root .qw-detail__html pre {
+  padding: 12px;
+  overflow: auto;
+  background: var(--qw-surface-2);
+  border-radius: var(--qw-radius-sm);
+}
+:root .qw-detail__html table {
+  border-collapse: collapse;
+}
+:root .qw-detail__html th,
+:root .qw-detail__html td {
+  padding: 4px 8px;
+  border: 1px solid var(--qw-border);
+}
+
+/* ==================== sign-in pages (§6) ==================== */
+
+/* below 992px the language switch sits on the navy band */
+@media (max-width: 991.98px) {
+  :root .auth-page__locale .el-button {
+    --el-button-text-color: var(--qw-side-text);
+    --el-button-hover-text-color: var(--qw-side-active-text);
+    --el-button-active-text-color: var(--qw-side-active-text);
+    --el-fill-color-light: var(--qw-side-hover);
+    --el-fill-color: var(--qw-side-hover);
+  }
+}

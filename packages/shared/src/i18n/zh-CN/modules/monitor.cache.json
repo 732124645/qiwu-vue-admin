@@ -1,0 +1,20 @@
+{
+  "field": {
+    "monitor": {
+      "cache": {
+        "name": "命名空间",
+        "prefix": "键前缀",
+        "clearable": "可清理",
+        "masked": "值已隐藏",
+        "ns": "命名空间",
+        "key": "键名",
+        "keys": "键列表",
+        "truncated": "结果已截断",
+        "type": "类型",
+        "ttl": "剩余时间（秒）",
+        "value": "值",
+        "deleted": "已删除键数"
+      }
+    }
+  }
+}

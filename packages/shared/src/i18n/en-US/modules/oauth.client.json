@@ -1,0 +1,20 @@
+{
+  "field": {
+    "oauth": {
+      "client": {
+        "clientId": "Client ID",
+        "name": "Client name",
+        "logoUrl": "Logo",
+        "grantTypes": "Grant types",
+        "redirectUris": "Redirect URIs",
+        "scopes": "Scopes",
+        "autoApproveScopes": "Auto-approved scopes",
+        "accessTtlSec": "Access token lifetime (s)",
+        "refreshTtlSec": "Refresh token lifetime (s)",
+        "isBuiltin": "Built-in",
+        "enabled": "Enabled",
+        "secret": "Client secret"
+      }
+    }
+  }
+}

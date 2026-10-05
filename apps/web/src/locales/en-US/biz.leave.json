@@ -1,0 +1,16 @@
+{
+  "biz": {
+    "leave": {
+      "entity": "leave request",
+      "title": "Leave request",
+      "submit": "Submit for approval",
+      "view": "View",
+      "backToList": "Back to list",
+      "approval": "Approval progress",
+      "sentBack": "The request was sent back to you: edit it if needed and resubmit.",
+      "resubmit": "Resubmit",
+      "resubmitConfirm": "Resubmit the request as it is now?",
+      "resubmitted": "Resubmitted"
+    }
+  }
+}

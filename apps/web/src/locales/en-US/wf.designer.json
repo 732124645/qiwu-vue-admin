@@ -1,0 +1,217 @@
+{
+  "wf": {
+    "designer": {
+      "add": "Add a node",
+      "copy": "Copy",
+      "remove": "Delete",
+      "end": "End",
+      "type": {
+        "begin": "Initiator",
+        "review": "Approver",
+        "notify": "CC",
+        "fork": "Branch"
+      },
+      "path": {
+        "name": "Path {n}",
+        "fallback": "Otherwise",
+        "fallbackHint": "Taken when the conditions of no other path match."
+      },
+      "fork": {
+        "mode": "Branch type",
+        "modes": {
+          "exclusive": "Exclusive",
+          "inclusive": "Inclusive",
+          "parallel": "Parallel"
+        },
+        "addPath": "Add a path",
+        "removePath": "Delete the path",
+        "moveLeft": "Move left",
+        "moveRight": "Move right"
+      },
+      "summary": {
+        "begin": "The initiator submits the request",
+        "unset": "Set up: {kind}",
+        "count": "{n} item | {n} items",
+        "levels": "{n} level | {n} levels",
+        "parallel": "Runs alongside the other paths.",
+        "fallback": "When no other path matches",
+        "noCondition": "Set up the conditions",
+        "toTop": "up to the top"
+      },
+      "check": {
+        "title": "{n} problem to fix before publishing | {n} problems to fix before publishing",
+        "quote": "\"{name}\"",
+        "at": "{node}: {message}",
+        "field": {
+          "name": "Name",
+          "paths": "Paths",
+          "when": "Conditions",
+          "value": "Condition value",
+          "ids": "Picked items",
+          "other": "This setting"
+        }
+      },
+      "confirm": {
+        "title": "Please confirm",
+        "ok": "Continue",
+        "removeFork": "Deleting the branch also deletes the nodes on its paths. Delete it?",
+        "removePath": "Deleting the path also deletes its nodes. Delete it?",
+        "parallel": "Parallel paths have no conditions: switching clears the conditions of every path. Switch?"
+      },
+      "drawer": {
+        "name": "Name",
+        "begin": "Initiator settings",
+        "review": "Approver settings",
+        "notify": "CC settings",
+        "path": "Path settings"
+      },
+      "assignee": {
+        "kind": "Who",
+        "kinds": {
+          "users": "Specific users",
+          "roles": "Roles",
+          "positions": "Positions",
+          "deptMembers": "Department members",
+          "deptHead": "Department heads",
+          "deptHeadChain": "Chain of department heads",
+          "initiator": "The initiator",
+          "initiatorPicks": "Picked by the initiator",
+          "initiatorDeptHead": "Initiator's department head",
+          "formFieldUser": "User in a form field",
+          "formFieldDeptHead": "Head of a form field's department"
+        },
+        "hints": {
+          "users": "The users picked here.",
+          "roles": "Enabled users holding any of these roles.",
+          "positions": "Enabled users holding any of these positions.",
+          "deptMembers": "Members of these departments, not of their sub-departments.",
+          "deptHead": "The heads of these departments.",
+          "deptHeadChain": "Department heads from the initiator's department upwards, up to the number of levels or the top department.",
+          "initiator": "The initiator.",
+          "initiatorPicks": "The initiator picks them when starting the process.",
+          "initiatorDeptHead": "The head of the initiator's department.",
+          "formFieldUser": "The user entered in the chosen form field.",
+          "formFieldDeptHead": "The head of the department entered in the chosen form field."
+        },
+        "users": "Users",
+        "pickUsers": "Pick users",
+        "roles": "Roles",
+        "rolesPlaceholder": "Select roles",
+        "positions": "Positions",
+        "positionsPlaceholder": "Select positions",
+        "depts": "Departments",
+        "levels": "Levels",
+        "field": "Form field",
+        "noField": "The form has no {type} field.",
+        "toTop": "All levels, up to the top department",
+        "orderHint": "With \"All approve, one after another\", they approve in the order shown.",
+        "earlier": "Move earlier",
+        "later": "Move later"
+      },
+      "review": {
+        "sign": {
+          "label": "With several approvers",
+          "any": "Any one approves",
+          "all": "All approve",
+          "ordered": "All approve, one after another"
+        },
+        "whenNobody": {
+          "label": "When nobody is found",
+          "autoPass": "Approve automatically",
+          "toManager": "Hand to the process managers",
+          "toUser": "Hand to a user"
+        },
+        "whenInitiatorIsReviewer": {
+          "label": "When the approver is the initiator",
+          "self": "The initiator approves",
+          "skip": "Skip",
+          "deptHead": "Hand to the department head"
+        },
+        "onReject": {
+          "label": "On rejection",
+          "finish": "End the process",
+          "sendBack": "Send back to the previous step"
+        },
+        "resubmitTo": {
+          "label": "Resubmitted after this step sent it back to the initiator",
+          "restart": "Starts over from the first step",
+          "sender": "Comes straight back to this step"
+        },
+        "commentRequired": "Comment required",
+        "timeout": {
+          "label": "Overdue reminder",
+          "hours": "Due in (hours)",
+          "repeat": "Then remind every (hours)",
+          "every": "Remind every (hours)",
+          "hint": "Only reminds the assignees; never approves or rejects on its own.",
+          "after": {
+            "label": "When overdue",
+            "remind": "Remind only",
+            "autoPass": "Approve automatically",
+            "autoReject": "Reject automatically",
+            "toManager": "Hand to the manager"
+          },
+          "afterHint": {
+            "autoPass": "Approved on the assignee's behalf; an automatic approval cannot be withdrawn.",
+            "autoReject": "Rejected on the assignee's behalf, as this step's \"On rejection\" says: {onReject}.",
+            "toManager": "The task is transferred to the head of the assignee's department, or the parent department's head if the assignee is the department head. If no suitable person is found, it is transferred to the process managers. If none is available, only a reminder is sent.",
+            "common": "Handled within about 5 minutes after the due time; the initiator, the process managers and the to-do's original assignee are notified."
+          }
+        }
+      },
+      "cond": {
+        "hint": "The path is taken when every condition of any one group matches.",
+        "group": "Group {n}",
+        "and": "and",
+        "or": "or",
+        "field": "Field",
+        "op": "Operator",
+        "value": "Value",
+        "values": "Type a value and press Enter",
+        "formFields": "Form fields",
+        "initiator": "Initiator",
+        "initiatorDept": "Initiator's department",
+        "initiatorRoles": "Initiator's roles",
+        "addCond": "Add a condition",
+        "addGroup": "Add a condition group",
+        "remove": "Remove the condition"
+      },
+      "op": {
+        "eq": "equals",
+        "ne": "does not equal",
+        "gt": "is greater than",
+        "gte": "is at least",
+        "lt": "is less than",
+        "lte": "is at most",
+        "in": "is one of",
+        "contains": "contains",
+        "inDeptTree": "is under",
+        "hasRole": "has any of"
+      },
+      "access": {
+        "title": "Field access",
+        "field": "Field",
+        "edit": "Editable",
+        "read": "Read-only",
+        "hide": "Hidden",
+        "setAll": "Set every field to {access}",
+        "empty": "The form has no fields"
+      },
+      "fieldTypes": {
+        "number": "number",
+        "string": "text",
+        "date": "date",
+        "user": "user",
+        "dept": "department"
+      },
+      "progress": {
+        "legend": "Step status",
+        "done": "Done",
+        "active": "In progress",
+        "pending": "Not reached",
+        "skipped": "Not taken",
+        "stopped": "Ended here"
+      }
+    }
+  }
+}

@@ -1,0 +1,87 @@
+{
+  "list": {
+    "todo": "To-dos",
+    "done": "Done",
+    "mine": "Started",
+    "cc": "CC'd to me"
+  },
+  "empty": "Nothing here",
+  "fromStep": "Process step",
+  "detail": "Approval detail",
+  "initiator": "Initiator",
+  "startedAt": "Started",
+  "endedAt": "Ended",
+  "form": "Form",
+  "viewForm": "View",
+  "desktopOnly": "View it on a computer",
+  "timeline": "Approval history",
+  "system": "System",
+  "decide": {
+    "approve": "Approve",
+    "reject": "Reject",
+    "sendBack": "Send back",
+    "transfer": "Transfer",
+    "delegate": "Delegate",
+    "more": "More",
+    "commentHint": "Your comment",
+    "delegateHint": "Once they have handled it, the task is back with you to decide.",
+    "addSign": "Add signers",
+    "cc": "Copy to",
+    "comment": "Comment",
+    "removeSign": "Remove signers",
+    "withdraw": "Withdraw",
+    "cancel": "Cancel process",
+    "urge": "Send reminder",
+    "reasonHint": "Why they get a copy",
+    "sign": {
+      "before": "Before me",
+      "after": "After me"
+    },
+    "signHint": {
+      "before": "Once they have all approved, the task is back with you to decide.",
+      "after": "You approve now; it takes effect once they have all approved."
+    },
+    "withdrawHint": "Only while nobody has acted on the next step; the task is then back with you.",
+    "cancelHint": "The process ends and cannot be resumed.",
+    "urged": "Approvers reminded",
+    "urgeLater": "You can send a reminder once per hour. Please try again later.",
+    "done": "Done",
+    "resubmit": "Resubmit"
+  },
+  "start": {
+    "none": "No process to start",
+    "desktopOnly": "Start this process on a computer",
+    "picksHint": "Pick the users of these steps, at least one each.",
+    "confirm": "Start this process?",
+    "pick": {
+      "review": "Approvers",
+      "notify": "CC"
+    },
+    "submit": "Start",
+    "started": "Started"
+  },
+  "summary": "{n} waiting for you",
+  "summaryNone": "Nothing waiting for you",
+  "startedBy": "Started by {name}",
+  "startedByAt": "Started by {name} on {time}",
+  "yourTurn": "Your turn · {node}",
+  "pending": "Pending",
+  "process": "Process",
+  "fullForm": "Full form",
+  "emptyTodo": "You're all caught up",
+  "emptyTodoHint": "We'll let you know as soon as a new one arrives.",
+  "viewDone": "View done",
+  "dynamic": {
+    "days": "{n} days",
+    "yes": "Yes",
+    "no": "No",
+    "desktopField": "Fill this in on a computer",
+    "badForm": "This form can't be shown on a phone; start it on a computer",
+    "detail": {
+      "add": "Add item",
+      "remove": "Remove",
+      "row": "Item {n}",
+      "total": "Total"
+    }
+  }
+}

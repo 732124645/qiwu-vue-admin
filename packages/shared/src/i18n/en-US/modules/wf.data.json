@@ -1,0 +1,19 @@
+{
+  "field": {
+    "wf": {
+      "data": {
+        "id": "No.",
+        "version": "Version",
+        "state": "State",
+        "initiator": "Initiator",
+        "initiatorId": "Initiator",
+        "dept": "Dept",
+        "startedAt": "Started at",
+        "startedAtFrom": "Started at (from)",
+        "startedAtTo": "Started at (to)",
+        "endedAt": "Ended at",
+        "filters": "Field filters"
+      }
+    }
+  }
+}

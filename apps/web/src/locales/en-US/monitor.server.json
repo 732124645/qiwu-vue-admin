@@ -1,0 +1,13 @@
+{
+  "monitor": {
+    "server": {
+      "free": "Free",
+      "heap": "Node.js heap"
+    }
+  },
+  "menu": {
+    "monitor": {
+      "server": "Server"
+    }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "select": "请选择",
+  "empty": "没有匹配的数据",
+  "confirmCount": "确定（{count}）",
+  "user": {
+    "title": "选择人员",
+    "placeholder": "请选择人员",
+    "keyword": "搜索用户名或姓名",
+    "nameKeyword": "搜索姓名",
+    "allDepts": "全部部门"
+  },
+  "dept": {
+    "title": "选择部门",
+    "placeholder": "请选择部门"
+  },
+  "upload": {
+    "file": "上传文件",
+    "image": "上传图片",
+    "hint": "单个文件不超过 {size}，最多 {limit} 个",
+    "limit": "最多上传 {limit} 个文件",
+    "tooLarge": "{name} 超过 {size}，未上传"
+  }
+}

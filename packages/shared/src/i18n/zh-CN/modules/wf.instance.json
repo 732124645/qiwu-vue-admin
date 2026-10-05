@@ -1,0 +1,14 @@
+{
+  "field": {
+    "wf": {
+      "instance": {
+        "modelKey": "模型标识",
+        "businessKey": "业务单据",
+        "formValues": "表单",
+        "initiatorPicks": "自选人员",
+        "state": "状态",
+        "unread": "仅未读"
+      }
+    }
+  }
+}

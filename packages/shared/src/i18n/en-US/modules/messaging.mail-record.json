@@ -1,0 +1,23 @@
+{
+  "field": {
+    "messaging": {
+      "mailRecord": {
+        "userId": "Recipient user",
+        "toList": "To list",
+        "ccList": "Cc list",
+        "bccList": "Bcc list",
+        "accountId": "Account ID",
+        "templateCode": "Template code",
+        "locale": "Locale",
+        "subject": "Subject",
+        "body": "Body",
+        "params": "Params",
+        "status": "Status",
+        "providerMsgId": "Provider message ID",
+        "error": "Error",
+        "attempts": "Attempts",
+        "sentAt": "Sent at"
+      }
+    }
+  }
+}

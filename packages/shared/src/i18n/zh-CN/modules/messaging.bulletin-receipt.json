@@ -1,0 +1,14 @@
+{
+  "field": {
+    "messaging": {
+      "bulletinReceipt": {
+        "keyword": "用户名或显示名",
+        "userId": "用户 ID",
+        "username": "用户名",
+        "displayName": "显示名",
+        "deptName": "部门",
+        "readAt": "阅读时间"
+      }
+    }
+  }
+}

@@ -1,0 +1,83 @@
+/*
+ * Design tokens, direction B "远洋" (docs/design/visual-system.md §2). Components use only these; Element Plus
+ * gets them through element.css. Dark values under html.dark (@vueuse useDark). The settings drawer's theme
+ * color overrides --qw-brand / --qw-brand-text / --qw-brand-weak inline on <html> (core/theme.ts).
+ * core/theme.ts parses this file (theme color, contrast.spec.ts): plain `--qw-x: value;` declarations.
+ */
+:root {
+  --qw-brand: #1f6feb;
+  --qw-brand-text: #1d68dd;
+  --qw-brand-weak: #e9f1fd;
+  --qw-on-brand: #ffffff;
+  --qw-canvas: #f2f4f7;
+  --qw-surface: #ffffff;
+  --qw-surface-2: #f7f9fc;
+  --qw-border: #e3e7ee;
+  --qw-text: #0f1a2b;
+  --qw-text-2: #4b5870;
+  --qw-text-3: #5f6b80;
+  --qw-side-bg: #0b1a33;
+  --qw-side-text: #b9c4d8;
+  --qw-side-text-3: #7f8da8;
+  --qw-side-hover: rgba(255, 255, 255, 0.06);
+  --qw-side-active-bg: var(--qw-brand);
+  --qw-side-active-text: #ffffff;
+  --qw-side-hover-text: #ffffff;
+  --qw-side-logo-text: #ffffff;
+  /* Optional light sidebar: follows the current global surfaces, never the top navigation. */
+  --qw-side-light-bg: var(--qw-surface);
+  --qw-side-light-text: var(--qw-text-2);
+  --qw-side-light-text-3: var(--qw-text-3);
+  --qw-side-light-hover: var(--qw-brand-weak);
+  --qw-side-light-hover-text: var(--qw-text);
+  --qw-side-light-logo-text: var(--qw-text);
+  --qw-success: #127d5a;
+  --qw-success-weak: #e6f4ee;
+  --qw-warning: #a75808;
+  --qw-warning-weak: #fdf1e3;
+  --qw-danger: #c8322f;
+  --qw-danger-weak: #fdecec;
+  --qw-neutral: #5f6b80;
+  --qw-neutral-weak: #eef1f5;
+  /* light in both themes: the ground under the bpmn.io logo, drawn #404040 by bpmn-js */
+  --qw-logo-plate: #ffffff;
+  --qw-radius-sm: 8px;
+  --qw-radius: 10px;
+  --qw-radius-lg: 14px;
+  --qw-shadow-1: 0 1px 3px rgba(15, 26, 43, 0.05), 0 10px 24px -14px rgba(15, 26, 43, 0.16);
+  --qw-shadow-2: 0 18px 48px -18px rgba(15, 26, 43, 0.28);
+  --qw-font:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI Variable Text', 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
+  /* §8 motion: enter slow, leave fast */
+  --qw-ease-enter: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --qw-ease-exit: cubic-bezier(0.4, 0, 1, 1);
+}
+
+html.dark {
+  color-scheme: dark;
+  --qw-brand-text: #6fa3ff;
+  --qw-brand-weak: rgba(76, 141, 255, 0.14);
+  --qw-canvas: #080d16;
+  --qw-surface: #0f1624;
+  --qw-surface-2: #141c2d;
+  --qw-border: #1e2940;
+  --qw-text: #e8edf5;
+  --qw-text-2: #9aa7bd;
+  --qw-text-3: #7a879e;
+  /* the same navy as light mode: a hue apart from the near-black canvas, the aside also gets a border */
+  --qw-side-bg: #0b1a33;
+  --qw-side-text: #9facc2;
+  --qw-side-text-3: #7786a2;
+  --qw-side-hover: rgba(255, 255, 255, 0.05);
+  --qw-success: #3fcb8f;
+  --qw-success-weak: rgba(63, 203, 143, 0.12);
+  --qw-warning: #f0a14a;
+  --qw-warning-weak: rgba(240, 161, 74, 0.12);
+  --qw-danger: #f26b68;
+  --qw-danger-weak: rgba(242, 107, 104, 0.12);
+  --qw-neutral: #8b98ae;
+  --qw-neutral-weak: rgba(139, 152, 174, 0.12);
+  --qw-shadow-1: none;
+  --qw-shadow-2: 0 18px 48px -18px rgba(0, 0, 0, 0.6);
+}

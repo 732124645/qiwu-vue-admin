@@ -1,0 +1,17 @@
+{
+  "field": {
+    "iam": {
+      "dept": {
+        "parentId": "Parent department",
+        "treePath": "Department path",
+        "name": "Department name",
+        "sortNo": "Sort order",
+        "headUserId": "Head",
+        "headUserName": "Head",
+        "phone": "Phone",
+        "email": "Email",
+        "enabled": "Enabled"
+      }
+    }
+  }
+}

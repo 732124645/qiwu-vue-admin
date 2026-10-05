@@ -1,0 +1,18 @@
+{
+  "messaging": {
+    "mailTemplate": {
+      "entity": "邮件模板",
+      "defaultAccount": "默认账号",
+      "testSend": "测试发送",
+      "recipient": "收件邮箱",
+      "invalidRecipient": "请输入有效的收件邮箱和参数",
+      "testOk": "测试邮件已发送，记录 #{id}",
+      "testFailed": "测试邮件发送失败，记录 #{id}"
+    }
+  },
+  "menu": {
+    "messaging": {
+      "mailTemplate": "邮件模板"
+    }
+  }
+}

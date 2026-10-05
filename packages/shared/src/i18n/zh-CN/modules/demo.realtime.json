@@ -1,0 +1,12 @@
+{
+  "field": {
+    "demo": {
+      "realtime": {
+        "target": "发送对象",
+        "userIds": "用户",
+        "roleIds": "角色",
+        "text": "消息内容"
+      }
+    }
+  }
+}

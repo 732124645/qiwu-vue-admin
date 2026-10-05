@@ -1,0 +1,12 @@
+{
+  "scheduler": {
+    "task": {
+      "entity": "任务"
+    }
+  },
+  "menu": {
+    "scheduler": {
+      "task": "定时任务"
+    }
+  }
+}

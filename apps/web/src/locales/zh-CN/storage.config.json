@@ -1,0 +1,14 @@
+{
+  "storage": {
+    "config": {
+      "entity": "存储配置",
+      "setPrimary": "设为主配置",
+      "secretRequired": "修改存储连接信息后，请重新填写访问密钥"
+    }
+  },
+  "menu": {
+    "storage": {
+      "config": "存储配置"
+    }
+  }
+}

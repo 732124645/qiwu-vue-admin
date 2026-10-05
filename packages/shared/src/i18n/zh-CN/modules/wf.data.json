@@ -1,0 +1,19 @@
+{
+  "field": {
+    "wf": {
+      "data": {
+        "id": "编号",
+        "version": "版本",
+        "state": "状态",
+        "initiator": "发起人",
+        "initiatorId": "发起人",
+        "dept": "发起部门",
+        "startedAt": "发起时间",
+        "startedAtFrom": "发起时间起",
+        "startedAtTo": "发起时间止",
+        "endedAt": "结束时间",
+        "filters": "字段筛选"
+      }
+    }
+  }
+}

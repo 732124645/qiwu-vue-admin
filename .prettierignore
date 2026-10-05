@@ -1,0 +1,5 @@
+pnpm-lock.yaml
+dist/
+coverage/
+# the uni-app client is its own project
+mobile/

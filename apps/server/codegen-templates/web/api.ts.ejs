@@ -1,0 +1,47 @@
+<%_
+const B = m.Biz
+// a read-only page has no enabled toggle and no create schema
+const enabled = !m.readonly && m.enabled
+// a master-sub module (crud.ts `subs`): GET /:id answers the row with its sub rows
+const subs = m.subs.length > 0
+const own = enabled || m.withOptions || m.withImport || subs
+// a tree (crud.ts `kind`): the list is the whole filtered forest, one delete at a time
+const tree = m.kind === 'tree'
+const base = tree ? 'treeApi' : 'crudApi'
+_%>
+import type { <%= names([m.withImport && 'ImportMode', m.withImport && 'ImportResult', !m.readonly && B + 'Create', subs && B + 'Detail', m.withOptions && B + 'Option', B + 'Vo']) %> } from '@qiwu/shared'
+import { <%= names([own && 'api', base, m.withImport && 'download']) %> } from '@/core/request/http'
+
+const BASE = '/<%= m.url %>'
+
+/** /api/<%= m.url %>: the standard <%= tree ? 'tree' : 'CRUD' %> calls<% if (own) { %> plus the module's own<% } %>. */
+export const <%= m.biz %>Api = {
+<%_ if (m.readonly) { _%>
+  // read-only: the list, one row and the export
+  ...crudApi<<%= B %>Vo>(BASE),
+<%_ } else { _%>
+  ...<%= base %><<%= B %>Vo, <%= B %>Create>(BASE),
+<%_ } _%>
+<%_ if (subs) { _%>
+  /** the row with its <%= comment(m.subs.map((s) => s.prop).join(', ')) %> (what the form edits and saves whole) */
+  get: (id: number) => api.get<<%= B %>Detail>(`${BASE}/${id}`),
+<%_ } _%>
+<%_ if (enabled) { _%>
+  setEnabled: (id: number, enabled: boolean) => api.put(`${BASE}/${id}/enabled`, { enabled }),
+<%_ } _%>
+<%_ if (m.withOptions) { _%>
+  options: () => api.get<<%= B %>Option[]>(`${BASE}/options`),
+<%_ } _%>
+<%_ if (m.withImport) { _%>
+  /** the .xlsx to fill in (dict columns come with a dropdown of their labels) */
+  importTemplate: (filename: string) => download(`${BASE}/import-template`, {}, filename),
+  /** multipart `mode` + `file`; failed rows come back as a report to download (`reportId`) */
+  importFile(file: File, mode: ImportMode) {
+    const form = new FormData()
+    form.append('mode', mode)
+    form.append('file', file)
+    // up to 5000 rows are checked and written one by one
+    return api.post<ImportResult>(`${BASE}/import`, form, { timeout: 5 * 60_000 })
+  },
+<%_ } _%>
+}

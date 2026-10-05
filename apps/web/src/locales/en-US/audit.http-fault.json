@@ -1,0 +1,15 @@
+{
+  "audit": {
+    "httpFault": {
+      "entity": "API error log entry",
+      "resolve": "Resolve",
+      "ignore": "Ignore",
+      "reopen": "Reopen"
+    }
+  },
+  "menu": {
+    "audit": {
+      "httpFault": "API error log"
+    }
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "geo": {
+    "area": {
+      "tree": "Divisions",
+      "lookup": "IP lookup",
+      "ipHint": "An IPv4 or IPv6 address, e.g. 8.8.8.8",
+      "query": "Look up",
+      "unknown": "Unknown",
+      "picker": "Region picker",
+      "pickerHint": "The AreaCascader form field: its value is the path of division codes.",
+      "value": "Value"
+    }
+  },
+  "picker": {
+    "area": {
+      "placeholder": "Select a region",
+      "loading": "Loading regions…"
+    }
+  },
+  "menu": {
+    "geo": {
+      "area": "Regions"
+    }
+  }
+}

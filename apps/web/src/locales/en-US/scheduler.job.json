@@ -1,0 +1,40 @@
+{
+  "scheduler": {
+    "job": {
+      "recentRuns": "Recent runs",
+      "noRuns": "No runs yet",
+      "paused": "Disabled: these are the times it would fire once enabled.",
+      "outcome": {
+        "ok": "Succeeded",
+        "failed": "Failed",
+        "skipped": "Skipped",
+        "timeout": "Timed out"
+      },
+      "misfire": {
+        "skip": "Skip missed runs",
+        "run_once": "Run once at start-up"
+      },
+      "runConfirm": "Run the task \"{name}\" once now? It uses the saved params; the result shows in the run log.",
+      "runStarted": "Started: the result shows in the run log"
+    },
+    "handler": {
+      "audit": {
+        "purge": "Purge old logs"
+      },
+      "session": {
+        "sweep": "Sweep ended sessions"
+      },
+      "notify": {
+        "dispatch": "Dispatch pending notifications"
+      },
+      "demo": {
+        "echo": "Demo: echo a message"
+      },
+      "wf": {
+        "task": {
+          "remind": "Send overdue to-do reminders"
+        }
+      }
+    }
+  }
+}

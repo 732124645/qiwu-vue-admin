@@ -1,0 +1,14 @@
+{
+  "messaging": {
+    "bulletin": {
+      "entity": "公告",
+      "receipts": "已读用户",
+      "receiptsTitle": "「{title}」的已读用户"
+    }
+  },
+  "menu": {
+    "messaging": {
+      "bulletin": "通知公告"
+    }
+  }
+}

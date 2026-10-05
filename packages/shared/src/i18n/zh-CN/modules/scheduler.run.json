@@ -1,0 +1,21 @@
+{
+  "field": {
+    "scheduler": {
+      "run": {
+        "taskId": "任务 ID",
+        "taskName": "任务名称",
+        "handler": "处理器",
+        "params": "参数",
+        "attempt": "第几次尝试",
+        "outcome": "结果",
+        "output": "输出",
+        "error": "错误信息",
+        "startedAt": "开始时间",
+        "startedAtFrom": "开始时间起",
+        "startedAtTo": "开始时间止",
+        "endedAt": "结束时间",
+        "costMs": "耗时（毫秒）"
+      }
+    }
+  }
+}

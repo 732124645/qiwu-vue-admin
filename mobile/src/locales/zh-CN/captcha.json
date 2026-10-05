@@ -1,0 +1,14 @@
+{
+  "title": "安全验证",
+  "image": {
+    "alt": "验证码图片",
+    "placeholder": "输入图片中的答案",
+    "newImage": "换一张"
+  },
+  "slider": {
+    "title": "拖动拼图完成验证"
+  },
+  "confirm": "确认",
+  "loadFailed": "验证码加载失败",
+  "retry": "重试"
+}

@@ -1,0 +1,15 @@
+{
+  "settings": {
+    "param": {
+      "entity": "参数",
+      "refreshCache": "刷新缓存",
+      "cacheRefreshed": "缓存已刷新，所有参数将重新读取",
+      "secretHint": "敏感值只以掩码显示；不修改则保留原值，输入新值即替换。"
+    }
+  },
+  "menu": {
+    "settings": {
+      "param": "参数设置"
+    }
+  }
+}

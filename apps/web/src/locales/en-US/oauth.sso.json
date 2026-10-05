@@ -1,0 +1,15 @@
+{
+  "oauth": {
+    "sso": {
+      "title": "Authorize access",
+      "subtitle": "Continue as {name}",
+      "wants": "{client} wants to access your account:",
+      "redirectHost": "After authorization, you will be redirected to {host}",
+      "approve": "Allow",
+      "deny": "Deny",
+      "switchAccount": "Use another account",
+      "redirecting": "Redirecting…",
+      "invalid": "The authorization request is not valid"
+    }
+  }
+}

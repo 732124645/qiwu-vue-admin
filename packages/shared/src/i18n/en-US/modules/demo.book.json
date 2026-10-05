@@ -1,0 +1,19 @@
+{
+  "field": {
+    "demo": {
+      "book": {
+        "isbn": "ISBN",
+        "title": "Title",
+        "author": "Author",
+        "coverUrl": "Cover",
+        "publishedOn": "Published on",
+        "publishedOnFrom": "Published on (from)",
+        "publishedOnTo": "Published on (to)",
+        "price": "Price",
+        "genre": "Genre",
+        "deptId": "Department",
+        "enabled": "Enabled"
+      }
+    }
+  }
+}

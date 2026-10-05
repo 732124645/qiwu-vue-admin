@@ -1,0 +1,28 @@
+{
+  "monitor": {
+    "redis": {
+      "ops": "Operations",
+      "ofMax": "{percent} of {max}",
+      "opsUnit": "commands per second",
+      "commandTip": "{command}: {calls} calls, {usec} µs per call",
+      "keysOfDb": "{keys} (db {db})",
+      "field": "Field",
+      "value": "Value",
+      "stat": {
+        "version": "Version",
+        "mode": "Mode",
+        "uptime": "Uptime",
+        "clients": "Connected clients",
+        "memory": "Memory used",
+        "keys": "Keys",
+        "expires": "Keys with expiry",
+        "hitRate": "Hit rate"
+      }
+    }
+  },
+  "menu": {
+    "monitor": {
+      "redis": "Cache monitor"
+    }
+  }
+}

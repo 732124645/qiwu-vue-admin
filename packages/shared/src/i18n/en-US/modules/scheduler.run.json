@@ -1,0 +1,21 @@
+{
+  "field": {
+    "scheduler": {
+      "run": {
+        "taskId": "Task ID",
+        "taskName": "Task",
+        "handler": "Handler",
+        "params": "Params",
+        "attempt": "Attempt",
+        "outcome": "Outcome",
+        "output": "Output",
+        "error": "Error",
+        "startedAt": "Started at",
+        "startedAtFrom": "Started at (from)",
+        "startedAtTo": "Started at (to)",
+        "endedAt": "Ended at",
+        "costMs": "Duration (ms)"
+      }
+    }
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "action": {
+    "create": "Add",
+    "edit": "Edit",
+    "delete": "Delete",
+    "save": "Save",
+    "addChild": "Add below",
+    "addRow": "Add row",
+    "removeRow": "Remove row"
+  },
+  "title": {
+    "create": "Add {name}",
+    "edit": "Edit {name}",
+    "detail": "View {name}"
+  },
+  "rows": {
+    "row": "Row {n}",
+    "empty": "No rows yet: add one below"
+  },
+  "tree": {
+    "topLevel": "None (top level)",
+    "children": "Below: {n}"
+  },
+  "confirm": {
+    "title": "Confirm",
+    "delete": "Delete this record? It will no longer be shown and cannot be restored here."
+  },
+  "msg": {
+    "created": "Added",
+    "updated": "Saved",
+    "deleted": "Deleted"
+  },
+  "empty": "No data"
+}

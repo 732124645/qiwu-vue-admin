@@ -1,0 +1,17 @@
+{
+  "field": {
+    "messaging": {
+      "inboxTemplate": {
+        "code": "模板编码",
+        "locale": "语言",
+        "name": "模板名称",
+        "title": "标题",
+        "body": "正文",
+        "category": "分类",
+        "senderLabel": "发送方名称",
+        "paramNames": "参数名称",
+        "enabled": "启用状态"
+      }
+    }
+  }
+}

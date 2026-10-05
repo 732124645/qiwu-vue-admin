@@ -1,0 +1,46 @@
+{
+  "topMenu": "Top menu",
+  "footer": "© {year} Qiwu · MIT License",
+  "lock": {
+    "action": "Lock screen",
+    "title": "Screen locked",
+    "hint": "{name}, enter your password to unlock",
+    "unlock": "Unlock"
+  },
+  "search": {
+    "placeholder": "Search menu"
+  },
+  "fullscreen": {
+    "enter": "Full screen",
+    "exit": "Exit full screen"
+  },
+  "size": {
+    "label": "Component size",
+    "large": "Large",
+    "default": "Default",
+    "small": "Small"
+  },
+  "settings": {
+    "title": "Page settings",
+    "layout": "Layout",
+    "layouts": {
+      "side": "Side menu",
+      "top": "Top menu",
+      "mix": "Mixed"
+    },
+    "primary": "Theme color",
+    "interface": "Display",
+    "dark": "Dark mode",
+    "grey": "Grayscale mode",
+    "fixedHeader": "Fixed header",
+    "showLogo": "Show logo",
+    "showFooter": "Show footer",
+    "dynamicTitle": "Page name in the browser title",
+    "watermark": "Show watermark",
+    "sideTheme": "Sidebar appearance",
+    "sideThemes": {
+      "light": "Light",
+      "dark": "Dark"
+    }
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "light": {
+    "navBg": "#ffffff",
+    "navText": "black",
+    "navBack": "#000000",
+    "bg": "#f2f4f7",
+    "bgText": "dark",
+    "heroBg": "#0b1a33",
+    "tabColor": "#5f6b80",
+    "tabSelected": "#1d68dd",
+    "tabBg": "#ffffff",
+    "tabBorder": "white"
+  },
+  "dark": {
+    "navBg": "#0f1624",
+    "navText": "white",
+    "navBack": "#ffffff",
+    "bg": "#080d16",
+    "bgText": "light",
+    "heroBg": "#0b1a33",
+    "tabColor": "#7a879e",
+    "tabSelected": "#6fa3ff",
+    "tabBg": "#0f1624",
+    "tabBorder": "black"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "extends": "@vue/tsconfig/tsconfig.json",
+  "compilerOptions": {
+    "sourceMap": true,
+    "lib": ["esnext", "dom"],
+    "types": ["@dcloudio/types", "z-paging/types"],
+    // no baseUrl (deprecated in TS 6): paths resolve from this file
+    "paths": {
+      "@/*": ["./src/*"],
+      // shared from its TypeScript source, with the one zod of mobile/ (vite.config.ts aliases)
+      "@qiwu/shared": ["../packages/shared/src/index.ts"],
+      "@qiwu/shared/*": ["../packages/shared/src/*"],
+      "zod": ["./node_modules/zod"]
+    }
+  },
+  "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.vue"]
+}

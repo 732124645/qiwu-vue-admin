@@ -1,0 +1,16 @@
+{
+  "field": {
+    "messaging": {
+      "mailAccount": {
+        "name": "Name",
+        "address": "Address",
+        "username": "Username",
+        "password": "Password",
+        "host": "Host",
+        "port": "Port",
+        "security": "Connection security",
+        "enabled": "Enabled"
+      }
+    }
+  }
+}
