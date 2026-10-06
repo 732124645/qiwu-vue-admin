@@ -889,11 +889,19 @@ test('csp: the designer, its menus and the watermark notice raise no CSP violati
 /** a computed transform that moves nothing */
 const IDENTITY = ['none', 'matrix(1, 0, 0, 1, 0, 0)']
 
+/** the logo markup bpmn-js ships */
+const LOGO_SVG = /BPMNIO_LOGO_SVG = '([^']+)'/.exec(
+  readFileSync(
+    new URL('../node_modules/bpmn-js/lib/util/PoweredByUtil.js', import.meta.url),
+    'utf8',
+  ),
+)![1]!
+
 /**
  * The bpmn.io logo of the diagram on `page` (designer or read-only) is bpmn-js's, visible, on top and unaltered
- * one, hit where it is drawn (left, middle, right), its color, 53 × 21; from it up to the root
- * nothing dims, filters, clips, blends, moves or hides it; the plate lies under it; the screen over it is what
- * the logo and its plate alone show.
+ * one: its markup bpmn-js's own, hit where it is drawn (left, middle, right), its color on every shape, unfaded
+ * and unstroked, 53 × 21; from its shapes up to the root nothing dims, filters, clips, blends, moves or hides
+ * it; the plate lies under it; the screen over it is what the logo and its plate alone show, within raster noise.
  */
 async function logoIntact(page: Page) {
   const logo = canvas(page).locator('.bjs-powered-by')
@@ -904,16 +912,15 @@ async function logoIntact(page: Page) {
   // hit-tests and screenshots need it in the viewport
   await logo.scrollIntoViewIfNeeded()
   // (in the page: its globals through the logo's document, e2e code has no DOM types)
-  const seen = await logo.evaluate((a) => {
+  const seen = await logo.evaluate((a, source) => {
     const doc = a.ownerDocument
     const style = (e: typeof a) => doc.defaultView.getComputedStyle(e)
     const svg = a.querySelector('svg')
     const box = svg.getBoundingClientRect()
     const y = box.top + box.height / 2
-    const chain = []
-    for (let e = svg; e; e = e.parentElement) {
+    const look = (e: typeof a) => {
       const s = style(e)
-      chain.push({
+      return {
         opacity: Number(s.opacity),
         filter: s.filter,
         clipPath: s.clipPath,
@@ -921,10 +928,27 @@ async function logoIntact(page: Page) {
         mask: s.maskImage,
         transform: s.transform,
         visibility: s.visibility,
-      })
+      }
     }
+    // the logo's shapes, then from the svg up to the root
+    const shapes = [...svg.querySelectorAll('*')]
+    const chain = shapes.map(look)
+    for (let e = svg; e; e = e.parentElement) chain.push(look(e))
+    // bpmn-js adds only an inline style to the svg (checked through the computed styles)
+    const ref = doc.createElement('div')
+    ref.innerHTML = source
+    const want = ref.firstElementChild
     const plate = doc.querySelector('.wf-bpmn__plate')
     return {
+      markup:
+        a.children.length === 1 &&
+        svg.innerHTML === want.innerHTML &&
+        [...want.attributes].every((n) => svg.getAttribute(n.name) === n.value) &&
+        [...svg.attributes].every((n) => n.name === 'style' || want.hasAttribute(n.name)),
+      paint: shapes.map((e) => {
+        const s = style(e)
+        return { fill: s.fill, fillOpacity: s.fillOpacity, stroke: s.stroke, display: s.display }
+      }),
       // the plate: its own element, under the logo in the logo's stacking context
       under:
         plate.parentElement.contains(a) && Number(style(plate).zIndex) < Number(style(a).zIndex),
@@ -933,14 +957,17 @@ async function logoIntact(page: Page) {
       ),
       size: [box.width, box.height],
       color: style(a).color,
-      fill: style(svg.querySelector('path')).fill,
       chain,
     }
-  })
+  }, LOGO_SVG)
+  expect(seen.markup, "the logo's markup differs from bpmn-js's").toBe(true)
   expect(seen.under).toBe(true)
   expect(seen.hits).toEqual([true, true, true])
   expect(seen.color).toBe('rgb(64, 64, 64)')
-  expect(seen.fill).toBe('rgb(64, 64, 64)')
+  for (const p of seen.paint) {
+    expect(p).toMatchObject({ fill: 'rgb(64, 64, 64)', fillOpacity: '1', stroke: 'none' })
+    expect(p.display).not.toBe('none')
+  }
   expect(Math.abs(seen.size[0]! - 53)).toBeLessThanOrEqual(1)
   expect(Math.abs(seen.size[1]! - 21)).toBeLessThanOrEqual(1)
   expect(seen.chain.reduce((p, s) => p * s.opacity, 1)).toBe(1)
@@ -995,11 +1022,50 @@ async function logoIntact(page: Page) {
   await hide.evaluate((h) => h.logo())
   const plateOnly = await shot()
   await hide.evaluate((h) => h.undo())
-  expect(alone.equals(before), 'the logo region differs from the logo and its plate alone').toBe(
-    true,
-  )
-  expect(plateOnly.equals(before), 'the logo does not show on its plate').toBe(false)
+  // Without a GPU, hiding the app watermark can move the logo into another compositing layer whose
+  // anti-aliased edges rasterize a few levels apart; ink over the logo or its plate differs by far more.
+  expect(
+    await pixelsApart(logo, alone, before),
+    'the logo region differs from the logo and its plate alone',
+  ).toBe(0)
+  expect(
+    await pixelsApart(logo, plateOnly, before),
+    'the logo does not show on its plate',
+  ).toBeGreaterThan(200)
   await expect(logo).toBeVisible()
+}
+
+/** Pixels of two PNG shots of one clip whose largest colour channel differs by more than `limit`. */
+function pixelsApart(logo: Locator, a: Buffer, b: Buffer, limit = 12) {
+  return logo.evaluate(
+    async (e, [a, b, limit]) => {
+      const doc = e.ownerDocument
+      const read = async (png: string) => {
+        const image = new doc.defaultView.Image()
+        image.src = `data:image/png;base64,${png}`
+        await image.decode()
+        const canvas = doc.createElement('canvas')
+        canvas.width = image.width
+        canvas.height = image.height
+        const ctx = canvas.getContext('2d')
+        ctx.drawImage(image, 0, 0)
+        return ctx.getImageData(0, 0, image.width, image.height).data
+      }
+      const [x, y] = [await read(a), await read(b)]
+      let apart = 0
+      for (let i = 0; i < x.length; i += 4)
+        if (
+          Math.max(
+            Math.abs(x[i] - y[i]),
+            Math.abs(x[i + 1] - y[i + 1]),
+            Math.abs(x[i + 2] - y[i + 2]),
+          ) > limit
+        )
+          apart++
+      return apart
+    },
+    [a.toString('base64'), b.toString('base64'), limit] as const,
+  )
 }
 
 /** Check the actual watermark ink and its stacking even when no tile ink crosses the logo. */
