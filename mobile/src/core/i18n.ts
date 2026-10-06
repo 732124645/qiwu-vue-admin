@@ -40,7 +40,14 @@ export function detectLocale(): Locale {
   return uni.getLocale().startsWith('en') ? 'en-US' : DEFAULT_LOCALE
 }
 
-const i18n = createI18n({ legacy: false, locale: detectLocale(), fallbackLocale: DEFAULT_LOCALE })
+const startLocale = detectLocale()
+const i18n = createI18n({ legacy: false, locale: startLocale, fallbackLocale: DEFAULT_LOCALE })
+
+/** wot-ui's own texts (placeholders, picker buttons…): its Chinese default unless told otherwise. */
+const wotLocale = (lang: Locale) => WotLocale.use(lang, lang === 'en-US' ? wotEnUS : undefined)
+// before any component reads them: the first page may render before the app's onLaunch (H5 waits for the
+// router). uni.setLocale stays in onLaunch: before the app exists it does nothing.
+wotLocale(startLocale)
 
 /** Current locale (reactive: what renders through `t()` follows a switch); also the API's Accept-Language. */
 export const locale = () => i18n.global.locale.value as Locale
@@ -96,7 +103,7 @@ export const LANGUAGE_KEY: Record<Locale, string> = {
 /** Switches our texts, wot-ui's own texts and uni's built-in UI, and remembers the choice. */
 export function setLocale(next: Locale) {
   i18n.global.locale.value = next
-  WotLocale.use(next, next === 'en-US' ? wotEnUS : undefined)
+  wotLocale(next)
   uni.setLocale(UNI[next])
   uni.setStorageSync(STORAGE_KEY, next)
 }

@@ -195,26 +195,24 @@ onHide(() => (shown = false))
   letter-spacing: 0.06em;
 }
 
-/* left of the bird (it starts at ~59% of the width): a long name wraps to two lines, the org line ends in … */
+/*
+ * Left of the hero art at every width: it starts at 339rpx (QwPageHeader: 422rpx wide, 11rpx past the right
+ * edge), the column at the header's padding. A long name and the org line wrap to two lines each, then end in …
+ */
 .qw-home__hello {
   position: relative;
   display: flex;
   flex-direction: column;
-  max-width: 56%;
+  max-width: calc(339rpx - var(--qw-space-4));
   margin-top: 12rpx;
 }
 
-.qw-home__name {
+.qw-home__name,
+.qw-home__hello .qw-hdr__sub {
   display: -webkit-box;
   overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
-}
-
-.qw-home__hello .qw-hdr__sub {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .qw-home__sheet {

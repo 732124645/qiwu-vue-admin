@@ -1,8 +1,20 @@
 # Changelog
 
-中文说明：本文件按功能区域汇总栖梧 / Qiwu 的用户可见变化，正文使用英文。`1.0.0` 于 2026-10-05 发布。
+中文说明：本文件按功能区域汇总栖梧 / Qiwu 的用户可见变化，正文使用英文。`1.0.0` 于 2026-10-05 发布，`1.0.1` 于 2026-10-06 发布。
 
 All notable product changes are recorded here in Keep a Changelog style. The initial release below summarizes the delivered features. Planned work is identified explicitly.
+
+## [1.0.1] - 2026-10-06
+
+### Added
+
+- GitHub Actions for the public repository: pushes and pull requests to `main` run the full local gate (`pnpm ci:local` with MySQL 8.4 and Redis 8 service containers, web and mobile Playwright). A `vX.Y.Z` tag runs the same gate, publishes a GitHub Release from this changelog and, after approval in the `demo` environment, deploys the demo site over SSH.
+- Server deploy kit (`scripts/deploy/`): one directory per release behind an atomic `current` link, shared env files, PM2 cluster reloads with health checks and automatic code rollback, a root-owned kit, and a deploy key that can only run the deploy command (kept in a root-owned keys file, outside the app user's home). See `docs/deploy.md`.
+
+### Fixed
+
+- Mobile: wot-ui component texts such as placeholders follow English in the dev server and from the first render after a restart.
+- Mobile workbench: long English subtitles wrap beside the header illustration instead of running under it.
 
 ## [1.0.0] - 2026-10-05
 

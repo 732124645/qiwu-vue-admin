@@ -1,0 +1,101 @@
+# Full gate (pnpm ci:local) on a Linux runner: MySQL 8.4 and Redis 8 service containers with
+# throwaway credentials, Playwright on its bundled Chromium. Runs in the public repository only
+# (a fork: change the repository name below, or start it by hand); release.yml reuses it.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  gate:
+    if: github.repository == '732124645/qiwu-vue-admin' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      HUSKY: '0'
+      PW_CHANNEL: chromium
+      MYSQL_ROOT_PASSWORD: ci-root-throwaway # lives only in the job's temporary container
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: ci-root-throwaway
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -pci-root-throwaway --silent"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+      redis:
+        image: redis:8.0
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.22.1
+      - name: pnpm (the packageManager version of package.json)
+        run: |
+          npm install -g "$(node -p "require('./package.json').packageManager")"
+          echo "PNPM_STORE=$(pnpm store path --silent)" >> "$GITHUB_ENV"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.PNPM_STORE }}
+          key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'mobile/pnpm-lock.yaml') }}
+          restore-keys: pnpm-${{ runner.os }}-
+      - run: pnpm i --frozen-lockfile
+      - name: Playwright Chromium and its system packages
+        run: pnpm --filter @qiwu/web exec playwright install --with-deps chromium
+      - name: Deploy kit shell check
+        run: shellcheck scripts/deploy/*.sh
+      - name: Test databases, Redis ACL user and apps/server/.env.local (throwaway)
+        run: |
+          db_pw=$(openssl rand -hex 24)
+          redis_pw=$(openssl rand -hex 24)
+          echo "::add-mask::$db_pw"
+          echo "::add-mask::$redis_pw"
+          docker exec -i "${{ job.services.mysql.id }}" mysql -uroot -p"$MYSQL_ROOT_PASSWORD" <<SQL
+          CREATE USER 'qiwu'@'%' IDENTIFIED BY '$db_pw';
+          CREATE DATABASE qiwu_test; CREATE DATABASE qiwu_e2e; CREATE DATABASE qiwu_mobile_e2e;
+          GRANT ALL PRIVILEGES ON qiwu_test.* TO 'qiwu'@'%';
+          GRANT ALL PRIVILEGES ON qiwu_e2e.* TO 'qiwu'@'%';
+          GRANT ALL PRIVILEGES ON qiwu_mobile_e2e.* TO 'qiwu'@'%';
+          SQL
+          # the same restricted user as a production install: keys and channels qw:* only
+          docker exec "${{ job.services.redis.id }}" redis-cli ACL SETUSER qiwu on ">$redis_pw" \
+            '~qw:*' '&qw:*' +@all -@dangerous +info
+          umask 077
+          {
+            echo 'DB_USER=qiwu'
+            echo "DB_PASSWORD=${db_pw}"
+            echo 'REDIS_USERNAME=qiwu'
+            echo "REDIS_PASSWORD=${redis_pw}"
+          } > apps/server/.env.local
+      - run: pnpm ci:local
+      - name: Playwright results of a failed run
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-results
+          path: |
+            apps/web/test-results
+            mobile/test-results
+          retention-days: 7
+          if-no-files-found: ignore

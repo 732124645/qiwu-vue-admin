@@ -55,7 +55,7 @@ pnpm db:seed
 
 生产环境的 `pnpm db:seed` 也会创建请假样例的 5 个 OA 示例账号，共用一个仅打印一次的随机密码，非演示模式下首登强制改密；正式上线前应禁用 / 删除这些账号，或移除请假样例，不要公开 seed 日志。
 
-使用 PM2 升级时，顺序为 `pnpm -r build` → `pnpm db:migrate` → `pnpm db:seed` → `pm2 restart qiwu-server`。migrate / seed 会重新执行 `nest build`，其 `deleteOutDir` 会删除并重建运行中 PM2 所用的 `apps/server/dist/`；代码生成器运行时也从该目录读取模板。迁移期间旧进程代码与新数据库结构会短暂并存，须确认兼容；需要避免这一窗口时，先 `pm2 stop qiwu-server`，再构建、迁移、seed 与重启。
+使用 PM2 升级时，顺序为 `pnpm -r build` → `pnpm db:migrate` → `pnpm db:seed` → `pm2 restart qiwu-server`。migrate / seed 会重新执行 `nest build`，其 `deleteOutDir` 会删除并重建运行中 PM2 所用的 `apps/server/dist/`；代码生成器运行时也从该目录读取模板。迁移期间旧进程代码与新数据库结构会短暂并存，须确认兼容；需要避免这一窗口时，先 `pm2 stop qiwu-server`，再构建、迁移、seed 与重启。按版本目录部署（见 [GitHub Actions 自动部署](#github-actions-自动部署可选)）时，每个版本在独立目录构建，不会删除运行中的 `dist/`。
 
 直接启动时必须进入服务端目录：
 
@@ -220,38 +220,18 @@ CSP_CONNECT_SRC=https://qw-files.s3.example.com node -e "import('./apps/web/csp.
 
 ## 使用 PM2 部署（可选）
 
-PM2 是 AGPL-3.0 运维工具；这里只在服务器全局安装，用它守护 Node 进程，不加入任何 `package.json`、不 `import pm2`，项目依赖的许可禁用清单保持不变。默认部署一个实例。配置字段见 [PM2 官方说明](https://pm2.keymetrics.io/docs/usage/application-declaration/)。
+PM2 是 AGPL-3.0 运维工具；这里只在服务器全局安装，用它守护 Node 进程，不加入任何 `package.json`、不 `import pm2`，项目依赖的许可禁用清单保持不变。配置字段见 [PM2 官方说明](https://pm2.keymetrics.io/docs/usage/application-declaration/)。
 
 ```sh
 npm install -g pm2
 ```
 
-由部署管理员建立仅部署用户可写的 `/srv/qiwu/logs`，并在 `/srv/qiwu/current/ecosystem.config.cjs` 保存下列示例。仓库是 ESM，所以配置使用 `.cjs`；cwd 必须是绝对服务端路径：
+仓库自带 [`scripts/deploy/ecosystem.config.cjs`](../scripts/deploy/ecosystem.config.cjs)：cluster 模式 2 个 worker，cwd 为 `<根目录>/current/apps/server`，两个 env 文件按绝对路径加载，日志写入 `<根目录>/logs/`。仓库是 ESM，所以配置使用 `.cjs`。根目录、进程名与 worker 数取环境变量 `QW_DEPLOY_ROOT`（默认 `/srv/qiwu`）、`QW_PM2_NAME`（默认 `qiwu-server`）与 `QW_PM2_INSTANCES`（默认 2）。由部署管理员建立仅部署用户可写的 `/srv/qiwu/logs`，并把该文件放到部署用户不可写的 `/opt/qiwu-deploy/bin/`（下文的准备脚本会这样安装）。
 
-```js
-module.exports = {
-  apps: [
-    {
-      name: 'qiwu-server',
-      cwd: '/srv/qiwu/current/apps/server',
-      script: 'dist/main.js',
-      node_args: '--env-file-if-exists=.env.local --env-file-if-exists=.env',
-      instances: 1,
-      exec_mode: 'fork',
-      autorestart: true,
-      time: true,
-      error_file: '/srv/qiwu/logs/server-error.log',
-      out_file: '/srv/qiwu/logs/server-out.log',
-      env_production: { NODE_ENV: 'production' },
-    },
-  ],
-}
-```
-
-这里通过 Node 的 `node_args` 加载工作目录的 env 文件，密钥仍在受限 `.env.local` 或外部进程环境，配置文件不含秘密。发布管理员**先执行一次 migrate → seed**，再以同一部署用户管理 PM2：
+env 文件通过 Node 的 `node_args` 加载，密钥仍在受限 `.env.local` 或外部进程环境，配置文件不含秘密。发布管理员**先执行一次 migrate → seed**，再以同一部署用户管理 PM2：
 
 ```sh
-pm2 start /srv/qiwu/current/ecosystem.config.cjs --env production
+pm2 start /opt/qiwu-deploy/bin/ecosystem.config.cjs --env production
 pm2 logs qiwu-server
 pm2 save
 pm2 startup
@@ -259,7 +239,128 @@ pm2 startup
 
 `pm2 logs` 是交互观察，Ctrl+C 退出。`pm2 save` 保存当前进程列表；`pm2 startup` 打印的系统自启安装命令由服务器管理员核对后执行，再确认重启后的进程状态，流程见 [PM2 自启说明](https://pm2.keymetrics.io/docs/usage/startup/)。日志目录和 PM2 状态目录须限制访问并安排轮转；进程环境中的秘密也须按秘密文件管理。
 
-开 cluster / `-i` 多实例前，先闭合 [scale-out.md](scale-out.md) 的共享 MySQL / Redis、同库号 / 前缀 / `APP_SECRET`、适配器就绪、共享存储及实际代理验收条件，再调整配置。当前只启用 websocket，无需 sticky；将来启用 polling 必须另配粘性会话。本文不把单实例 PM2 示例当作生产横向扩容已验证。
+升级后用 `pm2 startOrReload /opt/qiwu-deploy/bin/ecosystem.config.cjs --env production` 逐个替换 worker，服务不中断；调整 worker 数用 `pm2 scale qiwu-server <n>` 后 `pm2 save`；启用了下文的自动部署时，同时把 `/opt/qiwu-deploy/deploy.env` 的 `QW_PM2_INSTANCES` 改成同一个数：健康检查要求 worker 数不少于它，两者不一致时之后每次部署都会失败，切回后的检查同样失败（退出 3）。
+
+同一主机上的 cluster 已满足 [scale-out.md](scale-out.md) 的大部分前提：各 worker 读同一组 env 文件，共用 MySQL 库、Redis 库号与前缀及 `APP_SECRET`；上传目录是同一主机路径；项目只启用 websocket，每条连接固定在一个 worker 上，无需粘性会话；定时任务靠 Redis 锁去重。Redis 版本、ACL 与适配器就绪仍按 scale-out.md 核对；跨主机多实例另需共享存储与代理验收，将来启用 polling 必须另配粘性会话。
+
+## GitHub Actions 自动部署（可选）
+
+仓库带两个工作流和 `scripts/deploy/` 下的服务器部署套件。复刻仓库时，把两个工作流里的 `github.repository == '732124645/qiwu-vue-admin'` 改成自己的仓库名，`deploy.env` 的 `QW_REPO` 也一样。
+
+- [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)：main 推送、PR 与手动触发时运行。ubuntu-24.04 上启动 MySQL 8.4 与 Redis 8 服务容器（账号密码每次随机；Redis 用户与生产一样只能访问 `qw:*`），`PW_CHANNEL=chromium` 让 Playwright 使用自带的 Chromium（本地默认仍是 Edge），然后运行完整门禁 `pnpm ci:local`；失败时上传 Playwright 结果（保留 7 天）。只在上游仓库自动运行，其他仓库只能手动触发。
+- [`.github/workflows/release.yml`](../.github/workflows/release.yml)：推送 `vX.Y.Z` 标签时，复用 CI → 校验标签提交在 `main` 上，并以 `CHANGELOG.md` 中 `## [X.Y.Z]` 一节创建 GitHub Release（该节缺失或为空则失败）→ 等待环境 `demo` 审批 → 通过 SSH 把 `<标签> <提交号>` 发给服务器执行部署。预发布标签（如 `v1.1.0-rc.1`）不触发。
+
+第三方 action 均按完整提交号固定。只有创建 Release 的作业有 `contents: write`；部署作业没有令牌权限，只拿环境机密。
+
+### 仓库设置
+
+1. Settings → Environments 新建 `demo`：Required reviewers 填仓库所有者（可以审批自己的发布）；Deployment branches and tags 选 Selected，只加标签规则 `v*`。环境机密：
+   - `DEPLOY_SSH_KEY`：部署私钥。用 `ssh-keygen -t ed25519 -N '' -C deploy -f deploy_key` 生成，公钥交给下文的准备脚本，私钥存进机密后从本机删除。
+   - `DEPLOY_HOST`：服务器地址；前面有 CDN 时填源站 IP，不填经代理的域名。
+   - `DEPLOY_KNOWN_HOSTS`：服务器主机公钥行（准备脚本最后打印），主机字段须与 `DEPLOY_HOST` 完全一致。
+
+   可选环境变量 `DEPLOY_USER`，默认 `qiwu`。
+
+2. Settings → Rules → Rulesets 新建 Tag 规则集：目标 `v*`，限制更新与删除，已发布的标签不能被移动。
+3. Settings → Actions → General：Workflow permissions 选只读；不允许 Actions 创建或批准 PR；外部贡献者的 fork PR 运行需要审批。工作流只用 `pull_request`，fork 的 PR 拿不到机密。
+4. 服务器 SSH 端口要对 GitHub 托管 runner 开放（其地址段很大），启用前先关闭密码登录，root 只允许密钥登录。sshd 对同一关键字只采用读到的第一个值，`sshd_config.d/` 下的文件按文件名顺序读入（Debian/Ubuntu 在 `sshd_config` 开头引入它们，先于主文件自己的设置），云镜像或服务商的 `00-*.conf` 之类可能重新打开密码登录；加固结果以 `sshd -T` 的实际值为准，例如 `sshd -T | grep -Ei '^(passwordauthentication|kbdinteractiveauthentication|permitrootlogin) '`。不带 `-C` 的 `sshd -T` 只显示全局值，而 Match 段会覆盖全局值（例如 `Match Address` 为部分来源重新打开密码登录），所以还要检查 `sshd_config` 与 `sshd_config.d/` 下有没有 Match 段，并用 `sshd -T -C user=root,host=<主机名>,addr=<外部地址>` 按连接核对。
+
+### 服务器布局
+
+| 路径                                              | 属主                  | 用途                                                                                                          |
+| ------------------------------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `/opt/qiwu-deploy/bin/`                           | root，0755            | `server-deploy.sh`、`deploy-forced-command.sh`、`ecosystem.config.cjs`：应用用户改不了部署逻辑                |
+| `/opt/qiwu-deploy/deploy.env`                     | root，0644            | 部署配置，不含秘密；模板 [`deploy.env.example`](../scripts/deploy/deploy.env.example)                         |
+| `/opt/qiwu-deploy/deploy.lock`                    | root:应用用户组，0660 | 部署锁；放在 root 的目录里，root 取锁时不会跟随应用用户放的符号链接                                           |
+| `/opt/qiwu-deploy/authorized_keys`                | root，0644            | 部署公钥；sshd 只从这里读应用用户的公钥，应用用户加不了自己的公钥                                             |
+| `/srv/qiwu/`                                      | root:应用用户组，1775 | 应用用户可以新建自己的条目；粘滞位让它不能改名或删除 root 放在这里的文件（例如 Nginx 片段）                   |
+| `/srv/qiwu/releases/<标签>-<UTC 时间>/`           | 应用用户              | 每次部署一个完整目录（源码、依赖与构建产物）；`REVISION` 记录 `<标签> <提交号>`，部署成功后写 `DEPLOYED` 标记 |
+| `/srv/qiwu/current`                               | 应用用户              | 指向当前版本的符号链接，原子切换；Nginx root 与 PM2 cwd 都经过它                                              |
+| `/srv/qiwu/shared/apps/server/.env`、`.env.local` | 应用用户，0644 / 0600 | 链接进每个版本（`QW_SHARED_LINKS`）                                                                           |
+| `/srv/qiwu/shared/ip2region/<sha256>.xdb`         | 应用用户              | 按 pin 区分的 IP 数据，回到旧版本时也有对应文件                                                               |
+| `/srv/qiwu/logs/`、`/srv/qiwu/logs/deploy/`       | 应用用户              | PM2 日志；每次部署的详细日志（0640，保留 90 天）                                                              |
+| `/srv/qiwu/backups/`                              | 应用用户，0700        | 可选的迁移前 `mysqldump`（保留 14 天）                                                                        |
+
+上传目录必须在代码目录之外：`STORAGE_LOCAL_ROOT` 设为绝对路径，解析符号链接后也不能落在 `current`、`releases`、`app` 之下（例如 `/srv/qiwu/uploads`），否则部署脚本拒绝继续——切换会换掉代码目录，清理会删除旧版本。Nginx 的 `root` 指向 `/srv/qiwu/current/apps/web/dist`。
+
+`deploy.env` 的键：
+
+| 键                                 | 默认                                      | 说明                                                                                                  |
+| ---------------------------------- | ----------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `QW_DEPLOY_ROOT`                   | `/srv/qiwu`                               | 部署根目录                                                                                            |
+| `QW_REPO`                          | 必填                                      | 标签来源的公开仓库 `<owner>/<name>`，下载不需要凭据                                                   |
+| `QW_APP_USER`                      | `qiwu`                                    | 脚本只以该用户运行                                                                                    |
+| `QW_PM2_NAME`、`QW_PM2_INSTANCES`  | `qiwu-server`、`2`                        | PM2 进程名与 worker 数                                                                                |
+| `QW_HEALTH_URL`、`QW_HEALTH_TRIES` | 本机 `:3000/api/health`、`30`             | 健康检查地址与次数（间隔 2 秒）                                                                       |
+| `QW_KEEP_RELEASES`                 | `3`                                       | 保留的已部署版本数（含当前版本）                                                                      |
+| `QW_MIN_FREE_MB`                   | `3072`                                    | 部署前要求的剩余空间                                                                                  |
+| `QW_DEPLOY_SEED`                   | `1`                                       | 迁移后运行种子（幂等；新菜单与权限需要它）                                                            |
+| `QW_ASSET_CARRY_DAYS`              | `14`                                      | 旧版本网页资源的保留天数                                                                              |
+| `QW_SHARED_LINKS`                  | `apps/server/.env apps/server/.env.local` | 从 `shared/` 链接进版本目录的文件                                                                     |
+| `QW_DB_NAME`、`QW_DB_BACKUP_CNF`   | 空                                        | 两者都设置时，迁移前 `mysqldump`；后者是仅有备份权限账号的 MySQL 选项文件（0600）                     |
+| `QW_MIGRATE_ENV`                   | 空                                        | 可选 env 文件，提供有 DDL 权限的 `DB_USER` 与 `DB_PASSWORD`，只用于迁移与种子；应用账号可以只保留 DML |
+| `QW_ALLOW_DOWNGRADE`               | `0`                                       | 默认拒绝部署比当前更低的标签                                                                          |
+| `QW_BUILD_TIMEOUT`                 | `30m`                                     | `pnpm i` 与 `pnpm -r build` 各自的时限（GNU `timeout` 的写法）                                        |
+| `QW_MIGRATE_TIMEOUT`               | `10m`                                     | 迁移与种子各自的时限；等元数据锁的 DDL 会阻塞线上对该表的查询，时限不宜过长                           |
+
+### 服务器准备（一次）
+
+部署全程以应用用户运行；只有准备服务器与更新部署套件需要 root。准备脚本中 root 只写 root 拥有的路径（`/opt/qiwu-deploy`、Nginx 与 sshd 配置），`/srv/qiwu` 下与应用用户家目录里的操作都以应用用户身份执行，应用用户放的符号链接因此换不来 root 权限。
+
+root 运行套件并把它装进 root 拥有的 `bin/`，所以套件本身也只能由 root 修改：由 root 按提交号下载标签的源码包，解压到 root 拥有的新目录再运行。**不要从 `/srv/qiwu/current` 或 `/srv/qiwu/releases/` 运行**：那里应用用户可写，拿到应用用户身份的代码可以先改掉脚本，等 root 执行时提权。脚本开头检查套件目录、它的每一级父目录和每个套件文件，属主不是 root 或组与其他用户可写时拒绝运行。
+
+```sh
+sudo -i                                    # 以下以 root 执行
+TAG=vX.Y.Z SHA=<标签的 40 位提交号>        # 与 GitHub 上该标签的提交核对
+git ls-remote https://github.com/732124645/qiwu-vue-admin "refs/tags/$TAG^{}" "refs/tags/$TAG"
+install -d -m 0700 /root/qiwu-kit-$TAG
+curl -fsSL https://codeload.github.com/732124645/qiwu-vue-admin/tar.gz/$SHA |
+  tar -xz --strip-components=1 --no-same-owner --no-same-permissions -C /root/qiwu-kit-$TAG
+bash /root/qiwu-kit-$TAG/scripts/deploy/server-migrate-layout.sh --pubkey deploy_key.pub
+```
+
+`git ls-remote` 打印的附注标签行（`^{}`）或轻量标签行须等于 `SHA`。`--no-same-permissions` 让解压后的文件按 root 的 umask 去掉组写权限（源码包里的文件可能带组写权限）。
+
+脚本可以重复运行，已完成的步骤会跳过：
+
+1. 建立 root 拥有的 `/opt/qiwu-deploy/`；`deploy.env` 不存在时从模板生成并停下，核对后再运行。之后取部署锁（有部署在进行时停下），把部署套件装进 `bin/`（先写临时文件再改名，正在读旧脚本的进程不受影响）。
+2. `/srv/qiwu` 设为 root:应用用户组 1775，以应用用户身份建立上表的目录。应用用户组里只能有应用用户（脚本开始时检查，否则停下）：组成员都能在 `/srv/qiwu` 新建条目；应用用户的家目录可能就是 `/srv/qiwu`，组成员还能在里面放入部署时 git、pnpm 会读取的点文件（如 `.npmrc`、`.gitconfig`），以应用用户身份执行代码。已有单目录安装（`/srv/qiwu/app`，PM2 fork 进程）时：把 `.env`、`.env.local` 与 IP 数据复制到 `shared/`，原来的两个 env 文件换成指向 `shared/` 的符号链接（旧版本的 worker 和切回旧版本都读 `shared/`，修改配置或轮换密钥只改一处；运行中的进程启动时已读完 env，不受影响），确认上传目录在外部，把 `app` 移为 `releases/legacy-*` 并建立 `current`；`app` 留作兼容链接，首次自动部署成功、确认 Nginx 不再引用后即可删除。
+3. Nginx 配置中的 `/srv/qiwu/app/` 改为 `/srv/qiwu/current/`；`nginx -t` 通过才重载，否则还原。
+4. 指定 `--pubkey` 时：sshd 配置片段 `/etc/ssh/sshd_config.d/60-qiwu-deploy.conf` 的 `Match User` 段对应用用户设 `AuthorizedKeysFile /opt/qiwu-deploy/authorized_keys`，强制 `ForceCommand /opt/qiwu-deploy/bin/deploy-forced-command.sh`，只允许公钥，`DisableForwarding yes`（端口、套接字、代理与 X11 转发全部关闭）、`PermitUserRC no`、`PermitTTY no`。`sshd -t` 通过，并且 `sshd -T` 显示应用用户的这些设置全部生效、root 的强制命令与公钥文件不受影响，才重载 sshd；否则删除该片段并停下（前面的配置文件中匹配该用户的 Match 段若先设了同一关键字，sshd 会采用它）。公钥以 `restrict,command="/opt/qiwu-deploy/bin/deploy-forced-command.sh" <公钥>` 一行写入 root 拥有的 `/opt/qiwu-deploy/authorized_keys`（0644），已有的公钥跳过。公钥不放在应用用户家目录：家目录可能就是 `/srv/qiwu`，第 2 步把它设为组可写后，sshd 的 StrictModes 会拒绝其中的 `~/.ssh/authorized_keys`。应用用户 `~/.ssh/` 下已有的文件不改动，sshd 也不再读取；应用用户既加不了公钥，改写 `~/.ssh/rc` 也无效，root 拥有的 sshd 配置只允许运行部署脚本，也不能转发。强制命令固定 `LC_ALL=C`（客户端可以传入 `LC_*`）。
+5. PM2 进程从 fork 改为 cluster：唯一的停机点，约几秒；先把 `~/.pm2/dump.pm2` 复制一份，健康检查不通过时用它恢复原来的进程列表。PM2 命令在干净的环境里运行，root 会话的变量不会被 `pm2 save` 存下来。
+6. 打印 `DEPLOY_KNOWN_HOSTS` 需要的主机公钥行（读服务器本机文件，不依赖首次连接时的信任）。
+
+`git`、`curl`、`tar`、`flock`、`timeout`、`node`、`pnpm`、`pm2` 须在应用用户的默认 PATH 中（脚本会检查）；启用备份时还需要 `mysqldump`。脚本只支持 Linux 与 bash。发布改动了 `scripts/deploy/` 时，按上面的步骤把新标签解压到新的 `/root/qiwu-kit-<标签>` 再运行一次本脚本，即可更新 `/opt/qiwu-deploy/bin/`。第一次建议先在服务器上手动部署一个标签、观察完整流程，再配置环境机密。
+
+### 每次部署
+
+强制命令只接受 `<vX.Y.Z> <40 位提交号>`，再调用 `server-deploy.sh`：
+
+1. 校验参数，读 `deploy.env`，确认运行用户，取得 `deploy.lock`（已有部署在进行时退出 75）。标签解析与源码下载有超时，安装、构建、迁移与种子各有总时限（`QW_BUILD_TIMEOUT`、`QW_MIGRATE_TIMEOUT`，超时按失败处理），卡住的步骤不会一直占着锁。
+2. 在 `QW_REPO` 解析标签（支持附注标签），结果必须等于工作流发来的提交号；默认拒绝降级；检查剩余空间。
+3. 按提交号从 GitHub 下载源码包到新的 `releases/<标签>-<UTC 时间>`，链接共享文件与 IP 数据，然后 `pnpm i --frozen-lockfile` 与 `pnpm -r build`（低优先级，把 CPU 让给在线服务）。
+4. 把当前版本自身的网页资源与最近 `QW_ASSET_CARRY_DAYS` 天的资源硬链接进新版本：已打开的页面仍能加载旧分块，CDN 也不会缓存到 404。
+5. 可选备份，然后运行新版本的迁移与种子（`dist/db/migrate.js`、`dist/db/seed.js`）。
+6. 原子切换 `current`，`pm2 startOrReload` 逐个替换 worker。健康检查要求 `/api/health` 正常，**并且**每个 worker 的工作目录都是新版本；通过后写 `DEPLOYED`、`pm2 save`，清理多余版本与过期的日志和备份。
+
+切换前任何一步失败（包括切换本身）：退出 1，删除新版本目录，旧版本照常服务；这时新版本的迁移与种子可能已经执行，数据库不回退（见下文边界）。切换后健康检查失败：切回上一版本并重载，成功退出 2，仍然失败退出 3（需要人工处理）。参数错误退出 64。SSH 中断不会打断部署，它会完成或切回。Actions 日志只有步骤摘要（公开仓库的日志所有人可见），详细输出在 `/srv/qiwu/logs/deploy/`。
+
+迁移超时后，被结束的进程留下的语句可能仍在 MySQL 里等锁：用 `SHOW PROCESSLIST` 找到状态为 `Waiting for table metadata lock` 的迁移语句并 `KILL` 它，再找出持有锁的长事务处理后重新部署。部署进程本身卡住（例如被手动暂停）时，用 `pgrep -af server-deploy.sh` 找到它，结束它及其子进程；进程退出后 `deploy.lock` 自动释放。
+
+在服务器上手动操作：
+
+```sh
+sudo -u qiwu -H /opt/qiwu-deploy/bin/server-deploy.sh vX.Y.Z      # 手动部署一个标签
+sudo -u qiwu -H /opt/qiwu-deploy/bin/server-deploy.sh --rollback  # 切回上一个已部署的版本，只回代码
+```
+
+`--dry-run <源码包> <标签>` 只用于测试：只能针对带 `DRY_RUN` 标记文件的临时根目录，标签在本地 git 仓库解析，跳过网络、pnpm、数据库与 PM2 重载；worker 检查读该根目录下的 `proc/`，由 PATH 上的 `pm2` 替身写入。
+
+### 边界
+
+- 自动切回只回代码，不回数据库。迁移必须兼容上一版本（先加后删，分两个版本完成）；不兼容的迁移在维护窗口手动部署，必要时从迁移前备份恢复。MySQL 的 DDL 不是事务性的，失败的迁移可能已部分执行。
+- 部署从不调用 `db:reset`；种子幂等，不覆盖已有密码。将来若加定时重置任务，须取同一把 `/opt/qiwu-deploy/deploy.lock`。
+- 仍不提供 Docker 镜像；CI 的服务容器只是 GitHub runner 上的测试设施。
 
 ## 演示模式与 OAuth 边界
 

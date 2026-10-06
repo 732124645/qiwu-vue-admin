@@ -1,5 +1,5 @@
 // Our own `{name}` replacement over the shared validation/field/seed messages.
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import { loginBody } from '@qiwu/shared'
 import { Locale as WotLocale } from '@wot-ui/ui/locale'
 import { detectLocale, fieldErrors, issueText, locale, setLocale, t, tx } from '@/core/i18n'
@@ -47,6 +47,16 @@ it('switches uni and wot-ui too, and remembers the choice', () => {
   expect((WotLocale.messages() as { calendar: { title: string } }).calendar.title).toBe('Select Date')
   expect(t('common.error.network')).toBe('Network error, please try again later')
   expect(detectLocale()).toBe('en-US')
+})
+
+it('applies the saved language to wot-ui as it loads, before any page renders', async () => {
+  uni.setStorageSync('qw.locale', 'en-US')
+  vi.resetModules()
+  await import('@/core/i18n')
+  const { Locale: fresh } = await import('@wot-ui/ui/locale')
+  expect((fresh.messages() as { textarea: { placeholder: string } }).textarea.placeholder).toBe(
+    'Please input information...',
+  )
 })
 
 it('every mobile text exists in both languages, the redesigned screens’ texts included', () => {

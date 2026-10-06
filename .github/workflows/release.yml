@@ -1,0 +1,80 @@
+# A pushed vX.Y.Z tag: the full CI gate, a GitHub Release with the CHANGELOG.md section of that
+# version, then (after approval in the "demo" environment) a deploy over SSH whose key the server
+# only lets run scripts/deploy/deploy-forced-command.sh. See docs/deploy.md.
+name: Release
+
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    needs: ci
+    if: github.repository == '732124645/qiwu-vue-admin'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    outputs:
+      commit: ${{ steps.tag.outputs.commit }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Tag on main, release notes from CHANGELOG.md
+        id: tag
+        run: |
+          [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          commit=$(git rev-parse "refs/tags/$GITHUB_REF_NAME^{commit}")
+          # the tag still points to the commit CI tested, and that commit is on main
+          [[ "$commit" == "$(git rev-parse "$GITHUB_SHA^{commit}")" ]]
+          git merge-base --is-ancestor "$commit" origin/main
+          awk -v h="## [${GITHUB_REF_NAME#v}]" 'index($0, h) == 1 { on = 1; next }
+            on && /^## \[/ { exit } on' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          grep -q '[^[:space:]]' "$RUNNER_TEMP/notes.md"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1 ||
+            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag \
+              --title "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md"
+
+  deploy:
+    needs: release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions: {}
+    environment: demo
+    concurrency:
+      group: deploy-demo
+      cancel-in-progress: false
+    steps:
+      - name: Deploy through the server's forced command
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_USER: ${{ vars.DEPLOY_USER || 'qiwu' }}
+          DEPLOY_COMMIT: ${{ needs.release.outputs.commit }}
+        # the server prints step summaries only; its detailed log stays on the server
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          (umask 077 && printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key)
+          ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=6 \
+            "$DEPLOY_USER@$DEPLOY_HOST" "$GITHUB_REF_NAME $DEPLOY_COMMIT"

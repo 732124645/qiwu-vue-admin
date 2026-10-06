@@ -39,6 +39,9 @@ export default defineConfig({
       'socket.io-client': realpathSync(resolve(__dirname, 'node_modules/socket.io-client')),
     },
   },
+  // dev server: one copy of wot-ui. Pre-bundled, `@wot-ui/ui/locale` (core/i18n.ts) would be a second copy of
+  // the module its components (served as source) read, so a language switch would never reach their texts
+  optimizeDeps: { exclude: ['@wot-ui/ui'] },
   // shared targets ES2023, which esbuild 0.20 (vite 5.2) warns about
   esbuild: { tsconfigRaw: { compilerOptions: { target: 'es2022' } } },
   server: { proxy },
