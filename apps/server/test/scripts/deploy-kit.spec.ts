@@ -391,14 +391,11 @@ describe.skipIf(!LINUX_TOOLS)('server-deploy.sh --dry-run against a scratch root
     expect(existsSync(join(live, 'DEPLOYED'))).toBe(true)
     expect(readlinkSync(join(live, 'apps/server/.env'))).toBe(join(dir, 'shared/apps/server/.env'))
 
-    const locked = spawnSync(
-      'bash',
-      [
-        '-c',
-        'exec 9>"$1/deploy.lock"; flock -n 9 || exit 99; "$2" --dry-run "$3" v1.2.4',
-        '_',
-      ].concat([dir, deploy, tarball('v1.2.4')]),
-      { encoding: 'utf8', env },
+    // the holder is its own process: a shell would exec the script, whose exec 9> drops the lock
+    const locked = run(
+      'flock',
+      ['-n', join(dir, 'deploy.lock'), deploy, '--dry-run', tarball('v1.2.4'), 'v1.2.4'],
+      env,
     )
     expect(locked.status).toBe(75)
     expect(locked.stderr).toContain('another deploy is running')

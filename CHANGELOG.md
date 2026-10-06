@@ -1,16 +1,16 @@
 # Changelog
 
-中文说明：本文件按功能区域汇总栖梧 / Qiwu 的用户可见变化，正文使用英文。`1.0.0` 于 2026-10-05 发布，`1.0.2` 于 2026-10-06 发布（`1.0.1` 未发布，内容并入 `1.0.2`）。
+中文说明：本文件按功能区域汇总栖梧 / Qiwu 的用户可见变化，正文使用英文。`1.0.0` 于 2026-10-05 发布，`1.0.3` 于 2026-10-06 发布（`1.0.1`、`1.0.2` 未发布，内容并入 `1.0.3`）。
 
 All notable product changes are recorded here in Keep a Changelog style. The initial release below summarizes the delivered features. Planned work is identified explicitly.
 
-## [1.0.2] - 2026-10-06
+## [1.0.3] - 2026-10-06
 
-`1.0.1` was tagged but never released: its first CI run failed on a fresh checkout. This release contains its changes and the fix.
+`1.0.1` and `1.0.2` were tagged but never released. The first CI run of `1.0.1` failed on a fresh checkout: the shared package was not built before `verify`. The run of `1.0.2` failed on Linux in a deploy-lock test that held the lock in the wrong process. This release contains their changes and the fixes.
 
 ### Added
 
-- GitHub Actions for the public repository: pushes and pull requests to `main` run the full local gate (`pnpm ci:local` with MySQL 8.4 and Redis 8 service containers, web and mobile Playwright). A `vX.Y.Z` tag runs the same gate, publishes a GitHub Release from this changelog and, after approval in the `demo` environment, deploys the demo site over SSH.
+- GitHub Actions for the public repository: pushes and pull requests to `main` run the full local gate (`pnpm ci:local` with MySQL 8.4 and Redis 8 service containers, web and mobile Playwright). A `vX.Y.Z` tag does not run the gate again: it requires a successful CI run of the same commit on `main`, publishes a GitHub Release from this changelog and, after approval in the `demo` environment, deploys the demo site over SSH.
 - Server deploy kit (`scripts/deploy/`): one directory per release behind an atomic `current` link, shared env files, PM2 cluster reloads with health checks and automatic code rollback, a root-owned kit, and a deploy key that can only run the deploy command (kept in a root-owned keys file, outside the app user's home). See `docs/deploy.md`.
 
 ### Fixed

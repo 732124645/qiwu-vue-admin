@@ -1,6 +1,7 @@
-# A pushed vX.Y.Z tag: the full CI gate, a GitHub Release with the CHANGELOG.md section of that
-# version, then (after approval in the "demo" environment) a deploy over SSH whose key the server
-# only lets run scripts/deploy/deploy-forced-command.sh. See docs/deploy.md.
+# A pushed vX.Y.Z tag: proof that the CI workflow (ci.yml) already passed for this commit on a push
+# to main (the gate is not run again), a GitHub Release with the CHANGELOG.md section of that version,
+# then (after approval in the "demo" environment) a deploy over SSH whose key the server only lets
+# run scripts/deploy/deploy-forced-command.sh. See docs/deploy.md.
 name: Release
 
 on:
@@ -15,16 +16,13 @@ defaults:
     shell: bash
 
 jobs:
-  ci:
-    uses: ./.github/workflows/ci.yml
-
   release:
-    needs: ci
     if: github.repository == '732124645/qiwu-vue-admin'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: write
+      actions: read
     outputs:
       commit: ${{ steps.tag.outputs.commit }}
     steps:
@@ -37,13 +35,38 @@ jobs:
         run: |
           [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
           commit=$(git rev-parse "refs/tags/$GITHUB_REF_NAME^{commit}")
-          # the tag still points to the commit CI tested, and that commit is on main
+          # the tag still points to the commit this run was started for, and that commit is on main
           [[ "$commit" == "$(git rev-parse "$GITHUB_SHA^{commit}")" ]]
           git merge-base --is-ancestor "$commit" origin/main
           awk -v h="## [${GITHUB_REF_NAME#v}]" 'index($0, h) == 1 { on = 1; next }
             on && /^## \[/ { exit } on' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
           grep -q '[^[:space:]]' "$RUNNER_TEMP/notes.md"
           echo "commit=$commit" >> "$GITHUB_OUTPUT"
+      - name: CI passed for this commit on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT: ${{ steps.tag.outputs.commit }}
+        # checked at run time, so re-running this workflow after CI turned green is enough
+        run: |
+          ci=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml" |
+            jq -e 'select(.path == ".github/workflows/ci.yml") | .id')
+          run=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$ci/runs?head_sha=$COMMIT&per_page=100" |
+            jq -r --argjson ci "$ci" --arg sha "$COMMIT" --arg repo "$GITHUB_REPOSITORY" '
+              first(.workflow_runs[] | select(.workflow_id == $ci and .event == "push"
+                and .head_branch == "main" and .head_sha == $sha and .status == "completed"
+                and .conclusion == "success" and .repository.full_name == $repo
+                and .head_repository.full_name == $repo)) | .id')
+          if [[ -z "$run" ]]; then
+            echo "::error::No successful CI run of a push to main for $COMMIT. If CI is still running, wait for it and re-run this release workflow; if it failed, re-run or fix CI first. If no push to main ran CI with this commit as its head (several commits in one push, [skip ci]), tag a commit that a successful push-to-main CI run tested."
+            exit 1
+          fi
+          # a run whose jobs were all skipped (the repository condition in ci.yml) also ends in success
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs" |
+            jq -e '[.jobs[] | select(.name == "gate")] | length == 1 and .[0].conclusion == "success"' > /dev/null || {
+            echo "::error::CI run $run for $COMMIT did not pass its gate job (skipped?). The repository condition in ci.yml must name this repository; fix it, then push to main again."
+            exit 1
+          }
+          echo "CI passed: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$run"
       - name: GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}

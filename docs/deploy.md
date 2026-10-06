@@ -245,12 +245,14 @@ pm2 startup
 
 ## GitHub Actions 自动部署（可选）
 
-仓库带两个工作流和 `scripts/deploy/` 下的服务器部署套件。复刻仓库时，把两个工作流里的 `github.repository == '732124645/qiwu-vue-admin'` 改成自己的仓库名，`deploy.env` 的 `QW_REPO` 也一样。
+仓库带两个工作流和 `scripts/deploy/` 下的服务器部署套件。复刻仓库时，把两个工作流里的 `github.repository == '732124645/qiwu-vue-admin'` 改成自己的仓库名，`deploy.env` 的 `QW_REPO` 也一样。两个工作流必须一起改：只改了 `release.yml` 时，main 推送的 CI 运行会跳过门禁却显示成功，发布工作流会因其中的 `gate` 作业被跳过而报错退出。
 
 - [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)：main 推送、PR 与手动触发时运行。ubuntu-24.04 上启动 MySQL 8.4 与 Redis 8 服务容器（账号密码每次随机；Redis 用户与生产一样只能访问 `qw:*`），`PW_CHANNEL=chromium` 让 Playwright 使用自带的 Chromium（本地默认仍是 Edge），然后运行完整门禁 `pnpm ci:local`；失败时上传 Playwright 结果（保留 7 天）。只在上游仓库自动运行，其他仓库只能手动触发。
-- [`.github/workflows/release.yml`](../.github/workflows/release.yml)：推送 `vX.Y.Z` 标签时，复用 CI → 校验标签提交在 `main` 上，并以 `CHANGELOG.md` 中 `## [X.Y.Z]` 一节创建 GitHub Release（该节缺失或为空则失败）→ 等待环境 `demo` 审批 → 通过 SSH 把 `<标签> <提交号>` 发给服务器执行部署。预发布标签（如 `v1.1.0-rc.1`）不触发。
+- [`.github/workflows/release.yml`](../.github/workflows/release.yml)：推送 `vX.Y.Z` 标签时不再重跑门禁。先校验标签格式、标签指向本次运行的提交且该提交在 `main` 上、`CHANGELOG.md` 中有非空的 `## [X.Y.Z]` 一节 → 再通过 Actions API 确认本仓库的 CI 工作流（按文件 `.github/workflows/ci.yml` 识别）已为同一提交成功跑完一次推送运行：事件为 `push`、分支为 `main`、提交号完全一致、已完成且结论为成功，同一仓库而非 fork，且这次运行中的 `gate` 作业结论为成功（被跳过不算：所有作业都被跳过的运行整体也显示成功）；PR、手动触发或其他分支的运行都不算 → 以该节创建 GitHub Release → 等待环境 `demo` 审批 → 通过 SSH 把 `<标签> <提交号>` 发给服务器执行部署。预发布标签（如 `v1.1.0-rc.1`）不触发。
 
-第三方 action 均按完整提交号固定。只有创建 Release 的作业有 `contents: write`；部署作业没有令牌权限，只拿环境机密。
+发布顺序因此是：推 `main` → 等 CI 通过 → 推标签。CI 还在运行、失败或没有运行时，发布工作流报错退出，不建 Release 也不部署；CI 通过后在 Actions 页面重新运行该发布工作流即可（校验在运行时进行）。标签必须打在 CI 实际测过的那次推送的尖端提交上：一次推送多个提交时只有最后一个有 CI 运行，提交信息带 `[skip ci]` 的推送没有运行，这两种情况重跑多少次发布工作流都不会通过。CI 偶发失败时，先在 Actions 页面重跑那次 CI 运行，通过后再重跑发布工作流。
+
+第三方 action 均按完整提交号固定。只有创建 Release 的作业有 `contents: write`（另有读取 CI 运行记录的 `actions: read`）；部署作业没有令牌权限，只拿环境机密。
 
 ### 仓库设置
 

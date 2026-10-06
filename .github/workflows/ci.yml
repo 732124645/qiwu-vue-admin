@@ -1,13 +1,13 @@
 # Full gate (pnpm ci:local) on a Linux runner: MySQL 8.4 and Redis 8 service containers with
 # throwaway credentials, Playwright on its bundled Chromium. Runs in the public repository only
-# (a fork: change the repository name below, or start it by hand); release.yml reuses it.
+# (a fork: change the repository name below, or start it by hand). release.yml publishes a tag only
+# when a push run of this workflow on main passed for the tagged commit.
 name: CI
 
 on:
   push:
     branches: [main]
   pull_request:
-  workflow_call:
   workflow_dispatch:
 
 permissions:
