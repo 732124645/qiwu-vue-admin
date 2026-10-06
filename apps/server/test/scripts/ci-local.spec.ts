@@ -141,6 +141,19 @@ it('plans shell commands without single quotes and requires matches for the non-
   )
 })
 
+it('builds the shared package right after the frozen install, before verify, in both modes', () => {
+  for (const args of [[], ['--parallel']]) {
+    const out = spawnSync(process.execPath, [PATH, '--dry', ...args], { encoding: 'utf8' }).stdout
+    expect(out).toContain('shared build: RUN  pnpm --filter @qiwu/shared build\n')
+    // a fresh checkout has no packages/shared/dist: verify's typecheck needs it
+    const steps = out
+      .split('\n')
+      .filter((line) => line.startsWith('▶ '))
+      .map((line) => line.slice(2, line.indexOf(':')))
+    expect(steps.slice(0, 4)).toEqual(['install', 'shared build', 'verify', 'build'])
+  }
+})
+
 it('rejects effective parallel mode on Windows before planning any step, while --serial wins', () => {
   const preload = join(dir, 'win32.mjs')
   writeFileSync(preload, "Object.defineProperty(process, 'platform', { value: 'win32' })\n")

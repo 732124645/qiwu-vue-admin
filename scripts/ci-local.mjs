@@ -21,6 +21,9 @@ const MOBILE = existsSync(join(root, 'mobile/package.json')) ? undefined : 'no m
 // [name, shell command, skip reason or undefined]
 const before = [
   ['install', 'pnpm i --frozen-lockfile'],
+  // the shared package exports its types from dist and a fresh checkout has none: verify's
+  // typecheck of the web e2e specs (tsconfig.node.json reads dist) would not resolve @qiwu/shared
+  ['shared build', 'pnpm --filter @qiwu/shared build'],
   ['verify', 'pnpm verify'],
   ['build', 'pnpm -r build'],
   // the arch run inside verify precedes the build: scan the fresh apps/web/dist

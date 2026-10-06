@@ -1,10 +1,12 @@
 # Changelog
 
-中文说明：本文件按功能区域汇总栖梧 / Qiwu 的用户可见变化，正文使用英文。`1.0.0` 于 2026-10-05 发布，`1.0.1` 于 2026-10-06 发布。
+中文说明：本文件按功能区域汇总栖梧 / Qiwu 的用户可见变化，正文使用英文。`1.0.0` 于 2026-10-05 发布，`1.0.2` 于 2026-10-06 发布（`1.0.1` 未发布，内容并入 `1.0.2`）。
 
 All notable product changes are recorded here in Keep a Changelog style. The initial release below summarizes the delivered features. Planned work is identified explicitly.
 
-## [1.0.1] - 2026-10-06
+## [1.0.2] - 2026-10-06
+
+`1.0.1` was tagged but never released: its first CI run failed on a fresh checkout. This release contains its changes and the fix.
 
 ### Added
 
@@ -13,6 +15,7 @@ All notable product changes are recorded here in Keep a Changelog style. The ini
 
 ### Fixed
 
+- `pnpm ci:local` builds the shared package before `verify`, so the full gate also passes on a fresh checkout (it relied on an earlier build); the mobile removal drill in `docs/mobile.md` gained the same step.
 - Mobile: wot-ui component texts such as placeholders follow English in the dev server and from the first render after a restart.
 - Mobile workbench: long English subtitles wrap beside the header illustration instead of running under it.
 

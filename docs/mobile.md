@@ -319,7 +319,7 @@ pnpm -C mobile dev:app         # 用 HBuilderX 导入 mobile/dist/dev/app，运�
 4. `scripts/ci-local.mjs`：删 `const MOBILE = …` 与 5 个 `mobile …` 步骤；`scripts/i18n-check.mjs`、`scripts/originality-check.mjs`、`scripts/license-check.mjs`：删 `const MOBILE = …` 及用到 `MOBILE` / `mobile` 的几行（都在"不存在则跳过"的分支里）。
 5. 代码生成器：`apps/server/src/modules/platform/codegen/workspace.ts` 的 `export const MOBILE = …` 和 `scripts/gen-check-golden.mjs` 的 `const MOBILE = …` 是 mobile-refs 白名单里的两行，其余路径都由这个常量拼出；模板目录 `apps/server/codegen-templates/uni/` 只用来渲染移动端页面。`mobile/` 不存在时，`hasMobile()` 为假：生成器不渲染、不写、也不打包移动端页面，`demo_*.cg.ts` 里的 `withMobile: true` 不产出任何文件，`gen:check-golden` 也不比对移动端文件，所以这几处都可以留着。想删的话：删掉 `codegen-templates/uni/`，再把 `crud.ts` 里的移动端目标、`withMobile` 选项和编辑页开关一并去掉（不建议，留着无害）。
 6. 可选：删除 `scripts/arch/mobile-refs.mjs` 与 `apps/server/test/arch/arch-mobile-refs.spec.ts`。
-7. macOS / POSIX 执行 `pnpm i --frozen-lockfile && pnpm verify`；Windows 用下列顺序检查。全绿，根 `pnpm-lock.yaml` 不变（移动端从未进入根锁定文件）。删除演练仅在可丢弃副本进行。
+7. macOS / POSIX 执行 `pnpm i --frozen-lockfile && pnpm --filter @qiwu/shared build && pnpm verify`；Windows 用下列顺序检查。全绿，根 `pnpm-lock.yaml` 不变（移动端从未进入根锁定文件）。删除演练仅在可丢弃副本进行。
 
 ```powershell
 pnpm.cmd i --frozen-lockfile
