@@ -31,6 +31,7 @@ import request from 'supertest'
 import type { DataSource } from 'typeorm'
 import { AppModule } from '../../src/app.module.js'
 import { setupApp } from '../../src/app.setup.js'
+import { MENU_FEATURES } from '../../src/core/auth/menu-features.js'
 import { PermVersion } from '../../src/core/auth/perm-version.js'
 import { redisKey } from '../../src/core/redis/cache-namespaces.js'
 import { ParamService } from '../../src/core/settings/param.service.js'
@@ -39,6 +40,7 @@ import { findId, insertRow } from '../../src/db/seeds/upsert.js'
 import { logOf } from '../setup/audit.js'
 import { bearer, signIn } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 const PREFIX = 'e2e-role-'
 const URL = '/api/iam/roles'
@@ -104,29 +106,39 @@ async function dictLabel(code: string, value: string, lang = 'zh-CN') {
 }
 
 async function user(name: string, roles: number[]) {
-  const id = await insertRow(ds.manager, 'iam_user', {
-    username: PREFIX + name,
-    display_name: name,
-    password_hash: 'not-used-by-this-spec',
-    password_changed_at: new Date(),
-  })
+  const id = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_user', {
+      username: PREFIX + name,
+      display_name: name,
+      password_hash: 'not-used-by-this-spec',
+      password_changed_at: new Date(),
+    }),
+  )
   for (const r of roles)
-    await ds.query('INSERT INTO iam_user_roles (user_id, role_id) VALUES (?, ?)', [id, r])
+    await ds.query('INSERT INTO iam_user_roles (user_id, role_id, tenant_id) VALUES (?, ?, 1)', [
+      id,
+      r,
+    ])
   userIds.push(id)
   return (await signIn(app, PREFIX + name)).accessToken
 }
 
 /** A user of `roles` in dept `dept` (null: none) and its token. */
 async function member(name: string, roles: number[], dept: number | null = null) {
-  const id = await insertRow(ds.manager, 'iam_user', {
-    username: PREFIX + name,
-    display_name: name,
-    dept_id: dept,
-    password_hash: 'not-used-by-this-spec',
-    password_changed_at: new Date(),
-  })
+  const id = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_user', {
+      username: PREFIX + name,
+      display_name: name,
+      dept_id: dept,
+      password_hash: 'not-used-by-this-spec',
+      password_changed_at: new Date(),
+    }),
+  )
   for (const r of roles)
-    await ds.query('INSERT INTO iam_user_roles (user_id, role_id) VALUES (?, ?)', [id, r])
+    await ds.query('INSERT INTO iam_user_roles (user_id, role_id, tenant_id) VALUES (?, ?, 1)', [
+      id,
+      r,
+    ])
   userIds.push(id)
   return { id, token: (await signIn(app, PREFIX + name)).accessToken }
 }
@@ -142,13 +154,18 @@ beforeAll(async () => {
   i18n = app.get(I18nService)
   await cleanRedis(redis)
   lastId = Number((await ds.query('SELECT COALESCE(MAX(id), 0) AS n FROM iam_role'))[0].n)
-  roleId = await insertRow(ds.manager, 'iam_role', {
-    code: `${PREFIX}reader`,
-    name: `${PREFIX}reader`,
-    data_scope: 'all',
-  })
+  roleId = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_role', {
+      code: `${PREFIX}reader`,
+      name: `${PREFIX}reader`,
+      data_scope: 'all',
+    }),
+  )
   const browse = await findId(ds.manager, 'iam_menu', { perms: rolePerms.browse })
-  await ds.query('INSERT INTO iam_role_menus (role_id, menu_id) VALUES (?, ?)', [roleId, browse])
+  await ds.query('INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, 1)', [
+    roleId,
+    browse,
+  ])
   tokens.admin = (await signIn(app)).accessToken
   tokens.reader = await user('reader', [roleId])
   tokens.plain = await user('plain', [])
@@ -277,17 +294,20 @@ describe('crud', () => {
     expect(res.status).toBe(status)
     expect(res.body.code).toBe(code)
   }
-  const rootRole = () => findId(ds.manager, 'iam_role', { code: 'root' }) as Promise<number>
+  const rootRole = () =>
+    inTenant1(() => findId(ds.manager, 'iam_role', { code: 'root' })) as Promise<number>
   /** A role granted `perms` (by their action menus), data scope all. */
   async function granted(tag: string, perms: string[], over: object = {}) {
-    const id = await insertRow(ds.manager, 'iam_role', {
-      code: `${PREFIX}${tag}`,
-      name: `${PREFIX}${tag}`,
-      data_scope: 'all',
-      ...over,
-    })
+    const id = await inTenant1(() =>
+      insertRow(ds.manager, 'iam_role', {
+        code: `${PREFIX}${tag}`,
+        name: `${PREFIX}${tag}`,
+        data_scope: 'all',
+        ...over,
+      }),
+    )
     for (const perm of perms)
-      await ds.query('INSERT INTO iam_role_menus (role_id, menu_id) VALUES (?, ?)', [
+      await ds.query('INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, 1)', [
         id,
         await findId(ds.manager, 'iam_menu', { perms: perm }),
       ])
@@ -296,7 +316,9 @@ describe('crud', () => {
   const permVer = async (userId: number) =>
     Number((await redis.get(redisKey('authPermVer', userId))) ?? 0)
   const idOf = async (username: string) =>
-    (await findId(ds.manager, 'iam_user', { username: PREFIX + username })) as number
+    (await inTenant1(() =>
+      findId(ds.manager, 'iam_user', { username: PREFIX + username }),
+    )) as number
 
   it('crud: a new role is never builtin and starts with the data scope own_dept; menu / dept links on', async () => {
     const tag = unique()
@@ -376,9 +398,15 @@ describe('crud', () => {
       name: `${PREFIX}menu-${seq}`,
       perms: `test.roleE2e.m${seq}`,
     })
-    const dept = await findId(ds.manager, 'iam_dept', { name: 'seed.dept.rd' })
-    await ds.query('INSERT INTO iam_role_menus (role_id, menu_id) VALUES (?, ?)', [free, menu])
-    await ds.query('INSERT INTO iam_role_depts (role_id, dept_id) VALUES (?, ?)', [free, dept])
+    const dept = await inTenant1(() => findId(ds.manager, 'iam_dept', { name: 'seed.dept.rd' }))
+    await ds.query('INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, 1)', [
+      free,
+      menu,
+    ])
+    await ds.query('INSERT INTO iam_role_depts (role_id, dept_id, tenant_id) VALUES (?, ?, 1)', [
+      free,
+      dept,
+    ])
     const deleteMenu = () =>
       request(app.getHttpServer()).delete(`/api/iam/menus/${menu}`).set(bearer(tokens.admin))
     expectErr(await deleteMenu(), 409, Err.IAM_MENU_GRANTED.code)
@@ -433,7 +461,8 @@ describe('grant', () => {
   }
   const menuId = async (by: Record<string, string>) =>
     (await findId(ds.manager, 'iam_menu', by)) as number
-  const deptId = async (name: string) => (await findId(ds.manager, 'iam_dept', { name })) as number
+  const deptId = async (name: string) =>
+    (await inTenant1(() => findId(ds.manager, 'iam_dept', { name }))) as number
   /** The path of route names from the top of `/api/auth/menus` to `routeName` (empty: not there). */
   function trail(nodes: MenuNode[], routeName: string): string[] {
     for (const n of nodes) {
@@ -446,7 +475,16 @@ describe('grant', () => {
 
   it('grant: the menu tree lists every menu (disabled ones too) as a forest; grant perm only', async () => {
     const tree: RoleMenuNode[] = (await call('admin', 'get', '/menu-tree').expect(200)).body.data
-    const all = await ds.query('SELECT id FROM iam_menu')
+    // but the tenant pages and what is under them: multi-tenancy is off here
+    const switched = Object.keys(MENU_FEATURES).filter(
+      (r) => MENU_FEATURES[r] === 'APP_MULTI_TENANT',
+    )
+    const all = await ds.query(
+      `SELECT m.id FROM iam_menu m
+        WHERE NOT EXISTS (SELECT 1 FROM iam_menu h
+                           WHERE h.route_name IN (?) AND m.tree_path LIKE CONCAT(h.tree_path, '%'))`,
+      [switched],
+    )
     const flat = (nodes: RoleMenuNode[]): RoleMenuNode[] =>
       nodes.flatMap((n) => [n, ...flat(n.children)])
     expect(
@@ -546,11 +584,13 @@ describe('grant', () => {
     expect(await seen()).toEqual([`${tag}-holder`, `${tag}-mate`])
     // a deleted dept reaches nothing either, though still picked and with a user left in it (older
     // data: no foreign keys)
-    const gone = await insertRow(ds.manager, 'iam_dept', {
-      parent_id: 0,
-      tree_path: '/',
-      name: `${PREFIX}${tag}-dept`,
-    })
+    const gone = await inTenant1(() =>
+      insertRow(ds.manager, 'iam_dept', {
+        parent_id: 0,
+        tree_path: '/',
+        name: `${PREFIX}${tag}-dept`,
+      }),
+    )
     await ds.query('UPDATE iam_dept SET tree_path = ? WHERE id = ?', [`/${gone}/`, gone])
     try {
       await member(`${tag}-far`, [], gone)
@@ -585,12 +625,14 @@ describe('grant', () => {
     const role = (await add(body(unique()))).id
     const browse = await menuId({ perms: userPerms.browse })
     await call('admin', 'put', `/${role}/menus`, { menuLink: true, menuIds: [browse] }).expect(200)
-    const gone = await insertRow(ds.manager, 'iam_dept', {
-      parent_id: 0,
-      tree_path: '/',
-      name: `${PREFIX}gone-${seq}`,
-      deleted_at: new Date(),
-    })
+    const gone = await inTenant1(() =>
+      insertRow(ds.manager, 'iam_dept', {
+        parent_id: 0,
+        tree_path: '/',
+        name: `${PREFIX}gone-${seq}`,
+        deleted_at: new Date(),
+      }),
+    )
     for (const res of [
       await call('admin', 'put', `/${role}/menus`, { menuLink: true, menuIds: [browse, MISSING] }),
       await call('admin', 'put', `/${role}/data-scope`, {
@@ -607,7 +649,7 @@ describe('grant', () => {
     expect((await call('admin', 'get', `/${role}/menus`)).body.data.menuIds).toEqual([browse])
     expect((await call('admin', 'get', `/${role}/data-scope`)).body.data.dataScope).toBe('own_dept')
 
-    const root = (await findId(ds.manager, 'iam_role', { code: 'root' })) as number
+    const root = (await inTenant1(() => findId(ds.manager, 'iam_role', { code: 'root' }))) as number
     expectErr(
       await call('admin', 'put', `/${root}/menus`, { menuLink: true, menuIds: [browse] }),
       422,
@@ -691,13 +733,15 @@ describe('members', () => {
     (await findId(ds.manager, 'iam_menu', { perms: perm })) as number
   /** A role (data scope `scope`) granted `perms` by their action menus. */
   async function roleWith(tag: string, perms: string[], scope = 'own_dept') {
-    const id = await insertRow(ds.manager, 'iam_role', {
-      code: `${PREFIX}${tag}`,
-      name: `${PREFIX}${tag}`,
-      data_scope: scope,
-    })
+    const id = await inTenant1(() =>
+      insertRow(ds.manager, 'iam_role', {
+        code: `${PREFIX}${tag}`,
+        name: `${PREFIX}${tag}`,
+        data_scope: scope,
+      }),
+    )
     for (const perm of perms)
-      await ds.query('INSERT INTO iam_role_menus (role_id, menu_id) VALUES (?, ?)', [
+      await ds.query('INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, 1)', [
         id,
         await menuOf(perm),
       ])
@@ -729,8 +773,12 @@ describe('members', () => {
   async function setup() {
     const tag = `m${++seq}`
     const [platform, finance] = [
-      (await findId(ds.manager, 'iam_dept', { name: 'seed.dept.platform' })) as number,
-      (await findId(ds.manager, 'iam_dept', { name: 'seed.dept.finance' })) as number,
+      (await inTenant1(() =>
+        findId(ds.manager, 'iam_dept', { name: 'seed.dept.platform' }),
+      )) as number,
+      (await inTenant1(() =>
+        findId(ds.manager, 'iam_dept', { name: 'seed.dept.finance' }),
+      )) as number,
     ]
     const R = await roleWith(`${tag}-r`, [userPerms.browse])
     const opRole = await roleWith(`${tag}-op`, [rolePerms['assign-users'], userPerms.browse])
@@ -829,7 +877,7 @@ describe('members', () => {
 
   it('members: GrantPolicy guards adds (403), nobody leaves the root role and non-root callers leave root users alone (422), unknown role 404, 400, assign-users only, action-logged', async () => {
     const { R, op, B, as } = await setup()
-    const root = (await findId(ds.manager, 'iam_role', { code: 'root' })) as number
+    const root = (await inTenant1(() => findId(ds.manager, 'iam_role', { code: 'root' }))) as number
     const wider = await roleWith(`wider-${seq}`, [rolePerms.remove])
     for (const role of [root, wider])
       expectErr(
@@ -840,7 +888,9 @@ describe('members', () => {
         403,
         Err.IAM_GRANT_EXCEEDS_OWN.code,
       )
-    const admin = (await findId(ds.manager, 'iam_user', { username: 'admin' })) as number
+    const admin = (await inTenant1(() =>
+      findId(ds.manager, 'iam_user', { username: 'admin' }),
+    )) as number
     expectErr(
       await call('admin', 'post', `/${root}/members/revoke`, { userIds: [admin] }),
       422,
@@ -848,9 +898,11 @@ describe('members', () => {
     )
     expect(await holders(root)).toContain(admin)
     // a root user in the operator's scope keeps its roles as they are (a root caller may change them)
-    const platform = (await findId(ds.manager, 'iam_dept', {
-      name: 'seed.dept.platform',
-    })) as number
+    const platform = (await inTenant1(() =>
+      findId(ds.manager, 'iam_dept', {
+        name: 'seed.dept.platform',
+      }),
+    )) as number
     const [held, bare] = [
       await member(`root-held-${seq}`, [root, R], platform),
       await member(`root-bare-${seq}`, [root], platform),
@@ -911,21 +963,26 @@ describe('escalation', () => {
   const menuOf = async (perm: string) =>
     (await findId(ds.manager, 'iam_menu', { perms: perm })) as number
   const deptOf = async (name: string) =>
-    (await findId(ds.manager, 'iam_dept', { name: `seed.dept.${name}` })) as number
+    (await inTenant1(() => findId(ds.manager, 'iam_dept', { name: `seed.dept.${name}` }))) as number
   /** A role of scope `scope` (its picked depts `depts`) granted `perms` by their action menus. */
   async function roleWith(tag: string, perms: string[], scope = 'own_dept', depts: number[] = []) {
-    const id = await insertRow(ds.manager, 'iam_role', {
-      code: `${PREFIX}${tag}`,
-      name: `${PREFIX}${tag}`,
-      data_scope: scope,
-    })
+    const id = await inTenant1(() =>
+      insertRow(ds.manager, 'iam_role', {
+        code: `${PREFIX}${tag}`,
+        name: `${PREFIX}${tag}`,
+        data_scope: scope,
+      }),
+    )
     for (const perm of perms)
-      await ds.query('INSERT INTO iam_role_menus (role_id, menu_id) VALUES (?, ?)', [
+      await ds.query('INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, 1)', [
         id,
         await menuOf(perm),
       ])
     for (const dept of depts)
-      await ds.query('INSERT INTO iam_role_depts (role_id, dept_id) VALUES (?, ?)', [id, dept])
+      await ds.query('INSERT INTO iam_role_depts (role_id, dept_id, tenant_id) VALUES (?, ?, 1)', [
+        id,
+        dept,
+      ])
     return id
   }
   const grants = async (role: number) => ({
@@ -1038,7 +1095,7 @@ describe('escalation', () => {
         (await ds.query('SELECT deleted_at FROM iam_role WHERE id = ?', [ordinary]))[0].deleted_at,
       ).toBeNull()
 
-      await ds.query('INSERT INTO iam_role_menus (role_id, menu_id) VALUES (?, ?)', [
+      await ds.query('INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, 1)', [
         memberId,
         action,
       ])
@@ -1187,7 +1244,7 @@ describe('escalation', () => {
       perms: userPerms.browse,
       enabled: 0,
     })
-    await ds.query('INSERT INTO iam_role_menus (role_id, menu_id) VALUES (?, ?)', [
+    await ds.query('INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, 1)', [
       pickedOut,
       disabled,
     ])
@@ -1320,10 +1377,10 @@ describe('escalation', () => {
       })
       const action = await addMenu({ kind: 'action', name: `${name}-a`, perms, parentId: page })
       for (const role of roles)
-        await ds.query('INSERT INTO iam_role_menus (role_id, menu_id) VALUES (?, ?)', [
-          role,
-          action,
-        ])
+        await ds.query(
+          'INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, 1)',
+          [role, action],
+        )
       return { group, page, action }
     }
     const menu = (id: number, dto: object, token = op.token) =>

@@ -6,6 +6,7 @@ import { ElMessage, type FormInstance, type FormItemRule } from 'element-plus'
 import { DEFAULT_PASSWORD_POLICY, smsResetPasswordBody, type PasswordPolicy } from '@qiwu/shared'
 import { authExtraApi, publicPasswordPolicy } from '@/api/auth-extra'
 import PasswordToggle from '@/core/components/PasswordToggle.vue'
+import TenantCodeField from '@/core/components/TenantCodeField.vue'
 import { useSmsCode } from '@/core/composables/use-sms-code'
 import { revalidateOnLocale, zodRules } from '@/core/form/zod-rules'
 import AuthPage from '@/core/layout/AuthPage.vue'
@@ -38,6 +39,7 @@ const rules = computed<Record<string, FormItemRule[]>>(() => ({
 }))
 const formRef = ref<FormInstance>()
 revalidateOnLocale(formRef)
+const tenantField = ref<InstanceType<typeof TenantCodeField>>()
 const { cooldown, sending, send } = useSmsCode('reset_password')
 const checkingMobile = ref(false)
 const sent = ref(false)
@@ -49,8 +51,9 @@ async function sendCode() {
   checkingMobile.value = true
   try {
     if (!(await formRef.value?.validateField('mobile').catch(() => false))) return
+    if ((await tenantField.value?.validate()) === false) return
     error.value = ''
-    sent.value = (await send(form.mobile.trim())) || sent.value
+    sent.value = (await send(form.mobile.trim(), tenantField.value?.code)) || sent.value
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : t('common.error.network')
   } finally {
@@ -63,14 +66,18 @@ async function submit() {
   loading.value = true
   try {
     if (!(await formRef.value?.validate().catch(() => false))) return
+    if ((await tenantField.value?.validate()) === false) return
     error.value = ''
+    const tenantCode = tenantField.value?.code
     await authExtraApi.resetBySms({
       mobile: form.mobile.trim(),
       code: form.code,
       newPassword: form.newPassword,
+      tenantCode,
     })
     ElMessage.success(t('auth.reset.done'))
-    await router.replace('/login')
+    // the sign-in page offers the same tenant
+    await router.replace({ path: '/login', query: tenantCode ? { tenant: tenantCode } : {} })
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : t('common.error.network')
   } finally {
@@ -81,6 +88,7 @@ async function submit() {
 
 <template>
   <AuthPage :title="t('auth.reset.title')" :subtitle="t('auth.reset.subtitle')">
+    <TenantCodeField ref="tenantField" />
     <el-form
       ref="formRef"
       :model="form"

@@ -16,7 +16,8 @@
         "stack": "堆栈",
         "state": "处理状态",
         "handledBy": "处理人 ID",
-        "handledAt": "处理时间"
+        "handledAt": "处理时间",
+        "tenantId": "租户"
       }
     }
   }

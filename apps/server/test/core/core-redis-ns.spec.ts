@@ -2,8 +2,17 @@
 // comes from config (ACL user, db 15 in tests) and closes on shutdown; specs clean up with
 // SCAN MATCH qw:* + UNLINK, never FLUSHDB.
 import { Test, type TestingModule } from '@nestjs/testing'
+import { CACHE_KEY_TENANCIES } from '@qiwu/shared'
 import { CoreConfigModule } from '../../src/core/config/config.module.js'
-import { CACHE_NAMESPACES, keyPattern, redisKey } from '../../src/core/redis/cache-namespaces.js'
+import { allTenants, TenantContextMissing, withTenant } from '../../src/core/context/tenant.js'
+import {
+  CACHE_NAMESPACES,
+  type CacheNamespace,
+  type CacheNamespaceName,
+  keyPattern,
+  keyPatternAllTenants,
+  redisKey,
+} from '../../src/core/redis/cache-namespaces.js'
 import { CoreRedisModule, REDIS, type Redis } from '../../src/core/redis/redis.module.js'
 import { cleanRedis } from '../setup/redis.js'
 
@@ -42,6 +51,7 @@ describe('cache-namespaces', () => {
         'auth:seen',
         'auth:permver:',
         'auth:credver:',
+        'auth:acting-leave:',
         'auth:fail:',
         'captcha:',
         'sms:limit:',
@@ -64,6 +74,100 @@ describe('cache-namespaces', () => {
       (n) => n.prefix.startsWith('auth:') && n.clearable,
     )
     expect(clearableAuth).toEqual([])
+  })
+
+  it('declares every namespace’s tenant dimension; none is per tenant yet', () => {
+    const declared = Object.fromEntries(
+      Object.entries(CACHE_NAMESPACES).map(([name, n]) => [name, n.tenancy]),
+    )
+    for (const t of Object.values(declared)) expect(CACHE_KEY_TENANCIES).toContain(t)
+    const platform = ['dict', 'dictVer', 'param', 'paramVer', 'throttle', 'jobLock', 'jobFire']
+    expect(declared).toEqual(
+      Object.fromEntries(
+        Object.keys(CACHE_NAMESPACES).map((name) => [
+          name,
+          platform.includes(name) ? 'platform' : 'global-id',
+        ]),
+      ),
+    )
+  })
+
+  it('global-id and platform keys are byte for byte the same in any context: no tenant segment', () => {
+    const keys = () => [
+      redisKey('lock', 'job', 7),
+      redisKey('smsLimit', 'cooldown', '13900009001'),
+      redisKey('smsLimit', 'ip', '2026-10-07', '10.0.0.1'),
+      redisKey('authFail', 'p', 'alice', '10.0.0.1'),
+      redisKey('dict', 'entries', 'iam.gender'),
+      redisKey('jobFire', 7, 1),
+      keyPattern('lock'),
+      keyPattern('smsLimit'),
+      keyPattern('param'),
+    ]
+    const expected = [
+      'qw:lock:job:7',
+      'qw:sms:limit:cooldown:13900009001',
+      'qw:sms:limit:ip:2026-10-07:10.0.0.1',
+      'qw:auth:fail:p:alice:10.0.0.1',
+      'qw:dict:entries:iam.gender',
+      'qw:job:fire:7:1',
+      'qw:lock:*',
+      'qw:sms:limit:*',
+      'qw:param:*',
+    ]
+    expect(keys()).toEqual(expected)
+    expect(withTenant(2, keys)).toEqual(expected)
+    expect(allTenants(keys)).toEqual(expected)
+  })
+
+  describe('a tenant namespace (registered here for the duration: the registry has none yet)', () => {
+    // the key builders take registered names only
+    const byName = 'specByName' as CacheNamespaceName
+    const registry = CACHE_NAMESPACES as unknown as Record<string, CacheNamespace>
+
+    beforeAll(() => {
+      registry[byName] = {
+        prefix: 'spec:by-name:',
+        clearable: true,
+        masked: false,
+        tenancy: 'tenant',
+      }
+    })
+
+    afterAll(() => {
+      delete registry[byName]
+    })
+
+    it('gets the context tenant’s segment right after its prefix, the default tenant too', () => {
+      expect(withTenant(2, () => redisKey(byName, 'alice', 'x'))).toBe(
+        'qw:spec:by-name:t:2:alice:x',
+      )
+      expect(withTenant(1, () => redisKey(byName, 'alice'))).toBe('qw:spec:by-name:t:1:alice')
+      // an inner tenant wins over the outer one
+      expect(withTenant(1, () => withTenant(2, () => redisKey(byName, 'a')))).toBe(
+        'qw:spec:by-name:t:2:a',
+      )
+    })
+
+    it('its scan pattern is the context tenant’s; the cache monitor’s for root spans every tenant', () => {
+      expect(withTenant(2, () => keyPattern(byName))).toBe('qw:spec:by-name:t:2:*')
+      expect(withTenant(1, () => keyPattern(byName))).toBe('qw:spec:by-name:t:1:*')
+      expect(withTenant(2, () => keyPatternAllTenants(byName))).toBe('qw:spec:by-name:*')
+      expect(keyPatternAllTenants('dict')).toBe('qw:dict:*')
+    })
+
+    it('throws without a tenant, and inside allTenants with no inner withTenant', () => {
+      expect(() => redisKey(byName, 'alice')).toThrow(TenantContextMissing)
+      expect(() => keyPattern(byName)).toThrow(TenantContextMissing)
+      // not the outer tenant's segment either
+      withTenant(2, () =>
+        allTenants(() => {
+          expect(() => redisKey(byName, 'alice')).toThrow(TenantContextMissing)
+          expect(() => keyPattern(byName)).toThrow(TenantContextMissing)
+          expect(withTenant(3, () => redisKey(byName, 'a'))).toBe('qw:spec:by-name:t:3:a')
+        }),
+      )
+    })
   })
 
   it('uses REDIS_KEY_PREFIX', () => {

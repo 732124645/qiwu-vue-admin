@@ -3,12 +3,12 @@
 // forest, create under an enabled parent (tree_path = the parent's + own id), a move rewriting the whole
 // subtree's paths (never below itself), enable with the ancestors / no disable over an enabled child,
 // no delete with children; 403 per permission, 400 translated, 404 unknown ids, @Idempotent, @ActionLog
-// rows, Swagger. Only the standard cases: module-specific ones go into a hand-written
+// rows, Swagger, tenant isolation (the switch on). Only the standard cases: module-specific ones go into a hand-written
 // demo-topic-extra.e2e-spec.ts.
 import type { NestExpressApplication } from '@nestjs/platform-express'
 import { Test } from '@nestjs/testing'
 import { getDataSourceToken } from '@nestjs/typeorm'
-import { Err, type TopicNode, topicPerms } from '@qiwu/shared'
+import { DEFAULT_TENANT_ID, Err, type TopicNode, topicPerms } from '@qiwu/shared'
 import { I18nService } from 'nestjs-i18n'
 import request from 'supertest'
 import type { DataSource } from 'typeorm'
@@ -19,6 +19,13 @@ import { findId, insertRow } from '../../src/db/seeds/upsert.js'
 import { logOf } from '../setup/audit.js'
 import { bearer, signIn } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
+import {
+  bootApp,
+  createTenant,
+  inTenant1,
+  signInDirect,
+  type TestTenant,
+} from '../setup/tenants.js'
 
 const PREFIX = 'e2e-topic-'
 const URL = '/api/demo/topics'
@@ -91,14 +98,20 @@ const expectErr = (res: request.Response, status: number, code: string) => {
 }
 
 async function user(name: string, roles: number[]) {
-  const id = await insertRow(ds.manager, 'iam_user', {
-    username: PREFIX + name,
-    display_name: name,
-    password_hash: 'not-used-by-this-spec',
-    password_changed_at: new Date(),
-  })
+  const id = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_user', {
+      username: PREFIX + name,
+      display_name: name,
+      password_hash: 'not-used-by-this-spec',
+      password_changed_at: new Date(),
+    }),
+  )
   for (const r of roles)
-    await ds.query('INSERT INTO iam_user_roles (user_id, role_id) VALUES (?, ?)', [id, r])
+    await ds.query('INSERT INTO iam_user_roles (user_id, role_id, tenant_id) VALUES (?, ?, ?)', [
+      id,
+      r,
+      DEFAULT_TENANT_ID,
+    ])
   userIds.push(id)
   return (await signIn(app, PREFIX + name)).accessToken
 }
@@ -112,13 +125,19 @@ beforeAll(async () => {
   i18n = app.get(I18nService)
   await cleanRedis(redis)
   lastId = Number((await ds.query('SELECT COALESCE(MAX(id), 0) AS n FROM demo_topic'))[0].n)
-  roleId = await insertRow(ds.manager, 'iam_role', {
-    code: `${PREFIX}reader`,
-    name: `${PREFIX}reader`,
-    data_scope: 'all',
-  })
+  roleId = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_role', {
+      code: `${PREFIX}reader`,
+      name: `${PREFIX}reader`,
+      data_scope: 'all',
+    }),
+  )
   const browse = await findId(ds.manager, 'iam_menu', { perms: topicPerms.browse })
-  await ds.query('INSERT INTO iam_role_menus (role_id, menu_id) VALUES (?, ?)', [roleId, browse])
+  await ds.query('INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, ?)', [
+    roleId,
+    browse,
+    DEFAULT_TENANT_ID,
+  ])
   tokens.admin = (await signIn(app)).accessToken
   tokens.reader = await user('reader', [roleId])
   tokens.plain = await user('plain', [])
@@ -396,4 +415,68 @@ it('Swagger documents every route', async () => {
   expect(
     doc.paths[URL].get.responses['200'].content['application/json'].schema.properties.data,
   ).toMatchObject({ type: 'array' })
+})
+
+describe('tenant isolation (see docs/design-notes.md#tenancy): the switch on, the rows of another tenant', () => {
+  let on: NestExpressApplication
+  let other: TestTenant
+  /** on `on`: the default tenant's admin, the other tenant's administrator (tenant_admin) */
+  const as = { mine: '', theirs: '' }
+  const http = (
+    who: keyof typeof as,
+    method: 'get' | 'post' | 'put' | 'delete',
+    path = '',
+    body?: object,
+  ) => {
+    const req = request(on.getHttpServer())[method](`${URL}${path}`).set(bearer(as[who]))
+    return body ? req.send(body) : req
+  }
+  /** A top-level row `who` adds through the API, as POST answers it. */
+  const addAs = async (who: keyof typeof as, tag = unique(), over: object = {}) =>
+    (await http(who, 'post', '', body(tag, over)).expect(201)).body.data
+
+  beforeAll(async () => {
+    on = await bootApp({ multiTenant: true })
+    other = await createTenant(on)
+    as.mine = (await signIn(on)).accessToken
+    as.theirs = (await signInDirect(on, other.ownerId))!.accessToken
+  })
+
+  afterAll(async () => {
+    await other?.dispose()
+    await on?.close()
+  })
+
+  it('their rows are not in the forest; get, update, enabled, delete → 404, nothing written; never a parent (create and move → 404)', async () => {
+    const their = await addAs('theirs')
+    const mine = await addAs('mine')
+    const forest: TopicNode[] = (await http('mine', 'get').expect(200)).body.data
+    expect(find(forest, mine.id)).toBeDefined()
+    expect(find(forest, their.id)).toBeUndefined()
+    const notFound = (res: request.Response) => expectErr(res, 404, Err.NOT_FOUND.code)
+    notFound(await http('mine', 'get', `/${their.id}`))
+    notFound(await http('mine', 'put', `/${their.id}`, body(unique())))
+    notFound(await http('mine', 'put', `/${their.id}/enabled`, { enabled: false }))
+    notFound(await http('mine', 'delete', `/${their.id}`))
+    notFound(await http('mine', 'post', '', body(unique(), { parentId: their.id })))
+    notFound(await http('mine', 'put', `/${mine.id}`, { parentId: their.id }))
+    expect(await ds.query('SELECT id FROM demo_topic WHERE parent_id = ?', [their.id])).toEqual([])
+    expect((await http('theirs', 'get', `/${their.id}`).expect(200)).body.data).toEqual(their)
+    expect((await http('mine', 'get', `/${mine.id}`).expect(200)).body.data).toEqual(mine)
+  })
+
+  it('create: the row is the caller’s tenant’s, a tenantId in the body changes nothing; the same values in both tenants', async () => {
+    const tag = unique()
+    const their = await addAs('theirs', tag)
+    const mine = await addAs('mine', tag, { tenantId: other.id })
+    expect(
+      await ds.query(
+        'SELECT id, tenant_id AS tenantId FROM demo_topic WHERE id IN (?) ORDER BY id',
+        [[their.id, mine.id]],
+      ),
+    ).toEqual([
+      { id: their.id, tenantId: other.id },
+      { id: mine.id, tenantId: DEFAULT_TENANT_ID },
+    ])
+  })
 })

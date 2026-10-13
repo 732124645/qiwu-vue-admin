@@ -9,7 +9,9 @@ import {
   NotifyChannels,
   type NotifyChannel,
   type NotifyDraft,
+  type NotifyDue,
 } from '../../../../core/notify/notify.js'
+import { AppConfigService } from '../../../../core/config/config.module.js'
 import { MailAccount } from '../mail-account/mail-account.entity.js'
 import { MailDeliveryError, MailTransports } from '../mail-account/mail-transports.js'
 import { MailRecord } from '../mail-record/mail-record.entity.js'
@@ -24,6 +26,7 @@ export class MailChannel implements NotifyChannel<MailTemplate>, OnModuleInit {
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
     private readonly channels: NotifyChannels,
     private readonly transports: MailTransports,
+    private readonly cfg: AppConfigService,
   ) {}
 
   onModuleInit(): void {
@@ -65,24 +68,33 @@ export class MailChannel implements NotifyChannel<MailTemplate>, OnModuleInit {
     return row.id
   }
 
-  async due(limit: number): Promise<number[]> {
+  async dueRows(limit: number): Promise<NotifyDue[]> {
     if (limit <= 0) return []
-    const rows = await this.txHost.tx
-      .getRepository(MailRecord)
-      .createQueryBuilder('r')
-      .select('r.id', 'id')
-      .where(
-        "r.attempts < :max AND (r.status IN ('pending', 'failed') OR (r.status = 'sending' AND r.claimed_at < :cutoff))",
-        {
-          max: NOTIFY_MAX_ATTEMPTS,
-          cutoff: new Date(Date.now() - NOTIFY_CLAIM_TIMEOUT_MS),
-        },
-      )
-      .orderBy('r.created_at', 'ASC')
-      .addOrderBy('r.id', 'ASC')
-      .limit(limit)
-      .getRawMany<{ id: number }>()
-    return rows.map((row) => row.id)
+    return (
+      this.txHost.tx
+        .getRepository(MailRecord)
+        .createQueryBuilder('r')
+        .select('r.id', 'id')
+        .addSelect('r.tenant_id', 'tenantId')
+        .where(
+          "r.attempts < :max AND (r.status IN ('pending', 'failed') OR (r.status = 'sending' AND r.claimed_at < :cutoff))",
+          {
+            max: NOTIFY_MAX_ATTEMPTS,
+            cutoff: new Date(Date.now() - NOTIFY_CLAIM_TIMEOUT_MS),
+          },
+        )
+        // only available tenants (see docs/design-notes.md#tenancy): a scan that skipped them after
+        // the fact would keep their records at the head of every batch
+        .andWhere(
+          `r.tenant_id IN (SELECT t.id FROM iam_tenant t WHERE t.enabled = 1 AND t.deleted_at IS NULL
+           AND (t.expires_at IS NULL OR t.expires_at > NOW(3)) AND (:multiTenant OR t.id = 1))`,
+          { multiTenant: this.cfg.get('APP_MULTI_TENANT') },
+        )
+        .orderBy('r.created_at', 'ASC')
+        .addOrderBy('r.id', 'ASC')
+        .limit(limit)
+        .getRawMany<NotifyDue>()
+    )
   }
 
   expire(): Promise<void> {

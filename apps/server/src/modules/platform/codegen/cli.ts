@@ -14,9 +14,9 @@ import { resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import { Module, NotFoundException } from '@nestjs/common'
 import { NestFactory } from '@nestjs/core'
-import { Err } from '@qiwu/shared'
-import { ClsService } from 'nestjs-cls'
+import { type CgImportHint, Err } from '@qiwu/shared'
 import { CoreContextModule } from '../../../core/context/context.module.js'
+import { DEFAULT_TENANT_ID, withTenant } from '../../../core/context/tenant.js'
 import { CoreDbModule } from '../../../core/db/db.module.js'
 import { BizError } from '../../../core/http/biz-error.js'
 import { ValidationException } from '../../../core/http/validation.pipe.js'
@@ -38,13 +38,19 @@ async function run(svc: CodegenService, command: string, tables: string[], out?:
   if (command === 'import') {
     const { ids, hints } = await svc.import(tables)
     tables.forEach((t, i) => console.log(`imported ${t} (config ${ids[i]})`))
-    // the soft-delete convention: unique keys end with alive (no deleted_at: refused); the default parent
-    for (const h of hints)
-      console.warn(
-        h.missing === 'alive'
-          ? `hint: ${h.tableName} unique key ${h.key} has no alive column; a deleted row's value stays taken (make it (..., alive))`
-          : `hint: ${h.tableName}: no menu group ${h.key} (or one below it) to hang the page under, so its parent is biz (Business); build the group in the menu page, then pick it on the config's generation tab`,
-      )
+    // the soft-delete convention: unique keys end with alive (no deleted_at: refused); the tenant
+    // convention: tenant_id, unique keys led by it; the default parent
+    const texts: Record<CgImportHint['missing'], (h: CgImportHint) => string> = {
+      alive: (h) =>
+        `hint: ${h.tableName} unique key ${h.key} has no alive column; a deleted row's value stays taken (make it (..., alive))`,
+      tenant_column: (h) =>
+        `hint: ${h.tableName} has no ${h.key} column; every tenant shares its rows (add tenant_id, or list it in PLATFORM_TABLES)`,
+      tenant_key: (h) =>
+        `hint: ${h.tableName} unique key ${h.key} does not start with tenant_id; a value is taken across all tenants (make it (tenant_id, ..., alive))`,
+      parent_menu: (h) =>
+        `hint: ${h.tableName}: no menu group ${h.key} (or one below it) to hang the page under, so its parent is biz (Business); build the group in the menu page, then pick it on the config's generation tab`,
+    }
+    for (const h of hints) console.warn(texts[h.missing](h))
     return 0
   }
   const root = repoRoot()
@@ -110,7 +116,8 @@ async function main(): Promise<number> {
   })
   try {
     const svc = app.get(CodegenService)
-    return await app.get(ClsService).run(() => run(svc, command, tables, values.out))
+    // qw:cross-tenant the command line works for the default tenant
+    return await withTenant(DEFAULT_TENANT_ID, () => run(svc, command, tables, values.out))
   } finally {
     await app.close()
   }

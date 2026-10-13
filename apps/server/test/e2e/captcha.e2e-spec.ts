@@ -30,6 +30,7 @@ import { REDIS, type Redis } from '../../src/core/redis/redis.module.js'
 import { ParamService } from '../../src/core/settings/param.service.js'
 import { insertRow } from '../../src/db/seeds/upsert.js'
 import { cleanRedis } from '../setup/redis.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 let app: NestExpressApplication
 let ds: DataSource
@@ -93,12 +94,14 @@ const solvedTicket = async (ip: string, scene = 'signin') => {
 const user = async () => {
   const username = `${PREFIX}${++userSeq}`
   userIds.push(
-    await insertRow(ds.manager, 'iam_user', {
-      username,
-      display_name: username,
-      password_hash: bcrypt.hashSync(PASSWORD, 4),
-      password_changed_at: new Date(),
-    }),
+    await inTenant1(() =>
+      insertRow(ds.manager, 'iam_user', {
+        username,
+        display_name: username,
+        password_hash: bcrypt.hashSync(PASSWORD, 4),
+        password_changed_at: new Date(),
+      }),
+    ),
   )
   return username
 }

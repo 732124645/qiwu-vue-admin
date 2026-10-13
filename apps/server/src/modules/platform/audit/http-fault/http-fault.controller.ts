@@ -12,11 +12,13 @@ import {
 } from '@qiwu/shared'
 import { ActionLog } from '../../../../core/audit/action-log.js'
 import { RequirePerm } from '../../../../core/auth/decorators.js'
+import { PlatformOnly } from '../../../../core/auth/platform-only.js'
 import { ExcelService, XLSX_TYPE } from '../../../../core/excel/excel.service.js'
 import { ApiEnvelope } from '../../../../core/http/api-envelope.decorator.js'
 import { httpFaultColumns, HttpFaultService } from './http-fault.service.js'
 
 @ApiTags('audit')
+@PlatformOnly('root')
 @Controller('audit/http-faults')
 export class HttpFaultController {
   constructor(

@@ -19,13 +19,15 @@
       },
       "import": {
         "title": "导入表",
-        "hint": "本库中尚未导入的表（框架表 meta_、test_、cg_ 除外）",
+        "hint": "本库中尚未导入的表（框架表与保留表 meta_、test_、cg_、wxoa_ 除外）",
         "filter": "按表名或描述筛选",
         "empty": "没有可导入的表",
         "submit": "导入选中",
         "done": "已导入 {count} 张表",
         "noDeletedAt": "缺少 deleted_at 列：加列 deleted_at datetime(3) NULL 后才能导入（生成的代码按逻辑删除）",
         "noAlive": "表 {table} 的唯一键 {key} 不含 alive 列：已删除行的值仍被占用，请把唯一键改为 (…, alive)",
+        "noTenantColumn": "表 {table} 不是平台表，却没有租户列 {key}：所有租户共用它的数据，请加上 tenant_id 列",
+        "noTenantKey": "表 {table} 的唯一键 {key} 不以 tenant_id 开头：同一个值在所有租户之间只能用一次，请把唯一键改为 (tenant_id, …, alive)",
         "noParentMenu": "表 {table}：没有可挂页面的菜单分组 {key}（或其下级分组），父菜单暂定为“业务管理”（biz）。可先在菜单管理中建好分组，再在“生成信息”页签改选。"
       },
       "sync": {

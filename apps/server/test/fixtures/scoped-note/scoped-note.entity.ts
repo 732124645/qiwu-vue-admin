@@ -3,6 +3,7 @@ import { DataScoped } from '../../../src/core/data-scope/data-scope.js'
 import { BaseEntity } from '../../../src/core/db/base.entity.js'
 import { referencedBy } from '../../../src/core/db/references.js'
 import { TestDept } from './test-dept.entity.js'
+import { TenantColumn } from '../../../src/core/db/tenant-filter.js'
 
 // the reference registry's kinds (core-db spec): a note's own links go with it (cascade), a note another
 // note links to is in use (restrict); a dept with sub-depts is in use (a table referencing itself), its
@@ -31,4 +32,7 @@ export class ScopedNote extends BaseEntity {
   @ManyToOne(() => TestDept, (dept) => dept.notes)
   @JoinColumn({ name: 'dept_id' })
   dept: Relation<TestDept> | null
+
+  @TenantColumn()
+  tenantId: number
 }

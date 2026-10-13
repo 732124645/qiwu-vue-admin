@@ -180,7 +180,7 @@ export abstract class BaseCrudService<E extends ObjectLiteral & { id: number }> 
     const qb = this.txHost.tx
       .createQueryBuilder()
       .select('1', 'ok')
-      .from(`(SELECT ${derived.join(', ')})`, 'w') // arch-allow: sql-concat column identifiers from @DataScoped; values are :params
+      .from(`(SELECT ${derived.join(', ')})`, 'w') // arch-allow: sql-concat column identifiers from @DataScoped; values are :params; tenant: no table read
       .setParameters({ wDept: valueOf(columns.dept), wOwner: valueOf(columns.owner) })
     if (!(await applyScopes(qb, 'w', columns, this.scopeRules).getRawOne()))
       throw new NotFoundException()
@@ -193,8 +193,9 @@ export abstract class BaseCrudService<E extends ObjectLiteral & { id: number }> 
 
   /**
    * 409 `err` (default `Err.DUPLICATE`, params `{ [field]: value }`) when another live row already holds
-   * `value` in `field`; `excludeId` = the row being updated. Checks the whole table, not the caller's
-   * scope, like the DB unique index it mirrors (`unique(col, alive)`; soft-deleted rows don't count).
+   * `value` in `field`; `excludeId` = the row being updated. Checks the current tenant, not the caller's
+   * scope, like the DB unique index it mirrors (`unique(tenant_id, col, alive)` on a tenant table; the
+   * ORM adds the tenant condition; soft-deleted rows don't count).
    * The index stays the real guard: a race still ends as errno 1062 → 409.
    */
   async assertUnique<K extends keyof E & string>(

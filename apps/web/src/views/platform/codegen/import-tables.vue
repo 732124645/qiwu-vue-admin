@@ -8,8 +8,8 @@ import EmptyState from '@/core/components/EmptyState.vue'
 
 /**
  * Import dialog of the generator list (`openDialog` content): the tables of this database not imported yet
- * (the server leaves out framework tables `meta_` / `test_` / `cg_`), filtered here by name or comment;
- * the ticked ones are imported in one request (all or none), `done` with the new config ids. A table
+ * (the server leaves out framework and official account tables `meta_` / `test_` / `cg_` / `wxoa_`),
+ * filtered here by name or comment; the ticked ones are imported in one request (all or none), `done` with the new config ids. A table
  * without `deleted_at` cannot be ticked, the reason in its row (the server refuses it: 422 C3010).
  */
 defineOptions({ name: 'CodegenImportTables' })
@@ -40,9 +40,12 @@ async function submit() {
   try {
     const result = await codegenApi.import(picked.value.map((r) => r.tableName))
     ElMessage.success(t('codegen.table.import.done', { count: result.ids.length }))
-    // a unique key without alive: imported anyway, fix the DDL; no menu group of its own yet: its parent is biz
+    // a unique key without alive, no tenant_id, a unique key not led by tenant_id: imported anyway, fix
+    // the DDL; no menu group of its own yet: its parent is biz
     const texts = {
       alive: 'codegen.table.import.noAlive',
+      tenant_column: 'codegen.table.import.noTenantColumn',
+      tenant_key: 'codegen.table.import.noTenantKey',
       parent_menu: 'codegen.table.import.noParentMenu',
     }
     for (const h of result.hints)

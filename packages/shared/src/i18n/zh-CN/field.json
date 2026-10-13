@@ -37,7 +37,8 @@
     "ticket": "绑定票据",
     "wxMp": {
       "code": "微信登录凭证"
-    }
+    },
+    "tenantCode": "租户编码"
   },
   "messaging": {
     "inboxMine": {

@@ -46,6 +46,8 @@ function backend(extra: Record<string, Route> = {}) {
       hints: [
         { tableName: 'shop_order', missing: 'alive', key: 'uk_shop_order_no' },
         { tableName: 'shop_order', missing: 'parent_menu', key: 'shop' },
+        { tableName: 'shop_note', missing: 'tenant_column', key: 'tenant_id' },
+        { tableName: 'shop_order', missing: 'tenant_key', key: 'uk_shop_order_no' },
       ],
     }),
     'POST /codegen/tables/1/sync': ok({
@@ -168,12 +170,14 @@ describe('codegen list', () => {
       JSON.stringify({ tableNames: ['shop_order', 'demo_invoice'] }),
     )
     expect(success).toHaveBeenCalledWith('2 table(s) imported')
-    // a unique key without alive, no menu group of its own: one warning each,
-    // imported anyway
+    // a unique key without alive, no menu group of its own, no tenant_id, a unique key not led by it:
+    // one warning each, imported anyway
     expect(warning.mock.calls.map((c: unknown[]) => (c[0] as { message: string }).message)).toEqual(
       [
         'The unique key uk_shop_order_no of shop_order lacks the alive column, so values in deleted rows cannot be reused. Change the unique key to (…, alive).',
         'Table shop_order: no menu group shop (or subgroup) is available for this page, so its parent defaults to Business (biz). Create a group in Menus, then select it on the Generation tab.',
+        'Table shop_note is not a platform table but lacks the tenant column tenant_id, so every tenant shares its rows. Add a tenant_id column.',
+        'The unique key uk_shop_order_no of shop_order does not start with tenant_id, so a value can be used only once across all tenants. Change the unique key to (tenant_id, …, alive).',
       ],
     )
     await vi.waitFor(() => expect(dialogs).toHaveLength(0))

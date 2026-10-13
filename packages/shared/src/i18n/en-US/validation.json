@@ -85,5 +85,8 @@
     "duplicate": "{field} has duplicate items",
     "refresh_needs_code": "The refresh token grant needs the authorization code grant too",
     "auto_approve_subset": "{field} may only hold scopes the client has"
-  }
+  },
+  "tenant_code_reserved": "{field} is reserved",
+  "tenant_domain": "{field} must be a host name: letters, digits, hyphens and dots (kept in lower case), without scheme, port, path or wildcard",
+  "tenant_domain_duplicate": "{field} lists a host name twice"
 }

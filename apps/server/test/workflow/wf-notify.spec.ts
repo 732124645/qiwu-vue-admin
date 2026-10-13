@@ -26,6 +26,7 @@ import { chain, fields, notify, parallel, review, T0 } from '../fixtures/wf/flow
 import { signIn } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
 import { closeSockets, connect, inbox, socketOf } from '../setup/socket.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 const PREFIX = 'e2e-wfn-'
 /** model and node names are seed keys ({i18n}: 员工 / Staff, 总部 / Headquarters) or an admin's text */
@@ -65,11 +66,11 @@ async function publish(steps: WfStep[], name = MODEL): Promise<number> {
   const key = `${PREFIX}m${++seq}`
   const tree = { id: 'begin', type: 'begin', name: 'Begin', next: chain(...steps) }
   const m = await ds.query(
-    "INSERT INTO wf_model (model_key, name, form_kind) VALUES (?, ?, 'dynamic')",
+    "INSERT INTO wf_model (tenant_id, model_key, name, form_kind) VALUES (1, ?, ?, 'dynamic')",
     [key, name],
   )
   const v = await ds.query(
-    'INSERT INTO wf_version (model_id, model_key, version, tree_json, form_snapshot) VALUES (?, ?, 1, ?, ?)',
+    'INSERT INTO wf_version (tenant_id, model_id, model_key, version, tree_json, form_snapshot) VALUES (1, ?, ?, 1, ?, ?)',
     [m.insertId, key, JSON.stringify(tree), JSON.stringify({ fields })],
   )
   return v.insertId
@@ -86,9 +87,9 @@ const input = (versionId: number) => ({
 })
 /** starts version `versionId` (at T0) in its own transaction; the instance id */
 const start = async (versionId: number) =>
-  (await cls.run(() => store.start(input(versionId), T0))).inst.id
+  (await inTenant1(() => cls.run(() => store.start(input(versionId), T0)))).inst.id
 const act = (instanceId: number, fn: (run: WfRun) => WfChangeSet | Promise<WfChangeSet>) =>
-  cls.run(() => store.act(instanceId, fn, T0))
+  inTenant1(() => cls.run(() => store.act(instanceId, fn, T0)))
 /** the pending task of `who` */
 const taskOf = (run: WfRun, who: Who) =>
   run.tasks.find((t) => t.assigneeId === u[who] && t.state === 'pending')!
@@ -142,14 +143,16 @@ beforeAll(async () => {
   await ds.query('DELETE FROM iam_user WHERE username LIKE ?', [`${PREFIX}%`])
   for (const who of WHO) {
     const en = who === 'ben' || who === 'dan'
-    u[who] = await insertRow(ds.manager, 'iam_user', {
-      username: PREFIX + who,
-      display_name: who,
-      password_hash: 'not-used-by-this-spec',
-      password_changed_at: new Date(),
-      locale: en ? 'en-US' : 'zh-CN',
-      timezone: en ? 'UTC' : 'Asia/Shanghai',
-    })
+    u[who] = await inTenant1(() =>
+      insertRow(ds.manager, 'iam_user', {
+        username: PREFIX + who,
+        display_name: who,
+        password_hash: 'not-used-by-this-spec',
+        password_changed_at: new Date(),
+        locale: en ? 'en-US' : 'zh-CN',
+        timezone: en ? 'UTC' : 'Asia/Shanghai',
+      }),
+    )
     const { accessToken } = await signIn(app, PREFIX + who)
     got[who] = inbox(await connect(socketOf(app, { token: accessToken })))
   }
@@ -248,14 +251,16 @@ describe('start', () => {
   it('wf:task waits for the outermost commit (a savepoint commit is not it); a rollback sends nothing', async () => {
     const v = await publish([review('a', { assignee: { kind: 'users', ids: [u.ann] } })])
     let id = 0
-    await cls.run(() =>
-      txHost.withTransaction(async () => {
-        await txHost.withTransaction(Propagation.Nested, async () => {
-          id = (await store.start(input(v), T0)).inst.id
-        })
-        await settle()
-        expect(pushes('ann')).toEqual([])
-      }),
+    await inTenant1(async () =>
+      cls.run(() =>
+        txHost.withTransaction(async () => {
+          await txHost.withTransaction(Propagation.Nested, async () => {
+            id = (await store.start(input(v), T0)).inst.id
+          })
+          await settle()
+          expect(pushes('ann')).toEqual([])
+        }),
+      ),
     )
     await vi.waitFor(() => expect(pushes('ann')).toEqual([id]))
     expect(await sent()).toEqual([['ann', 'wf.task.assigned']])
@@ -263,11 +268,13 @@ describe('start', () => {
     got.ann.length = 0
     const boom = new Error('boom')
     await expect(
-      cls.run(() =>
-        txHost.withTransaction(async () => {
-          await store.start(input(v), T0)
-          throw boom
-        }),
+      inTenant1(async () =>
+        cls.run(() =>
+          txHost.withTransaction(async () => {
+            await store.start(input(v), T0)
+            throw boom
+          }),
+        ),
       ),
     ).rejects.toBe(boom)
     await settle()
@@ -372,8 +379,12 @@ describe('actions', () => {
   it('overdue (the remind job) → wf.task.overdue with the due time in the recipient zone', async () => {
     const id = await start(await publish([review('a', { ...only(u.ann), timeout: { hours: 2 } })]))
     await markNow()
-    const task = await ds.getRepository(WfTaskRow).findOneByOrFail({ instanceId: id })
-    await cls.run(() => txHost.withTransaction(() => app.get(WfNotify).overdue(task)))
+    const task = await inTenant1(() =>
+      ds.getRepository(WfTaskRow).findOneByOrFail({ instanceId: id }),
+    )
+    await inTenant1(() =>
+      cls.run(() => txHost.withTransaction(() => app.get(WfNotify).overdue(task))),
+    )
     expect(await sent()).toEqual([['ann', 'wf.task.overdue']])
     expect((await inboxOf('ann'))!.body).toBe(
       `init 发起的员工（编号 ${id}）在「A」的待办已于 2026-03-01 18:00 到期，请尽快处理。`,

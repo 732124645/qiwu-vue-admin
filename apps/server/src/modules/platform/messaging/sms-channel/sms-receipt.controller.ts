@@ -18,6 +18,7 @@ import type { Response } from 'express'
 import { z } from 'zod'
 import { SkipActionLog } from '../../../../core/audit/action-log.js'
 import { Public } from '../../../../core/auth/decorators.js'
+import { allTenants } from '../../../../core/context/tenant.js'
 import { SecretBox } from '../../../../core/crypto/secret-box.js'
 import { RateLimit } from '../../../../core/guard/rate-limit.decorator.js'
 import { BizError } from '../../../../core/http/biz-error.js'
@@ -145,18 +146,21 @@ export class SmsReceiptController {
       if (Number.isNaN(receiptAt.getTime())) throw new BadRequestException()
       updates.push({ providerMsgId, status, receiptAt })
     }
-    for (const { providerMsgId, status, receiptAt } of updates) {
-      await this.txHost.tx
-        .getRepository(SmsRecord)
-        .createQueryBuilder()
-        .update()
-        .set({ receiptStatus: status, receiptAt })
-        .where('channel_id = :channelId AND provider_msg_id = :providerMsgId', {
-          channelId,
-          providerMsgId,
-        })
-        .execute()
-    }
+    // the channel's token (checked above) vouches for its receipts; one batch may hold several tenants' records
+    // qw:cross-tenant receipts update records by channel and provider message id
+    await allTenants(async () => {
+      for (const { providerMsgId, status, receiptAt } of updates)
+        await this.txHost.tx
+          .getRepository(SmsRecord)
+          .createQueryBuilder()
+          .update()
+          .set({ receiptStatus: status, receiptAt })
+          .where('channel_id = :channelId AND provider_msg_id = :providerMsgId', {
+            channelId,
+            providerMsgId,
+          })
+          .execute()
+    })
     response.json(
       driver === 'tencent'
         ? { result: 0, errmsg: 'OK' }

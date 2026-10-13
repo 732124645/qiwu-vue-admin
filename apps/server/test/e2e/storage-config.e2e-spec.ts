@@ -7,7 +7,7 @@
 import type { NestExpressApplication } from '@nestjs/platform-express'
 import { Test } from '@nestjs/testing'
 import { getDataSourceToken } from '@nestjs/typeorm'
-import { configPerms, Err, STORAGE_SECRET_MASK } from '@qiwu/shared'
+import { configPerms, DEFAULT_TENANT_ID, Err, STORAGE_SECRET_MASK } from '@qiwu/shared'
 import { I18nService } from 'nestjs-i18n'
 import request from 'supertest'
 import type { DataSource } from 'typeorm'
@@ -20,6 +20,7 @@ import { StorageConfigService } from '../../src/modules/platform/storage/config/
 import { logOf } from '../setup/audit.js'
 import { bearer, signIn } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 const PREFIX = 'e2e-config-'
 const URL = '/api/storage/configs'
@@ -67,14 +68,20 @@ const count = async () =>
 const idsOf = (res: request.Response) => res.body.data.items.map((r: { id: number }) => r.id)
 
 async function user(name: string, roles: number[]) {
-  const id = await insertRow(ds.manager, 'iam_user', {
-    username: PREFIX + name,
-    display_name: name,
-    password_hash: 'not-used-by-this-spec',
-    password_changed_at: new Date(),
-  })
+  const id = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_user', {
+      username: PREFIX + name,
+      display_name: name,
+      password_hash: 'not-used-by-this-spec',
+      password_changed_at: new Date(),
+    }),
+  )
   for (const r of roles)
-    await ds.query('INSERT INTO iam_user_roles (user_id, role_id) VALUES (?, ?)', [id, r])
+    await ds.query('INSERT INTO iam_user_roles (user_id, role_id, tenant_id) VALUES (?, ?, ?)', [
+      id,
+      r,
+      DEFAULT_TENANT_ID,
+    ])
   userIds.push(id)
   return (await signIn(app, PREFIX + name)).accessToken
 }
@@ -88,13 +95,19 @@ beforeAll(async () => {
   i18n = app.get(I18nService)
   await cleanRedis(redis)
   lastId = Number((await ds.query('SELECT COALESCE(MAX(id), 0) AS n FROM fs_storage'))[0].n)
-  roleId = await insertRow(ds.manager, 'iam_role', {
-    code: `${PREFIX}reader`,
-    name: `${PREFIX}reader`,
-    data_scope: 'all',
-  })
+  roleId = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_role', {
+      code: `${PREFIX}reader`,
+      name: `${PREFIX}reader`,
+      data_scope: 'all',
+    }),
+  )
   const browse = await findId(ds.manager, 'iam_menu', { perms: configPerms.browse })
-  await ds.query('INSERT INTO iam_role_menus (role_id, menu_id) VALUES (?, ?)', [roleId, browse])
+  await ds.query('INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, ?)', [
+    roleId,
+    browse,
+    DEFAULT_TENANT_ID,
+  ])
   tokens.admin = (await signIn(app)).accessToken
   tokens.reader = await user('reader', [roleId])
   tokens.plain = await user('plain', [])

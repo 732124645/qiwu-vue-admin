@@ -1,8 +1,17 @@
 import { Inject, Injectable, Logger } from '@nestjs/common'
-import { FIRST_PARTY_CLIENTS, RT, type RealtimeMessage } from '@qiwu/shared'
+import {
+  DEFAULT_TENANT_ID,
+  FIRST_PARTY_CLIENTS,
+  RT,
+  type RealtimeMessage,
+  SESSION_END_REASONS,
+  type SessionEndReason,
+} from '@qiwu/shared'
+import { AuditWriter } from '../audit/audit-writer.js'
 import { RealtimeService } from '../realtime/realtime.service.js'
 import { redisKey } from '../redis/cache-namespaces.js'
 import { REDIS, type Redis } from '../redis/redis.module.js'
+import { leaveRow } from './acting.js'
 import type { Session } from './token.service.js'
 
 /** Who a session belongs to: a user, or (client_credentials) only an OAuth2 client. */
@@ -40,11 +49,27 @@ const kickedMsg = (sid: string): RealtimeMessage => ({
 })
 
 /**
+ * What the sockets of sessions revoked for `reason` get before they end: a kick `session:kicked`, an end
+ * the client explains (its tenant gone, SESSION_END_REASONS) the same with that reason, others nothing.
+ */
+const lastMsg = (reason: string): ((sid: string) => RealtimeMessage) | undefined =>
+  reason === KICKED
+    ? kickedMsg
+    : (SESSION_END_REASONS as readonly string[]).includes(reason)
+      ? (sid) => ({
+          type: RT.sessionKicked,
+          payload: { sid, reason: reason as SessionEndReason },
+        })
+      : undefined
+
+/**
  * The only way a session ends early (see docs/design-notes.md#auth-sessions, #security): sign-out, kicks, password changes, disabling
- * or deleting a user or an OAuth2 client and refresh-token replay all end here. It deletes the
- * session and every token-type key registered under `auth:user:{id}`, then disconnects the session's
- * sockets (a kick first pushes `session:kicked` to them); user revocation first runs module hooks
- * (unused OTPs consumed; WeChat bindings ended on a password change). A user's pending OAuth2
+ * or deleting a user or an OAuth2 client, a tenant's end and refresh-token replay all end here. It
+ * deletes the session and every token-type key registered under `auth:user:{id}`, then disconnects the
+ * session's sockets (a kick, or an end the client explains such as its tenant's, first pushes
+ * `session:kicked`) and records the leave of a session that worked inside another tenant (see
+ * docs/design-notes.md#tenancy); user revocation first runs module hooks (unused OTPs consumed; WeChat bindings
+ * ended on a password change). A user's pending OAuth2
  * authorization codes sit in their own expiry ZSET (`auth:codes:{id}`): `revokeUser` deletes
  * them unless filtered by client; `revokeSession` leaves them alone (a code belongs to
  * no session) and `revokeClient` leaves them to the exchange, which refuses a disabled or deleted
@@ -59,6 +84,7 @@ export class SessionRevoker {
   constructor(
     @Inject(REDIS) private readonly redis: Redis,
     private readonly realtime: RealtimeService,
+    private readonly audit: AuditWriter,
   ) {}
 
   /**
@@ -134,17 +160,39 @@ export class SessionRevoker {
   async revokeClient(clientId: string, reason: string): Promise<number> {
     if ((FIRST_PARTY_CLIENTS as readonly string[]).includes(clientId))
       throw new Error(`revokeClient: ${clientId} is a first-party client`)
+    const count = await this.revokeWhere((s) => s.clientId === clientId, reason)
+    this.logger.log({ clientId, sessions: count, reason }, 'client sessions revoked')
+    return count
+  }
+
+  /**
+   * Every session of tenant `tenantId` (its sockets get `session:kicked` with the reason when it is one
+   * of SESSION_END_REASONS): the tenant was disabled or its end moved before now (see
+   * docs/design-notes.md#tenancy). Call it after the tenant row is committed, then `PermVersion.bumpAll()`:
+   * a session issued meanwhile reloads and is refused. A session that does not name its tenant is of
+   * the default one. Scans every `auth:online` member like `revokeClient`; index sessions by tenant if
+   * an install ever keeps far more online. Returns how many sessions it ended.
+   */
+  async revokeTenant(tenantId: number, reason: string): Promise<number> {
+    const count = await this.revokeWhere(
+      (s) => (s.tenantId ?? DEFAULT_TENANT_ID) === tenantId,
+      reason,
+    )
+    this.logger.log({ tenantId, sessions: count, reason }, 'tenant sessions revoked')
+    return count
+  }
+
+  /** Ends every online session `pick` selects; returns how many ended. */
+  private async revokeWhere(pick: (s: Session) => boolean, reason: string): Promise<number> {
     const sids = await this.redis.zRange(redisKey('authOnline'), 0, -1)
     if (!sids.length) return 0
     const raws = await this.redis.mGet(sids.map((sid) => redisKey('authSession', sid)))
     const mine = sids.filter((_, i) => {
       const raw = raws[i]
-      return raw != null && (JSON.parse(raw) as Session).clientId === clientId
+      return raw != null && pick(JSON.parse(raw) as Session)
     })
     const ended = await Promise.all(mine.map((sid) => this.revokeSession(sid, reason)))
-    const count = ended.filter(Boolean).length
-    this.logger.log({ clientId, sessions: count, reason }, 'client sessions revoked')
-    return count
+    return ended.filter(Boolean).length
   }
 
   /**
@@ -180,7 +228,11 @@ export class SessionRevoker {
     if (sids.size) tx.zRem(redisKey('authOnline'), [...sids]).zRem(redisKey('authSeen'), [...sids])
     await tx.exec()
     // after the keys are gone: a socket connecting meanwhile re-checks the session once it joined
-    this.realtime.endSessions(sids, reason === KICKED ? kickedMsg : undefined)
+    this.realtime.endSessions(sids, lastMsg(reason))
+    // a session inside another tenant leaves it with its end, recorded in the default tenant
+    for (const s of sessions)
+      if (s.actingTenantId !== undefined)
+        this.audit.action(leaveRow(s, reason === 'signout' ? 'signout' : 'session_end'))
     return sessions
   }
 }

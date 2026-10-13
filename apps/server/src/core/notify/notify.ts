@@ -22,6 +22,7 @@ import {
 } from 'typeorm'
 import { currentLocale, currentTimezone, timezoneOf } from '../i18n/locale.js'
 import { clsGet } from '../context/cls.js'
+import { allTenants, tenantId, withTenant } from '../context/tenant.js'
 import { formatInZone } from '../excel/excel.js'
 import { DictService } from '../settings/dict.service.js'
 import { ParamService } from '../settings/param.service.js'
@@ -50,18 +51,19 @@ export const NOTIFY_CLAIM_TIMEOUT_MS = 10 * 60_000
  * the rows are locked like `deliver`'s claim locks them (primary key first). An UPDATE over the status
  * index range locked that index first and deadlocked with a concurrent claim.
  */
-export async function expireClaims(
-  q: EntityManager,
-  table: string,
-  withError: boolean,
-): Promise<void> {
+export function expireClaims(q: EntityManager, table: string, withError: boolean): Promise<void> {
+  // qw:cross-tenant a lost sender's claims are cleared in every tenant's records
+  return allTenants(() => expireStale(q, table, withError))
+}
+
+async function expireStale(q: EntityManager, table: string, withError: boolean): Promise<void> {
   const stale = "status = 'sending' AND claimed_at < ? AND attempts >= ? AND deleted_at IS NULL"
   const args = [new Date(Date.now() - NOTIFY_CLAIM_TIMEOUT_MS), NOTIFY_MAX_ATTEMPTS]
-  // arch-allow: sql-concat the table is a channel's constant; values bound
+  // arch-allow: sql-concat the table is a channel's constant; values bound; qw:cross-tenant run by expireClaims under allTenants
   const rows: { id: number }[] = await q.query(`SELECT id FROM ${table} WHERE ${stale}`, args)
   if (!rows.length) return
   await q.query(
-    // arch-allow: sql-concat the table is a channel's constant; values bound
+    // arch-allow: sql-concat the table is a channel's constant; values bound; qw:cross-tenant run by expireClaims under allTenants
     `UPDATE ${table} SET status = 'failed'${withError ? ", error = 'interrupted'" : ''}
       WHERE id IN (?) AND ${stale}`,
     [rows.map((r) => r.id), ...args],
@@ -77,7 +79,10 @@ export type NotifyParam =
   | { i18n: string }
   | { datetime: string }
 export type NotifyParams = Record<string, NotifyParam>
-/** A user id, or a direct address that belongs to no user: rendered in the request's language and time zone. */
+/**
+ * A user id of the caller's tenant (another tenant's names no recipient), or a direct address that belongs
+ * to no user: rendered in the request's language and time zone.
+ */
 export type NotifyTo = number | { email: string } | { mobile: string }
 
 export interface NotifySend {
@@ -90,6 +95,12 @@ export interface NotifySend {
 }
 
 export type NotifyRecordIds = Partial<Record<NotifyChannelCode, number[]>>
+
+/** A record due for delivery and the tenant it belongs to. */
+export interface NotifyDue {
+  id: number
+  tenantId: number
+}
 
 /** Resolved by Notifier: users from iam_user, direct addresses from request CLS. */
 export interface NotifyRecipient {
@@ -130,8 +141,11 @@ export interface NotifyChannel<T extends NotifyTemplate = NotifyTemplate> {
    * each record column's length. Return the inserted row id, or null when no row applies.
    */
   write(draft: NotifyDraft<T>): Promise<number | null>
-  /** Record ids eligible for a first claim or a retry, including stale claims. */
-  due(limit: number): Promise<number[]>
+  /**
+   * Records eligible for a first claim or a retry, including stale claims, oldest first, each with its
+   * tenant (the dispatch job scans them in `allTenants` and delivers each in its tenant).
+   */
+  dueRows(limit: number): Promise<NotifyDue[]>
   /** Mark interrupted claims that have exhausted their attempts. */
   expire(): Promise<void>
   /**
@@ -241,7 +255,12 @@ export class NotifyDispatcher implements BeforeApplicationShutdown {
   }
 
   @JobHandler('notify.dispatch')
-  async dispatch(_params: object, { signal }: JobContext): Promise<string> {
+  dispatch(_params: object, ctx: JobContext): Promise<string> {
+    // qw:cross-tenant the outbox of every tenant is scanned; each record is delivered in its own tenant
+    return allTenants(() => this.dispatchAll(ctx))
+  }
+
+  private async dispatchAll({ signal }: JobContext): Promise<string> {
     let count = 0
     for (const channel of this.channels.all()) {
       signal.throwIfAborted()
@@ -251,10 +270,11 @@ export class NotifyDispatcher implements BeforeApplicationShutdown {
         .catch((error: unknown) =>
           this.logger.error(`Notification ${channel.code} expire failed`, error),
         )
-      for (const id of await channel.due(100)) {
+      for (const { id, tenantId } of await channel.dueRows(100)) {
         signal.throwIfAborted()
         try {
-          await channel.deliver(id)
+          // qw:cross-tenant the record's own tenant
+          await withTenant(tenantId, () => channel.deliver(id))
           count++
         } catch (error) {
           this.logger.error(`Notification ${channel.code}/${id} failed`, error)
@@ -301,7 +321,7 @@ export class NotifyTransactionSubscriber implements EntitySubscriberInterface, O
  * transaction commits; without a transaction, flush just after insertion. Rollback must leave no rows
  * or sends. Only TransactionHost / @Transactional() transactions count: a send inside a raw
  * dataSource.transaction() writes and flushes at once. The minute-based notify.dispatch job retries
- * channel.due() rows after a missed flush.
+ * channel.dueRows() records after a missed flush.
  */
 @Injectable()
 export class Notifier {
@@ -334,8 +354,8 @@ export class Notifier {
             timezone: string | null
           }[]
         >(
-          'SELECT id, email, mobile, locale, timezone FROM iam_user WHERE id IN (?) AND deleted_at IS NULL',
-          [userIds],
+          'SELECT id, email, mobile, locale, timezone FROM iam_user WHERE id IN (?) AND deleted_at IS NULL AND tenant_id = ?',
+          [userIds, tenantId()],
         )
       : []
     const byId = new Map(users.map((user) => [Number(user.id), user]))

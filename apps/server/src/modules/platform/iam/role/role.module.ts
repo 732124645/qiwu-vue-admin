@@ -2,6 +2,7 @@
 import { Module } from '@nestjs/common'
 import { TypeOrmModule } from '@nestjs/typeorm'
 import { DeptModule } from '../dept/dept.module.js'
+import { TenantPackageModule } from '../tenant-package/tenant-package.module.js'
 import { User } from '../user/user.entity.js'
 import { GrantPolicy } from './grant-policy.js'
 import { RoleMemberService } from './role-member.service.js'
@@ -10,7 +11,8 @@ import { Role } from './role.entity.js'
 import { RoleService } from './role.service.js'
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Role, User]), DeptModule],
+  // the grant tree of a tenant keeps to its package
+  imports: [TypeOrmModule.forFeature([Role, User]), DeptModule, TenantPackageModule],
   controllers: [RoleController],
   providers: [RoleService, RoleMemberService, GrantPolicy],
   exports: [RoleService, GrantPolicy],

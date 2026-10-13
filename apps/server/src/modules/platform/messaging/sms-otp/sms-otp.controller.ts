@@ -42,7 +42,7 @@ export class SmsOtpController {
   @ApiOperation({ summary: 'Request a single-use SMS verification code' })
   @ApiEnvelope(smsCodeVo)
   code(@Body({ schema: smsCodeBody }) body: SmsCodeBody, @Req() req: Request): Promise<SmsCodeVo> {
-    return this.otp.issue(body, plainIp(req.ip))
+    return this.otp.issue(body, plainIp(req.ip), req.hostname)
   }
 
   @Public()
@@ -78,7 +78,7 @@ export class SmsOtpController {
   })
   @ApiEnvelope()
   async resetPassword(@Body() body: unknown, @Req() req: Request): Promise<null> {
-    await this.smsAuth.resetPassword(body, plainIp(req.ip))
+    await this.smsAuth.resetPassword(body, plainIp(req.ip), req.hostname)
     return null
   }
 }

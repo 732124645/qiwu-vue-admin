@@ -11,7 +11,7 @@ import {
   type RealtimeType,
 } from '@qiwu/shared'
 import { currentLocale, i18n } from '@/core/i18n'
-import { accessToken, refreshAccessToken } from '@/core/request/http'
+import { accessToken, refreshAccessToken, SESSION_END_TEXT, sessionEnd } from '@/core/request/http'
 import router from '@/core/router'
 import { useAuthStore } from '@/core/stores/auth'
 
@@ -97,12 +97,15 @@ function disconnect() {
 }
 
 /**
- * An admin ended this session (iam/session kick): say so, drop the session, go to the sign-in page. The
- * refresh hint stays: it is shared with other tabs, which may hold another, live session.
+ * An admin ended this session (iam/session kick), or the server did for a `reason` (its tenant became
+ * unavailable): say which, drop the session, go to the sign-in page, which repeats a reason. The refresh
+ * hint stays: it is shared with other tabs, which may hold another, live session.
  */
-function kicked() {
-  ElMessage.warning(i18n.global.t('common.session.kicked'))
+function kicked({ reason }: RealtimePayloads['session:kicked']) {
+  const text = reason && SESSION_END_TEXT[reason]
+  ElMessage.warning(i18n.global.t(text || 'common.session.kicked'))
   useAuthStore().clear()
+  sessionEnd.value = reason && text ? reason : null
   const { fullPath, meta } = router.currentRoute.value
   void router.push(meta.public ? '/login' : { path: '/login', query: { redirect: fullPath } })
 }

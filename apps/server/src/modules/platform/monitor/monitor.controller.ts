@@ -21,6 +21,7 @@ import { z } from 'zod'
 import { ActionLog } from '../../../core/audit/action-log.js'
 import { SkipHttpTrace } from '../../../core/audit/http-trace.js'
 import { RequirePerm } from '../../../core/auth/decorators.js'
+import { PlatformOnly } from '../../../core/auth/platform-only.js'
 import { ApiEnvelope } from '../../../core/http/api-envelope.decorator.js'
 import { CacheMonitorService } from './cache.service.js'
 import { MonitorService } from './monitor.service.js'
@@ -34,6 +35,7 @@ const clearedBizId = (req: Request) => req.query.ns ?? req.query.key
  * `all` would fill with them; the clean-ups keep their access and action log rows.
  */
 @ApiTags('monitor')
+@PlatformOnly()
 @Controller('monitor')
 export class MonitorController {
   constructor(
@@ -71,6 +73,7 @@ export class MonitorController {
   @Get('cache/namespaces')
   @SkipHttpTrace()
   @RequirePerm(monitorPerms.cache)
+  @PlatformOnly('root')
   @ApiOperation({ summary: 'The registered cache namespaces' })
   @ApiEnvelope(z.array(cacheNamespaceVo))
   namespaces() {
@@ -80,6 +83,7 @@ export class MonitorController {
   @Get('cache/keys')
   @SkipHttpTrace()
   @RequirePerm(monitorPerms.cache)
+  @PlatformOnly('root')
   @ApiOperation({ summary: 'Keys of one registered namespace (SCAN, capped)' })
   @ApiEnvelope(cacheKeysVo)
   keys(@Query({ schema: cacheKeysQuery }) { ns }: CacheKeysQuery) {
@@ -89,6 +93,7 @@ export class MonitorController {
   @Get('cache/value')
   @SkipHttpTrace()
   @RequirePerm(monitorPerms.cache)
+  @PlatformOnly('root')
   @ApiOperation({ summary: 'Type, TTL and value of one key (masked namespaces: no value)' })
   @ApiEnvelope(cacheValueVo)
   value(@Query({ schema: cacheValueQuery }) { key }: CacheValueQuery) {
@@ -97,6 +102,7 @@ export class MonitorController {
 
   @Delete('cache/keys')
   @RequirePerm(monitorPerms.cacheClear)
+  @PlatformOnly('root')
   @ActionLog({ domain: 'monitor.cache', verb: 'remove', bizId: clearedBizId })
   @ApiOperation({ summary: 'Delete a clearable namespace (ns) or one key of one (key)' })
   @ApiEnvelope(cacheClearVo)
@@ -106,6 +112,7 @@ export class MonitorController {
 
   @Delete('cache/all-registered')
   @RequirePerm(monitorPerms.cacheClear)
+  @PlatformOnly('root')
   @ActionLog({ domain: 'monitor.cache', verb: 'clean' })
   @ApiOperation({ summary: 'Delete the keys of every clearable namespace' })
   @ApiEnvelope(cacheClearVo)

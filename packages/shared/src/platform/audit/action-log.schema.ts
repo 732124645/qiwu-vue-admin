@@ -51,5 +51,7 @@ export const actionLogVo = z.object({
   errorMsg: z.string().nullable(),
   costMs: z.number().int(),
   createdAt: z.iso.datetime(),
+  /** the actor's own tenant: another one than the row's = a platform user working inside this tenant */
+  actorTenantId: z.number().int(),
 })
 export type ActionLogVo = z.infer<typeof actionLogVo>

@@ -74,6 +74,8 @@
     "send": "Send",
     "broadcast": "Send to everyone",
     "manage": "Reassign and terminate",
-    "managers": "Appoint process managers"
+    "managers": "Appoint process managers",
+    "enterTenant": "Enter tenant",
+    "resetInitialPassword": "Reset initial password"
   }
 }

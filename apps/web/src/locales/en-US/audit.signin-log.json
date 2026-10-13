@@ -7,7 +7,9 @@
       "cleaned": "Cleared",
       "unlock": "Unlock account",
       "unlockConfirm": "Unlock sign-ins for the username “{username}”?",
-      "unlocked": "{username} unlocked"
+      "unlocked": "{username} unlocked",
+      "platform": "Platform",
+      "unresolvedTenant": "Unresolved tenant"
     }
   },
   "menu": {

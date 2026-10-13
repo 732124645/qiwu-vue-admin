@@ -15,6 +15,7 @@ import { REDIS, type Redis } from '../../src/core/redis/redis.module.js'
 import { findId, insertRow } from '../../src/db/seeds/upsert.js'
 import { bearer, signIn } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 const PREFIX = 'e2e-wfa-'
 const KEY = `${PREFIX}m`
@@ -62,7 +63,7 @@ const eventsOf = (instanceId: number, action: string) =>
   )
 
 async function add(table: keyof typeof made, row: Record<string, unknown>) {
-  const id = await insertRow(ds.manager, table, row)
+  const id = await inTenant1(() => insertRow(ds.manager, table, row))
   made[table].push(id)
   return id
 }
@@ -92,7 +93,7 @@ async function role(name: string, dataScope: string, perms: string[]) {
     data_scope: dataScope,
   })
   for (const p of perms)
-    await ds.query('INSERT INTO iam_role_menus (role_id, menu_id) VALUES (?, ?)', [
+    await ds.query('INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, 1)', [
       id,
       await findId(ds.manager, 'iam_menu', { perms: p }),
     ])
@@ -110,7 +111,10 @@ async function user(name: string, deptName: string, roles: number[] = [], enable
     enabled,
   })
   for (const r of roles)
-    await ds.query('INSERT INTO iam_user_roles (user_id, role_id) VALUES (?, ?)', [u[name], r])
+    await ds.query('INSERT INTO iam_user_roles (user_id, role_id, tenant_id) VALUES (?, ?, 1)', [
+      u[name],
+      r,
+    ])
   if (enabled) tokens[name] = (await signIn(app, PREFIX + name)).accessToken
 }
 
@@ -138,7 +142,7 @@ beforeAll(async () => {
   const narrow = await role('narrow', 'own_dept_tree', [instance.browse, task.browse, task.manage])
   const wide = await role('wide', 'all', [instance.browse])
   const browse = await role('browse', 'all', [instance.browse, task.browse])
-  const staff = (await findId(ds.manager, 'iam_role', { code: 'staff' }))!
+  const staff = (await inTenant1(() => findId(ds.manager, 'iam_role', { code: 'staff' })))!
   for (const name of ['carol', 'erin', 'frank']) await user(name, 'other')
   await user('dave', 'other', [], false)
   await user('alice', 'sub')
@@ -164,14 +168,13 @@ beforeAll(async () => {
       onReject: 'finish',
     },
   }
-  const m = await ds.query('INSERT INTO wf_model (model_key, name, form_kind) VALUES (?, ?, ?)', [
-    KEY,
-    `${PREFIX}name`,
-    'dynamic',
-  ])
+  const m = await ds.query(
+    'INSERT INTO wf_model (model_key, name, form_kind, tenant_id) VALUES (?, ?, ?, 1)',
+    [KEY, `${PREFIX}name`, 'dynamic'],
+  )
   const v = await ds.query(
-    `INSERT INTO wf_version (model_id, model_key, version, tree_json, form_snapshot)
-     VALUES (?, ?, 1, ?, ?)`,
+    `INSERT INTO wf_version (model_id, model_key, version, tree_json, form_snapshot, tenant_id)
+     VALUES (?, ?, 1, ?, ?, 1)`,
     [m.insertId, KEY, JSON.stringify(tree), JSON.stringify({ fields: {} })],
   )
   await ds.query('UPDATE wf_model SET current_version_id = ? WHERE id = ?', [

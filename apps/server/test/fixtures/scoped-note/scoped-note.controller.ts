@@ -65,6 +65,19 @@ export class ScopedNoteController {
     return this.notes.options()
   }
 
+  @Get('with-dept')
+  @RequirePerm(notePerms.browse)
+  listWithDept(@Query({ schema: noteQuery }) query: NoteQuery) {
+    return this.notes.pageWithDept(query)
+  }
+
+  /** A @SkipDataScope() read (a system job's count): every live row of the tenant, whoever calls. */
+  @Get('count')
+  @RequirePerm(notePerms.browse)
+  count() {
+    return this.notes.countAll()
+  }
+
   @Get(':id')
   @RequirePerm(notePerms.view)
   get(@Param('id', ParseIntPipe) id: number) {
@@ -100,6 +113,22 @@ export class ScopedNoteController {
   @RequirePerm(notePerms.remove)
   remove(@Param('id', ParseIntPipe) id: number) {
     return this.notes.remove([id])
+  }
+
+  /** A generated import's upsert, without the sheet: by title, the row the caller's scope sees or a new one. */
+  @Post('upsert')
+  @HttpCode(200)
+  @RequirePerm(notePerms.create)
+  async upsert(@Body({ schema: noteBody }) dto: z.output<typeof noteBody>) {
+    await this.notes.upsert(dto)
+  }
+
+  /** Soft-deletes every row, like a log's clean (a QueryBuilder soft delete without WHERE). */
+  @Post('clean')
+  @HttpCode(200)
+  @RequirePerm(notePerms.remove)
+  clean() {
+    return this.notes.clean()
   }
 
   @Post('batch-delete')

@@ -34,6 +34,7 @@ import {
 import { logOf } from '../setup/audit.js'
 import { bearer, signIn } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 const PREFIX = 'oauth2-e2e-'
 const PW = 'Oauth2#Pass1'
@@ -61,15 +62,20 @@ const pkce = () => {
 }
 
 async function user(name: string, roles: number[] = []) {
-  const id = await insertRow(ds.manager, 'iam_user', {
-    username: PREFIX + name,
-    display_name: name,
-    password_hash: await bcrypt.hash(PW, 4),
-    password_changed_at: new Date(),
-  })
+  const id = await inTenant1(async () =>
+    insertRow(ds.manager, 'iam_user', {
+      username: PREFIX + name,
+      display_name: name,
+      password_hash: await bcrypt.hash(PW, 4),
+      password_changed_at: new Date(),
+    }),
+  )
   userIds.push(id)
   for (const r of roles)
-    await ds.query('INSERT INTO iam_user_roles (user_id, role_id) VALUES (?, ?)', [id, r])
+    await ds.query('INSERT INTO iam_user_roles (user_id, role_id, tenant_id) VALUES (?, ?, 1)', [
+      id,
+      r,
+    ])
   return id
 }
 
@@ -713,13 +719,15 @@ describe('sessions', () => {
   })
 
   it('a non-root operator neither lists nor kicks a client_credentials session (404)', async () => {
-    roleId = await insertRow(ds.manager, 'iam_role', {
-      code: `${PREFIX}ops`,
-      name: `${PREFIX}ops`,
-      data_scope: 'all',
-    })
+    roleId = await inTenant1(() =>
+      insertRow(ds.manager, 'iam_role', {
+        code: `${PREFIX}ops`,
+        name: `${PREFIX}ops`,
+        data_scope: 'all',
+      }),
+    )
     for (const perm of [sessionPerms.browse, sessionPerms.kick])
-      await ds.query('INSERT INTO iam_role_menus (role_id, menu_id) VALUES (?, ?)', [
+      await ds.query('INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, 1)', [
         roleId,
         await findId(ds.manager, 'iam_menu', { perms: perm }),
       ])
@@ -1001,7 +1009,7 @@ describe('authorize', () => {
   })
 
   it('userinfo: user.read tokens of a user only — without the scope 403, client_credentials 403 B4003', async () => {
-    const u = (await app.get(PermVersion).load(cat))!
+    const u = (await inTenant1(() => app.get(PermVersion).load(cat)))!
     const noScope = await tokens.issue(u, {
       clientId: 'crm',
       scopes: [],

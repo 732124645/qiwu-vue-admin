@@ -4,7 +4,7 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import dayjs from 'dayjs'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { signinLogPerms, type SigninLogVo } from '@qiwu/shared'
+import { DEFAULT_TENANT_ID, signinLogPerms, type SigninLogVo } from '@qiwu/shared'
 import { signinLogApi } from '@/api/platform/audit/signin-log'
 import DictSelect from '@/core/components/DictSelect.vue'
 import DictTag from '@/core/components/DictTag.vue'
@@ -13,8 +13,10 @@ import Pagination from '@/core/components/Pagination.vue'
 import TableToolbar from '@/core/components/TableToolbar.vue'
 import { useCrudList } from '@/core/composables/use-crud'
 import type { QwColumn } from '@/core/composables/use-table-prefs'
+import { tx } from '@/core/i18n'
 import { Icon } from '@/core/icons'
 import { usePerm } from '@/core/permission'
+import { useAuthStore } from '@/core/stores/auth'
 import SigninLogDetail from './detail.vue'
 
 // keep-alive name = the seeded menu's component_name
@@ -45,13 +47,23 @@ const {
     ip: '',
     ok: null as string | null,
     createdAtRange: null as [string, string] | null,
+    unresolved: null as true | null,
   },
   sort: '-createdAt',
 })
 const showSearch = ref(true)
+const auth = useAuthStore()
+/**
+ * The platform root's filter (only while multi-tenancy is on): the attempts of no tenant (an unknown tenant
+ * code) instead of this tenant's. Unset is left out of the query.
+ */
+const unresolved = computed({
+  get: () => !!query.unresolved,
+  set: (on: boolean) => (query.unresolved = on || null),
+})
 // order and visibility are the user's column settings (table id `audit.signinLog`); short columns get a
 // fixed width (longest locale's header + sort caret); the free text, else the name, takes the rest
-const columns: QwColumn[] = [
+const columns = computed((): QwColumn[] => [
   { prop: 'kind', label: 'field.audit.signinLog.kind', width: 120, showOverflowTooltip: true },
   {
     prop: 'username',
@@ -60,6 +72,17 @@ const columns: QwColumn[] = [
     showOverflowTooltip: true,
   },
   { prop: 'userType', label: 'field.audit.signinLog.userType', width: 140 },
+  // only while multi-tenancy is on (`/me.tenant`)
+  ...(auth.tenant
+    ? [
+        {
+          prop: 'tenantId',
+          label: 'field.audit.signinLog.tenantId',
+          width: 140,
+          showOverflowTooltip: true,
+        },
+      ]
+    : []),
   { prop: 'ip', label: 'field.audit.signinLog.ip', width: 160, showOverflowTooltip: true },
   {
     prop: 'browser',
@@ -71,11 +94,20 @@ const columns: QwColumn[] = [
   { prop: 'ok', label: 'field.audit.signinLog.ok', width: 100 },
   { prop: 'msg', label: 'field.audit.signinLog.msg', minWidth: 200, showOverflowTooltip: true },
   { prop: 'createdAt', label: 'field.common.createdAt', sortable: true, width: 160 },
-]
+])
+/** The row's tenant: none (an unknown tenant code), the platform (the default tenant) or this tenant. */
+const rowTenant = ({ tenantId }: SigninLogVo) =>
+  tenantId === null
+    ? t('audit.signinLog.unresolvedTenant')
+    : tenantId === DEFAULT_TENANT_ID
+      ? t('audit.signinLog.platform')
+      : tx(auth.tenant?.name ?? '')
 // computed: the perms reload when the server's permission version moves
 const perm = usePerm()
 // the detail drawer loads GET /:id, which needs `view`
 const canView = computed(() => perm.has(signinLogPerms.view))
+// the unresolved rows are listed only: GET /:id and delete answer 404 for them
+const rowActions = computed(() => !query.unresolved)
 
 const detailId = ref<number>()
 const detailOpen = ref(false)
@@ -156,6 +188,12 @@ async function unlock() {
         <el-form-item :label="t('field.audit.signinLog.ok')">
           <DictSelect v-model="query.ok" code="core.yes_no" />
         </el-form-item>
+        <el-form-item
+          v-if="auth.tenant && auth.platformRoot"
+          :label="t('audit.signinLog.unresolvedTenant')"
+        >
+          <el-switch v-model="unresolved" />
+        </el-form-item>
         <el-form-item :label="t('field.common.createdAt')" class="qw-search-wide">
           <el-date-picker
             v-model="query.createdAtRange"
@@ -211,7 +249,7 @@ async function unlock() {
           {{ t('audit.signinLog.clean') }}
         </el-button>
         <el-button
-          v-if="selection.length"
+          v-if="selection.length && rowActions"
           v-perm="signinLogPerms.remove"
           type="danger"
           plain
@@ -235,6 +273,7 @@ async function unlock() {
         <template #cell-kind="{ row }">
           <DictTag code="audit.signin_kind" :value="row.kind" />
         </template>
+        <template #cell-tenantId="{ row }">{{ rowTenant(row) }}</template>
         <template #cell-userType="{ row }"
           ><DictTag code="audit.user_type" :value="row.userType"
         /></template>
@@ -246,7 +285,7 @@ async function unlock() {
         }}</template>
         <template #cell-username="{ row }">
           <el-button
-            v-if="canView"
+            v-if="canView && rowActions"
             link
             type="primary"
             class="qw-cell-link"
@@ -257,7 +296,13 @@ async function unlock() {
           <template v-else>{{ row.username }}</template>
         </template>
         <template #actions="{ row }">
-          <el-button v-perm="signinLogPerms.remove" link type="danger" @click="remove([row.id])">
+          <el-button
+            v-if="rowActions"
+            v-perm="signinLogPerms.remove"
+            link
+            type="danger"
+            @click="remove([row.id])"
+          >
             {{ t('crud.action.delete') }}
           </el-button>
         </template>

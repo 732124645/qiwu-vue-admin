@@ -21,13 +21,14 @@ const DYN_MODEL = 'M-wfd expense claim'
 // dynamic-form model. Prints the ids.
 const SEED = `
 import { DataSource } from 'typeorm'
+import { withTenant } from './dist/core/context/tenant.js'
 import { dataSourceOptions } from './dist/db/data-source.js'
 import { seedLimitedUser } from './dist/db/seeds/iam/iam.seed.js'
 import { insertRow } from './dist/db/seeds/upsert.js'
 const { OWNER, BOSS, STRANGER, COMMENT, REASON, DYN_MODEL } = process.env
 const ds = await new DataSource(dataSourceOptions()).initialize()
 try {
-  await ds.transaction(async (q) => {
+  await withTenant(1, () => ds.transaction(async (q) => {
     const user = (u) => seedLimitedUser(q, JSON.parse(u).username, JSON.parse(u).password)
     const owner = await user(OWNER)
     const boss = await user(BOSS)
@@ -78,7 +79,7 @@ try {
     })
     await q.query('UPDATE wf_model SET current_version_id = ? WHERE id = ?', [dyn, model])
     console.log(JSON.stringify({ leave, instance: id, dynamic: await instance(dyn, 'm_wfd_dyn', null) }))
-  })
+  }))
 } finally {
   await ds.destroy()
 }

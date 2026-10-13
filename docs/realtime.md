@@ -7,27 +7,27 @@
 - 每个已登录的浏览器标签页一条 Socket.IO 连接（路径 `/socket.io`，只用 websocket 传输）。连接由 `apps/web/src/core/realtime/socket.ts` 的 `startRealtime()`（`main.ts` 启动时调用一次）统一管理：出现访问令牌即连接，令牌更换即用新令牌重连，登出即关闭。业务代码从不自己调用 `io()`。
 - 只有服务端 → 浏览器一个方向：网关 `apps/server/src/core/realtime/realtime.gateway.ts` 没有入站处理器，浏览器只监听。
 - 所有推送走同一个 Socket.IO 事件 `REALTIME_EVENT`（`'message'`），内容是信封 `RealtimeMessage` `{ type, payload }`，前端按 `type` 分发。契约只在 `packages/shared/src/common/realtime.ts` 定义一处，服务端与前端共用同一组类型。
-- 握手通过后，socket 由服务端加入三个房间：`user:{id}`、`sid:{sid}`、`type:{userType}`（`realtime.service.ts` 的 `rooms`）。客户端无法选择或加入其他房间。
+- 握手通过后，socket 由服务端加入四个房间：`user:{id}`、`sid:{sid}`、`tenant:{tid}`、`type:{tid}:{userType}`（`tid` 取自会话的租户；`realtime.service.ts` 的 `rooms`）。客户端无法选择或加入其他房间；没有跨租户的房间。默认租户的 `tid` 是 1，多租户开关关闭时所有 socket 都在 `tenant:1`。平台人员进入其他租户期间，socket 仍只在本人租户的这四个房间里，不加入目标租户的房间（进入与退出都整页重载，重连后照旧）。
 
 ## 服务端：`RealtimeService`
 
 `CoreRealtimeModule` 是全局模块：任何 service 直接在构造函数里注入 `RealtimeService`，不用 import 模块。
 
-| 方法                        | 送达                                                                                 |
-| --------------------------- | ------------------------------------------------------------------------------------ |
-| `toUser(userId, msg)`       | 该用户所有已连接的标签页（房间 `user:{id}`）                                         |
-| `toUsers(userIds, msg)`     | 多个用户；同一 socket 只收到一次；空数组什么都不发                                   |
-| `toUserType(userType, msg)` | 某一用户类型的全部 socket（房间 `type:{userType}`）                                  |
-| `broadcast(msg)`            | 所有已登录的 socket                                                                  |
-| `onlineUsers(userIds?)`     | 整个部署中有 socket 的不同用户数（在给定 id 中，或全部）；在发送前调用即得"送达人数" |
+| 方法                             | 送达                                                                                                 |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `toUser(userId, msg)`            | 该用户所有已连接的标签页（房间 `user:{id}`）                                                         |
+| `toUsers(userIds, msg)`          | 多个用户；同一 socket 只收到一次；空数组什么都不发                                                   |
+| `toUserType(tid, userType, msg)` | 租户 `tid` 里某一用户类型的全部 socket（房间 `type:{tid}:{userType}`）                               |
+| `toTenant(tid, msg)`             | 租户 `tid` 的所有已登录 socket（房间 `tenant:{tid}`）；当前请求的租户用 `tenantId()`                 |
+| `onlineUsers(userIds?)`          | 整个部署中有 socket 的不同用户数（在给定 id 中，或当前上下文租户的全部）；在发送前调用即得"送达人数" |
 
-现有用法：站内信投递后 `toUser(userId, { type: RT.notifyNew, payload: { id, title } })`（`inbox.channel.ts`），公告发布 / 撤回 / 删除后 `broadcast({ type: RT.notifyBulletin, payload: { action, ids } })`（`bulletin.service.ts`），示例页 `toUsers` / `broadcast`（`modules/demo/realtime/realtime.service.ts`），流程动作在最外层事务提交后 `toUsers(…, { type: RT.wfTask, payload: { instanceId } })`（`modules/workflow/runtime/wf-notify.ts`，调用方外层还有事务时也等到那次提交）。信封按 `type` 做类型检查：`payload` 必须符合 `RealtimePayloads[type]`。
+现有用法：站内信投递后 `toUser(userId, { type: RT.notifyNew, payload: { id, title } })`（`inbox.channel.ts`），公告发布 / 撤回 / 删除后 `toTenant(tenantId(), { type: RT.notifyBulletin, payload: { action, ids } })`（`bulletin.service.ts`），示例页 `toUsers` / `toTenant`（`modules/demo/realtime/realtime.service.ts`），流程动作在最外层事务提交后 `toUsers(…, { type: RT.wfTask, payload: { instanceId } })`（`modules/workflow/runtime/wf-notify.ts`，调用方外层还有事务时也等到那次提交）。信封按 `type` 做类型检查：`payload` 必须符合 `RealtimePayloads[type]`。
 
 规则：
 
 - **提交之后再推**：在事务提交之后调用（`withTransaction(...)` 返回之后，或像站内信那样在状态写入之后），不要在事务内部推送；否则接收方可能按推送去读，却读到尚未提交或已回滚的数据。
 - **推送是提示，不是数据通道**：只带标识和显示所需的最少字段，接收方需要详情时经 HTTP 接口按自己的权限与数据范围读取。例如 `notify:bulletin` 只带 `{ action, ids }`，不带公告正文。
-- **收件人由服务端决定**：`toUser(s)` 的 id 由服务端按权限与数据范围算出，不要直接采用请求体里的 id。示例页的"指定用户 / 角色"经 `scopedQb` 只取调用者 `iam_user` 数据范围内的启用用户，范围外的静默排除；"全员"另需 `demo.realtime.broadcast`。`broadcast` 会送到每个已登录用户（包括没有相关权限的人），只用于人人都能读的内容。
+- **收件人由服务端决定**：`toUser(s)` 的 id 由服务端按权限与数据范围算出，不要直接采用请求体里的 id。示例页的"指定用户 / 角色"经 `scopedQb` 只取调用者 `iam_user` 数据范围内的启用用户，范围外的静默排除；"全员"另需 `demo.realtime.broadcast`。`toTenant` 会送到该租户每个已登录用户（包括没有相关权限的人），只用于该租户人人都能读的内容；没有推给所有租户的方法。
 - **即发即弃**：方法同步返回，不等待也不确认送达；不在线的用户收不到，之后也不补发。必须送达的内容先落库（如站内信 `msg_inbox`），推送只负责"有新内容"的提醒。
 - 网关就绪之前（CLI、种子、迁移脚本）所有方法都是空操作，调用方不用判断。
 - `endSessions` 只供 `SessionRevoker` 使用（断开被结束会话的 socket，强退时先推 `session:kicked`），业务代码不要调用。
@@ -84,13 +84,13 @@
 
 现有类型：
 
-| 类型              | 载荷                               | 发给                                                                                   |
-| ----------------- | ---------------------------------- | -------------------------------------------------------------------------------------- |
-| `session:kicked`  | `{ sid }`                          | 被管理员强退的会话，随后断开                                                           |
-| `notify:new`      | `{ id, title }`                    | 站内信的收件人（`user:{id}`）                                                          |
-| `notify:bulletin` | `{ action, ids }`                  | 所有已登录的 socket                                                                    |
-| `demo:message`    | `{ from: { id, name }, text, at }` | 示例页选定的用户 / 角色成员 / 全员                                                     |
-| `wf:task`         | `{ instanceId }`                   | 待办有变化的用户（分配、办理、取消等），流程动作的事务提交后推送；前端刷新待办数与列表 |
+| 类型              | 载荷                                                                           | 发给                                                                                   |
+| ----------------- | ------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------- |
+| `session:kicked`  | `{ sid, reason? }`（`reason` 只在不是普通踢出时下发，如 `tenant_unavailable`） | 被管理员强退或因租户不可用而结束的会话，随后断开                                       |
+| `notify:new`      | `{ id, title }`                                                                | 站内信的收件人（`user:{id}`）                                                          |
+| `notify:bulletin` | `{ action, ids }`                                                              | 发布者所在租户的所有已登录 socket（`tenant:{tid}`）                                    |
+| `demo:message`    | `{ from: { id, name }, text, at }`                                             | 示例页选定的用户 / 角色成员 / 本租户全员                                               |
+| `wf:task`         | `{ instanceId }`                                                               | 待办有变化的用户（分配、办理、取消等），流程动作的事务提交后推送；前端刷新待办数与列表 |
 
 ## 前端：`onRealtime` 订阅
 
@@ -146,7 +146,7 @@ onRealtime(RT.demoMessage, (m) => {
 
 ## 多实例部署
 
-服务端在统一的 `setupApp` 入口挂载 `@socket.io/redis-adapter` 的分片适配器（`createShardedAdapter`，`subscriptionMode: 'dynamic'`），生产与测试使用同一入口。`toUser` / `toUsers` / `toUserType` / `broadcast` 跨实例送达；`onlineUsers` 通过 `fetchSockets()` 统计整个部署中不同的在线用户；`SessionRevoker` 先推 `session:kicked` 再跨实例断开被结束会话的连接。人数是发送时的在线快照，不是客户端确认收到了消息。
+服务端在统一的 `setupApp` 入口挂载 `@socket.io/redis-adapter` 的分片适配器（`createShardedAdapter`，`subscriptionMode: 'dynamic'`），生产与测试使用同一入口。`toUser` / `toUsers` / `toUserType` / `toTenant` 跨实例送达；`onlineUsers` 通过 `fetchSockets()` 统计整个部署中不同的在线用户；`SessionRevoker` 先推 `session:kicked` 再跨实例断开被结束会话的连接。人数是发送时的在线快照，不是客户端确认收到了消息。
 
 部署前按 [scale-out.md](scale-out.md) 核对配置：Redis ≥ 7；所有实例连接同一 MySQL 库、同一 Redis 服务与 `REDIS_DB`，使用相同的 `REDIS_KEY_PREFIX`。频道由 `redisChannel` 构造为 `qw:socket.io:<REDIS_DB>`，定时任务同步频道为 `qw:job:sync:<REDIS_DB>`。Pub/Sub 不按 Redis 库隔离，所以不同部署必须使用不同的库号和频道前缀；不能让两个独立环境组成一个集群。
 

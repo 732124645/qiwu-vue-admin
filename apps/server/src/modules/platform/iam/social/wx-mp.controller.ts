@@ -16,6 +16,7 @@ import { z } from 'zod'
 import { ActionLog, SkipActionLog } from '../../../../core/audit/action-log.js'
 import { answerWithTokens, clientOf, tokenPayload } from '../../../../core/auth/auth.controller.js'
 import { Public } from '../../../../core/auth/decorators.js'
+import { HomeTenant } from '../../../../core/auth/tenant-scope.js'
 import { MOBILE_CLIENT } from '../../../../core/auth/token.service.js'
 import { AppConfigService } from '../../../../core/config/config.module.js'
 import { clsGet } from '../../../../core/context/cls.js'
@@ -89,6 +90,7 @@ export class WxMpAuthController {
 
 @ApiTags('iam')
 @Controller('iam/profile/socials')
+@HomeTenant()
 export class ProfileSocialController {
   constructor(
     private readonly wxMp: WxMpService,

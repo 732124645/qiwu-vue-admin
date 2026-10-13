@@ -20,7 +20,7 @@ export class SoftDeleteAll20260929100000 implements MigrationInterface {
 
   async up(q: QueryRunner): Promise<void> {
     for (const [table, name] of FOREIGN_KEYS)
-      // arch-allow: sql-concat table/key identifiers are this file's constants
+      // arch-allow: sql-concat table/key identifiers are this file's constants; tenant: a migration runs once over every tenant's rows
       await q.query(`ALTER TABLE ${table} DROP FOREIGN KEY ${name}`)
     await q.query('ALTER TABLE demo_book RENAME INDEX fk_demo_book_dept TO idx_demo_book_dept')
     for (const [table, after, keys] of TABLES) {
@@ -29,18 +29,18 @@ export class SoftDeleteAll20260929100000 implements MigrationInterface {
       if (keys.length) alter.push(`ADD COLUMN ${ALIVE} AFTER deleted_at`)
       for (const [name, columns] of keys)
         alter.push(`DROP INDEX ${name}`, `ADD UNIQUE KEY ${name} (${columns}, alive)`)
-      // arch-allow: sql-concat table/key/column identifiers are this file's constants
+      // arch-allow: sql-concat table/key/column identifiers are this file's constants; tenant: a migration runs once over every tenant's rows
       await q.query(`ALTER TABLE ${table} ${alter.join(', ')}`)
     }
   }
 
   async down(q: QueryRunner): Promise<void> {
     for (const [table] of TABLES)
-      // arch-allow: sql-concat the table identifier is this file's constant
+      // arch-allow: sql-concat the table identifier is this file's constant; tenant: a migration runs once over every tenant's rows
       await q.query(`DELETE FROM ${table} WHERE deleted_at IS NOT NULL`)
     for (const [child, column, parent] of CASCADED)
       await q.query(
-        // arch-allow: sql-concat table/column identifiers are this file's constants
+        // arch-allow: sql-concat table/column identifiers are this file's constants; tenant: a migration runs once over every tenant's rows
         `DELETE c FROM ${child} c LEFT JOIN ${parent} p ON p.id = c.${column} WHERE p.id IS NULL`,
       )
     for (const [table, , keys] of TABLES) {
@@ -50,12 +50,12 @@ export class SoftDeleteAll20260929100000 implements MigrationInterface {
       ])
       if (keys.length) alter.push('DROP COLUMN alive')
       alter.push('DROP COLUMN deleted_at')
-      // arch-allow: sql-concat table/key/column identifiers are this file's constants
+      // arch-allow: sql-concat table/key/column identifiers are this file's constants; tenant: a migration runs once over every tenant's rows
       await q.query(`ALTER TABLE ${table} ${alter.join(', ')}`)
     }
     await q.query('ALTER TABLE demo_book RENAME INDEX idx_demo_book_dept TO fk_demo_book_dept')
     for (const [table, name, ddl] of FOREIGN_KEYS)
-      // arch-allow: sql-concat table/key identifiers and definitions are this file's constants
+      // arch-allow: sql-concat table/key identifiers and definitions are this file's constants; tenant: a migration runs once over every tenant's rows
       await q.query(`ALTER TABLE ${table} ADD CONSTRAINT ${name} ${ddl}`)
   }
 }

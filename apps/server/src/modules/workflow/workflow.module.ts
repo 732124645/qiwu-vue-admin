@@ -71,7 +71,7 @@ import { typeormOrg } from './typeorm-org.js'
       inject: [TransactionHost],
       useFactory: (txHost: TransactionHost<TransactionalAdapterTypeOrm>) =>
         typeormOrg({
-          // arch-allow: sql-concat forwards typeorm-org's literal, parameterized SQL to the current tx
+          // arch-allow: sql-concat forwards typeorm-org's literal, parameterized SQL to the current tx; tenant: those literals are checked in typeorm-org.ts
           query: (sql: string, params?: unknown[]) => txHost.tx.query(sql, params),
         }),
     },

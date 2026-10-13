@@ -29,6 +29,7 @@ import {
   WX_SUBSCRIBE_TEMPLATES_PARAM,
 } from '@qiwu/shared'
 import type { EntityManager } from 'typeorm'
+import { allTenants } from '../../../core/context/tenant.js'
 import { softDeleteWhere } from '../../../core/db/references.js'
 import { findId, findRow, insertRow, type Row, upsert } from '../upsert.js'
 
@@ -379,7 +380,7 @@ async function seedDictRow(
   if (!found) await insertRow(q, table, { ...key, ...row, [column]: texts })
   else if (!found.deleted)
     await q.query(
-      // arch-allow: sql-concat table and column names are the constants above; every value is bound
+      // arch-allow: sql-concat table and column names are the constants above; every value is bound; tenant: cfg_dict and cfg_dict_entry are platform tables
       `UPDATE ${table} SET ${column} = JSON_MERGE_PATCH(CAST(? AS JSON), COALESCE(${column}, JSON_OBJECT()))
         WHERE id = ?`,
       [JSON.stringify(texts), found.id],
@@ -413,7 +414,8 @@ export async function seedSettings(q: EntityManager): Promise<string[]> {
   // (its action `settings.dict.browse` moves to the dict page, seedDict upserts it by perms right after)
   const viewer = await findId(q, 'iam_menu', { route_name: 'settings-dict-viewer' })
   if (viewer !== undefined) {
-    await softDeleteWhere(q, 'iam_role_menus', 'menu_id', [viewer])
+    // qw:cross-tenant a platform menu leaves no grant behind in any tenant
+    await allTenants(() => softDeleteWhere(q, 'iam_role_menus', 'menu_id', [viewer]))
     await softDeleteWhere(q, 'iam_menu', 'id', [viewer])
   }
   return []

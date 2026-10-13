@@ -1,0 +1,17 @@
+{
+  "iam": {
+    "tenantPackage": {
+      "entity": "Tenant package",
+      "menus": "Menus",
+      "menusHint": "Check the menus and actions the tenants with this package may use; platform-only menus are not listed. A menu added later is in no package until checked here.",
+      "tree": "Package menus",
+      "disableConfirm": "The tenants with package {name} can use nothing until it is enabled again or they get another package. Disable it?",
+      "disable": "Disable"
+    }
+  },
+  "menu": {
+    "iam": {
+      "tenantPackage": "Tenant packages"
+    }
+  }
+}

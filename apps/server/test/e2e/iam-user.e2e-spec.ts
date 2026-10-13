@@ -25,6 +25,7 @@ import { findId, insertRow } from '../../src/db/seeds/upsert.js'
 import { logOf } from '../setup/audit.js'
 import { bearer, signIn } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 const PREFIX = 'user-e2e-'
 const URL = '/api/iam/users'
@@ -90,18 +91,23 @@ async function permMenu(perm: string): Promise<number> {
 }
 
 async function addRole(code: string, dataScope: string, perms: string[], picked: number[] = []) {
-  const id = await insertRow(ds.manager, 'iam_role', {
-    code: PREFIX + code,
-    name: PREFIX + code,
-    data_scope: dataScope,
-  })
+  const id = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_role', {
+      code: PREFIX + code,
+      name: PREFIX + code,
+      data_scope: dataScope,
+    }),
+  )
   for (const p of perms)
-    await ds.query('INSERT INTO iam_role_menus (role_id, menu_id) VALUES (?, ?)', [
+    await ds.query('INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, 1)', [
       id,
       await permMenu(p),
     ])
   for (const d of picked)
-    await ds.query('INSERT INTO iam_role_depts (role_id, dept_id) VALUES (?, ?)', [id, d])
+    await ds.query('INSERT INTO iam_role_depts (role_id, dept_id, tenant_id) VALUES (?, ?, 1)', [
+      id,
+      d,
+    ])
   created.roles.push(id)
   role[code] = id
   return id
@@ -109,15 +115,20 @@ async function addRole(code: string, dataScope: string, perms: string[], picked:
 
 /** A signed-in user inserted directly (not through the API under test). */
 async function operator(name: string, deptId: number | null, roles: number[]) {
-  const id = await insertRow(ds.manager, 'iam_user', {
-    username: PREFIX + name,
-    display_name: name,
-    dept_id: deptId,
-    password_hash: 'not-used-by-this-spec',
-    password_changed_at: new Date(),
-  })
+  const id = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_user', {
+      username: PREFIX + name,
+      display_name: name,
+      dept_id: deptId,
+      password_hash: 'not-used-by-this-spec',
+      password_changed_at: new Date(),
+    }),
+  )
   for (const r of roles)
-    await ds.query('INSERT INTO iam_user_roles (user_id, role_id) VALUES (?, ?)', [id, r])
+    await ds.query('INSERT INTO iam_user_roles (user_id, role_id, tenant_id) VALUES (?, ?, 1)', [
+      id,
+      r,
+    ])
   created.users.push(id)
   uid[name] = id
   tok[name] = (await signIn(app, PREFIX + name)).accessToken
@@ -173,9 +184,11 @@ beforeAll(async () => {
   permVersion = app.get(PermVersion)
   await cleanRedis(redis)
   for (const key of ['hq', 'rd', 'platform', 'product', 'ops', 'support', 'finance'])
-    dept[key] = (await findId(ds.manager, 'iam_dept', { name: `seed.dept.${key}` }))!
-  adminId = (await findId(ds.manager, 'iam_user', { username: 'admin' }))!
-  rootRoleId = (await findId(ds.manager, 'iam_role', { code: 'root' }))!
+    dept[key] = (await inTenant1(() =>
+      findId(ds.manager, 'iam_dept', { name: `seed.dept.${key}` }),
+    ))!
+  adminId = (await inTenant1(() => findId(ds.manager, 'iam_user', { username: 'admin' })))!
+  rootRoleId = (await inTenant1(() => findId(ds.manager, 'iam_role', { code: 'root' })))!
   const [param] = await ds.query('SELECT param_value FROM cfg_param WHERE param_key = ?', [
     USER_INITIAL_PASSWORD_PARAM,
   ])
@@ -467,8 +480,8 @@ describe('crud', () => {
       '13912345680',
     )
     await ds.query(
-      `INSERT INTO msg_sms_otp (mobile, scene, code, attempts, daily_seq, request_ip)
-       VALUES (?, 'signin', '123456', 0, 1, '127.0.0.1')`,
+      `INSERT INTO msg_sms_otp (mobile, scene, code, attempts, daily_seq, request_ip, tenant_id)
+       VALUES (?, 'signin', '123456', 0, 1, '127.0.0.1', 1)`,
       ['13912345679'],
     )
     await call(tok.mobileWriter!, 'put', `/${id}`, { mobile: '13912345679' }).expect(200)
@@ -486,22 +499,24 @@ describe('crud', () => {
     const [oldMobile, newMobile, unrelated] = ['13912345683', '13912345684', '13912345685']
     const id = await newUser({ mobile: oldMobile })
     await ds.query(
-      `INSERT INTO msg_sms_otp (mobile, scene, code, attempts, daily_seq, request_ip)
-       VALUES (?, 'signin', '654321', 0, 1, '127.0.0.1'),
-              (?, 'reset_password', '123456', 0, 1, '127.0.0.1'),
-              (?, 'signin', '111111', 0, 1, '127.0.0.1')`,
+      `INSERT INTO msg_sms_otp (mobile, scene, code, attempts, daily_seq, request_ip, tenant_id)
+       VALUES (?, 'signin', '654321', 0, 1, '127.0.0.1', 1),
+              (?, 'reset_password', '123456', 0, 1, '127.0.0.1', 1),
+              (?, 'signin', '111111', 0, 1, '127.0.0.1', 1)`,
       [oldMobile, oldMobile, unrelated],
     )
     try {
       await call(tok.admin!, 'put', `/${id}`, { mobile: newMobile }).expect(200)
       created.users.push(
-        await insertRow(ds.manager, 'iam_user', {
-          username: unique(),
-          display_name: 'replacement',
-          password_hash: 'not-used',
-          password_changed_at: new Date(),
-          mobile: oldMobile,
-        }),
+        await inTenant1(() =>
+          insertRow(ds.manager, 'iam_user', {
+            username: unique(),
+            display_name: 'replacement',
+            password_hash: 'not-used',
+            password_changed_at: new Date(),
+            mobile: oldMobile,
+          }),
+        ),
       )
       const res = await http()
         .post('/api/auth/sms/login')
@@ -544,13 +559,17 @@ describe('crud', () => {
     const username = unique()
     await create({ username, displayName: 'x', roleIds: [MISSING] }).expect(404)
     await create({ username, displayName: 'x', positionIds: [MISSING] }).expect(404)
-    expect(await findId(ds.manager, 'iam_user', { username })).toBeUndefined()
+    expect(await inTenant1(() => findId(ds.manager, 'iam_user', { username }))).toBeUndefined()
   })
 
   it('roles / positions replaced as sent: removed links soft-deleted, re-added ones revived (one row each), new ones inserted', async () => {
     const [p1, p2] = [
-      await insertRow(ds.manager, 'iam_position', { code: unique(), name: unique() }),
-      await insertRow(ds.manager, 'iam_position', { code: unique(), name: unique() }),
+      await inTenant1(() =>
+        insertRow(ds.manager, 'iam_position', { code: unique(), name: unique() }),
+      ),
+      await inTenant1(() =>
+        insertRow(ds.manager, 'iam_position', { code: unique(), name: unique() }),
+      ),
     ]
     const id = await newUser({ roleIds: [role.staff], positionIds: [p1] })
     const put = (body: object, path = '') => call(tok.admin!, 'put', `/${id}${path}`, body)
@@ -585,17 +604,19 @@ describe('crud', () => {
   })
 
   it('a deleted or unknown dept → 404 on create and move, root too; nothing written', async () => {
-    const gone = await insertRow(ds.manager, 'iam_dept', {
-      parent_id: 0,
-      tree_path: '/',
-      name: unique(),
-      deleted_at: new Date(),
-    })
+    const gone = await inTenant1(() =>
+      insertRow(ds.manager, 'iam_dept', {
+        parent_id: 0,
+        tree_path: '/',
+        name: unique(),
+        deleted_at: new Date(),
+      }),
+    )
     created.depts.push(gone)
     const username = unique()
     for (const deptId of [gone, MISSING])
       await create({ username, displayName: 'x', deptId }).expect(404)
-    expect(await findId(ds.manager, 'iam_user', { username })).toBeUndefined()
+    expect(await inTenant1(() => findId(ds.manager, 'iam_user', { username }))).toBeUndefined()
     const id = await newUser({ deptId: dept.rd })
     await call(tok.admin!, 'put', `/${id}`, { deptId: gone }).expect(404)
     expect((await call(tok.admin!, 'get', `/${id}`)).body.data.deptId).toBe(dept.rd)
@@ -604,11 +625,13 @@ describe('crud', () => {
 
   it('a deleted dept reaches nothing: own_dept_tree skips it, a user left in one has no dept (own_dept sees nobody)', async () => {
     // older data (no foreign keys): a dept under R&D deleted with a user still in it
-    const gone = await insertRow(ds.manager, 'iam_dept', {
-      parent_id: dept.rd,
-      tree_path: '/',
-      name: unique(),
-    })
+    const gone = await inTenant1(() =>
+      insertRow(ds.manager, 'iam_dept', {
+        parent_id: dept.rd,
+        tree_path: '/',
+        name: unique(),
+      }),
+    )
     created.depts.push(gone)
     const [{ tree_path: rdPath }] = await ds.query('SELECT tree_path FROM iam_dept WHERE id = ?', [
       dept.rd,
@@ -685,7 +708,10 @@ describe('crud', () => {
     // editing: the same rules for added roles; roles the user already has may stay
     const { id } = (await make([])).body.data
     await refused(call(tok.mgr!, 'put', `/${id}`, { roleIds: [role.wide] }))
-    await ds.query('INSERT INTO iam_user_roles (user_id, role_id) VALUES (?, ?)', [id, role.wide])
+    await ds.query('INSERT INTO iam_user_roles (user_id, role_id, tenant_id) VALUES (?, ?, 1)', [
+      id,
+      role.wide,
+    ])
     await call(tok.mgr!, 'put', `/${id}`, { roleIds: [role.wide, role.staff] }).expect(200)
     expect(await rolesOf(id)).toEqual([role.wide, role.staff].sort((a, b) => a! - b!))
     await refused(call(tok.mgr!, 'put', `/${id}`, { roleIds: [role.wide, role.extraPerm] }))
@@ -776,10 +802,12 @@ describe('crud', () => {
 
 describe('actions', () => {
   it('delete: soft delete + role/position links soft-deleted at once, the old token and refresh are 401, sign-in fails, the position becomes deletable', async () => {
-    const posId = await insertRow(ds.manager, 'iam_position', {
-      code: unique(),
-      name: unique(),
-    })
+    const posId = await inTenant1(() =>
+      insertRow(ds.manager, 'iam_position', {
+        code: unique(),
+        name: unique(),
+      }),
+    )
     const username = unique()
     const id = await newUser({
       username,

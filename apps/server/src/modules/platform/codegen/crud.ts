@@ -13,7 +13,9 @@ import {
   Err,
   type Locale,
   LOCALES,
+  TENANT_COLUMN,
 } from '@qiwu/shared'
+import { isTenantTable, PLATFORM_TABLES } from '../../../core/db/tenant-tables.js'
 import { BizError } from '../../../core/http/biz-error.js'
 import type { CgColumn } from './cg-column.entity.js'
 import type { CgTableDetail } from './codegen.service.js'
@@ -157,6 +159,8 @@ export interface SubModel {
   /** for the entity template: a sub row is never data-scoped itself; its own config's references */
   scope: undefined
   entityBase: 'BaseEntity'
+  /** for the entity template: a tenant table (`isTenantMapped`) */
+  tenant: boolean
   refs: RefModel[]
 }
 
@@ -228,6 +232,16 @@ export interface CrudModel {
    * (`created_at`) / IdEntity
    */
   entityBase: 'BaseEntity' | 'CreatedEntity' | 'IdEntity'
+  /**
+   * a tenant table (`isTenantMapped`): the entity maps `tenant_id` with `@TenantColumn()`; a platform
+   * table's plain `tenant_id` stays unmapped
+   */
+  tenant: boolean
+  /**
+   * a table of `PLATFORM_TABLES`: its page is the platform's, the controller carries `@PlatformOnly()`
+   * and its route name goes into `PLATFORM_ONLY_ROUTES` (see docs/design-notes.md#tenancy)
+   */
+  platform: boolean
   /**
    * who holds ids of the rows (the entity registers them): `options.referencedBy` (restrict), a
    * master-sub master's sub tables by their fk (cascade) first
@@ -332,9 +346,22 @@ const refsOf = (t: Pick<CgTableDetail, 'options'>, taken: RefModel[] = []): RefM
       label: comment(r.label),
     }))
 
-/** A column of the table's own: not the key, an audit or the soft-delete column. */
+/**
+ * Whether a config's table is a tenant table (`isTenantTable`, as the ORM's tenant condition and the seeds
+ * judge it): it has `tenant_id` and is no platform table.
+ */
+const isTenantMapped = (t: Pick<CgTableDetail, 'tableName' | 'columns'>) =>
+  isTenantTable(
+    t.tableName,
+    t.columns.some((c) => c.columnName === TENANT_COLUMN),
+  )
+
+/** A column of the table's own: not the key, an audit, the soft-delete or the tenant column. */
 const isOwn = (c: Pick<CgColumn, 'isPk' | 'columnName'>) =>
-  !c.isPk && c.columnName !== DELETED_AT && !(AUDIT as readonly string[]).includes(c.columnName)
+  !c.isPk &&
+  c.columnName !== DELETED_AT &&
+  c.columnName !== TENANT_COLUMN &&
+  !(AUDIT as readonly string[]).includes(c.columnName)
 /** The label: first `name` / `title`, else first text; neither dict-backed nor secret. */
 const labelOf = <
   C extends { column: string; tsType: string; widget?: string; dict: string | null },
@@ -415,8 +442,8 @@ export function assertTemplateColumns(
 const INTEGER = /^(tinyint|smallint|mediumint|int|integer|bigint)\b/i
 /**
  * A sub-table link (`master_sub`, set on the sub's config): the master and the fk column set together,
- * the master another config, the fk one of the sub's own integer columns (not its key); a sub is never a
- * master or a tree itself. Else 422 C3007.
+ * the master another config, the fk one of the sub's own integer columns (`isOwn`: not its key, an audit
+ * or the tenant column); a sub is never a master or a tree itself. Else 422 C3007.
  */
 function assertSubLink(
   t: Pick<
@@ -431,7 +458,7 @@ function assertSubLink(
     t.masterTableId === t.id ||
     t.template !== 'crud' ||
     !fk ||
-    fk.isPk ||
+    !isOwn(fk) ||
     !INTEGER.test(fk.columnType)
   )
     throw new BizError(Err.CODEGEN_SUB_TABLES, { table: t.tableName.slice(0, 64) })
@@ -902,6 +929,8 @@ export function crudModel(t: RenderConfig): CrudModel {
     withOptions,
     withMobile: !!o.withMobile,
     entityBase: appendOnly ? (createdAt ? 'CreatedEntity' : 'IdEntity') : 'BaseEntity',
+    tenant: isTenantMapped(t),
+    platform: PLATFORM_TABLES.includes(t.tableName),
     refs: [...cascades, ...refsOf(t, cascades)],
     scope: scoped
       ? { dept: 'dept_id', owner: byName.has('created_by') ? 'created_by' : null }
@@ -1017,6 +1046,7 @@ function subModels(
       sortNo: own.find((c) => c.column === 'sort_no' && c.tsType === 'number'),
       scope: undefined,
       entityBase: 'BaseEntity',
+      tenant: isTenantMapped(s),
       refs: refsOf(s),
     }
   })
@@ -1118,14 +1148,21 @@ export function crudRegistration(t: RenderConfig, mobile = hasMobile()): string[
   const seeds = `SEEDS.${biz && m.domain !== 'demo' ? 'project' : m.domain}`
   return [
     host,
-    // arch-allow: sql-concat an import statement for the user to paste, not SQL
+    // arch-allow: sql-concat an import statement for the user to paste, not SQL; tenant: no query
     `  import { ${m.Biz}Module } from '${from}'  + ${m.Biz}Module in \`imports\``,
     'apps/server/src/db/seeds/index.ts:',
-    // arch-allow: sql-concat an import statement for the user to paste, not SQL
+    // arch-allow: sql-concat an import statement for the user to paste, not SQL; tenant: no query
     `  import { seed${m.Biz} } from '../../modules/${m.home}/${m.business}.seed.js'  + seed${m.Biz} in ${seeds}`,
     'packages/shared/src/index.ts:',
-    // arch-allow: sql-concat an export statement for the user to paste, not SQL
+    // arch-allow: sql-concat an export statement for the user to paste, not SQL; tenant: no query
     `  export * from './${m.home}.schema.js'`,
+    // a platform table's page: other tenants' sessions lose its perms, its controller is @PlatformOnly()
+    ...(m.platform
+      ? [
+          'packages/shared/src/common/tenancy.ts:',
+          `  '${m.routeName}' in PLATFORM_ONLY_ROUTES (a platform page: other tenants never get its perms)`,
+        ]
+      : []),
     ...(m.withMobile && mobile
       ? [
           `${MOBILE}pages.json (subpackage "pages-biz"):`,

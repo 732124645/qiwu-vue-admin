@@ -19,6 +19,7 @@ import { REDIS, type Redis } from '../../src/core/redis/redis.module.js'
 import { insertRow } from '../../src/db/seeds/upsert.js'
 import { bearer, signIn } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 const PREFIX = 'geo-e2e-'
 const URL = '/api/geo/areas'
@@ -47,12 +48,14 @@ beforeAll(async () => {
   redis = app.get(REDIS)
   await cleanRedis(redis)
   admin = (await signIn(app)).accessToken
-  nobodyId = await insertRow(ds.manager, 'iam_user', {
-    username: `${PREFIX}nobody`,
-    display_name: 'nobody',
-    password_hash: 'not-used-by-this-spec',
-    password_changed_at: new Date(),
-  })
+  nobodyId = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_user', {
+      username: `${PREFIX}nobody`,
+      display_name: 'nobody',
+      password_hash: 'not-used-by-this-spec',
+      password_changed_at: new Date(),
+    }),
+  )
   nobody = (await signIn(app, `${PREFIX}nobody`)).accessToken
 })
 
@@ -139,29 +142,33 @@ describe('location in logs and sessions', () => {
   it('sign-in and action log rows and the online list carry the location of their IP', async () => {
     const at = vi.spyOn(ipLocator, 'location').mockResolvedValue('中国 广东省 深圳市')
     const audit = app.get(AuditWriter)
-    audit.signin({
-      kind: 'password',
-      userType: 'admin',
-      userId: nobodyId,
-      username: `${PREFIX}nobody`,
-      clientId: 'console',
-      ip: '203.0.113.77',
-      ua: 'vitest',
-      ok: true,
-      msgKey: 'signin.ok',
-    })
-    audit.action({
-      domain: 'test.geo',
-      verb: 'probe',
-      bizId: null,
-      method: 'POST',
-      url: '/api/test/geo',
-      ip: '203.0.113.77',
-      ua: 'vitest',
-      params: {},
-      result: null,
-      costMs: 1,
-    })
+    inTenant1(() =>
+      audit.signin({
+        kind: 'password',
+        userType: 'admin',
+        userId: nobodyId,
+        username: `${PREFIX}nobody`,
+        clientId: 'console',
+        ip: '203.0.113.77',
+        ua: 'vitest',
+        ok: true,
+        msgKey: 'signin.ok',
+      }),
+    )
+    inTenant1(() =>
+      audit.action({
+        domain: 'test.geo',
+        verb: 'probe',
+        bizId: null,
+        method: 'POST',
+        url: '/api/test/geo',
+        ip: '203.0.113.77',
+        ua: 'vitest',
+        params: {},
+        result: null,
+        costMs: 1,
+      }),
+    )
     // the writer does not await: poll
     const row = (sql: string, params: unknown[]) =>
       vi.waitFor(

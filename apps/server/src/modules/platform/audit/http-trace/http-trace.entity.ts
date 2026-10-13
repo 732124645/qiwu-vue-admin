@@ -68,4 +68,8 @@ export class HttpTrace extends IdEntity {
   /** 耗时（毫秒） */
   @Column({ name: 'cost_ms', type: 'int', unsigned: true })
   costMs: number
+
+  /** 租户 ID（匿名或未解析出租户时为空；平台表，只供平台按租户筛选） */
+  @Column({ name: 'tenant_id', type: 'bigint', unsigned: true, nullable: true })
+  tenantId: number | null
 }

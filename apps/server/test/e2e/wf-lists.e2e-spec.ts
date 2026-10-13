@@ -19,6 +19,7 @@ import type { WfTaskRow } from '../../src/modules/workflow/runtime/wf-runtime.en
 import { type WfRun, WfStore } from '../../src/modules/workflow/runtime/wf-store.js'
 import { bearer, signIn } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 const PREFIX = 'e2e-wfl-'
 
@@ -64,12 +65,12 @@ const tree = (next?: object) => ({ id: 'begin', type: 'begin', name: 'Begin', ne
 async function model(root: object, name: string): Promise<string> {
   const key = `${PREFIX}m${++seq}`
   const m = await ds.query(
-    'INSERT INTO wf_model (model_key, name, form_kind, enabled) VALUES (?, ?, ?, 1)',
+    'INSERT INTO wf_model (model_key, name, form_kind, enabled, tenant_id) VALUES (?, ?, ?, 1, 1)',
     [key, name, 'dynamic'],
   )
   const v = await ds.query(
-    `INSERT INTO wf_version (model_id, model_key, version, tree_json, form_snapshot)
-     VALUES (?, ?, 1, ?, ?)`,
+    `INSERT INTO wf_version (model_id, model_key, version, tree_json, form_snapshot, tenant_id)
+     VALUES (?, ?, 1, ?, ?, 1)`,
     [m.insertId, key, JSON.stringify(root), JSON.stringify({ fields: {} })],
   )
   await ds.query('UPDATE wf_model SET current_version_id = ? WHERE id = ?', [
@@ -91,23 +92,27 @@ async function start(who: string, key: string): Promise<number> {
 
 /** Runs an engine action on the pending task of `userId` (its own CLS context, no caller). */
 const act = (id: number, userId: number, fn: (r: WfRun, task: WfTaskRow) => Promise<WfChangeSet>) =>
-  app.get(ClsService).run(() =>
-    app.get(WfStore).act(id, (r) =>
-      fn(
-        r,
-        r.tasks.find((t) => t.assigneeId === userId && t.state === 'pending')!,
+  inTenant1(() =>
+    app.get(ClsService).run(() =>
+      app.get(WfStore).act(id, (r) =>
+        fn(
+          r,
+          r.tasks.find((t) => t.assigneeId === userId && t.state === 'pending')!,
+        ),
       ),
     ),
   )
 
 async function user(name: string) {
-  u[name] = await insertRow(ds.manager, 'iam_user', {
-    username: PREFIX + name,
-    display_name: name,
-    dept_id: deptId,
-    password_hash: 'not-used-by-this-spec',
-    password_changed_at: new Date(),
-  })
+  u[name] = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_user', {
+      username: PREFIX + name,
+      display_name: name,
+      dept_id: deptId,
+      password_hash: 'not-used-by-this-spec',
+      password_changed_at: new Date(),
+    }),
+  )
   made.iam_user.push(u[name]!)
   tokens[name] = (await signIn(app, PREFIX + name)).accessToken
 }
@@ -128,11 +133,13 @@ beforeAll(async () => {
   redis = app.get(REDIS)
   await cleanRedis(redis)
   await cleanup()
-  deptId = await insertRow(ds.manager, 'iam_dept', {
-    parent_id: 0,
-    name: `${PREFIX}dept`,
-    tree_path: '/',
-  })
+  deptId = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_dept', {
+      parent_id: 0,
+      name: `${PREFIX}dept`,
+      tree_path: '/',
+    }),
+  )
   made.iam_dept.push(deptId)
   for (const name of ['alice', 'bob', 'carol', 'dave', 'erin', 'mallory']) await user(name)
 

@@ -74,16 +74,19 @@ import { withCaptcha, type AskCaptcha } from '@/core/captcha'
 import { fieldErrors, locale, t } from '@/core/i18n'
 import { api, errorText } from '@/core/request'
 import { useAuthStore } from '@/core/stores/auth'
+import type { TenantCode } from '@/core/tenancy'
 
 /**
  * SMS sign-in (see docs/design-notes.md#auth-sessions), the sign-in page's second tab: a code sent through the `sms_send` captcha, then a
  * countdown from the server's `cooldownSec`. The answer is the same whether the number has an account or not,
  * and so is what the form shows. Emits `done` once signed in. `signIn`/`action`: another use of the proven
- * code and its button text (the WeChat bind page: bind, then sign in).
+ * code and its button text (the WeChat bind page: bind, then sign in). `tenant`: the page's tenant code,
+ * checked before each request and sent along (the code goes to that tenant's account).
  */
 const props = defineProps<{
   ask: AskCaptcha
-  signIn?: (body: { mobile: string; code: string }) => Promise<void>
+  tenant?: TenantCode
+  signIn?: (body: { mobile: string; code: string; tenantCode?: string }) => Promise<void>
   action?: string
 }>()
 const emit = defineEmits<{ done: [] }>()
@@ -110,12 +113,15 @@ async function sendCode() {
   sending.value = true
   error.value = ''
   try {
+    const tenantCode = props.tenant ? await props.tenant.read() : {}
+    if (!tenantCode) return
     const answer = await withCaptcha(props.ask, 'sms_send', (captchaTicket) =>
       api.post<SmsCodeVo>(
         '/auth/sms/code',
         {
           mobile,
           scene: 'signin',
+          ...tenantCode,
           ...(captchaTicket ? { captchaTicket } : {}),
         } satisfies SmsCodeBody,
         { silent: true },
@@ -143,7 +149,13 @@ async function submit() {
   loading.value = true
   error.value = ''
   try {
-    await (props.signIn ?? auth.smsLogin)({ mobile: parsed.data.mobile, code: parsed.data.code })
+    const tenantCode = props.tenant ? await props.tenant.read() : {}
+    if (!tenantCode) return
+    await (props.signIn ?? auth.smsLogin)({
+      mobile: parsed.data.mobile,
+      code: parsed.data.code,
+      ...tenantCode,
+    })
     emit('done')
   } catch (e) {
     error.value = errorText(e)

@@ -9,6 +9,7 @@ import { ClsService } from 'nestjs-cls'
 import type { DataSource } from 'typeorm'
 import { AppModule } from '../../src/app.module.js'
 import { setupApp } from '../../src/app.setup.js'
+import { tenantId } from '../../src/core/context/tenant.js'
 import {
   fillTemplate,
   NOTIFY_CLAIM_TIMEOUT_MS,
@@ -17,6 +18,7 @@ import {
   NotifyChannels,
   NotifyDispatcher,
   type NotifyChannel,
+  type NotifyDue,
   type NotifyDraft,
   type NotifySend,
   type NotifyTemplate,
@@ -28,6 +30,7 @@ import { insertRow } from '../../src/db/seeds/upsert.js'
 import { MailTransports } from '../../src/modules/platform/messaging/mail-account/mail-transports.js'
 import { SmsClients } from '../../src/modules/platform/messaging/sms-channel/sms-clients.js'
 import { cleanRedis } from '../setup/redis.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 const PREFIX = 'test.notify.'
 const OUTBOX = `${PREFIX}outbox`
@@ -39,28 +42,32 @@ const staleClaim = () => new Date(Date.now() - NOTIFY_CLAIM_TIMEOUT_MS - 1000)
 const dispatch = () =>
   dispatcher.dispatch({}, { signal: new AbortController().signal, log: () => {} })
 const mailRecord = (status: string, attempts: number, claimedAt: Date | null = null) =>
-  insertRow(ds.manager, 'msg_mail_record', {
-    account_id: mailAccountId,
-    to_list: ['reader@example.invalid'],
-    template_code: MAIL,
-    locale: 'en-US',
-    subject: 'Recovery',
-    body: '<p>Recovery</p>',
-    status,
-    attempts,
-    claimed_at: claimedAt,
-  })
+  inTenant1(() =>
+    insertRow(ds.manager, 'msg_mail_record', {
+      account_id: mailAccountId,
+      to_list: ['reader@example.invalid'],
+      template_code: MAIL,
+      locale: 'en-US',
+      subject: 'Recovery',
+      body: '<p>Recovery</p>',
+      status,
+      attempts,
+      claimed_at: claimedAt,
+    }),
+  )
 const smsRecord = (status: string, attempts: number, claimedAt: Date | null = null, otp = false) =>
-  insertRow(ds.manager, 'msg_sms_record', {
-    channel_id: smsChannelId,
-    template_code: SMS,
-    mobile: '13800138000',
-    body: otp ? '******' : 'Recovery',
-    params: { templateId: smsTemplateId, values: otp ? { code: '******' } : {} },
-    status,
-    attempts,
-    claimed_at: claimedAt,
-  })
+  inTenant1(() =>
+    insertRow(ds.manager, 'msg_sms_record', {
+      channel_id: smsChannelId,
+      template_code: SMS,
+      mobile: '13800138000',
+      body: otp ? '******' : 'Recovery',
+      params: { templateId: smsTemplateId, values: otp ? { code: '******' } : {} },
+      status,
+      attempts,
+      claimed_at: claimedAt,
+    }),
+  )
 
 @Injectable()
 class TxCalls {
@@ -119,8 +126,8 @@ class TestMailChannel implements NotifyChannel<MailTemplate> {
   async write({ template, recipient, params, values }: NotifyDraft<MailTemplate>): Promise<number> {
     const email = recipient.email
     const result: { insertId: number } = await this.tx.tx.query(
-      `INSERT INTO msg_mail_record (user_id, to_list, template_code, locale, subject, body, params, status, error, attempts)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+      `INSERT INTO msg_mail_record (user_id, to_list, template_code, locale, subject, body, params, status, error, attempts, tenant_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
       [
         recipient.userId,
         JSON.stringify(email ? [email] : []),
@@ -131,6 +138,7 @@ class TestMailChannel implements NotifyChannel<MailTemplate> {
         JSON.stringify(params),
         email ? 'pending' : 'skipped',
         email ? null : 'no_address',
+        tenantId(),
       ],
     )
     return Number(result.insertId)
@@ -142,6 +150,10 @@ class TestMailChannel implements NotifyChannel<MailTemplate> {
       [NOTIFY_MAX_ATTEMPTS, limit],
     )
     return rows.map((row) => Number(row.id))
+  }
+
+  async dueRows(limit: number): Promise<NotifyDue[]> {
+    return (await this.due(limit)).map((id) => ({ id, tenantId: 1 }))
   }
 
   async expire(): Promise<void> {}
@@ -214,15 +226,17 @@ beforeAll(async () => {
     ['fallback', 'en-US', null, 'fallback@example.invalid'],
     ['noEmail', 'en-US', null, null],
   ] as const)
-    users[key] = await insertRow(ds.manager, 'iam_user', {
-      username: `e2e-${PREFIX}${key}`,
-      display_name: key,
-      password_hash: 'unused',
-      locale,
-      timezone,
-      email,
-      password_changed_at: new Date(),
-    })
+    users[key] = await inTenant1(() =>
+      insertRow(ds.manager, 'iam_user', {
+        username: `e2e-${PREFIX}${key}`,
+        display_name: key,
+        password_hash: 'unused',
+        locale,
+        timezone,
+        email,
+        password_changed_at: new Date(),
+      }),
+    )
   for (const [code, locale, title, body, enabled] of [
     [OUTBOX, 'en-US', 'Hello {name}', 'Notice {name}', 1],
     [RENDER, 'zh-CN', 'ZH {state}', '{when}|{action}|{unknown}|{raw}', 1],
@@ -297,7 +311,7 @@ afterAll(async () => {
 
 describe('outbox', () => {
   it('delivers a direct write once with its rendered push', async () => {
-    const ids = await notifier.send(outboxInput())
+    const ids = await inTenant1(() => notifier.send(outboxInput()))
     expect(ids.inbox).toHaveLength(1)
     expect(await inboxRows()).toMatchObject([
       { id: ids.inbox![0], status: 'delivered', attempts: 1, title: 'Hello Ada' },
@@ -309,7 +323,7 @@ describe('outbox', () => {
   })
 
   it('waits for the transaction commit', async () => {
-    const ids = await tx.send(outboxInput())
+    const ids = await inTenant1(() => tx.send(outboxInput()))
     await dispatcher.idle()
     expect((await inboxRows())[0]).toMatchObject({
       id: ids.inbox![0],
@@ -320,14 +334,14 @@ describe('outbox', () => {
   })
 
   it('discards rows and pushes on business rollback', async () => {
-    await expect(tx.fails(outboxInput())).rejects.toThrow('rollback')
+    await expect(inTenant1(() => tx.fails(outboxInput()))).rejects.toThrow('rollback')
     await dispatcher.idle()
     expect(await inboxRows()).toEqual([])
     expect(push).not.toHaveBeenCalled()
   })
 
   it('does not flush a nested send when its outer transaction rolls back', async () => {
-    await expect(tx.nestedFails(outboxInput())).rejects.toThrow('outer rollback')
+    await expect(inTenant1(() => tx.nestedFails(outboxInput()))).rejects.toThrow('outer rollback')
     await dispatcher.idle()
     expect(await inboxRows()).toEqual([])
     expect(push).not.toHaveBeenCalled()
@@ -344,7 +358,7 @@ describe('outbox', () => {
       entered = resolve
     })
     try {
-      const outer = tx.nestedWaits(outboxInput(), gate, entered)
+      const outer = inTenant1(() => tx.nestedWaits(outboxInput(), gate, entered))
       await inside
       expect(await inboxRows()).toEqual([])
       expect(start).not.toHaveBeenCalled()
@@ -362,7 +376,7 @@ describe('outbox', () => {
   })
 
   it('writes one row for a user listed twice', async () => {
-    const ids = await notifier.send({ ...outboxInput(), to: [users.en, users.en] })
+    const ids = await inTenant1(() => notifier.send({ ...outboxInput(), to: [users.en, users.en] }))
     expect(ids.inbox).toHaveLength(1)
     expect(await inboxRows()).toHaveLength(1)
     expect(push).toHaveBeenCalledTimes(1)
@@ -372,7 +386,7 @@ describe('outbox', () => {
     const start = vi.spyOn(dispatcher, 'start').mockImplementation(() => {})
     let ids: Awaited<ReturnType<Notifier['send']>>
     try {
-      ids = await tx.send(outboxInput())
+      ids = await inTenant1(() => tx.send(outboxInput()))
     } finally {
       start.mockRestore()
     }
@@ -394,12 +408,12 @@ describe('outbox', () => {
     const start = vi.spyOn(dispatcher, 'start').mockImplementation(() => {})
     let ids: Awaited<ReturnType<Notifier['send']>>
     try {
-      ids = await tx.send(outboxInput())
+      ids = await inTenant1(() => tx.send(outboxInput()))
     } finally {
       start.mockRestore()
     }
     await Promise.all([
-      dispatcher.flush(ids!),
+      inTenant1(() => dispatcher.flush(ids!)),
       dispatcher.dispatch({}, { signal: new AbortController().signal, log: () => {} }),
     ])
     expect((await inboxRows())[0]).toMatchObject({ status: 'delivered', attempts: 1 })
@@ -447,24 +461,32 @@ describe('outbox', () => {
   it('leaves fresh sending claims alone', async () => {
     const mailId = await mailRecord('sending', 1, new Date())
     const smsId = await smsRecord('sending', 1, new Date())
-    const inboxId = await insertRow(ds.manager, 'msg_inbox', {
-      user_id: users.en,
-      template_code: OUTBOX,
-      locale: 'en-US',
-      category: 'system',
-      title: 'In progress',
-      body: 'In progress',
-      status: 'sending',
-      attempts: 1,
-      claimed_at: new Date(),
-    })
+    const inboxId = await inTenant1(() =>
+      insertRow(ds.manager, 'msg_inbox', {
+        user_id: users.en,
+        template_code: OUTBOX,
+        locale: 'en-US',
+        category: 'system',
+        title: 'In progress',
+        body: 'In progress',
+        status: 'sending',
+        attempts: 1,
+        claimed_at: new Date(),
+      }),
+    )
     const mailSend = vi.spyOn(app.get(MailTransports), 'send')
     const smsFor = vi.spyOn(app.get(SmsClients), 'for')
     try {
       const channels = app.get(NotifyChannels)
-      expect(await channels.get('mail')!.due(100)).not.toContain(mailId)
-      expect(await channels.get('sms')!.due(100)).not.toContain(smsId)
-      expect(await channels.get('inbox')!.due(100)).not.toContain(inboxId)
+      expect(
+        (await inTenant1(() => channels.get('mail')!.dueRows(100))).map((r) => r.id),
+      ).not.toContain(mailId)
+      expect(
+        (await inTenant1(() => channels.get('sms')!.dueRows(100))).map((r) => r.id),
+      ).not.toContain(smsId)
+      expect(
+        (await inTenant1(() => channels.get('inbox')!.dueRows(100))).map((r) => r.id),
+      ).not.toContain(inboxId)
       await dispatch()
       for (const [table, id] of [
         ['msg_mail_record', mailId],
@@ -503,7 +525,7 @@ describe('outbox', () => {
         ReturnType<MailTransports['send']>
       >)
     try {
-      const first = app.get(NotifyChannels).get('mail')!.deliver(id)
+      const first = inTenant1(() => app.get(NotifyChannels).get('mail')!.deliver(id))
       await inside
       const [claimed] = await ds.query('SELECT claimed_at FROM msg_mail_record WHERE id = ?', [id])
       expect(claimed.claimed_at).toBeInstanceOf(Date)
@@ -526,17 +548,19 @@ describe('outbox', () => {
   it('fails exhausted stale claims, including masked OTP, without sending', async () => {
     const mailId = await mailRecord('sending', NOTIFY_MAX_ATTEMPTS, staleClaim())
     const otpId = await smsRecord('sending', NOTIFY_MAX_ATTEMPTS, staleClaim(), true)
-    const inboxId = await insertRow(ds.manager, 'msg_inbox', {
-      user_id: users.en,
-      template_code: OUTBOX,
-      locale: 'en-US',
-      category: 'system',
-      title: 'Interrupted',
-      body: 'Interrupted',
-      status: 'sending',
-      attempts: NOTIFY_MAX_ATTEMPTS,
-      claimed_at: staleClaim(),
-    })
+    const inboxId = await inTenant1(() =>
+      insertRow(ds.manager, 'msg_inbox', {
+        user_id: users.en,
+        template_code: OUTBOX,
+        locale: 'en-US',
+        category: 'system',
+        title: 'Interrupted',
+        body: 'Interrupted',
+        status: 'sending',
+        attempts: NOTIFY_MAX_ATTEMPTS,
+        claimed_at: staleClaim(),
+      }),
+    )
     const mailSend = vi.spyOn(app.get(MailTransports), 'send')
     const smsFor = vi.spyOn(app.get(SmsClients), 'for')
     try {
@@ -571,7 +595,7 @@ describe('dispatch round', () => {
     const start = vi.spyOn(dispatcher, 'start').mockImplementation(() => {})
     let ids: Awaited<ReturnType<Notifier['send']>>
     try {
-      ids = await tx.send(outboxInput())
+      ids = await inTenant1(() => tx.send(outboxInput()))
     } finally {
       start.mockRestore()
     }
@@ -601,12 +625,14 @@ describe('render', () => {
   } as const
 
   it('uses each recipient locale, dictionary label, time zone and plain text', async () => {
-    const ids = await notifier.send({
-      template: RENDER,
-      to: [users.zh, users.en],
-      channels: ['inbox'],
-      params,
-    })
+    const ids = await inTenant1(() =>
+      notifier.send({
+        template: RENDER,
+        to: [users.zh, users.en],
+        channels: ['inbox'],
+        params,
+      }),
+    )
     const rows = await inboxRows()
     expect(rows.map((row) => row.id)).toEqual(ids.inbox)
     expect(rows[0]).toMatchObject({ locale: 'zh-CN', title: 'ZH 启用' })
@@ -620,7 +646,9 @@ describe('render', () => {
     expect(configuredZone).toBe(DEFAULT_TIMEZONE)
     await cls.run(async () => {
       cls.set('timezone', 'America/Los_Angeles')
-      await notifier.send({ template: RENDER, to: [users.fallback], channels: ['inbox'], params })
+      await inTenant1(() =>
+        notifier.send({ template: RENDER, to: [users.fallback], channels: ['inbox'], params }),
+      )
     })
     expect((await inboxRows())[0]).toMatchObject({
       locale: 'en-US',
@@ -634,7 +662,9 @@ describe('render', () => {
       'en-US',
     ])
     try {
-      await notifier.send({ template: RENDER, to: [users.en], channels: ['inbox'], params })
+      await inTenant1(() =>
+        notifier.send({ template: RENDER, to: [users.en], channels: ['inbox'], params }),
+      )
       expect((await inboxRows())[0]).toMatchObject({ locale: 'zh-CN', title: 'ZH Enabled' })
     } finally {
       await ds.query('UPDATE msg_inbox_template SET enabled = 1 WHERE code = ? AND locale = ?', [
@@ -645,10 +675,14 @@ describe('render', () => {
   })
 
   it('selects enabled channel templates and honors explicit channels', async () => {
-    expect(await notifier.send({ template: DISABLED, to: [users.en] })).toEqual({})
+    expect(await inTenant1(() => notifier.send({ template: DISABLED, to: [users.en] }))).toEqual({})
     expect(await inboxRows()).toEqual([])
-    expect((await notifier.send({ template: OUTBOX, to: [users.en] })).inbox).toHaveLength(1)
-    expect(await notifier.send({ template: MAIL, to: [users.en], channels: ['inbox'] })).toEqual({})
+    expect(
+      (await inTenant1(() => notifier.send({ template: OUTBOX, to: [users.en] }))).inbox,
+    ).toHaveLength(1)
+    expect(
+      await inTenant1(() => notifier.send({ template: MAIL, to: [users.en], channels: ['inbox'] })),
+    ).toEqual({})
   })
 
   it('uses request language and zone for a direct address; inbox has no row for it', async () => {
@@ -661,18 +695,22 @@ describe('render', () => {
         await cls.run(async () => {
           cls.set('locale', locale satisfies Locale)
           cls.set('timezone', timezone)
-          const inbox = await notifier.send({
-            template: RENDER,
-            to: [{ email: 'direct@example.invalid' }],
-            channels: ['inbox'],
-            params,
-          })
+          const inbox = await inTenant1(() =>
+            notifier.send({
+              template: RENDER,
+              to: [{ email: 'direct@example.invalid' }],
+              channels: ['inbox'],
+              params,
+            }),
+          )
           expect(inbox).toEqual({})
-          return notifier.send({
-            template: MAIL,
-            to: [{ email: 'direct@example.invalid' }],
-            params: { when: params.when },
-          })
+          return inTenant1(() =>
+            notifier.send({
+              template: MAIL,
+              to: [{ email: 'direct@example.invalid' }],
+              params: { when: params.when },
+            }),
+          )
         }),
       )
     expect(await inboxRows()).toEqual([])
@@ -687,7 +725,9 @@ describe('render', () => {
   })
 
   it('records a missing mail address as skipped without delivery', async () => {
-    const ids = await notifier.send({ template: MAIL, to: [users.noEmail], channels: ['mail'] })
+    const ids = await inTenant1(() =>
+      notifier.send({ template: MAIL, to: [users.noEmail], channels: ['mail'] }),
+    )
     const [row] = await ds.query<{ status: string; to_list: string[]; attempts: number }[]>(
       'SELECT status, to_list, attempts FROM msg_mail_record WHERE id = ?',
       [ids.mail![0]],

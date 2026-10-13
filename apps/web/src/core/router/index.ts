@@ -8,6 +8,7 @@ import {
   type RouterHistory,
 } from 'vue-router'
 import type { I18nText, MePayload, MenuNode } from '@qiwu/shared'
+import { brandName, brandTitle } from '@/core/composables/use-brand'
 import { i18n, localized } from '@/core/i18n'
 import { api, isTransient, permVer, permVerAnswers, sessionEpoch } from '@/core/request/http'
 import { appSettings } from '@/core/stores/app'
@@ -153,9 +154,12 @@ export function safeRedirect(target: unknown): string {
   }
 }
 
-/** `<page> - <app>`; just the app name when the "dynamic title" setting is off. */
+/**
+ * `<page> - <app>` (app: the tenant's brand name when it set one); just the app name when the "dynamic
+ * title" setting is off.
+ */
 function setTitle(to: RouteLocationNormalized) {
-  const app = import.meta.env.VITE_APP_TITLE || i18n.global.t('common.app.title')
+  const app = brandTitle()
   document.title =
     to.meta.title && appSettings.value.dynamicTitle
       ? `${localized(to.meta.titleI18n, to.meta.title)} - ${app}`
@@ -258,6 +262,8 @@ async function patiently(step: () => Promise<void>) {
   return step()
 }
 
+let stopBrandTitle: WatchStopHandle | undefined
+
 export function createAppRouter(
   history: RouterHistory = createWebHistory(import.meta.env.BASE_URL),
 ) {
@@ -310,6 +316,9 @@ export function createAppRouter(
   watch([i18n.global.locale, () => appSettings.value.dynamicTitle], () =>
     setTitle(router.currentRoute.value),
   )
+  // a brand known after the navigation (the host's on a sign-in page); only the latest router keeps it
+  stopBrandTitle?.()
+  stopBrandTitle = watch(brandName, () => setTitle(router.currentRoute.value))
   return router
 }
 

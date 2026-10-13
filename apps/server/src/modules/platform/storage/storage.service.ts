@@ -38,6 +38,7 @@ import {
   type Repository,
   type SelectQueryBuilder,
 } from 'typeorm'
+import { allTenants, tenantId } from '../../../core/context/tenant.js'
 import type { Principal } from '../../../core/auth/principal.js'
 import { EXPORT_BATCH } from '../../../core/db/base-crud.service.js'
 import { contains, exportBatches, paginate, sorted } from '../../../core/db/page.js'
@@ -187,10 +188,12 @@ export const objectColumns: ExcelColumn[] = [
 /** Lifetime of a direct upload's presigned PUT and of its one-time confirm grant. */
 export const PRESIGN_TTL_SEC = 600
 
-/** `presign:{key}`: who may confirm the key, and what they were allowed to upload. */
+/** `presign:{key}`: who may confirm the key, in which tenant, and what they were allowed to upload. */
 interface PresignGrant {
   /** the uploader's id as a string (the Lua script compares strings) */
   uid: string
+  /** the tenant it was presigned in, as a string: the object is that tenant's, confirmed there only */
+  tid: string
   storageId: number
   name: string
   size: number
@@ -198,13 +201,15 @@ interface PresignGrant {
   sha256: string | null
 }
 
-// Confirm's one-time grant (see docs/design-notes.md#storage): returns and deletes it only for its owner; anyone else,
-// or an unknown key, gets nil and the grant stays, so knowing a key never burns the owner's confirm.
-// KEYS: presign:{key} · ARGV: caller id
+// Confirm's one-time grant (see docs/design-notes.md#storage, #tenancy): returns and deletes it only for its
+// owner in the tenant it was presigned in; anyone else, the owner in another tenant, or an unknown key
+// gets nil and the grant stays, so knowing a key never burns the owner's confirm.
+// KEYS: presign:{key} · ARGV: caller id, caller's tenant id
 const TAKE_GRANT = `
 local v = redis.call('GET', KEYS[1])
 if not v then return false end
-if cjson.decode(v).uid ~= ARGV[1] then return false end
+local g = cjson.decode(v)
+if g.uid ~= ARGV[1] or (g.tid or '1') ~= ARGV[2] then return false end
 redis.call('DEL', KEYS[1])
 return v`
 
@@ -339,6 +344,7 @@ export class StorageService {
     const put = await client.presignPut(key, body, PRESIGN_TTL_SEC)
     const grant: PresignGrant = {
       uid: String(uploaderId),
+      tid: String(tenantId()),
       storageId: storage.id,
       name,
       size: body.size,
@@ -352,8 +358,9 @@ export class StorageService {
   }
 
   /**
-   * Direct upload, step 2: only the caller who presigned `key` takes its grant (atomically, once);
-   * anyone else or an unknown / used key → 404 with the grant untouched. The staged upload must then
+   * Direct upload, step 2: only the caller who presigned `key`, in the tenant it was presigned in, takes
+   * its grant (atomically, once); anyone else, another tenant or an unknown / used key → 404 with the
+   * grant untouched. The staged upload must then
    * have the presigned size and a type matching the name (a public tag: an image; its first bytes by a
    * Range GET, Office containers whole), else it is deleted (422); a passing one moves to its area
    * served with the sniffed type. HEAD, the reads and the copy are all bound to one ETag, so bytes PUT
@@ -364,7 +371,7 @@ export class StorageService {
   async confirm(key: string, uploaderId: number): Promise<FsObjectVo> {
     const raw = await this.redis.eval(TAKE_GRANT, {
       keys: [redisKey('presign', key)],
-      arguments: [String(uploaderId)],
+      arguments: [String(uploaderId), String(tenantId())],
     })
     if (typeof raw !== 'string') throw new NotFoundException()
     const grant = JSON.parse(raw) as PresignGrant
@@ -481,9 +488,10 @@ export class StorageService {
     const userIds = [...new Set(objs.map((o) => o.uploaderId))]
     const [storages, users] = await Promise.all([
       this.storages.findBy({ id: In(storageIds) }),
+      // the objects' tenant (the caller's): an uploader of another tenant shows no name
       this.objects.manager.query<{ id: number; display_name: string }[]>(
-        'SELECT id, display_name FROM iam_user WHERE id IN (?) AND deleted_at IS NULL',
-        [userIds],
+        'SELECT id, display_name FROM iam_user WHERE id IN (?) AND tenant_id = ? AND deleted_at IS NULL',
+        [userIds, tenantId()],
       ),
     ])
     const storageName = new Map(storages.map((s) => [s.id, s.name]))
@@ -498,12 +506,14 @@ export class StorageService {
   }
 
   /**
-   * Binds uploads to a business record (e.g. workflow start → `wf:<instanceId>`, which
-   * the tag's `StorageAccess` checker reads; see docs/design-notes.md#storage), inside the caller's transaction `tx`: one conditional UPDATE
-   * takes only live objects of `tag` that `uploaderId` uploaded and nothing has bound yet. Any other id
-   * (someone else's, already bound, another tag, deleted, unknown) → 400 C1009, the same for each (no
-   * probing); the caller's transaction then rolls back what this matched. No ids → nothing to do.
-   * `tx` outside a transaction (e.g. `txHost.tx` without `@Transactional`) throws: a partial bind would stay.
+   * Binds uploads to a business record (e.g. workflow start → `wf:<instanceId>`, which the tag's
+   * `StorageAccess` checker reads; see docs/design-notes.md#storage), inside the caller's
+   * transaction `tx`: one conditional UPDATE takes only live objects of the current tenant and
+   * `tag` that `uploaderId` uploaded and nothing has bound yet. Any other id (someone else's,
+   * another tenant's, already bound, another tag, deleted, unknown) → 400 C1009, the same for each
+   * (no probing); the caller's transaction then rolls back what this matched. No ids → nothing
+   * to do. `tx` outside a transaction (e.g. `txHost.tx` without `@Transactional`) throws: a
+   * partial bind would stay.
    */
   async bindRefs(
     ids: readonly number[],
@@ -517,16 +527,19 @@ export class StorageService {
     if (!unique.length) return
     const res = await tx.query<{ affectedRows: number }>(
       `UPDATE fs_object SET biz_ref = ?, updated_by = ?
-        WHERE id IN (?) AND biz_tag = ? AND uploader_id = ? AND biz_ref IS NULL AND deleted_at IS NULL`,
-      [ref, uploaderId, unique, tag, uploaderId],
+        WHERE id IN (?) AND tenant_id = ? AND biz_tag = ? AND uploader_id = ? AND biz_ref IS NULL
+          AND deleted_at IS NULL`,
+      [ref, uploaderId, unique, tenantId(), tag, uploaderId],
     )
     if (res.affectedRows !== unique.length) throw new BizError(Err.STORAGE_REF_INVALID)
   }
 
   /**
-   * The object's content: public → anyone signed in; private → the uploader, `storage.object.view` or
-   * the tag's checker, else 403; unknown id → 404. `attachment` always, except `inline` asked for an image.
-   * On S3 the caller is redirected to a 60 s presigned GET carrying the same type and disposition.
+   * The object's content: public → anyone signed in; private → the uploader, `storage.object.view`
+   * or the tag's checker, else 403; unknown id → 404. The lookup keeps to the caller's tenant (the
+   * ORM), so another tenant's object is unknown to root, `storage.object.view` and every checker
+   * alike. `attachment` always, except `inline` asked for an image. On S3 the caller is redirected
+   * to a 60 s presigned GET carrying the same type and disposition.
    */
   async download(id: number, inline: boolean, p: Principal): Promise<Download> {
     const obj = await this.objects.findOneBy({ id })
@@ -577,7 +590,12 @@ export class StorageService {
    * deleted since (its row still holds the config; its S3 secret goes once no object is left on it,
    * `dropUnusedSecrets`). Returns how many went.
    */
-  async purgeDeleted(before: Date, signal: AbortSignal): Promise<number> {
+  purgeDeleted(before: Date, signal: AbortSignal): Promise<number> {
+    // qw:cross-tenant the retention applies to every tenant's deleted files
+    return allTenants(() => this.purgeAll(before, signal))
+  }
+
+  private async purgeAll(before: Date, signal: AbortSignal): Promise<number> {
     let purged = 0
     for (let after = 0; ;) {
       signal.throwIfAborted()

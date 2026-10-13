@@ -31,11 +31,13 @@ import {
 } from '@qiwu/shared'
 import { ActionLog } from '../../../../core/audit/action-log.js'
 import { RequirePerm } from '../../../../core/auth/decorators.js'
+import { PlatformOnly } from '../../../../core/auth/platform-only.js'
 import { Idempotent } from '../../../../core/guard/idempotent.js'
 import { ApiEnvelope } from '../../../../core/http/api-envelope.decorator.js'
 import { StorageConfigService } from './config.service.js'
 
 @ApiTags('storage')
+@PlatformOnly()
 @Controller('storage/configs')
 export class StorageConfigController {
   constructor(private readonly configs: StorageConfigService) {}

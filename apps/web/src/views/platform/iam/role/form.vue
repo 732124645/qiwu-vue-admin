@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { roleCreate } from '@qiwu/shared'
+import { roleCreate, TENANT_ADMIN_ROLE } from '@qiwu/shared'
 import { roleApi } from '@/api/platform/iam/role'
 import { useCrudForm } from '@/core/composables/use-crud'
 
@@ -18,9 +18,12 @@ const { model, formRef, rules, loading, submitting, submit, row } = useCrudForm(
   id,
   emit,
 })
-// the server refuses these anyway (422 iam.role_builtin): a builtin role keeps its code, root stays enabled
+// the server refuses these anyway (422 iam.role_builtin): a builtin role keeps its code, root and the
+// builtin tenant_admin role stay enabled
 const builtin = computed(() => row.value?.isBuiltin === true)
-const root = computed(() => builtin.value && row.value?.code === 'root')
+const alwaysOn = computed(
+  () => builtin.value && (row.value?.code === 'root' || row.value?.code === TENANT_ADMIN_ROLE),
+)
 </script>
 
 <template>
@@ -35,7 +38,7 @@ const root = computed(() => builtin.value && row.value?.code === 'root')
       <el-input-number v-model="model.sortNo" :min="0" :max="999999" controls-position="right" />
     </el-form-item>
     <el-form-item :label="t('field.iam.role.enabled')" prop="enabled">
-      <el-switch v-model="model.enabled" :disabled="root" />
+      <el-switch v-model="model.enabled" :disabled="alwaysOn" />
     </el-form-item>
     <el-form-item :label="t('field.iam.role.note')" prop="note">
       <el-input v-model="model.note" type="textarea" :rows="3" maxlength="500" show-word-limit />

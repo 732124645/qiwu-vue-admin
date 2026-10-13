@@ -10,14 +10,17 @@ import {
   RT,
   type RealtimeAuth,
   type RealtimeMessage,
+  type RealtimePayloads,
 } from '@qiwu/shared'
 import { locale, t } from './i18n'
 import {
   LOGIN_PAGE,
   ORIGIN,
+  SESSION_END_TEXT,
   currentAccessToken,
   hasSession,
   refreshAccessToken,
+  sessionEnd,
   setSession,
 } from './request'
 import { useCountsStore } from './stores/counts'
@@ -51,19 +54,24 @@ export function pollCounts() {
   if (!realtimeUp.value) useCountsStore().load()
 }
 
-/** An admin ended this session (iam/session kick): sign-in page, then say why. */
-function kicked() {
+/**
+ * An admin ended this session (iam/session kick), or the server did for a `reason` (its tenant became
+ * unavailable): sign-in page, then say which; the sign-in page repeats a reason.
+ */
+function kicked({ reason }: RealtimePayloads['session:kicked']) {
   stopRealtime()
   setSession(null)
+  const text = reason && SESSION_END_TEXT[reason]
+  sessionEnd.value = reason && text ? reason : null
   uni.reLaunch({
     url: LOGIN_PAGE,
-    complete: () => uni.showToast({ title: t('common.error.kicked'), icon: 'none' }),
+    complete: () => uni.showToast({ title: t(text || 'common.error.kicked'), icon: 'none' }),
   })
 }
 
 function onMessage(msg: RealtimeMessage) {
   if (msg.type === RT.wfTask || msg.type === RT.notifyNew) useCountsStore().load()
-  else if (msg.type === RT.sessionKicked) kicked()
+  else if (msg.type === RT.sessionKicked) kicked(msg.payload)
 }
 
 /**

@@ -10,6 +10,7 @@ import { clsGet } from '../../../../core/context/cls.js'
 import { BaseCrudService } from '../../../../core/db/base-crud.service.js'
 import { contains, type PageParams } from '../../../../core/db/page.js'
 import type { ExcelColumn } from '../../../../core/excel/excel.service.js'
+import { platformRowsOnly } from '../platform-rows.js'
 import { HttpFault } from './http-fault.entity.js'
 
 /** Excel columns in list order (headers: the field labels; dict columns as their labels). */
@@ -31,6 +32,11 @@ export const httpFaultColumns: ExcelColumn[] = [
 export class HttpFaultService extends BaseCrudService<HttpFault> {
   constructor(txHost: TransactionHost<TransactionalAdapterTypeOrm>) {
     super(txHost, HttpFault)
+  }
+
+  /** Root reads every row; anyone else the default tenant's and the anonymous ones (`platformRowsOnly`). */
+  override scopedQb(alias: string): SelectQueryBuilder<HttpFault> {
+    return platformRowsOnly(super.scopedQb(alias), alias)
   }
 
   override async page<F extends string>(
@@ -64,6 +70,7 @@ export class HttpFaultService extends BaseCrudService<HttpFault> {
       state,
       createdAtFrom,
       createdAtTo,
+      tenantId,
     }: HttpFaultQuery,
   ): SelectQueryBuilder<HttpFault> {
     if (traceId) qb.andWhere('t.trace_id = :traceId', { traceId })
@@ -77,6 +84,7 @@ export class HttpFaultService extends BaseCrudService<HttpFault> {
       qb.andWhere('t.created_at >= :createdAtFrom', { createdAtFrom: new Date(createdAtFrom) })
     if (createdAtTo)
       qb.andWhere('t.created_at <= :createdAtTo', { createdAtTo: new Date(createdAtTo) })
+    if (tenantId !== undefined) qb.andWhere('t.tenant_id = :tenantId', { tenantId })
     return qb
   }
 

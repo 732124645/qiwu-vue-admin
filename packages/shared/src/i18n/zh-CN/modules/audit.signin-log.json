@@ -15,7 +15,9 @@
         "msgKey": "提示键",
         "msgParams": "提示参数",
         "msg": "提示",
-        "userType": "用户类型"
+        "userType": "用户类型",
+        "tenantId": "租户",
+        "unresolved": "未解析租户"
       }
     }
   }

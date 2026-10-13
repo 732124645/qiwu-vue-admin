@@ -11,13 +11,15 @@ import bcrypt from 'bcryptjs'
 import { createClient } from 'redis'
 import { DataSource } from 'typeorm'
 import { keyPattern } from './dist/core/redis/cache-namespaces.js'
+import { withTenant } from './dist/core/context/tenant.js'
 import { dataSourceOptions } from './dist/db/data-source.js'
 import { seedLimitedUser } from './dist/db/seeds/iam/iam.seed.js'
 import { findId, upsert } from './dist/db/seeds/upsert.js'
 const [limited, reader, modifier, profile, tree, scoped, granter, operator, rt, staff, wfAdmin, wfViewer, ...mustChange] = JSON.parse(process.env.E2E_USERS)
 const ds = await new DataSource(dataSourceOptions()).initialize()
 try {
-  await ds.transaction(async (q) => {
+  // the default tenant's users and rows, as the seeds' (no request around this script)
+  await withTenant(1, () => ds.transaction(async (q) => {
     await seedLimitedUser(q, limited.username, limited.password)
     // positions roles: the browse action alone (read-only; users too: masked contacts), browse +
     // modify without view (the page comes with its ancestors); the user list of "own dept and below"
@@ -38,27 +40,27 @@ try {
       const roleId = await upsert(q, 'iam_role', { code }, { name: code, data_scope: scope })
       for (const perm of perms) {
         const menuId = await findId(q, 'iam_menu', { perms: perm })
-        await q.query('INSERT IGNORE INTO iam_role_menus (role_id, menu_id) VALUES (?, ?)', [roleId, menuId])
+        await q.query('INSERT IGNORE INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, 1)', [roleId, menuId])
       }
-      await q.query('INSERT IGNORE INTO iam_user_roles (user_id, role_id) VALUES (?, ?)', [userId, roleId])
+      await q.query('INSERT IGNORE INTO iam_user_roles (user_id, role_id, tenant_id) VALUES (?, ?, 1)', [userId, roleId])
     }
     // the realtime demo's receiver: the page row alone (it has no browse action), so no send form
     const rtId = await seedLimitedUser(q, rt.username, rt.password)
     const rtRoleId = await upsert(q, 'iam_role', { code: 'e2e_rt' }, { name: 'e2e_rt', data_scope: 'own_dept' })
-    await q.query('INSERT IGNORE INTO iam_role_menus (role_id, menu_id) VALUES (?, ?)', [
+    await q.query('INSERT IGNORE INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, 1)', [
       rtRoleId, await findId(q, 'iam_menu', { route_name: 'demo-realtime' }),
     ])
-    await q.query('INSERT IGNORE INTO iam_user_roles (user_id, role_id) VALUES (?, ?)', [rtId, rtRoleId])
+    await q.query('INSERT IGNORE INTO iam_user_roles (user_id, role_id, tenant_id) VALUES (?, ?, 1)', [rtId, rtRoleId])
     // the personal center shows a position too
     const profileId = await seedLimitedUser(q, profile.username, profile.password)
-    await q.query('INSERT IGNORE INTO iam_user_positions (user_id, position_id) VALUES (?, ?)', [
+    await q.query('INSERT IGNORE INTO iam_user_positions (user_id, position_id, tenant_id) VALUES (?, ?, 1)', [
       profileId, await findId(q, 'iam_position', { code: 'support' }),
     ])
     // the approval center's user: the seeded role staff alone (own rows, like the OA users; dept support),
     // instead of demo
     const staffId = await seedLimitedUser(q, staff.username, staff.password)
     await q.query('DELETE FROM iam_user_roles WHERE user_id = ?', [staffId])
-    await q.query('INSERT INTO iam_user_roles (user_id, role_id) VALUES (?, ?)', [
+    await q.query('INSERT INTO iam_user_roles (user_id, role_id, tenant_id) VALUES (?, ?, 1)', [
       staffId, await findId(q, 'iam_role', { code: 'staff' }),
     ])
     // wf-center-start.spec: a published custom-form model (no business handler in this server to publish
@@ -87,7 +89,7 @@ try {
       parent_id: 0, kind: 'page', name: 'E2E page', route_path: '/e2e/page',
       component: 'home/index', icon: 'lucide:file-text', sort_no: 50,
     })
-  })
+  }))
 } finally {
   await ds.destroy()
 }

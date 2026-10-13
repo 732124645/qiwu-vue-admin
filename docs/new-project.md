@@ -58,15 +58,15 @@ node scripts/new-project.mjs --dry-run --name my-admin --db-name my_admin_dev --
 node scripts/new-project.mjs --name my-admin --db-name my_admin_dev --redis-db 0 --title '我的后台'
 ```
 
-| 参数            | 当前契约                                                                                                                       |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `--name`        | 1–63 字符、小写字母开头的 slug，仅小写字母、数字和 `-`                                                                         |
-| `--db-name`     | 默认将 slug 的 `-` 换为 `_` 后加 `_dev`；1–64 字符、小写字母开头，仅小写字母、数字与 `_`，必须以 `_dev` 结尾，拒绝 `qiwu_dev`  |
-| `--redis-db`    | 非负十进制安全整数；拒绝模板开发与测试使用的库号（9、13、14、15，`--help` 打印当前保留清单），不验证服务端实际配置或是否被占用 |
-| `--title`       | 默认项目 slug，1–128 字符；拒绝 CR / LF / NUL 和 `$ < > & "`；用于 HTML、浏览器、侧栏与登录页标题                              |
-| `--dry-run`     | 只读预览；缺少 Redis 库号时保留待确认状态                                                                                      |
-| `--self-test`   | 临时目录中的脚本自检，不连接数据库 / Redis 或修改当前项目                                                                      |
-| `--help` / `-h` | 显示用法                                                                                                                       |
+| 参数            | 当前契约                                                                                                                          |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `--name`        | 1–63 字符、小写字母开头的 slug，仅小写字母、数字和 `-`                                                                            |
+| `--db-name`     | 默认将 slug 的 `-` 换为 `_` 后加 `_dev`；1–64 字符、小写字母开头，仅小写字母、数字与 `_`，必须以 `_dev` 结尾，拒绝 `qiwu_dev`     |
+| `--redis-db`    | 非负十进制安全整数；拒绝模板开发与测试使用的库号（1、9、13、14、15，`--help` 打印当前保留清单），不验证服务端实际配置或是否被占用 |
+| `--title`       | 默认项目 slug，1–128 字符；拒绝 CR / LF / NUL 和 `$ < > & "`；用于 HTML、浏览器、侧栏与登录页标题                                 |
+| `--dry-run`     | 只读预览；缺少 Redis 库号时保留待确认状态                                                                                         |
+| `--self-test`   | 临时目录中的脚本自检，不连接数据库 / Redis 或修改当前项目                                                                         |
+| `--help` / `-h` | 显示用法                                                                                                                          |
 
 不设置 `VITE_APP_TITLE` 时，HTML 使用中文默认标题；浏览器、侧栏、登录页品牌跟随界面语言。标题文件是非秘密配置，可提交。脚本不修改根 `package.json` 的项目名；业务标识及项目域按 [代码生成指南](codegen.md) 设置，无需重命名 `@qiwu/*`。
 
@@ -101,6 +101,8 @@ pnpm dev
 
 先 migrate 再 seed；`pnpm dev` 在使用者终端交互运行，打开 Web 后使用 `admin` 与本项目保存的密码登录。不要对已有模板库 `qiwu_dev` 执行裸 `pnpm db:reset`。生产安装使用独立环境、数据库与密钥，见 [部署](deploy.md)；PC-only 裁剪见 [移动端](mobile.md#只要-pc删除移动端)。
 
+项目种子只写默认租户：`SEEDS.project` 只在默认租户运行。启用多租户后，每个租户都需要的基础数据（如默认分类、项目页面的流程模型）放进 `apps/server/src/db/seeds/project/tenant.seed.ts` 的 `PROJECT_TENANT_SEEDS`：开通租户时在同一事务里运行，之后每次 `pnpm db:seed` 对每个非默认租户运行，只补缺少的行，不复活租户删掉的行。
+
 首次开发登录默认会显示滑块验证码，模式由参数 `captcha.mode` 控制。`pnpm db:seed` 只在新建时打印新用户初始密码（包括 OA 演示用户）；重跑不会再次显示，须当场安全保存，绝不要粘贴到聊天、工单、日志或版本库。脚本预设的 `admin` 密码仍在本项目的 `.env.local` 中安全查看。
 
 ### 与模板同时运行
@@ -123,7 +125,7 @@ API_PROXY_TARGET=http://127.0.0.1:3310 pnpm --filter @qiwu/web dev --port 5190 -
 
 ## Windows（原生 PowerShell 5.1）
 
-Windows 开发与完整本地检查的环境要求见[入门指南](getting-started.md#windows原生-powershell-51)。准备 MySQL 与 Redis ≥ 7 服务；本文其余 shell 块面向 macOS / POSIX。
+Windows 开发与完整本地检查的环境要求见[入门指南](getting-started.md#windows原生-powershell-51)。准备 MySQL（推荐 8.4，最低 8.0.17）与 Redis ≥ 7.0 服务，见[入门指南](getting-started.md#1-准备运行环境)；本文其余 shell 块面向 macOS / POSIX。
 
 下列手敲命令使用 `pnpm.cmd`，避开 PowerShell 的 `.ps1` 执行策略，不修改执行策略。`pnpm.cmd` 仅随 npm / Corepack 安装提供；独立安装的 `pnpm.exe`（如 winget / get.pnpm.io）请把示例中的 `pnpm.cmd` 换成 `pnpm`。 脚本打印的通用 `pnpm` 后续步骤也遵循此规则。用编辑器保存 UTF-8 / LF 的环境文件；脚本的 0600 模式不能替代 Windows ACL，秘密文件仍由用户限制访问。
 

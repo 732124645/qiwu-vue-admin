@@ -15,22 +15,27 @@ import {
 import type { DeepPartial, QueryDeepPartialEntity, SelectQueryBuilder } from 'typeorm'
 import { PermVersion } from '../../../../core/auth/perm-version.js'
 import { clsGet } from '../../../../core/context/cls.js'
+import { allTenants, tenantId } from '../../../../core/context/tenant.js'
 import { BaseTreeService } from '../../../../core/db/base-tree.service.js'
+import { softDeleteWhere } from '../../../../core/db/references.js'
 import { BizError } from '../../../../core/http/biz-error.js'
 import { parseOr400 } from '../../../../core/http/validation.pipe.js'
 import { GrantPolicy } from '../role/grant-policy.js'
 import { Menu } from './menu.entity.js'
+import { syncPlatformOnly } from './platform-only.js'
 
 /**
  * Menus, a tree over BaseTreeService (docs/codegen-golden.md "Tree"): the forest list, the
  * paths, moves with the whole subtree and the delete rules are the base's. Uniqueness is the DB's
- * (`unique(…, alive)`, errno 1062 → 409 `duplicate`); a granted menu is refused (`beforeRemove`, 409).
+ * (`unique(…, alive)`, errno 1062 → 409 `duplicate`); a menu granted in the caller's tenant is refused
+ * (`beforeRemove`, 409), other tenants' grants of it go with it.
  * Menu rules (`beforeWrite`): the kind decides the fields (`menuUnusedFields`, `menuCreate`) and the
  * parents (`menuParentAllows`); `enabled` flags stand alone (below); sibling route paths and route names
  * are unique indexes. Perms are grants (see docs/design-notes.md#permissions): a non-root caller writes only perms it holds and an
  * edit is judged by what it makes effective for the roles granted the menus (`update`). Sessions carry the perms their menus grant and the browser the routes `/api/auth/menus`
  * builds (see docs/design-notes.md#layering, #permissions): every successful write (create, update, enable, delete, sort) reloads them all
  * (`bumpAll`, after the commit; a signed-in browser re-reads `/me` + `/menus` on the new `X-Perm-Ver`).
+ * Creates and edits keep `platform_only` by its rule (`syncPlatformOnly`, see docs/design-notes.md#tenancy).
  */
 @Injectable()
 export class MenuService extends BaseTreeService<Menu> {
@@ -42,8 +47,13 @@ export class MenuService extends BaseTreeService<Menu> {
     super(txHost, Menu)
   }
 
+  /** The new menu is platform-only when its parent is (`syncPlatformOnly`, in the same transaction). */
   override async create(dto: DeepPartial<Menu>): Promise<Menu> {
-    const row = await super.create(dto)
+    const row = await this.txHost.withTransaction(async () => {
+      const created = await super.create(dto)
+      await syncPlatformOnly(this.txHost.tx)
+      return created
+    })
     await this.permVersion.bumpAll()
     return row
   }
@@ -54,9 +64,11 @@ export class MenuService extends BaseTreeService<Menu> {
    * the caller could make (`GrantPolicy.assertMenuWrite`, 403 `grant_exceeds_own`).
    */
   override async update(id: number, dto: QueryDeepPartialEntity<Menu>): Promise<void> {
-    await this.txHost.withTransaction(() =>
-      this.grants.assertMenuWrite(() => super.update(id, dto)),
-    )
+    await this.txHost.withTransaction(async () => {
+      await this.grants.assertMenuWrite(() => super.update(id, dto))
+      // a new parent or route name: the subtree is platform-only by its new place
+      await syncPlatformOnly(this.txHost.tx)
+    })
     await this.permVersion.bumpAll()
   }
 
@@ -111,13 +123,21 @@ export class MenuService extends BaseTreeService<Menu> {
       throw new BizError(Err.IAM_GRANT_EXCEEDS_OWN)
   }
 
-  /** A menu granted to a role is not deleted (409): a locking read, so no grant slips in before the commit. */
+  /**
+   * A menu granted to a role of the caller's tenant is not deleted (409): a locking read, so no grant slips
+   * in before the commit. Menus are the platform's: the grants of other tenants' roles, which the caller
+   * neither sees nor can revoke, are soft-deleted with it (see docs/design-notes.md#tenancy).
+   */
   protected override async beforeRemove(ids: number[]): Promise<void> {
-    const [granted] = await this.txHost.tx.query<unknown[]>(
-      'SELECT role_id FROM iam_role_menus WHERE menu_id IN (?) AND deleted_at IS NULL LIMIT 1 FOR SHARE',
-      [ids],
+    const tx = this.txHost.tx
+    const [granted] = await tx.query<unknown[]>(
+      `SELECT role_id FROM iam_role_menus
+        WHERE menu_id IN (?) AND tenant_id = ? AND deleted_at IS NULL LIMIT 1 FOR SHARE`,
+      [ids, tenantId()],
     )
     if (granted) throw new BizError(Err.IAM_MENU_GRANTED)
+    // qw:cross-tenant a platform menu leaves no grant behind in any tenant
+    await allTenants(() => softDeleteWhere(tx, 'iam_role_menus', 'menu_id', ids))
   }
 
   /**

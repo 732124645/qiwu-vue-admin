@@ -14,7 +14,8 @@
   },
   "error": {
     "network": "Network error, please try again later",
-    "kicked": "An administrator signed you out. Please sign in again."
+    "kicked": "An administrator signed you out. Please sign in again.",
+    "tenantUnavailable": "Your tenant is disabled or has expired. Please contact your administrator."
   },
   "tab": {
     "home": "Workbench",

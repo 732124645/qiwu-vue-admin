@@ -15,6 +15,7 @@ import { findId, insertRow } from '../../src/db/seeds/upsert.js'
 import { WfHandlers } from '../../src/modules/workflow/runtime/wf-handlers.js'
 import { bearer, signIn } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 const PREFIX = 'e2e-wfm-'
 const URL = '/api/wf/models'
@@ -106,14 +107,19 @@ const handler = {
 }
 
 async function user(name: string, roles: number[]) {
-  const id = await insertRow(ds.manager, 'iam_user', {
-    username: PREFIX + name,
-    display_name: name,
-    password_hash: 'not-used-by-this-spec',
-    password_changed_at: new Date(),
-  })
+  const id = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_user', {
+      username: PREFIX + name,
+      display_name: name,
+      password_hash: 'not-used-by-this-spec',
+      password_changed_at: new Date(),
+    }),
+  )
   for (const r of roles)
-    await ds.query('INSERT INTO iam_user_roles (user_id, role_id) VALUES (?, ?)', [id, r])
+    await ds.query('INSERT INTO iam_user_roles (user_id, role_id, tenant_id) VALUES (?, ?, 1)', [
+      id,
+      r,
+    ])
   userIds.push(id)
   return (await signIn(app, PREFIX + name)).accessToken
 }
@@ -135,17 +141,22 @@ beforeAll(async () => {
   )
   await cleanRedis(redis)
   await cleanup()
-  roleId = await insertRow(ds.manager, 'iam_role', {
-    code: `${PREFIX}reader`,
-    name: `${PREFIX}reader`,
-    data_scope: 'all',
-  })
+  roleId = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_role', {
+      code: `${PREFIX}reader`,
+      name: `${PREFIX}reader`,
+      data_scope: 'all',
+    }),
+  )
   for (const perms of [wfPerms.model.browse, wfPerms.model.view]) {
     const menu = await findId(ds.manager, 'iam_menu', { perms })
-    await ds.query('INSERT INTO iam_role_menus (role_id, menu_id) VALUES (?, ?)', [roleId, menu])
+    await ds.query('INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, 1)', [
+      roleId,
+      menu,
+    ])
   }
   tokens.admin = (await signIn(app)).accessToken
-  adminId = (await findId(ds.manager, 'iam_user', { username: 'admin' }))!
+  adminId = (await inTenant1(() => findId(ds.manager, 'iam_user', { username: 'admin' })))!
   tokens.reader = await user('reader', [roleId])
   tokens.plain = await user('plain', [])
 })
@@ -193,7 +204,7 @@ describe('access (wfPerms.model)', () => {
 
 describe('CRUD', () => {
   it('create → 201 with defaults; detail adds the draft and the handler fields', async () => {
-    const row = await addCustom({ managerUserIds: [1], allowWithdraw: false })
+    const row = await addCustom({ managerUserIds: [adminId], allowWithdraw: false })
     expect(row).toMatchObject({
       name: 'Leave',
       category: 'other',
@@ -202,7 +213,7 @@ describe('CRUD', () => {
       createRoute: '/biz/leave/new',
       viewComponent: 'biz/leave/view',
       initiatorScope: null,
-      managerUserIds: [1],
+      managerUserIds: [adminId],
       allowCancel: true,
       allowWithdraw: false,
       enabled: true,
@@ -245,8 +256,8 @@ describe('CRUD', () => {
   it('an initiator scope listing nobody is stored as null (everyone), a real one with every list', async () => {
     const none = await add(custom({ initiatorScope: { userIds: [], deptIds: [] } }))
     expect(none.initiatorScope).toBeNull()
-    const some = await add(custom({ initiatorScope: { roleIds: [2] } }))
-    expect(some.initiatorScope).toEqual({ userIds: [], deptIds: [], roleIds: [2] })
+    const some = await add(custom({ initiatorScope: { roleIds: [roleId] } }))
+    expect(some.initiatorScope).toEqual({ userIds: [], deptIds: [], roleIds: [roleId] })
     await call('admin', 'put', `/${some.id}`, { initiatorScope: { deptIds: [0] } }).expect(400)
     await call('admin', 'put', `/${some.id}`, { initiatorScope: {} }).expect(200)
     expect((await detail(some.id)).initiatorScope).toBeNull()
@@ -261,7 +272,7 @@ describe('CRUD', () => {
       formKind: 'dynamic',
       flowKind: 'tree',
       allowCancel: false,
-      managerUserIds: [1, 2],
+      managerUserIds: [adminId, userIds[0]],
       category: 'hr',
     }).expect(200)
     expect(await detail(row.id)).toMatchObject({
@@ -270,7 +281,7 @@ describe('CRUD', () => {
       formKind: 'custom',
       flowKind: 'bpmn',
       allowCancel: false,
-      managerUserIds: [1, 2],
+      managerUserIds: [adminId, userIds[0]],
       category: 'hr',
     })
     await call('admin', 'put', `/${row.id}`, { createRoute: null }).expect(400)

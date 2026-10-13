@@ -1,7 +1,7 @@
 // Full local gate (see docs/design-notes.md#layering): run steps in order, stop at the first failure, print a summary.
 // --dry: only print the planned steps (RUN/SKIP) and exit 0.
-// --parallel: after the non-server tests, server test → golden and Playwright (web,
-// then mobile when mobile/ exists) run side by side, each step in its own process group with its
+// --parallel: after the non-server tests, server test → golden and Playwright (web, web with
+// multi-tenancy on, then mobile when mobile/ exists) run side by side, each step in its own process group with its
 // output in its own log file; the first failure stops the other lane. --serial (the default until 3
 // green parallel runs in a row) wins over --parallel.
 import { spawn, spawnSync } from 'node:child_process'
@@ -52,10 +52,12 @@ const lanes = [
     ['gen:check-golden', 'pnpm gen:check-golden --skip-build'],
   ],
   // runs the dist of the build step (server: .env.e2e, qiwu_e2e + Redis db 14; web: vite build +
-  // preview under the SPA CSP); the global setup prints the browser channel. Then the mobile
-  // H5 suite on its own database, Redis db and ports (qiwu_mobile_e2e, 9, 3201/4175)
+  // preview under the SPA CSP); the global setup prints the browser channel. Then the same with
+  // multi-tenancy on (e2e-tenant/: qiwu_tenant_e2e, 1, 3203/4176) and the mobile H5 suite on its own
+  // database, Redis db and ports (qiwu_mobile_e2e, 9, 3201/4175): one Playwright run at a time
   [
     ['playwright', 'pnpm --filter @qiwu/web e2e'],
+    ['playwright tenant', 'pnpm --filter @qiwu/web e2e:tenant'],
     ['mobile e2e', 'pnpm mobile:e2e', MOBILE],
   ],
 ]

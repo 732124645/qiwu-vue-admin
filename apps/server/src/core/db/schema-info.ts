@@ -1,3 +1,4 @@
+import { TENANT_COLUMN } from '@qiwu/shared'
 import type { DataSource, EntityManager } from 'typeorm'
 
 export interface ColumnInfo {
@@ -12,8 +13,8 @@ export interface ColumnInfo {
   /** a generated column (`alive`, …): computed by MySQL, never written */
   generated: boolean
   /**
-   * alone in a unique index, generated columns aside (`unique(code)`, or `unique(isbn, alive)`: unique
-   * among live rows)
+   * alone in a unique index, generated columns and the tenant column aside (`unique(code)`, or
+   * `unique(tenant_id, isbn, alive)`: unique among a tenant's live rows)
    */
   unique: boolean
 }
@@ -68,7 +69,7 @@ export async function readTableInfo(
   for (const { idx, col } of indexes) byIndex.set(idx, [...(byIndex.get(idx) ?? []), col])
   const unique = new Set(
     [...byIndex.values()]
-      .map((cols) => cols.filter((c) => !generated.has(c)))
+      .map((cols) => cols.filter((c) => !generated.has(c) && c !== TENANT_COLUMN))
       .filter((cols) => cols.length === 1)
       .map(([c]) => c),
   )

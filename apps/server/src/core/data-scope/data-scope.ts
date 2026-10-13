@@ -63,14 +63,14 @@ export const deptScopeRule =
         ...new Set(roles.flatMap((r) => (r.dataScope === 'picked_depts' ? (r.deptIds ?? []) : []))),
       ]
       const or: string[] = []
-      if (dept && picked.length) or.push(`${alias}.${dept} IN (:...dsPicked${i})`) // arch-allow: sql-concat alias/column identifiers, group index
-      if (dept && p.deptId !== null && has('own_dept')) or.push(`${alias}.${dept} = :dsDept`) // arch-allow: sql-concat alias/column identifiers
+      if (dept && picked.length) or.push(`${alias}.${dept} IN (:...dsPicked${i})`) // arch-allow: sql-concat alias/column identifiers, group index; tenant: the ORM adds it to the alias
+      if (dept && p.deptId !== null && has('own_dept')) or.push(`${alias}.${dept} = :dsDept`) // arch-allow: sql-concat alias/column identifiers; tenant: the ORM adds it to the alias
       if (dept && p.deptTreePath && has('own_dept_tree'))
         or.push(
-          // arch-allow: sql-concat alias/column/table identifiers
+          // arch-allow: sql-concat alias/column/table identifiers; tenant: tree paths are global dept ids, the prefix reaches the caller's own depts only
           `${alias}.${dept} IN (SELECT id FROM ${deptTable} WHERE tree_path LIKE :dsPrefix AND deleted_at IS NULL)`,
         )
-      if (owner && has('own_rows')) or.push(`${alias}.${owner} = :dsMe`) // arch-allow: sql-concat alias/column identifiers
+      if (owner && has('own_rows')) or.push(`${alias}.${owner} = :dsMe`) // arch-allow: sql-concat alias/column identifiers; tenant: the ORM adds it to the alias
       qb.andWhere(or.length ? `(${or.join(' OR ')})` : '1=0', {
         [`dsPicked${i}`]: picked,
         dsDept: p.deptId,
@@ -79,15 +79,17 @@ export const deptScopeRule =
       })
     })
 
-/** Multi-tenancy hook (item 2; see docs/design-notes.md#data-scope): v1 has no tenants, so it adds nothing. */
-export const tenantRule: ScopeRule = () => {}
-
-/** The rule chain every scoped entity gets unless its service replaces it. */
-export const defaultScopeRules = (): ScopeRule[] => [deptScopeRule(), tenantRule]
+/**
+ * The rule chain every scoped entity gets unless its service replaces it. Tenants are no link of it: the
+ * tenant condition sits in the ORM itself (core/db/tenant-filter.ts, docs/design-notes.md#tenancy).
+ */
+export const defaultScopeRules = (): ScopeRule[] => [deptScopeRule()]
 
 /**
  * The single data-scope hook (see docs/design-notes.md#data-scope): `@SkipDataScope` → no filter; no caller → nothing visible;
  * root (`Principal.root`) → no filter; otherwise every rule of the chain for the caller and CLS `checkedPerm`.
+ * Both exemptions skip department rules only: the tenant condition still applies
+ * (docs/design-notes.md#tenancy).
  */
 export function applyScopes<Q extends SelectQueryBuilder<ObjectLiteral>>(
   qb: Q,
@@ -120,7 +122,8 @@ export const withCheckedPerm = <T>(checked: PermRequirement | undefined, fn: () 
 
 /**
  * Runs the method without data scope (system jobs; see docs/design-notes.md#data-scope), in a nested CLS context so the
- * exemption ends with the call. Works outside a request too (the context is created).
+ * exemption ends with the call. Works outside a request too (the context is created). The tenant
+ * condition is not data scope: it stays (docs/design-notes.md#tenancy).
  */
 export const SkipDataScope =
   (): MethodDecorator => (_target, _key, descriptor: PropertyDescriptor) => {

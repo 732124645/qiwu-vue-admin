@@ -18,6 +18,7 @@ import { findId, insertRow } from '../../src/db/seeds/upsert.js'
 import { bearer, signIn } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
 import { closeSockets, connect, disconnected, inbox, socketOf } from '../setup/socket.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 const PREFIX = 'sess-e2e-'
 const URL = '/api/iam/sessions'
@@ -41,16 +42,21 @@ const kick = (body: object, token = admin) =>
 const me = (token: string) => http().get('/api/auth/me').set(bearer(token))
 
 async function user(name: string, deptId: number | null = null, roles: number[] = []) {
-  const id = await insertRow(ds.manager, 'iam_user', {
-    username: PREFIX + name,
-    display_name: name,
-    dept_id: deptId,
-    password_hash: 'not-used-by-this-spec',
-    password_changed_at: new Date(),
-  })
+  const id = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_user', {
+      username: PREFIX + name,
+      display_name: name,
+      dept_id: deptId,
+      password_hash: 'not-used-by-this-spec',
+      password_changed_at: new Date(),
+    }),
+  )
   userIds.push(id)
   for (const r of roles)
-    await ds.query('INSERT INTO iam_user_roles (user_id, role_id) VALUES (?, ?)', [id, r])
+    await ds.query('INSERT INTO iam_user_roles (user_id, role_id, tenant_id) VALUES (?, ?, 1)', [
+      id,
+      r,
+    ])
   return id
 }
 
@@ -267,18 +273,20 @@ describe('data scope', () => {
   let mateId = 0
   let bossId = 0
   beforeAll(async () => {
-    const rd = (await findId(ds.manager, 'iam_dept', { name: 'seed.dept.rd' }))!
-    roleId = await insertRow(ds.manager, 'iam_role', {
-      code: `${PREFIX}own-dept`,
-      name: `${PREFIX}own-dept`,
-      data_scope: 'own_dept',
-    })
+    const rd = (await inTenant1(() => findId(ds.manager, 'iam_dept', { name: 'seed.dept.rd' })))!
+    roleId = await inTenant1(() =>
+      insertRow(ds.manager, 'iam_role', {
+        code: `${PREFIX}own-dept`,
+        name: `${PREFIX}own-dept`,
+        data_scope: 'own_dept',
+      }),
+    )
     for (const perm of [sessionPerms.browse, sessionPerms.kick])
-      await ds.query('INSERT INTO iam_role_menus (role_id, menu_id) VALUES (?, ?)', [
+      await ds.query('INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, 1)', [
         roleId,
         await findId(ds.manager, 'iam_menu', { perms: perm }),
       ])
-    const rootRole = (await findId(ds.manager, 'iam_role', { code: 'root' }))!
+    const rootRole = (await inTenant1(() => findId(ds.manager, 'iam_role', { code: 'root' })))!
     await user('op', rd, [roleId])
     mateId = await user('mate', rd)
     bossId = await user('boss', rd, [rootRole])

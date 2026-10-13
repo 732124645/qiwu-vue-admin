@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import type { FormInstance } from 'element-plus'
 import { verifyPasswordBody } from '@qiwu/shared'
 import PasswordToggle from '@/core/components/PasswordToggle.vue'
 import { revalidateOnLocale, zodRules } from '@/core/form/zod-rules'
+import { tx } from '@/core/i18n'
 import { Icon } from '@/core/icons'
 import AuthPage from '@/core/layout/AuthPage.vue'
 import { api, ApiError } from '@/core/request/http'
@@ -26,6 +27,14 @@ const formRef = ref<FormInstance>()
 revalidateOnLocale(formRef)
 const loading = ref(false)
 const error = ref('')
+// working inside another tenant: the lock screen says so too
+const subtitle = computed(() => {
+  const hint = t('layout.lock.hint', { name: auth.me?.user.displayName ?? '' })
+  const tenant = auth.tenant
+  return tenant?.acting
+    ? `${hint} · ${t('layout.tenant.lockHint', { name: tx(tenant.name) })}`
+    : hint
+})
 
 async function unlock() {
   if (!(await formRef.value?.validate().catch(() => false))) return
@@ -54,10 +63,7 @@ async function signOut() {
 </script>
 
 <template>
-  <AuthPage
-    :title="t('layout.lock.title')"
-    :subtitle="t('layout.lock.hint', { name: auth.me?.user.displayName ?? '' })"
-  >
+  <AuthPage :title="t('layout.lock.title')" :subtitle>
     <el-form
       ref="formRef"
       :model="form"

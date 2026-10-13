@@ -19,13 +19,15 @@
       },
       "import": {
         "title": "Import tables",
-        "hint": "Tables of this database not imported yet (framework tables meta_, test_, cg_ left out)",
+        "hint": "Tables of this database not imported yet (framework and reserved tables meta_, test_, cg_, wxoa_ left out)",
         "filter": "Filter by name or comment",
         "empty": "No tables to import",
         "submit": "Import selected",
         "done": "{count} table(s) imported",
         "noDeletedAt": "No deleted_at column: add deleted_at datetime(3) NULL to import it (the generated code soft-deletes)",
         "noAlive": "The unique key {key} of {table} lacks the alive column, so values in deleted rows cannot be reused. Change the unique key to (…, alive).",
+        "noTenantColumn": "Table {table} is not a platform table but lacks the tenant column {key}, so every tenant shares its rows. Add a tenant_id column.",
+        "noTenantKey": "The unique key {key} of {table} does not start with tenant_id, so a value can be used only once across all tenants. Change the unique key to (tenant_id, …, alive).",
         "noParentMenu": "Table {table}: no menu group {key} (or subgroup) is available for this page, so its parent defaults to Business (biz). Create a group in Menus, then select it on the Generation tab."
       },
       "sync": {

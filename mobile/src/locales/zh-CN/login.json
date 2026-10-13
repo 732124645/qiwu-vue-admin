@@ -16,5 +16,6 @@
   "slogan": "审批、待办与消息，随时随地处理",
   "privacy": "隐私政策",
   "terms": "用户协议",
-  "showPassword": "显示密码"
+  "showPassword": "显示密码",
+  "tenantCode": "租户编码（留空即默认租户）"
 }

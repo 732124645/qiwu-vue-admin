@@ -5,7 +5,11 @@ import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { i18n, setLocale } from '@/core/i18n'
 import PasswordResetView from '@/views/password-reset/index.vue'
-import { fail, mockApi, ok } from './mock-api'
+import { fail, mockApi, ok, type Route } from './mock-api'
+
+// multi-tenancy off: no tenant code field
+const backend = (routes: Record<string, Route>) =>
+  mockApi({ 'GET /auth/tenancy': ok({ enabled: false }), ...routes })
 
 const openDialog = vi.hoisted(() => vi.fn<(...args: unknown[]) => Promise<string | undefined>>())
 vi.mock('@/core/dialog', () => ({ openDialog }))
@@ -44,7 +48,7 @@ afterEach(() => {
 
 describe('password reset by SMS', () => {
   it('sends an OTP for reset_password with the sms_send CAPTCHA ticket', async () => {
-    const calls = mockApi({
+    const calls = backend({
       'GET /settings/params/public/captcha.mode': ok({ key: 'captcha.mode', value: 'slider' }),
       'POST /auth/sms/code': ok({ cooldownSec: 60 }),
     })
@@ -66,7 +70,7 @@ describe('password reset by SMS', () => {
   })
 
   it('blocks mismatched confirmation, then resets with only the three contract fields and navigates', async () => {
-    const calls = mockApi({ 'POST /auth/password/reset-by-sms': ok(null) })
+    const calls = backend({ 'POST /auth/password/reset-by-sms': ok(null) })
     const { wrapper, router } = await page()
     await fill(wrapper)
     await wrapper.find('input[name="confirmPassword"]').setValue('Wrong123!')
@@ -86,7 +90,7 @@ describe('password reset by SMS', () => {
   })
 
   it('shows the translated server error inline and stays on the page', async () => {
-    const calls = mockApi({
+    const calls = backend({
       'POST /auth/password/reset-by-sms': fail(400, 'A0400', 'A stricter password is required'),
     })
     const { wrapper, router } = await page()
@@ -100,7 +104,7 @@ describe('password reset by SMS', () => {
   })
 
   it('accepts an eight-character lowercase password when one class is configured', async () => {
-    const calls = mockApi({
+    const calls = backend({
       'GET /settings/params/public/iam.password_char_classes': ok({
         key: 'iam.password_char_classes',
         value: '1',
@@ -121,7 +125,7 @@ describe('password reset by SMS', () => {
   })
 
   it('rejects a ten-character password when twelve characters are configured', async () => {
-    const calls = mockApi({
+    const calls = backend({
       'GET /settings/params/public/iam.password_min_length': ok({
         key: 'iam.password_min_length',
         value: '12',

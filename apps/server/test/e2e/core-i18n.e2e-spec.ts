@@ -16,6 +16,7 @@ import { BizError } from '../../src/core/http/biz-error.js'
 import { currentLocale, matchLocale } from '../../src/core/i18n/locale.js'
 import { insertRow } from '../../src/db/seeds/upsert.js'
 import { bearer, signIn } from '../setup/auth.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 const Note = z.object({ title: z.string().min(3) }).register(fieldDomains, { domain: 'demo' })
 
@@ -63,13 +64,15 @@ beforeAll(async () => {
   ds = app.get<DataSource>(getDataSourceToken())
   token.admin = (await signIn(app)).accessToken
   for (const [locale, username] of Object.entries(USERS)) {
-    await insertRow(ds.manager, 'iam_user', {
-      username,
-      display_name: username,
-      password_hash: 'not-used-by-this-spec',
-      password_changed_at: new Date(),
-      locale,
-    })
+    await inTenant1(() =>
+      insertRow(ds.manager, 'iam_user', {
+        username,
+        display_name: username,
+        password_hash: 'not-used-by-this-spec',
+        password_changed_at: new Date(),
+        locale,
+      }),
+    )
     token[locale] = (await signIn(app, username)).accessToken
   }
 })

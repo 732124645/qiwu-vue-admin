@@ -32,6 +32,7 @@ import {
 import { z } from 'zod'
 import { ActionLog } from '../../../../core/audit/action-log.js'
 import { RequirePerm } from '../../../../core/auth/decorators.js'
+import { PlatformOnly } from '../../../../core/auth/platform-only.js'
 import { ExcelService, XLSX_TYPE } from '../../../../core/excel/excel.service.js'
 import { Idempotent } from '../../../../core/guard/idempotent.js'
 import { ApiEnvelope } from '../../../../core/http/api-envelope.decorator.js'
@@ -48,6 +49,7 @@ export class DictController {
 
   @Get()
   @RequirePerm(dictPerms.browse)
+  @PlatformOnly()
   @ApiOperation({ summary: 'Page of dicts' })
   @ApiEnvelope(pageVo(dictVo))
   page(@Query({ schema: dictQuery }) query: DictQuery) {
@@ -57,6 +59,7 @@ export class DictController {
   /** The list's rows (same filters and sort, no paging) as .xlsx. */
   @Get('export')
   @RequirePerm(dictPerms.export)
+  @PlatformOnly()
   @ActionLog({ domain: 'settings.dict', verb: 'export' })
   @ApiOperation({ summary: 'Export the filtered dicts (.xlsx)' })
   @ApiProduces(XLSX_TYPE)
@@ -76,6 +79,7 @@ export class DictController {
   @Post('refresh-cache')
   @HttpCode(200)
   @RequirePerm(dictPerms.modify)
+  @PlatformOnly()
   @ActionLog({ domain: 'settings.dict', verb: 'refresh-cache' })
   @ApiOperation({ summary: 'Refresh the cached entries of every dict' })
   @ApiEnvelope()
@@ -85,6 +89,7 @@ export class DictController {
 
   @Get(':id')
   @RequirePerm(dictPerms.view)
+  @PlatformOnly()
   @ApiOperation({ summary: 'One dict' })
   @ApiEnvelope(dictVo)
   get(@Param('id', ParseIntPipe) id: number) {
@@ -93,6 +98,7 @@ export class DictController {
 
   @Post()
   @RequirePerm(dictPerms.create)
+  @PlatformOnly()
   @Idempotent()
   @ActionLog({
     domain: 'settings.dict',
@@ -107,6 +113,7 @@ export class DictController {
 
   @Put(':id')
   @RequirePerm(dictPerms.modify)
+  @PlatformOnly()
   @ActionLog({ domain: 'settings.dict', verb: 'modify' })
   @ApiOperation({ summary: 'Change a dict' })
   @ApiEnvelope()
@@ -116,6 +123,7 @@ export class DictController {
 
   @Put(':id/enabled')
   @RequirePerm(dictPerms.modify)
+  @PlatformOnly()
   @ActionLog({ domain: 'settings.dict', verb: 'modify' })
   @ApiOperation({ summary: 'Enable or disable a dict' })
   @ApiEnvelope()
@@ -128,6 +136,7 @@ export class DictController {
 
   @Delete(':id')
   @RequirePerm(dictPerms.remove)
+  @PlatformOnly()
   @ActionLog({ domain: 'settings.dict', verb: 'remove' })
   @ApiOperation({ summary: 'Delete a dict' })
   @ApiEnvelope()
@@ -138,6 +147,7 @@ export class DictController {
   @Post('batch-delete')
   @HttpCode(200)
   @RequirePerm(dictPerms.remove)
+  @PlatformOnly()
   @ActionLog({ domain: 'settings.dict', verb: 'remove' })
   @ApiOperation({ summary: 'Delete dicts: all or none' })
   @ApiEnvelope()

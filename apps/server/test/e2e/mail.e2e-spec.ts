@@ -21,6 +21,7 @@ import { MailTemplate } from '../../src/modules/platform/messaging/mail-template
 import { TransactionHost } from '@nestjs-cls/transactional'
 import { bearer, signIn } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 const URL = '/api/messaging/mail-accounts'
 const PREFIX = 'mail-e2e-'
@@ -116,20 +117,30 @@ beforeAll(async () => {
   lastRecordId = Number(
     (await ds.query('SELECT COALESCE(MAX(id), 0) AS n FROM msg_mail_record'))[0].n,
   )
-  roleId = await insertRow(ds.manager, 'iam_role', {
-    code: `${PREFIX}reader`,
-    name: `${PREFIX}reader`,
-    data_scope: 'all',
-  })
+  roleId = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_role', {
+      code: `${PREFIX}reader`,
+      name: `${PREFIX}reader`,
+      data_scope: 'all',
+    }),
+  )
   const browse = await findId(ds.manager, 'iam_menu', { perms: mailAccountPerms.browse })
-  await ds.query('INSERT INTO iam_role_menus (role_id, menu_id) VALUES (?, ?)', [roleId, browse])
-  userId = await insertRow(ds.manager, 'iam_user', {
-    username: `${PREFIX}reader`,
-    display_name: 'Reader',
-    password_hash: 'not-used',
-    password_changed_at: new Date(),
-  })
-  await ds.query('INSERT INTO iam_user_roles (user_id, role_id) VALUES (?, ?)', [userId, roleId])
+  await ds.query('INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, 1)', [
+    roleId,
+    browse,
+  ])
+  userId = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_user', {
+      username: `${PREFIX}reader`,
+      display_name: 'Reader',
+      password_hash: 'not-used',
+      password_changed_at: new Date(),
+    }),
+  )
+  await ds.query('INSERT INTO iam_user_roles (user_id, role_id, tenant_id) VALUES (?, ?, 1)', [
+    userId,
+    roleId,
+  ])
   admin = (await signIn(app)).accessToken
   reader = (await signIn(app, `${PREFIX}reader`)).accessToken
 })
@@ -420,20 +431,22 @@ describe('mail send', () => {
     const res = await sendTest(tpl.id, { to: 'reader@example.com', params: {} }).expect(200)
     expect(res.body.data.ok).toBe(false)
     expect((await record(res.body.data.recordId)).error).toBe('no_account')
-    const id = await channel.write({
-      template: { ...tpl, accountId: null },
-      recipient: {
-        userId: null,
-        email: 'reader@example.com',
-        mobile: null,
-        locale: 'en-US',
-        timezone: 'UTC',
-      },
-      params: {},
-      values: {},
-    })
+    const id = await inTenant1(() =>
+      channel.write({
+        template: { ...tpl, accountId: null },
+        recipient: {
+          userId: null,
+          email: 'reader@example.com',
+          mobile: null,
+          locale: 'en-US',
+          timezone: 'UTC',
+        },
+        params: {},
+        values: {},
+      }),
+    )
     await ds.query('UPDATE msg_mail_record SET account_id = NULL WHERE id = ?', [id])
-    await channel.deliver(id)
+    await inTenant1(() => channel.deliver(id))
     expect((await record(id)).error).toBe('no_account')
   })
 
@@ -455,15 +468,22 @@ describe('mail send', () => {
       params: {},
       values: {},
     }
-    const skippedId = await app.get(TransactionHost).withTransaction(() => channel.write(draft))
+    const skippedId = await app
+      .get(TransactionHost)
+      .withTransaction(() => inTenant1(() => channel.write(draft)))
     expect(await record(skippedId)).toMatchObject({ status: 'skipped', error: 'no_address' })
-    expect(await channel.due(100)).not.toContain(skippedId)
-    const pendingId = await channel.write({
-      ...draft,
-      recipient: { ...draft.recipient, email: 'reader@example.com' },
-    })
-    expect(await channel.due(100)).toContain(pendingId)
-    await Promise.all([channel.deliver(pendingId), channel.deliver(pendingId)])
+    expect((await inTenant1(() => channel.dueRows(100))).map((r) => r.id)).not.toContain(skippedId)
+    const pendingId = await inTenant1(() =>
+      channel.write({
+        ...draft,
+        recipient: { ...draft.recipient, email: 'reader@example.com' },
+      }),
+    )
+    expect((await inTenant1(() => channel.dueRows(100))).map((r) => r.id)).toContain(pendingId)
+    await Promise.all([
+      inTenant1(() => channel.deliver(pendingId)),
+      inTenant1(() => channel.deliver(pendingId)),
+    ])
     expect(sendMail).toHaveBeenCalledTimes(1)
     expect((await record(pendingId)).status).toBe('sent')
     await ds.query('UPDATE msg_mail_record SET status = ?, attempts = ? WHERE id = ?', [
@@ -471,13 +491,13 @@ describe('mail send', () => {
       2,
       pendingId,
     ])
-    expect(await channel.due(100)).toContain(pendingId)
+    expect((await inTenant1(() => channel.dueRows(100))).map((r) => r.id)).toContain(pendingId)
     await ds.query('UPDATE msg_mail_record SET status = ?, attempts = ? WHERE id = ?', [
       'failed',
       3,
       pendingId,
     ])
-    expect(await channel.due(100)).not.toContain(pendingId)
+    expect((await inTenant1(() => channel.dueRows(100))).map((r) => r.id)).not.toContain(pendingId)
   })
 
   it('send endpoint enforces permission, email validation and unknown id', async () => {

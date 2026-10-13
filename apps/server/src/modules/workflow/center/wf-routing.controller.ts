@@ -15,6 +15,7 @@ import {
   wfRemoveSignBody,
 } from '@qiwu/shared'
 import { ActionLog } from '../../../core/audit/action-log.js'
+import { HomeTenant, RequireFeature } from '../../../core/auth/tenant-scope.js'
 import { clsGet } from '../../../core/context/cls.js'
 import { Idempotent } from '../../../core/guard/idempotent.js'
 import { ApiEnvelope } from '../../../core/http/api-envelope.decorator.js'
@@ -25,10 +26,13 @@ const me = () => clsGet('principal')!.userId
 /**
  * Routing and lifecycle actions of the approval center (see docs/design-notes.md#workflow): sign-in only. Task
  * actions need the caller's task (withdraw: the approval they made), instance actions the caller's instance
- * (its initiator); else 404. A state the action does not expect is 409.
+ * (its initiator); else 404. A state the action does not expect is 409. They run in the caller's own
+ * tenant, as the to-do and own-instance lists do (see docs/design-notes.md#tenancy).
  */
 @ApiTags('wf')
 @Controller('wf')
+@RequireFeature('workflow')
+@HomeTenant()
 export class WfRoutingController {
   constructor(private readonly routing: WfRoutingService) {}
 

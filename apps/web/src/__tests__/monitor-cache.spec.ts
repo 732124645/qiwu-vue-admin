@@ -15,9 +15,15 @@ import CachePage from '@/views/platform/monitor/cache/index.vue'
 import { me, mockApi, ok, type Route } from './mock-api'
 
 const NS: CacheNamespaceVo[] = [
-  { name: 'authSession', prefix: 'auth:sess:', clearable: false, masked: true },
-  { name: 'dict', prefix: 'dict:', clearable: true, masked: false },
-  { name: 'newThing', prefix: 'new:', clearable: true, masked: false },
+  {
+    name: 'authSession',
+    prefix: 'auth:sess:',
+    clearable: false,
+    masked: true,
+    tenancy: 'global-id',
+  },
+  { name: 'dict', prefix: 'dict:', clearable: true, masked: false, tenancy: 'platform' },
+  { name: 'newThing', prefix: 'new:', clearable: true, masked: false, tenancy: 'tenant' },
 ]
 const q = (c: { params?: Record<string, string> }) => new URLSearchParams(c.params).toString()
 

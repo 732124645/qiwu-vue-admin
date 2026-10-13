@@ -27,7 +27,9 @@ import {
 } from '@qiwu/shared'
 import { z } from 'zod'
 import { ActionLog, SkipActionLog } from '../../../core/audit/action-log.js'
+import { HomeTenant, RequireFeature } from '../../../core/auth/tenant-scope.js'
 import { clsGet } from '../../../core/context/cls.js'
+import { withTenant } from '../../../core/context/tenant.js'
 import { Idempotent } from '../../../core/guard/idempotent.js'
 import { ApiEnvelope } from '../../../core/http/api-envelope.decorator.js'
 import { WfDetailService } from './wf-detail.service.js'
@@ -37,12 +39,17 @@ import { WfStartService } from './wf-start.service.js'
 const me = () => clsGet('principal')!.userId
 
 /**
- * Approval center (access model; see docs/design-notes.md#workflow): sign-in only (no `wfPerms`), the caller's own data.
+ * Approval center (access model; see docs/design-notes.md#workflow): sign-in only (no `wfPerms`), the caller's own data,
+ * part of the `workflow` feature (a tenant's package may leave it out); the caller's own lists run in the
+ * caller's own tenant, and so do the actions on their items (see docs/design-notes.md#tenancy).
+ * An instance's detail serves the admin pages of the data tenant too: inside another tenant, one the
+ * caller may not see there opens in the caller's own (the items of its lists).
  * `wf/startable-models` lists the start page's cards (not under `wf/models`: the admin `wf/models/:id` would
  * take it). `wf/models/:key/start-info` sits beside the admin model routes (`wf/models/:id…`, `wfPerms.model`).
  */
 @ApiTags('wf')
 @Controller('wf')
+@RequireFeature('workflow')
 export class WfCenterController {
   constructor(
     private readonly starts: WfStartService,
@@ -105,6 +112,7 @@ export class WfCenterController {
 
   // the static `instances/mine` before `instances/:id`
   @Get('instances/mine')
+  @HomeTenant()
   @ApiOperation({ summary: 'The instances I started, newest first' })
   @ApiEnvelope(pageVo(wfInstanceItemVo))
   mine(@Query({ schema: wfMineQuery }) query: WfMineQuery) {
@@ -112,6 +120,7 @@ export class WfCenterController {
   }
 
   @Get('tasks/todo')
+  @HomeTenant()
   @ApiOperation({ summary: 'My pending tasks, newest first' })
   @ApiEnvelope(pageVo(wfTaskItemVo))
   todo(@Query({ schema: wfTodoQuery }) query: WfTodoQuery) {
@@ -119,6 +128,7 @@ export class WfCenterController {
   }
 
   @Get('tasks/done')
+  @HomeTenant()
   @ApiOperation({ summary: 'The tasks I handled, latest first' })
   @ApiEnvelope(pageVo(wfTaskItemVo))
   done(@Query({ schema: wfDoneQuery }) query: WfDoneQuery) {
@@ -126,6 +136,7 @@ export class WfCenterController {
   }
 
   @Get('ccs/mine')
+  @HomeTenant()
   @ApiOperation({ summary: 'Copies sent to me, newest first' })
   @ApiEnvelope(pageVo(wfCcItemVo))
   ccs(@Query({ schema: wfCcQuery }) query: WfCcQuery) {
@@ -133,6 +144,7 @@ export class WfCenterController {
   }
 
   @Post('ccs/:id/read')
+  @HomeTenant()
   @HttpCode(200)
   @SkipActionLog()
   @ApiOperation({ summary: "Mark a copy sent to me read; anyone else's 404" })
@@ -147,7 +159,11 @@ export class WfCenterController {
       'An instance with its timeline: its initiator, task holders, cc recipients, wf.instance.view in scope; else 404',
   })
   @ApiEnvelope(wfInstanceDetailVo)
-  detail(@Param('id', ParseIntPipe) id: number) {
+  async detail(@Param('id', ParseIntPipe) id: number) {
+    const { actingTenantId, tenantId } = clsGet('principal')!
+    if (actingTenantId !== undefined && tenantId !== undefined && !(await this.details.canView(id)))
+      // qw:cross-tenant an item of the caller's own lists, which run in its own tenant
+      return withTenant(tenantId, () => this.details.detail(id))
     return this.details.detail(id)
   }
 }

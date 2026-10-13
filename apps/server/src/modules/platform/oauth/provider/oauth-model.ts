@@ -1,5 +1,7 @@
 import OAuth2Server from '@node-oauth/oauth2-server'
+import { DEFAULT_TENANT_ID } from '@qiwu/shared'
 import type { PermVersion } from '../../../../core/auth/perm-version.js'
+import type { SessionCurrent } from '../../../../core/auth/session-current.js'
 import type { SessionRevoker } from '../../../../core/auth/session-revoker.js'
 import type {
   Issued,
@@ -8,6 +10,7 @@ import type {
   SessionUser,
   TokenService,
 } from '../../../../core/auth/token.service.js'
+import { tenantId, withTenant } from '../../../../core/context/tenant.js'
 import type { ClientRow } from './provider.service.js'
 
 /** What the model needs from the provider (client authentication) and core/auth. */
@@ -17,17 +20,22 @@ export interface ModelDeps {
   tokens: TokenService
   revoker: SessionRevoker
   permVersion: PermVersion
+  sessions: SessionCurrent
 }
 
 /** The library's "user" of each grant: who the session is for, as the getters found it. */
 type GrantUser =
-  | { kind: 'code'; userId: number; credVer: string }
+  | { kind: 'code'; userId: number; credVer: string; tenantId: number }
   | { kind: 'refresh'; session: Session; tokens: IssuedTokens }
   | { kind: 'client' }
 
-/** client_credentials sessions belong to no user: AuthGuard sets no principal, PermGuard never passes. */
+/**
+ * client_credentials sessions belong to no user: AuthGuard sets no principal, PermGuard never passes.
+ * They are the platform's own integrations: the default tenant's.
+ */
 const MACHINE: SessionUser = {
   userId: null,
+  tenantId: DEFAULT_TENANT_ID,
   userType: 'client',
   deptId: null,
   deptTreePath: null,
@@ -94,7 +102,12 @@ export function oauthModel(deps: ModelDeps, at: { ip: string; ua: string }): Mod
         codeChallenge: e.challenge,
         codeChallengeMethod: 'S256',
         client: { id: e.client, grants: [] },
-        user: { kind: 'code', userId: e.userId, credVer: e.credVer } satisfies GrantUser,
+        user: {
+          kind: 'code',
+          userId: e.userId,
+          credVer: e.credVer,
+          tenantId: e.tenantId ?? DEFAULT_TENANT_ID,
+        } satisfies GrantUser,
       }
     },
 
@@ -104,8 +117,11 @@ export function oauthModel(deps: ModelDeps, at: { ip: string; ua: string }): Mod
     async getRefreshToken(refreshToken) {
       // Rotation happens here, on TokenService's single path (grace window, replay → the whole
       // session revoked, another client's token rejected untouched; see docs/design-notes.md#auth-sessions); errors the library raises after
-      // this (scope widening) leave the new pair in the grace window for a retry.
-      const r = await deps.tokens.refresh(refreshToken, at.ua, client().clientId)
+      // this (scope widening) leave the new pair in the grace window for a retry. The session is reloaded
+      // first, as a first-party one: a tenant end set since it was issued ends it (see docs/design-notes.md#tenancy).
+      const r = await deps.tokens.refresh(refreshToken, at.ua, client().clientId, {
+        reload: (s) => deps.sessions.current(s),
+      })
       if (r.kind !== 'rotated') return null
       return {
         refreshToken,
@@ -137,15 +153,19 @@ export function oauthModel(deps: ModelDeps, at: { ip: string; ua: string }): Mod
       const base = { clientId: c.clientId, scopes, keepSignedIn: false, ...at }
       let issued: Issued | null
       if (g.kind === 'code') {
-        const u = await deps.permVersion.load(g.userId)
-        // the user is gone or disabled, or revoked (password change, kick…) since the code was issued
-        issued =
-          u &&
-          (await deps.tokens.issue(u, {
-            ...base,
-            credVer: g.credVer,
-            ttl: { accessMs, refreshMs: refreshable ? c.refreshTtl * 1000 : accessMs },
-          }))
+        // qw:cross-tenant the exchange runs in the code's tenant (its user's, see docs/design-notes.md#tenancy)
+        issued = await withTenant(g.tenantId, async () => {
+          const u = await deps.permVersion.load(g.userId)
+          // the user is gone, disabled, of another tenant or in an unavailable one, or revoked
+          // (password change, kick…) since the code was issued
+          return u && u.tenantId === tenantId()
+            ? deps.tokens.issue(u, {
+                ...base,
+                credVer: g.credVer,
+                ttl: { accessMs, refreshMs: refreshable ? c.refreshTtl * 1000 : accessMs },
+              })
+            : null
+        })
         if (!issued)
           throw new OAuth2Server.InvalidGrantError('Invalid grant: authorization code is invalid')
       } else

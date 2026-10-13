@@ -35,6 +35,7 @@ import { findId, insertRow } from '../../src/db/seeds/upsert.js'
 import { logOf } from '../setup/audit.js'
 import { bearer, signIn } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 const PREFIX = 'e2e-hl-'
 const PROBE = '/api/e2e-http-logs'
@@ -172,24 +173,31 @@ beforeAll(async () => {
   await cleanRedis(redis)
   await setMode('write')
   // browse + view of the error log, no handle
-  roleId = await insertRow(ds.manager, 'iam_role', {
-    code: `${PREFIX}viewer`,
-    name: `${PREFIX}viewer`,
-    data_scope: 'all',
-  })
+  roleId = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_role', {
+      code: `${PREFIX}viewer`,
+      name: `${PREFIX}viewer`,
+      data_scope: 'all',
+    }),
+  )
   for (const perm of [httpFaultPerms.browse, httpFaultPerms.view])
-    await ds.query('INSERT INTO iam_role_menus (role_id, menu_id) VALUES (?, ?)', [
+    await ds.query('INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, 1)', [
       roleId,
       await findId(ds.manager, 'iam_menu', { perms: perm }),
     ])
-  viewerId = await insertRow(ds.manager, 'iam_user', {
-    username: `${PREFIX}viewer`,
-    display_name: 'viewer',
-    password_hash: 'not-used-by-this-spec',
-    password_changed_at: new Date(),
-  })
-  await ds.query('INSERT INTO iam_user_roles (user_id, role_id) VALUES (?, ?)', [viewerId, roleId])
-  adminId = Number((await findId(ds.manager, 'iam_user', { username: 'admin' }))!)
+  viewerId = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_user', {
+      username: `${PREFIX}viewer`,
+      display_name: 'viewer',
+      password_hash: 'not-used-by-this-spec',
+      password_changed_at: new Date(),
+    }),
+  )
+  await ds.query('INSERT INTO iam_user_roles (user_id, role_id, tenant_id) VALUES (?, ?, 1)', [
+    viewerId,
+    roleId,
+  ])
+  adminId = Number((await inTenant1(() => findId(ds.manager, 'iam_user', { username: 'admin' })))!)
   tokens.admin = (await signIn(app)).accessToken
   tokens.viewer = (await signIn(app, `${PREFIX}viewer`)).accessToken
 })

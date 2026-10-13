@@ -2,8 +2,8 @@
   <view class="qw-home">
     <QwPageHeader variant="hero">
       <template #bar>
-        <QwBrandMark size="48rpx" />
-        <text class="qw-home__brand">{{ t('common.app.name') }}</text>
+        <QwBrandMark size="48rpx" :logo="brand.logo" />
+        <text class="qw-home__brand">{{ brand.name }}</text>
       </template>
       <view class="qw-home__hello">
         <text class="qw-hdr__title qw-home__name" role="heading">{{ hello }}</text>
@@ -43,7 +43,7 @@
           <text>{{ t(`home.shortcut.${item.name}`) }}</text>
         </view>
       </view>
-      <view class="qw-sec">
+      <view v-if="workflow" class="qw-sec">
         <text class="qw-sec__title">{{ t('home.recent') }}</text>
         <view class="qw-sec__link qw-home__all" role="link" @click="toTab('approval')">
           <text>{{ t('home.viewAll') }}</text>
@@ -85,17 +85,21 @@ import QwBrandMark from '@/core/components/QwBrandMark.vue'
 import QwIcon, { type IconName } from '@/core/components/QwIcon.vue'
 import QwPageHeader from '@/core/components/QwPageHeader.vue'
 import QwTabBar from '@/core/components/QwTabBar.vue'
+import { FEATURE, hasFeature, visibleShortcuts } from '@/core/features'
 import { formatShort } from '@/core/format'
 import { t, tx } from '@/core/i18n'
 import { api } from '@/core/request'
 import { useAuthStore } from '@/core/stores/auth'
 import { useCountsStore } from '@/core/stores/counts'
+import { tenantBrand } from '@/core/tenancy'
 
 /**
  * Workbench: the greeting under the navy header; my to-dos, my running processes and unread
  * messages (shared with the tab badges, reloaded as the tab bar says); the shortcuts the user may open; my
  * newest to-dos. Each shortcut opens a page of its domain's subpackage; one with `perm` shows only
- * with that permission (display only: the server enforces it).
+ * with that permission, the shortcuts and counters of a feature only with that feature of the tenant's
+ * package (`visibleShortcuts`, core/features). Without the workflow feature the to-dos go too (none load).
+ * The bar shows the tenant's brand (core/tenancy).
  */
 type Tone = 'brand' | 'success' | 'warning' | 'neutral'
 interface Shortcut {
@@ -107,7 +111,12 @@ interface Shortcut {
 }
 // the approval center and the bulletin feed need a sign-in only (see docs/design-notes.md#workflow)
 const SHORTCUTS: Shortcut[] = [
-  { name: 'start', icon: 'send', tone: 'brand', url: '/pages-wf/start/index' },
+  {
+    name: 'start',
+    icon: 'send',
+    tone: 'brand',
+    url: '/pages-wf/start/index',
+  },
   // a new leave request (its submit starts the approval)
   {
     name: 'leave',
@@ -116,7 +125,12 @@ const SHORTCUTS: Shortcut[] = [
     url: '/pages-biz/leave/index',
     perm: leavePerms.create,
   },
-  { name: 'bulletin', icon: 'megaphone', tone: 'warning', url: '/pages-sys/bulletin/index' },
+  {
+    name: 'bulletin',
+    icon: 'megaphone',
+    tone: 'warning',
+    url: '/pages-sys/bulletin/index',
+  },
 ]
 /** the counters: each opens its tab */
 const STATS = [
@@ -140,8 +154,12 @@ const org = computed(() =>
     .map(tx)
     .join(' · '),
 )
-const stats = computed(() => STATS.map((stat) => ({ ...stat, value: counts[stat.name] })))
-const shortcuts = computed(() => SHORTCUTS.filter((s) => !s.perm || auth.hasPerm(s.perm)))
+const brand = computed(() => tenantBrand(me.value))
+const workflow = computed(() => hasFeature(FEATURE.workflow))
+const stats = computed(() =>
+  visibleShortcuts(STATS).map((stat) => ({ ...stat, value: counts[stat.name] })),
+)
+const shortcuts = computed(() => visibleShortcuts(SHORTCUTS))
 
 const toTab = (tab: string) => uni.switchTab({ url: `/pages/${tab}/index` })
 const open = (url: string) => uni.navigateTo({ url })

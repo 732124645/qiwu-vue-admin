@@ -8,6 +8,7 @@ import type {
 import { Column, CreateDateColumn, Entity } from 'typeorm'
 import { BaseEntity, IdEntity } from '../../../core/db/base.entity.js'
 import { referencedBy } from '../../../core/db/references.js'
+import { TenantColumn } from '../../../core/db/tenant-filter.js'
 
 // a published model is in use (its versions are what instances run and show): disable it instead. This also
 // keeps a reused model_key from numbering versions again from 1 (unique(model_key, version, alive))
@@ -81,6 +82,9 @@ export class WfModel extends BaseEntity {
   /** null = never published */
   @Column({ name: 'current_version_id', type: 'bigint', unsigned: true, nullable: true })
   currentVersionId: number | null
+
+  @TenantColumn()
+  tenantId: number
 }
 
 /** `wf_version`: a published snapshot, insert-only */
@@ -113,4 +117,7 @@ export class WfVersion extends IdEntity {
 
   @CreateDateColumn({ name: 'published_at', type: 'datetime', precision: 3 })
   publishedAt: Date
+
+  @TenantColumn()
+  tenantId: number
 }

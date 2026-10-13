@@ -74,9 +74,11 @@ jobs:
           docker exec -i "${{ job.services.mysql.id }}" mysql -uroot -p"$MYSQL_ROOT_PASSWORD" <<SQL
           CREATE USER 'qiwu'@'%' IDENTIFIED BY '$db_pw';
           CREATE DATABASE qiwu_test; CREATE DATABASE qiwu_e2e; CREATE DATABASE qiwu_mobile_e2e;
+          CREATE DATABASE qiwu_tenant_e2e;
           GRANT ALL PRIVILEGES ON qiwu_test.* TO 'qiwu'@'%';
           GRANT ALL PRIVILEGES ON qiwu_e2e.* TO 'qiwu'@'%';
           GRANT ALL PRIVILEGES ON qiwu_mobile_e2e.* TO 'qiwu'@'%';
+          GRANT ALL PRIVILEGES ON qiwu_tenant_e2e.* TO 'qiwu'@'%';
           SQL
           # the same restricted user as a production install: keys and channels qw:* only
           docker exec "${{ job.services.redis.id }}" redis-cli ACL SETUSER qiwu on ">$redis_pw" \

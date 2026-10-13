@@ -5,6 +5,7 @@ import type { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adap
 import { Err, type LeaveCreate, type LeaveQuery, type LeaveUpdate } from '@qiwu/shared'
 import type { SelectQueryBuilder } from 'typeorm'
 import { clsGet } from '../../../core/context/cls.js'
+import { tenantId } from '../../../core/context/tenant.js'
 import { BaseCrudService } from '../../../core/db/base-crud.service.js'
 import { BizError } from '../../../core/http/biz-error.js'
 import { WfDetailService } from '../../workflow/center/wf-detail.service.js'
@@ -92,16 +93,20 @@ export class LeaveService extends BaseCrudService<Leave> {
     })
   }
 
-  /** The caller holds the pending task of the begin node (the tree's root) of instance `instanceId`. */
+  /**
+   * The caller holds the pending task of the begin node (the tree's root) of instance `instanceId`;
+   * task, instance and version all of the caller's tenant.
+   */
   private async sentBack(instanceId: number): Promise<boolean> {
+    const tid = tenantId()
     const rows: unknown[] = await this.txHost.tx.query(
       // qw:include-deleted wf_version: a deleted version still runs the instances started on it
       `SELECT t.id FROM wf_task t
-         JOIN wf_instance i ON i.id = t.instance_id AND i.deleted_at IS NULL
-         JOIN wf_version v ON v.id = i.version_id
+         JOIN wf_instance i ON i.id = t.instance_id AND i.deleted_at IS NULL AND i.tenant_id = ?
+         JOIN wf_version v ON v.id = i.version_id AND v.tenant_id = ?
         WHERE t.instance_id = ? AND t.assignee_id = ? AND t.state = 'pending'
-          AND t.deleted_at IS NULL AND t.node_id = v.tree_json ->> '$.id'`,
-      [instanceId, caller().userId],
+          AND t.deleted_at IS NULL AND t.node_id = v.tree_json ->> '$.id' AND t.tenant_id = ?`,
+      [tid, tid, instanceId, caller().userId, tid],
     )
     return rows.length > 0
   }

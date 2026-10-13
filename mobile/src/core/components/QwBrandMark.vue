@@ -1,16 +1,21 @@
 <template>
-  <view class="qw-mark" :style="`width:${size};height:${size}`" aria-hidden="true">
-    <image class="qw-mark__glyph" src="/static/brand/mark-white.svg" mode="aspectFit" />
+  <view
+    :class="['qw-mark', { 'is-logo': logo }]"
+    :style="`width:${size};height:${size}`"
+    aria-hidden="true"
+  >
+    <image class="qw-mark__glyph" :src="logo || '/static/brand/mark-white.svg'" mode="aspectFit" />
   </view>
 </template>
 
 <script setup lang="ts">
 /**
  * The brand mark (visual-system §10, §12.3; the web's BrandMark): the white Nested Tile on the brand gradient,
- * corners 30%, a faint inner ring and the brand glow. Decorative: the name next to it is the text.
+ * corners 30%, a faint inner ring and the brand glow. Decorative: the name next to it is the text. `logo`: a
+ * tenant's logo instead, on the surface colour (readable on the navy as on the sheet).
  */
 defineOptions({ options: { virtualHost: true } })
-withDefaults(defineProps<{ size?: string }>(), { size: '96rpx' })
+withDefaults(defineProps<{ size?: string; logo?: string }>(), { size: '96rpx', logo: '' })
 </script>
 
 <style>
@@ -41,5 +46,21 @@ withDefaults(defineProps<{ size?: string }>(), { size: '96rpx' })
 .qw-mark__glyph {
   width: 100%;
   height: 100%;
+}
+
+.qw-mark.is-logo {
+  overflow: hidden;
+  background: var(--qw-surface);
+  box-shadow: var(--qw-shadow-1);
+}
+
+.qw-mark.is-logo::after {
+  border-color: var(--qw-border);
+  opacity: 1;
+}
+
+.qw-mark.is-logo .qw-mark__glyph {
+  width: 80%;
+  height: 80%;
 }
 </style>

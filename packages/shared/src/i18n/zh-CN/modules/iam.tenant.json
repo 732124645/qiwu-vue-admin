@@ -1,0 +1,29 @@
+{
+  "field": {
+    "iam": {
+      "tenant": {
+        "code": "租户编码",
+        "name": "租户名称",
+        "packageId": "租户套餐",
+        "packageName": "租户套餐",
+        "enabled": "启用状态",
+        "expiresAt": "到期时间",
+        "userQuota": "用户数上限",
+        "userCount": "已用/上限",
+        "domains": "绑定域名",
+        "brandName": "品牌名称",
+        "logoObjectId": "品牌 logo",
+        "logoUrl": "品牌 logo",
+        "ownerUserId": "租户管理员",
+        "note": "备注",
+        "admin": "租户管理员",
+        "username": "管理员用户名",
+        "displayName": "管理员显示名",
+        "mobile": "管理员手机号",
+        "email": "管理员邮箱",
+        "initialPassword": "初始密码",
+        "reason": "进入原因"
+      }
+    }
+  }
+}

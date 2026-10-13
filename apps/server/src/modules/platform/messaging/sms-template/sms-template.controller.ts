@@ -32,12 +32,14 @@ import {
 } from '@qiwu/shared'
 import { ActionLog } from '../../../../core/audit/action-log.js'
 import { RequirePerm } from '../../../../core/auth/decorators.js'
+import { PlatformOnly } from '../../../../core/auth/platform-only.js'
 import { Idempotent } from '../../../../core/guard/idempotent.js'
 import { ApiEnvelope } from '../../../../core/http/api-envelope.decorator.js'
 import type { SmsTemplate } from './sms-template.entity.js'
 import { SmsTemplateService } from './sms-template.service.js'
 
 @ApiTags('messaging')
+@PlatformOnly()
 @Controller('messaging/sms-templates')
 export class SmsTemplateController {
   constructor(private readonly smsTemplates: SmsTemplateService) {}

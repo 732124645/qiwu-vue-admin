@@ -100,6 +100,15 @@ describe('rule table (one row each)', () => {
     expect(initColumn(col('primary_one', 'tinyint', { generated: true }), 'demo', 0)).toBeNull()
   })
 
+  it('tenant column: shown nowhere and not required, even NOT NULL without a default', () => {
+    expect(init('tenant_id', 'bigint unsigned')).toMatchObject({
+      inList: false,
+      inForm: false,
+      inQuery: false,
+      required: false,
+    })
+  })
+
   it('primary key: read-only, not listed, not required', () => {
     expect(
       init('id', 'bigint unsigned', { isPk: true, autoIncrement: true, comment: 'ID' }),
@@ -350,22 +359,31 @@ describe('rule table (one row each)', () => {
   })
 })
 
-it('framework tables are excluded from import', () => {
-  for (const t of ['meta_migrations', 'test_scoped_note', 'cg_table', 'cg_column'])
+it('framework and WeChat Official Account tables are excluded from import', () => {
+  for (const t of [
+    'meta_migrations',
+    'test_scoped_note',
+    'cg_table',
+    'cg_column',
+    'wxoa_account',
+    'wxoa_message',
+    'wxoa_qrcode',
+  ])
     expect(EXCLUDED_TABLE.test(t)).toBe(true)
-  for (const t of ['iam_position', 'demo_book', 'metadata', 'testimony', 'cgx'])
+  for (const t of ['iam_position', 'demo_book', 'metadata', 'testimony', 'cgx', 'wxoax', 'wx_mp'])
     expect(EXCLUDED_TABLE.test(t)).toBe(false)
 })
 
 it('import hints: a unique key without alive; no deleted_at is refused instead', () => {
+  // a tenant table whose unique keys lead with tenant_id
   const hints = (...uniqueKeys: { name: string; columns: string[] }[]) =>
-    importHints({ name: 'demo_x', uniqueKeys })
-  expect(hints({ name: 'uk_x', columns: ['code', 'alive'] })).toEqual([])
+    importHints({ name: 'demo_x', uniqueKeys, columns: [col('tenant_id', 'bigint unsigned')] })
+  expect(hints({ name: 'uk_x', columns: ['tenant_id', 'code', 'alive'] })).toEqual([])
   expect(
     hints(
-      { name: 'uk_a', columns: ['code'] },
-      { name: 'uk_b', columns: ['a', 'alive'] },
-      { name: 'uk_c', columns: ['b', 'deleted_at'] },
+      { name: 'uk_a', columns: ['tenant_id', 'code'] },
+      { name: 'uk_b', columns: ['tenant_id', 'a', 'alive'] },
+      { name: 'uk_c', columns: ['tenant_id', 'b', 'deleted_at'] },
     ),
   ).toEqual([
     { tableName: 'demo_x', missing: 'alive', key: 'uk_a' },
@@ -379,6 +397,40 @@ it('import hints: a unique key without alive; no deleted_at is refused instead',
     expect.objectContaining({ err: Err.CODEGEN_NO_DELETED_AT, params: { table: 'demo_x' } }),
   )
   expect(() => assertDeletedAt(info('id', 'deleted_at'))).not.toThrow()
+})
+
+it('import hints: a table that is no platform table without tenant_id; a unique key of a tenant table not led by tenant_id (a registered global key aside); platform tables get neither', () => {
+  const tenantId = col('tenant_id', 'bigint unsigned')
+  const hints = (name: string, columns: ColumnInfo[], ...keys: [string, string[]][]) =>
+    importHints({
+      name,
+      columns,
+      uniqueKeys: keys.map(([key, cols]) => ({ name: key, columns: cols })),
+    })
+  // no tenant_id: shared by every tenant; its keys are not judged
+  expect(hints('demo_x', [], ['uk_x_code', ['code', 'alive']])).toEqual([
+    { tableName: 'demo_x', missing: 'tenant_column', key: 'tenant_id' },
+  ])
+  expect(
+    hints(
+      'demo_x',
+      [tenantId],
+      ['uk_x_code', ['code', 'alive']],
+      ['uk_x_pair', ['name', 'tenant_id', 'alive']],
+      ['uk_x_name', ['tenant_id', 'name', 'alive']],
+    ),
+  ).toEqual([
+    { tableName: 'demo_x', missing: 'tenant_key', key: 'uk_x_code' },
+    { tableName: 'demo_x', missing: 'tenant_key', key: 'uk_x_pair' },
+  ])
+  // GLOBAL_UNIQUE: global on its own table only
+  expect(hints('fs_object', [tenantId], ['uk_fs_object_key', ['object_key', 'alive']])).toEqual([])
+  expect(hints('demo_x', [tenantId], ['uk_fs_object_key', ['object_key', 'alive']])).toEqual([
+    { tableName: 'demo_x', missing: 'tenant_key', key: 'uk_fs_object_key' },
+  ])
+  // platform tables: without tenant_id, or with a plain one (never filtered)
+  expect(hints('cfg_param', [], ['uk_cfg_param_key', ['param_key', 'alive']])).toEqual([])
+  expect(hints('aud_http_trace', [tenantId], ['uk_x', ['trace_id', 'alive']])).toEqual([])
 })
 
 it('TS types', () => {
@@ -589,7 +641,11 @@ describe('project domains', () => {
 describe('generator paths', () => {
   const ROOT = join(process.cwd(), '../..')
   /** A CRUD config of `name` as import would store it: key, a name column, the audit columns. */
-  const config = (name: string, over: Partial<RenderConfig> = {}): RenderConfig => {
+  const config = (
+    name: string,
+    over: Partial<RenderConfig> = {},
+    extra: ColumnInfo[] = [],
+  ): RenderConfig => {
     const table = { ...initTable({ name, comment: '' }), ...over }
     const columns = [
       col('id', 'bigint unsigned', { isPk: true, autoIncrement: true }),
@@ -599,6 +655,7 @@ describe('generator paths', () => {
       col('updated_by', 'bigint unsigned', { nullable: true }),
       col('updated_at', 'datetime(3)', { default: 'CURRENT_TIMESTAMP(3)' }),
       col('deleted_at', 'datetime(3)', { nullable: true }),
+      ...extra,
     ].map((c, i) => ({
       ...initColumn(c, table.domain, (i + 1) * 10, table.business)!,
       id: i + 1,
@@ -677,6 +734,25 @@ describe('generator paths', () => {
     expect(schema.content).toContain('export const erpCustomerPerms = {')
     expect(schema.content).toContain("browse: 'erp.customer.browse',")
     expect(schema.content).toContain('export type ErpCustomerVo =')
+  })
+
+  it('the entity of a tenant table maps tenant_id by @TenantColumn(); a platform table with a plain tenant_id or a table without it does not', async () => {
+    const entity = async (name: string, extra: ColumnInfo[] = []) =>
+      (await renderCrud(config(name, {}, extra))).find((f) => f.path.endsWith('.entity.ts'))!
+        .content
+    const tenantId = [col('tenant_id', 'bigint unsigned')]
+    const tenant = await entity('erp_sale_order', tenantId)
+    expect(tenant).toContain("import { TenantColumn } from '../../../core/db/tenant-filter.js'")
+    expect(tenant).toMatch(/\n {2}@TenantColumn\(\)\n {2}tenantId: number\n\}\n$/)
+    expect(tenant).not.toContain("name: 'tenant_id'")
+    expect(crudModel(config('erp_sale_order', {}, tenantId)).tenant).toBe(true)
+    for (const [name, extra] of [
+      ['erp_sale_order', []],
+      ['aud_http_trace', tenantId],
+    ] as const) {
+      expect(await entity(name, [...extra])).not.toMatch(/tenant/i)
+      expect(crudModel(config(name, {}, [...extra])).tenant).toBe(false)
+    }
   })
 
   it('render refuses a reserved project domain (422 C3002)', () => {

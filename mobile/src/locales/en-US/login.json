@@ -16,5 +16,6 @@
   "slogan": "Approvals, to-dos and messages, on the go",
   "privacy": "Privacy",
   "terms": "Terms",
-  "showPassword": "Show password"
+  "showPassword": "Show password",
+  "tenantCode": "Tenant code (blank for the default tenant)"
 }

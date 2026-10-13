@@ -1,8 +1,36 @@
 # Changelog
 
-中文说明：本文件按功能区域汇总栖梧 / Qiwu 的用户可见变化，正文使用英文。`1.0.0` 于 2026-10-05 发布，`1.0.3` 于 2026-10-06 发布（`1.0.1`、`1.0.2` 未发布，内容并入 `1.0.3`）。
+中文说明：本文件按功能区域汇总栖梧 / Qiwu 的用户可见变化，正文使用英文。`1.0.0` 于 2026-10-05 发布，`1.0.3` 于 2026-10-06 发布（`1.0.1`、`1.0.2` 未发布，内容并入 `1.0.3`），`1.1.0`（多租户）于 2026-10-14 发布。
 
 All notable product changes are recorded here in Keep a Changelog style. The initial release below summarizes the delivered features. Planned work is identified explicitly.
+
+## [1.1.0] - 2026-10-14
+
+Multi-tenancy: one deployment serves several companies from one MySQL database (a shared schema with a `tenant_id` column). It is off by default; with the switch off the system behaves as `1.0.x` and all data belongs to the built-in default tenant. See `docs/multi-tenancy.md`.
+
+### Added
+
+- Tenancy switch `APP_MULTI_TENANT` (server environment, read at start-up, default `false`); there is no runtime toggle, and a change is complete only after every instance has restarted.
+- Data isolation: every tenant-owned row carries `tenant_id`; the ORM adds the tenant condition to reads and writes, raw SQL states its own, and static plus test-time checks reject raw SQL on tenant tables without it.
+- Tenant management (a platform page): create a tenant in one step (root department, built-in `tenant_admin` role, workflow templates and an owner account with a one-time initial password), expiry date, user quota, several host names, brand name and logo, enable/disable and initial-password reset. Disabling or expiring a tenant ends its sessions at once; its data stays.
+- Tenant packages: the menus a tenant may use, enforced on the server (permissions = role grants ∩ package). Routes of a feature group outside the package answer 404, and `GET /api/auth/me` lists the available `features`.
+- Sign-in by bound host name or tenant code on web, H5, App and mini program; unknown, disabled and existing codes get identical responses. Lockout, SMS codes, password resets, OAuth consent and WeChat bindings are per tenant.
+- Platform staff with `iam.tenant.enter` can enter a tenant for support with a required reason: a permanent banner, a two-hour limit, stale tabs reloaded through the `X-Tenant-Expect` header, and audit records for entering, leaving and every request made inside.
+- Platform pages (menus, dictionaries, parameters, storage, templates, code generation, jobs, monitoring and more) belong to the default tenant; with the switch on, API trace, API fault and cache pages are limited to the platform root. Operation and sign-in logs show the actor's tenant.
+- Code generator: tenant columns, `@TenantColumn()` and cross-tenant 404 cases in the generated end-to-end tests. `docs/multi-tenancy.md` explains how to write tenant-aware project code.
+- Demo data: sample tenants with their own packages and brands, created only when both `APP_DEMO_MODE` and `APP_MULTI_TENANT` are on.
+
+### Changed
+
+- New tables are tenant tables by default. A platform table is registered in `PLATFORM_TABLES`, a globally unique key in `GLOBAL_UNIQUE` (`apps/server/src/core/db/tenant-tables.ts`).
+
+### Upgrade notes
+
+- This release's migrations only add columns and indexes and stay compatible with the previous code: upgrading with the switch off needs no downtime and can be rolled back.
+- New installs may start with the switch on. An existing database is switched on in two deployments: first upgrade to `1.1.0` with the switch off and confirm it is healthy; then turn the switch on and deploy again. `db:migrate` then removes the default of the tenant columns (or run `tenancy-harden`); the server refuses to start with the switch on before that. Review the default tenant's roles that hold platform menus first. See `docs/deploy.md`.
+- A database that has run with the switch on cannot go back to any version before `1.1.0`, including patch versions released from the `1.0` line.
+- Tenants are never deleted, only disabled or expired. Before switching off, disable every tenant that should stop serving; `tenant-disable` handles ones missed while the switch is off.
+- Known limits: a WeChat account binds to an account in one tenant only; on the main host name, one browser signs in to one tenant at a time; host-name changes take up to 60 seconds; package changes reload every session's permissions once.
 
 ## [1.0.3] - 2026-10-06
 

@@ -451,6 +451,19 @@ describe('server', () => {
     expect(await specOf(hidden)).toContain(
       "await ds.query('UPDATE demo_book SET dept_id = ? WHERE id = ?', [dept, id])",
     )
+    // a required dept: the other tenant's rows (tenant isolation) name a dept of that tenant
+    const required = await renderCrud({
+      ...book,
+      columns: book.columns.map((c) =>
+        c.columnName === 'dept_id' ? { ...c, nullable: false, required: true } : c,
+      ),
+    } as CgTableDetail)
+    expect(required.find((f) => f.path.endsWith('.e2e-spec.ts'))!.content).toContain(
+      "(await http('theirs', 'post', '', body(tag, { deptId: otherDept, ...over }))",
+    )
+    expect(typecheck(required, sharedIndexWith('packages/shared/src/demo/book.schema.ts'))).toEqual(
+      [],
+    )
   })
 
   it('refuses a class name outside the whitelist on save and on render', async () => {
@@ -705,6 +718,8 @@ describe('server', () => {
     for (const body of [
       { subFkCol: 'item' }, // not an integer column
       { subFkCol: 'id' }, // its key
+      { subFkCol: 'tenant_id' }, // the row's tenant
+      { subFkCol: 'created_by' }, // an audit column
       { subFkCol: null }, // half a link
       { masterTableId: line.id }, // itself
       { masterTableId: 999_999 }, // no such config
@@ -1115,6 +1130,50 @@ describe('shared', () => {
     await expect(renderCrud(deleteField)).rejects.toMatchObject(refused('delete'))
   })
 
+  it('a platform table: @PlatformOnly() on every route behind a perm (not the options), its route name for PLATFORM_ONLY_ROUTES in the registration; a tenant table neither', async () => {
+    const param = await ctx.run(() => ctx.svc.defaults('cfg_param'))
+    const config = {
+      ...param,
+      business: 'param-probe',
+      options: { ...param.options, withOptions: true },
+    } as CgTableDetail
+    const controllerOf = async (c: CgTableDetail) =>
+      (await renderCrud(c)).find((f) => f.path.endsWith('.controller.ts'))!.content
+    const count = (text: string, part: string) => text.split(part).length - 1
+    const platform = await controllerOf(config)
+    expect(platform).toContain(
+      "import { PlatformOnly } from '../../../../core/auth/platform-only.js'",
+    )
+    expect(platform).toContain("@Get('options')")
+    expect(count(platform, '@PlatformOnly()')).toBe(count(platform, '@RequirePerm('))
+    expect(count(platform, '@PlatformOnly()')).toBeGreaterThan(5)
+    expect(platform).toMatch(/@RequirePerm\(settingsParamPerms\.browse\)\n\s+@PlatformOnly\(\)/)
+    expect(platform).toMatch(/@Get\('options'\)\n\s+@ApiOperation/)
+    expect(crudRegistration(config)).toEqual(
+      expect.arrayContaining([
+        'packages/shared/src/common/tenancy.ts:',
+        "  'settings-param-probe' in PLATFORM_ONLY_ROUTES (a platform page: other tenants never get its perms)",
+      ]),
+    )
+    for (const tenant of [position, book]) {
+      expect(await controllerOf(tenant)).not.toContain('PlatformOnly')
+      expect(crudRegistration(tenant).join('\n')).not.toContain('PLATFORM_ONLY_ROUTES')
+    }
+    // the spec's tenant isolation cases: a tenant table's only; the role and menu links of every
+    // spec name their tenant
+    const specOf = async (c: CgTableDetail) =>
+      (await renderCrud(c)).find((f) => f.path.endsWith('.e2e-spec.ts'))!.content
+    const platformSpec = await specOf(config)
+    expect(platformSpec).not.toMatch(/tenant isolation|createTenant/)
+    expect(platformSpec).toContain(
+      "'INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, ?)'",
+    )
+    for (const tenant of [position, book, topic])
+      expect(await specOf(tenant)).toContain(
+        "describe('tenant isolation (see docs/design-notes.md#tenancy): the switch on",
+      )
+  })
+
   it('import without a unique imported column: insert only (server, Swagger, web dialog, spec)', async () => {
     for (const isbn of [{ options: {} }, { inForm: false }]) {
       const files = await renderCrud({
@@ -1308,7 +1367,7 @@ describe('shared', () => {
     )
   })
 
-  it('every variant lints and type-checks clean (no unused helper): read-only without export, export without created_at or enabled', async () => {
+  it('every variant lints and type-checks clean (no unused helper): read-only without export, export without created_at or enabled, read-only with a required dept', async () => {
     const without = (...names: string[]) =>
       book.columns.map((c) => (names.includes(c.columnName) ? { ...c, inList: false } : c))
     const variants = [
@@ -1316,6 +1375,14 @@ describe('shared', () => {
       { ...book, readonly: true, columns: without('created_at') },
       { ...book, columns: without('created_at', 'enabled') },
       { ...book, columns: book.columns.filter((c) => c.columnName !== 'enabled') },
+      // a tenant table: its other tenant's rows go through the ORM, naming no dept of that tenant
+      {
+        ...book,
+        readonly: true,
+        columns: book.columns.map((c) =>
+          c.columnName === 'dept_id' ? { ...c, nullable: false, required: true } : c,
+        ),
+      },
     ] as CgTableDetail[]
     for (const variant of variants) {
       const files = await renderCrud(variant)

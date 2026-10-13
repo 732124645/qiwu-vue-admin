@@ -27,9 +27,17 @@ export const RT = {
 } as const
 export type RealtimeType = (typeof RT)[keyof typeof RT]
 
+/**
+ * Why a session ended other than an administrator's kick (`session:kicked` `reason`; absent = a plain
+ * kick): `tenant_unavailable` — its tenant was disabled, expired or multi-tenancy was turned off for it.
+ */
+export const SESSION_END_REASONS = ['tenant_unavailable'] as const
+export type SessionEndReason = (typeof SESSION_END_REASONS)[number]
+
 /** Payload of each envelope type. */
 export interface RealtimePayloads {
-  'session:kicked': { sid: string }
+  /** `reason` only when the session did not end by a plain kick */
+  'session:kicked': { sid: string; reason?: SessionEndReason }
   /** the inbox row id and rendered title, sent to `user:{id}` after its transaction commits */
   'notify:new': { id: number; title: string }
   /** to every signed-in socket; never the body */

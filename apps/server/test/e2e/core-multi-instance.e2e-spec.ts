@@ -13,6 +13,7 @@ import { dataSourceOptions } from '../../src/db/data-source.js'
 import { insertRow } from '../../src/db/seeds/upsert.js'
 import { bearer } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 const PREFIX = 'multi-instance-'
 const PW = 'Multi-instance#2026'
@@ -191,12 +192,14 @@ beforeAll(async () => {
     ])
     const passwordHash = bcrypt.hashSync(PW, 4)
     for (const name of ['recipient', 'other']) {
-      ids[name] = await insertRow(ds.manager, 'iam_user', {
-        username: PREFIX + name,
-        display_name: name,
-        password_hash: passwordHash,
-        password_changed_at: new Date(),
-      })
+      ids[name] = await inTenant1(() =>
+        insertRow(ds.manager, 'iam_user', {
+          username: PREFIX + name,
+          display_name: name,
+          password_hash: passwordHash,
+          password_changed_at: new Date(),
+        }),
+      )
       userIds.push(ids[name]!)
     }
     urls = await Promise.all([boot(), boot()])

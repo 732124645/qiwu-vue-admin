@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common'
 import { TypeOrmModule } from '@nestjs/typeorm'
+import { TENANT_LOOKUP } from '../../../core/auth/tenant-lookup.js'
 import { USER_LOOKUP } from '../../../core/auth/user-lookup.js'
 import { referencedBy } from '../../../core/db/references.js'
 import { StorageModule } from '../storage/storage.module.js'
@@ -20,6 +21,13 @@ import { ProfileSocialController, WxMpAuthController } from './social/wx-mp.cont
 import { WxMpGateway } from './social/wx-mp.gateway.js'
 import { WxMpService } from './social/wx-mp.service.js'
 import { WxSubscribeService } from './social/wx-subscribe.service.js'
+import { TenantBrandReader } from './tenant-brand/tenant-brand.reader.js'
+import { IamTenantLookup } from './tenant/iam-tenant-lookup.js'
+import { TenancyStartup } from './tenant/tenancy-startup.js'
+import { TenantController } from './tenant/tenant.controller.js'
+import { Tenant } from './tenant/tenant.entity.js'
+import { TenantService } from './tenant/tenant.service.js'
+import { TenantProvisioner } from './tenant/tenant-provisioner.js'
 import { UserModule } from './user/user.module.js'
 
 // what the dropped foreign keys did: a user's UI preferences, roles, positions and sign-in bindings
@@ -40,7 +48,8 @@ referencedBy(
 )
 
 /**
- * Identity & access: the `UserLookup` core/auth needs and the own-password change; positions; dept tree
+ * Identity & access: the `UserLookup` and `TenantLookup` core/auth needs, the multi-tenancy startup
+ * check, opening (TenantProvisioner) and managing tenants and the own-password change; positions; dept tree
  * and role options lookups, users, the personal center (avatar through storage); depts/roles/menus CRUD;
  * online sessions and kicks; WeChat mini program sign-in and binding (social/); WeChat subscribe-message
  * reminders after inbox delivery.
@@ -56,17 +65,29 @@ referencedBy(
     StorageModule,
     SmsOtpModule,
     InboxModule,
-    TypeOrmModule.forFeature([UserSocial]),
+    TypeOrmModule.forFeature([UserSocial, Tenant]),
   ],
-  controllers: [ProfileController, SignupController, WxMpAuthController, ProfileSocialController],
+  controllers: [
+    ProfileController,
+    SignupController,
+    WxMpAuthController,
+    ProfileSocialController,
+    TenantController,
+  ],
   providers: [
     { provide: USER_LOOKUP, useClass: IamUserLookup },
+    TenantBrandReader,
+    IamTenantLookup,
+    { provide: TENANT_LOOKUP, useExisting: IamTenantLookup },
+    TenancyStartup,
+    TenantProvisioner,
+    TenantService,
     ProfileService,
     SignupService,
     WxMpGateway,
     WxMpService,
     WxSubscribeService,
   ],
-  exports: [USER_LOOKUP],
+  exports: [USER_LOOKUP, TENANT_LOOKUP],
 })
 export class IamModule {}

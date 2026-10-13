@@ -33,6 +33,11 @@ export const signinLogQuery = pageQuery(['createdAt', 'id'])
     ok: z.stringbool().optional(),
     createdAtFrom: z.iso.datetime({ offset: true }).optional(),
     createdAtTo: z.iso.datetime({ offset: true }).optional(),
+    /**
+     * `1`: only the attempts of no tenant (an unknown tenant code), whichever tenant the list is read in;
+     * platform root only (403 for anyone else)
+     */
+    unresolved: z.stringbool().optional(),
   })
   .register(fieldDomains, { domain: 'audit.signinLog' })
 export type SigninLogQuery = z.output<typeof signinLogQuery>
@@ -55,5 +60,7 @@ export const signinLogVo = z.object({
   /** `msgKey` translated with `msgParams` (the request's language) */
   msg: z.string().nullable(),
   createdAt: z.iso.datetime(),
+  /** the tenant signed in to; null when the tenant code named none */
+  tenantId: z.number().int().nullable(),
 })
 export type SigninLogVo = z.infer<typeof signinLogVo>

@@ -1,6 +1,7 @@
 import { Column, Entity } from 'typeorm'
 import { BaseEntity } from '../../../core/db/base.entity.js'
 import { referencedBy } from '../../../core/db/references.js'
+import { TenantColumn } from '../../../core/db/tenant-filter.js'
 
 // a storage holding objects is in use (the former foreign key)
 referencedBy('fs_storage', { table: 'fs_object', column: 'storage_id' })
@@ -41,4 +42,7 @@ export class FsObject extends BaseEntity {
 
   @Column({ name: 'uploader_id', type: 'bigint', unsigned: true })
   uploaderId: number
+
+  @TenantColumn()
+  tenantId: number
 }

@@ -3,6 +3,7 @@
 // replay → whole session revoked, revokeSession / revokeUser via the auth:user:{id} index.
 import { createHash } from 'node:crypto'
 import { Test, type TestingModule } from '@nestjs/testing'
+import { AuditWriter } from '../../src/core/audit/audit-writer.js'
 import { CoreConfigModule } from '../../src/core/config/config.module.js'
 import { ownerIndexKey, SessionRevoker } from '../../src/core/auth/session-revoker.js'
 import { sweepOnline } from '../../src/core/auth/online-sweep.js'
@@ -31,6 +32,7 @@ const UA = 'Mozilla/5.0 (test) UA-1'
 const opts = { keepSignedIn: false, ip: '127.0.0.1', ua: UA }
 const user = (userId: number): SessionUser => ({
   userId,
+  tenantId: 1,
   userType: 'admin',
   deptId: 2,
   deptTreePath: '/1/2/',
@@ -61,8 +63,14 @@ async function dump(): Promise<string> {
 beforeAll(async () => {
   moduleRef = await Test.createTestingModule({
     imports: [CoreConfigModule.forRoot(), CoreRedisModule],
-    // RealtimeService without a gateway: socket endings are no-ops here (core-realtime.e2e covers them)
-    providers: [TokenService, SessionRevoker, RealtimeService],
+    // RealtimeService without a gateway: socket endings are no-ops here (core-realtime.e2e covers them);
+    // no session here works inside another tenant, so no action log row is written (tenant-enter.e2e)
+    providers: [
+      TokenService,
+      SessionRevoker,
+      RealtimeService,
+      { provide: AuditWriter, useValue: { action: () => undefined } },
+    ],
   }).compile()
   tokens = moduleRef.get(TokenService)
   revoker = moduleRef.get(SessionRevoker)
@@ -116,6 +124,7 @@ describe('issue', () => {
         'loginAt',
         'absoluteExpAt',
         'locale',
+        'tenantId',
       ].sort(),
     )
     expect(session).toMatchObject({

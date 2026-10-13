@@ -29,6 +29,7 @@ import { findId, insertRow, type Row } from '../../src/db/seeds/upsert.js'
 import { logOf } from '../setup/audit.js'
 import { bearer, signIn } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 const PREFIX = 'e2e-job-'
 const URL = '/api/scheduler/tasks'
@@ -201,11 +202,13 @@ beforeAll(async () => {
   lastRunId = Number((await ds.query('SELECT COALESCE(MAX(id), 0) AS n FROM job_run'))[0].n)
   lastInboxId = Number((await ds.query('SELECT COALESCE(MAX(id), 0) AS n FROM msg_inbox'))[0].n)
   // every task perm but `run`; browse + view of the run log
-  roleId = await insertRow(ds.manager, 'iam_role', {
-    code: `${PREFIX}no-run`,
-    name: `${PREFIX}no-run`,
-    data_scope: 'all',
-  })
+  roleId = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_role', {
+      code: `${PREFIX}no-run`,
+      name: `${PREFIX}no-run`,
+      data_scope: 'all',
+    }),
+  )
   for (const perm of [
     taskPerms.browse,
     taskPerms.view,
@@ -214,26 +217,33 @@ beforeAll(async () => {
     runPerms.browse,
     runPerms.view,
   ])
-    await ds.query('INSERT INTO iam_role_menus (role_id, menu_id) VALUES (?, ?)', [
+    await ds.query('INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, 1)', [
       roleId,
       await findId(ds.manager, 'iam_menu', { perms: perm }),
     ])
-  const noRun = await insertRow(ds.manager, 'iam_user', {
-    username: `${PREFIX}no-run`,
-    display_name: 'no-run',
-    password_hash: 'not-used-by-this-spec',
-    password_changed_at: new Date(),
-  })
+  const noRun = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_user', {
+      username: `${PREFIX}no-run`,
+      display_name: 'no-run',
+      password_hash: 'not-used-by-this-spec',
+      password_changed_at: new Date(),
+    }),
+  )
   userIds.push(noRun)
-  await ds.query('INSERT INTO iam_user_roles (user_id, role_id) VALUES (?, ?)', [noRun, roleId])
+  await ds.query('INSERT INTO iam_user_roles (user_id, role_id, tenant_id) VALUES (?, ?, 1)', [
+    noRun,
+    roleId,
+  ])
   tokens.admin = (await signIn(app)).accessToken
   tokens.noRun = (await signIn(app, `${PREFIX}no-run`)).accessToken
-  const plain = await insertRow(ds.manager, 'iam_user', {
-    username: `${PREFIX}plain`,
-    display_name: 'plain',
-    password_hash: 'not-used-by-this-spec',
-    password_changed_at: new Date(),
-  })
+  const plain = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_user', {
+      username: `${PREFIX}plain`,
+      display_name: 'plain',
+      password_hash: 'not-used-by-this-spec',
+      password_changed_at: new Date(),
+    }),
+  )
   userIds.push(plain)
   tokens.plain = (await signIn(app, `${PREFIX}plain`)).accessToken
 })
@@ -486,7 +496,7 @@ describe('lock', () => {
     ])
     // a root link removed (soft) no longer makes its user a recipient
     await ds.query(
-      "INSERT INTO iam_user_roles (user_id, role_id, deleted_at) SELECT ?, id, NOW(3) FROM iam_role WHERE code = 'root' AND deleted_at IS NULL",
+      "INSERT INTO iam_user_roles (user_id, role_id, deleted_at, tenant_id) SELECT ?, id, NOW(3), 1 FROM iam_role WHERE code = 'root' AND tenant_id = 1 AND deleted_at IS NULL",
       [userIds[1]],
     )
     const fire = scheduler.fire(id, nextAt(), 'manual')
@@ -1002,7 +1012,10 @@ describe('retry', () => {
     const tag = unique()
     const ids: Record<string, number[]> = {}
     const add = async (table: string, row: Row) =>
-      (ids[table] = [...(ids[table] ?? []), await insertRow(ds.manager, table, row)])
+      (ids[table] = [
+        ...(ids[table] ?? []),
+        await inTenant1(() => insertRow(ds.manager, table, row)),
+      ])
     // a row of each table at a time: the old ones go whether deleted (soft) already or not
     const rows: Record<string, (at: Date) => Row> = {
       aud_action_log: (at) => ({
@@ -1012,6 +1025,7 @@ describe('retry', () => {
         url: '/x',
         ok: 1,
         cost_ms: 1,
+        actor_tenant_id: 1,
         created_at: at,
       }),
       aud_signin_log: (at) => ({

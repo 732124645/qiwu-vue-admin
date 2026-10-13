@@ -38,6 +38,8 @@ export const httpFaultQuery = pageQuery(['createdAt', 'id'])
     state: z.string().trim().max(12).optional(),
     createdAtFrom: z.iso.datetime({ offset: true }).optional(),
     createdAtTo: z.iso.datetime({ offset: true }).optional(),
+    /** the errors of one tenant's requests (the anonymous ones have none) */
+    tenantId: z.coerce.number().int().positive().optional(),
   })
   .register(fieldDomains, { domain: 'audit.httpFault' })
 export type HttpFaultQuery = z.output<typeof httpFaultQuery>
@@ -60,5 +62,7 @@ export const httpFaultVo = z.object({
   handledBy: z.number().int().nullable(),
   handledAt: z.iso.datetime().nullable(),
   createdAt: z.iso.datetime(),
+  /** the signed-in caller's data tenant; null for an anonymous request */
+  tenantId: z.number().int().nullable(),
 })
 export type HttpFaultVo = z.infer<typeof httpFaultVo>

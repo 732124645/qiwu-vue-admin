@@ -7,6 +7,7 @@
         "refresh_token": "Refresh token",
         "client_credentials": "Client credentials"
       },
+      "credentialsHint": "Client credentials are for the platform's own integrations only: their tokens belong to the platform (the default tenant), never to another tenant; a tenant's apps use the authorization code",
       "redirectHint": "Press Enter to add; HTTPS only, http://localhost for local testing",
       "secretTitle": "Save the client secret",
       "secretOnce": "The secret is shown this once only: save it now. If it is lost, reset it.",

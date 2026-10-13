@@ -34,7 +34,11 @@
     "wx_mp_bound": "This WeChat account is linked to another account",
     "wx_mp_user_bound": "This account is already linked to a WeChat account. Unlink it in your profile first",
     "wx_mp_refused": "The account linked to this WeChat account is disabled",
-    "wx_mp_upstream": "The WeChat service is unavailable. Please try again later"
+    "wx_mp_upstream": "The WeChat service is unavailable. Please try again later",
+    "bad_credentials_tenant": "Wrong tenant code, username or password",
+    "tenant_switched": "The tenant of this tab has changed. Please reload the page",
+    "tenant_host_mismatch": "The tenant code does not match the domain you are visiting",
+    "tenant_inactive": "Your tenant is disabled or has expired. Please contact your administrator"
   },
   "excel": {
     "invalid": "The file is not a valid Excel (.xlsx) workbook",
@@ -54,7 +58,7 @@
     "grant_exceeds_own": "You cannot grant a role beyond your own permissions or data scope",
     "user_self": "You cannot delete or disable your own account",
     "user_protected": "The super administrator account is protected against this action",
-    "initial_password_unset": "The initial password parameter is not set or does not meet the password policy. Please enter a password",
+    "initial_password_unset": "The initial password is unavailable or does not meet the password policy. Please enter a password",
     "dept_has_users": "The department still has users and cannot be deleted",
     "menu_parent_kind": "This kind of menu cannot go under the chosen parent (actions go under pages, nothing goes under an action)",
     "menu_granted": "The menu is granted to roles. Remove it from those roles before deleting it",
@@ -62,7 +66,11 @@
     "role_has_users": "The role is assigned to users. Remove them from it before deleting it",
     "own_mobile_in_profile": "Change your own mobile number in your profile (password and SMS code required)",
     "mobile_change_unavailable": "SMS codes are not set up, so the mobile number cannot be changed here; ask an administrator to change it",
-    "menu_route_name_fixed": "A group's route name cannot be changed once saved: seeds and generated pages find the group by it"
+    "menu_route_name_fixed": "A group's route name cannot be changed once saved: seeds and generated pages find the group by it",
+    "tenant_user_quota": "The tenant's user quota is reached",
+    "tenant_package_platform_menu": "A package holds only menus open to tenants, never a platform-only one",
+    "tenant_default_fixed": "The default tenant cannot be disabled or given an expiry or a package, and keeps its code; the default tenant's initial password is the param iam.user.initial_password",
+    "tenant_domain_reserved": "A tenant cannot be bound to the platform's own domain"
   },
   "storage": {
     "file_required": "Please choose a file to upload",
@@ -77,7 +85,7 @@
     "secret_required": "Re-enter the secret key after changing the storage connection settings."
   },
   "codegen": {
-    "table_unavailable": "Table {table} is not available: it does not exist in this database, is a framework table (meta_, test_, cg_) or has already been imported",
+    "table_unavailable": "Table {table} is not available: it does not exist in this database, is a framework or reserved table (meta_, test_, cg_, wxoa_) or has already been imported",
     "identifier_invalid": "{name} cannot be used by the code generator: table and column names may only contain lowercase letters, digits and underscores and must start with a letter, class and property names must not be reserved words or names the generated code uses already, and a project domain must not be a reserved name",
     "options_label_missing": "Table {table} has no text column to label its options (a name, a title or another text column), so the options endpoint cannot be switched on",
     "tree_columns": "Table {table} cannot use the tree template: it needs the columns parent_id and tree_path (properties parentId, treePath) and a text label column",

@@ -3,9 +3,9 @@ import { effectScope } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { ElMessage } from 'element-plus'
 import { REALTIME_EVENT, REALTIME_UNAUTHORIZED, RT } from '@qiwu/shared'
-import { setLocale } from '@/core/i18n'
+import { i18n, setLocale } from '@/core/i18n'
 import { onRealtime, realtimeStatus, realtimeUp, startRealtime } from '@/core/realtime/socket'
-import { accessToken, refreshAccessToken, setSessionHint } from '@/core/request/http'
+import { accessToken, refreshAccessToken, sessionEnd, setSessionHint } from '@/core/request/http'
 
 /** A fake Socket.IO client: records its options, listeners and close; `active` = it will retry. */
 class FakeSocket {
@@ -138,6 +138,23 @@ describe('realtime socket', () => {
       path: '/login',
       query: { redirect: '/iam/users?page=2' },
     })
+  })
+
+  it('session:kicked with a reason says it, here and on the sign-in page; without one it is a plain kick', () => {
+    accessToken.value = 'at-12'
+    last().fire(REALTIME_EVENT, {
+      type: RT.sessionKicked,
+      payload: { sid: 'y', reason: 'tenant_unavailable' },
+    })
+    expect(ElMessage.warning).toHaveBeenCalledWith(i18n.global.t('auth.tenant.unavailable'))
+    expect(sessionEnd.value).toBe('tenant_unavailable')
+    expect(accessToken.value).toBe('')
+    vi.mocked(ElMessage.warning).mockClear()
+    accessToken.value = 'at-13'
+    last().fire(REALTIME_EVENT, { type: RT.sessionKicked, payload: { sid: 'z' } })
+    expect(ElMessage.warning).toHaveBeenCalledWith(i18n.global.t('common.session.kicked'))
+    expect(sessionEnd.value).toBeNull()
+    expect(accessToken.value).toBe('')
   })
 
   it('realtimeUp follows the current socket: up on connect, down on its disconnect, a new token or sign-out', () => {

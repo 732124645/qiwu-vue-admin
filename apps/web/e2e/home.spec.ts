@@ -38,8 +38,8 @@ function signInHistory(id: number, username: string, rows: [string, number, stri
   sql('DELETE FROM aud_signin_log WHERE user_id = ?', [id])
   for (const [kind, ok, at] of rows)
     sql(
-      `INSERT INTO aud_signin_log (kind, user_id, username, client_id, ok, msg_key, created_at)
-       VALUES (?, ?, ?, 'console', ?, 'signin.ok', ?)`,
+      `INSERT INTO aud_signin_log (tenant_id, kind, user_id, username, client_id, ok, msg_key, created_at)
+       VALUES (1, ?, ?, ?, 'console', ?, 'signin.ok', ?)`,
       [kind, id, username, ok, at.replace('T', ' ').replace('Z', '')],
     )
 }

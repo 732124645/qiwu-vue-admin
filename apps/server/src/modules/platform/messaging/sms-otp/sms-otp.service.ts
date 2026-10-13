@@ -13,9 +13,11 @@ import {
 } from '@qiwu/shared'
 import type { DataSource, EntityManager } from 'typeorm'
 import { smsIpBucket } from '../../../../core/auth/auth-params.js'
+import { LoginTenantResolver } from '../../../../core/auth/login-tenant.js'
 import { SessionRevoker } from '../../../../core/auth/session-revoker.js'
 import { CaptchaTicketVerifier } from '../../../../core/captcha/captcha-ticket.js'
 import { CaptchaService } from '../../../../core/captcha/captcha.service.js'
+import { tenantId } from '../../../../core/context/tenant.js'
 import { BizError } from '../../../../core/http/biz-error.js'
 import { currentLocale } from '../../../../core/i18n/locale.js'
 import { NotifyDispatcher } from '../../../../core/notify/notify.js'
@@ -85,40 +87,56 @@ export class OtpService {
     private readonly dispatcher: NotifyDispatcher,
     @Inject(REDIS) private readonly redis: Redis,
     @InjectDataSource() private readonly ds: DataSource,
+    private readonly loginTenants: LoginTenantResolver,
     revoker: SessionRevoker,
   ) {
-    // SessionRevoker.revokeUser voids the unused codes of the user's mobile and bind requests. A plain read
-    // first, never a join in the UPDATE: a non-root kick still holds the user row's lock in its
-    // transaction, and a locking read of it here would wait for that transaction, which waits for us.
+    // SessionRevoker.revokeUser voids the unused codes of the user's mobile (in the user's tenant: a
+    // number is unique within a tenant only) and bind requests. A plain read first, never a join in the
+    // UPDATE: a non-root kick still holds the user row's lock in its transaction, and a locking read of
+    // it here would wait for that transaction, which waits for us.
     revoker.onRevokeUser(async (userId) => {
       // a deleted user too (UserService.remove revokes after the soft delete): the number may be given
       // to another user at once, and its pending codes must not sign that one in
-      const [user] = await this.ds.query<{ mobile: string | null }[]>(
-        'SELECT mobile FROM iam_user WHERE id = ?', // qw:include-deleted
+      const [user] = await this.ds.query<{ mobile: string | null; tenant_id: number }[]>(
+        // qw:cross-tenant the user by its global id, whatever context revokes it; its tenant comes from the row
+        'SELECT mobile, tenant_id FROM iam_user WHERE id = ?', // qw:include-deleted
         [userId],
       )
       if (user?.mobile)
         await this.ds.query(
-          'UPDATE msg_sms_otp SET consumed_at = ? WHERE mobile = ? AND consumed_at IS NULL AND deleted_at IS NULL',
-          [new Date(), user.mobile],
+          'UPDATE msg_sms_otp SET consumed_at = ? WHERE mobile = ? AND tenant_id = ? AND consumed_at IS NULL AND deleted_at IS NULL',
+          [new Date(), user.mobile, user.tenant_id],
         )
       await this.ds.query(
+        // qw:cross-tenant the bind requests of a global user id (made in whatever tenant it acted in)
         'UPDATE msg_sms_otp SET consumed_at = ? WHERE user_id = ? AND consumed_at IS NULL AND deleted_at IS NULL',
         [new Date(), userId],
       )
     })
   }
 
-  async issue({ mobile, scene, captchaTicket }: SmsCodeBody, ip: string): Promise<SmsCodeVo> {
+  /**
+   * Public request for a sign-in or reset code: captcha ticket, then the sign-in tenant
+   * (`resolveLoginTenant`: `host`, else `tenantCode`), then the number limits (kept across tenants: they
+   * protect the phone's owner). A tenant that did not resolve answers like an unknown number: the same
+   * answer and limits, no code, no record (see docs/design-notes.md#tenancy).
+   */
+  async issue(
+    { mobile, scene, captchaTicket, tenantCode }: SmsCodeBody,
+    ip: string,
+    host?: string,
+  ): Promise<SmsCodeVo> {
     if (
       (await this.captcha.mode()) !== 'off' &&
       !(await this.tickets.verify('sms_send', ip, captchaTicket))
     )
       throw new BizError(Err.AUTH_CAPTCHA_REQUIRED)
+    const at = await this.loginTenants.resolveLoginTenant({ hostname: host }, tenantCode)
 
-    return this.issueLimited(mobile, ip, (dailySeq, issuedAt) =>
-      this.deliver(mobile, scene, ip, dailySeq, issuedAt, currentLocale()),
-    )
+    return this.issueLimited(mobile, ip, async (dailySeq, issuedAt) => {
+      if (at.tenantId !== null)
+        await this.deliver(mobile, scene, ip, dailySeq, issuedAt, currentLocale())
+    })
   }
 
   /** Signed-in bind request: separate number limits, same other limits and immediate answer. */
@@ -217,10 +235,11 @@ export class OtpService {
     return template ? { template, channel: template.channel } : null
   }
 
+  /** Voids the unused codes of `mobile` in the current tenant (its user's number changed). */
   async voidMobile(mobile: string): Promise<void> {
     await this.ds.query(
-      'UPDATE msg_sms_otp SET consumed_at = ? WHERE mobile = ? AND consumed_at IS NULL AND deleted_at IS NULL',
-      [new Date(), mobile],
+      'UPDATE msg_sms_otp SET consumed_at = ? WHERE mobile = ? AND tenant_id = ? AND consumed_at IS NULL AND deleted_at IS NULL',
+      [new Date(), mobile, tenantId()],
     )
   }
 
@@ -242,8 +261,8 @@ export class OtpService {
   ): Promise<void> {
     const send = await this.txHost.withTransaction(READ_COMMITTED, async () => {
       const [user] = await this.txHost.tx.query<{ id: number; enabled: number }[]>(
-        'SELECT id, enabled FROM iam_user WHERE mobile = ? AND deleted_at IS NULL LIMIT 1',
-        [mobile],
+        'SELECT id, enabled FROM iam_user WHERE tenant_id = ? AND mobile = ? AND deleted_at IS NULL LIMIT 1',
+        [tenantId(), mobile],
       )
       if (userId === undefined ? !user || Number(user.enabled) !== 1 : !!user) return null
 
@@ -317,6 +336,23 @@ export class OtpService {
     if (send) await this.sms.sendClaimed(send.recordId, send.message)
   }
 
+  /**
+   * One verification attempt of `mobile` in `scene` from `ip`: counted across tenants (the number's
+   * owner is protected, not an account), 429 `SMS_TOO_FREQUENT` past the limits. `consume` spends one;
+   * a sign-in whose tenant did not resolve spends one too, so it answers like a wrong code.
+   */
+  async countAttempt(mobile: string, scene: SmsOtpScene, ip: string): Promise<void> {
+    const allowed = await this.redis.eval(VERIFY_LIMIT, {
+      keys: [
+        redisKey('smsLimit', 'verify', 'mobile', limitKey(mobile), scene),
+        redisKey('smsLimit', 'verify', 'ip', smsIpBucket(ip)),
+      ],
+      arguments: ['10', '30', String(VERIFY_WINDOW_SEC)],
+    })
+    if (Number(allowed) !== 1) throw new BizError(Err.SMS_TOO_FREQUENT)
+  }
+
+  /** Spends the newest live code of `mobile` in `scene` issued in the current tenant (the ORM's condition). */
   async consume(
     {
       mobile,
@@ -326,14 +362,7 @@ export class OtpService {
     }: { mobile: string; scene: SmsOtpScene; code: string; userId?: number },
     ip: string,
   ): Promise<boolean> {
-    const allowed = await this.redis.eval(VERIFY_LIMIT, {
-      keys: [
-        redisKey('smsLimit', 'verify', 'mobile', limitKey(mobile), scene),
-        redisKey('smsLimit', 'verify', 'ip', smsIpBucket(ip)),
-      ],
-      arguments: ['10', '30', String(VERIFY_WINDOW_SEC)],
-    })
-    if (Number(allowed) !== 1) throw new BizError(Err.SMS_TOO_FREQUENT)
+    await this.countAttempt(mobile, scene, ip)
 
     return this.txHost.withTransaction(async () => {
       const repo = this.txHost.tx.getRepository(SmsOtp)

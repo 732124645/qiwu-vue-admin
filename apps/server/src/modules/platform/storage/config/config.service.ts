@@ -50,11 +50,13 @@ const rowVo = (r: StorageConfig): StorageConfigRowVo => ({
 
 /**
  * A deleted storage's S3 `secretKey` goes once no object row (live or deleted) is left on it: the
- * retention purge needs it until then to delete the deleted objects' bodies. Run by the storage delete
- * and after every purge (`StorageService.purgeDeleted`).
+ * retention purge needs it until then to delete the deleted objects' bodies, every tenant's (a
+ * storage is a platform row). Run by the storage delete and after every purge
+ * (`StorageService.purgeDeleted`).
  */
 export async function dropUnusedSecrets(q: EntityManager): Promise<void> {
   await q.query(
+    // qw:cross-tenant a storage serves every tenant: its secret stays while any tenant's object is on it
     `UPDATE fs_storage s SET s.config = JSON_REMOVE(s.config, '$.secretKey')
       WHERE s.deleted_at IS NOT NULL AND JSON_CONTAINS_PATH(s.config, 'one', '$.secretKey')
         AND NOT EXISTS (SELECT 1 FROM fs_object o WHERE o.storage_id = s.id)`, // qw:include-deleted objects waiting for the purge count too
@@ -62,12 +64,13 @@ export async function dropUnusedSecrets(q: EntityManager): Promise<void> {
 }
 
 /**
- * Storage configs (see docs/design-notes.md#storage) over BaseCrudService; generated list, hand-written driver forms (G).
- * `config` JSON: local `{publicPrefix}` (the root is `STORAGE_LOCAL_ROOT` only), s3 the connection
- * with `secretKey` boxed by SecretBox and never answered (masked). An S3 endpoint on an inner IP literal,
- * `localhost` or an unregistered port is refused on save (422); names are checked by the core/net agents
- * whenever the storage connects (test connection answers `{ok}` only). Exactly one storage is primary:
- * set through `setPrimary`, never disabled or deleted while primary.
+ * Storage configs (see docs/design-notes.md#storage) over BaseCrudService; generated list,
+ * hand-written driver forms (G). `config` JSON: local `{publicPrefix}` (the root is
+ * `STORAGE_LOCAL_ROOT` only), s3 the connection with `secretKey` boxed by SecretBox and never
+ * answered (masked). An S3 endpoint on an inner IP literal, `localhost` or an unregistered port is
+ * refused on save (422); names are checked by the core/net agents whenever the storage connects
+ * (test connection answers `{ok}` only). Exactly one storage is primary: set through `setPrimary`,
+ * never disabled or deleted while primary.
  */
 @Injectable()
 export class StorageConfigService extends BaseCrudService<StorageConfig> {

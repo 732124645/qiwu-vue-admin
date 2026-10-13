@@ -15,6 +15,7 @@ import SettingsDrawer from './SettingsDrawer.vue'
 import SideMenu from './SideMenu.vue'
 import { shown } from './SideMenuItem.vue'
 import TagsView from './TagsView.vue'
+import TenantBanner from './TenantBanner.vue'
 
 defineOptions({ name: 'AppLayout' })
 
@@ -80,11 +81,16 @@ const frames = computed(() =>
        stays below the existing BPMN logo plate (99) and unmodified logo (100). -->
   <el-watermark
     class="app-layout"
-    :class="{ 'app-layout--fixed': app.settings.fixedHeader }"
+    :class="{
+      'app-layout--fixed': app.settings.fixedHeader,
+      'app-layout--acting': auth.tenant?.acting,
+    }"
     :content="app.settings.watermark ? (auth.me?.user.username ?? '') : ''"
     :font="watermarkFont"
     :z-index="1"
   >
+    <!-- working inside another tenant: above everything, the way back -->
+    <TenantBanner />
     <el-header
       v-if="mode !== 'side'"
       height="56px"
@@ -212,6 +218,11 @@ const frames = computed(() =>
   color: var(--qw-text-3);
   background: var(--qw-canvas);
   border-top: 1px solid var(--qw-border);
+}
+/* the tenant banner (36px) sticks above the side bar */
+.app-layout--acting .app-layout__aside {
+  top: 36px;
+  height: calc(100vh - 36px);
 }
 /* fixed header: the layout fills the viewport and only the page area scrolls */
 .app-layout--fixed {

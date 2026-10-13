@@ -31,12 +31,14 @@ import {
 } from '@qiwu/shared'
 import { ActionLog } from '../../../../core/audit/action-log.js'
 import { RequirePerm } from '../../../../core/auth/decorators.js'
+import { PlatformOnly } from '../../../../core/auth/platform-only.js'
 import { Idempotent } from '../../../../core/guard/idempotent.js'
 import { ApiEnvelope } from '../../../../core/http/api-envelope.decorator.js'
 import type { Client } from './client.entity.js'
 import { ClientService } from './client.service.js'
 
 @ApiTags('oauth')
+@PlatformOnly()
 @Controller('oauth/clients')
 export class ClientController {
   constructor(private readonly clients: ClientService) {}

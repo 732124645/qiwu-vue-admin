@@ -26,6 +26,7 @@ import { PermVersion } from '../../../../core/auth/perm-version.js'
 import type { Principal } from '../../../../core/auth/principal.js'
 import { PASSWORD_CHANGED, SessionRevoker } from '../../../../core/auth/session-revoker.js'
 import { TokenService } from '../../../../core/auth/token.service.js'
+import { tenantId } from '../../../../core/context/tenant.js'
 import { BizError } from '../../../../core/http/biz-error.js'
 import type { UploadedFileData } from '../../../../core/http/upload.js'
 import { ValidationException } from '../../../../core/http/validation.pipe.js'
@@ -56,7 +57,8 @@ interface ProfileRow {
 
 /**
  * The signed-in user's own profile with the password change (see docs/design-notes.md#auth-sessions) and
- * UI preferences (`iam_user_pref`; key and value are validated by the controller's schemas).
+ * UI preferences (`iam_user_pref`; key and value are validated by the controller's schemas). Every
+ * statement keeps to the data tenant, the session's: the user's own.
  */
 @Injectable()
 export class ProfileService {
@@ -75,27 +77,30 @@ export class ProfileService {
 
   /** Own row, unmasked, with the dept, enabled role and position names (i18n key or text). */
   async get(userId: number): Promise<ProfileVo> {
+    const tid = tenantId()
     const [u] = await this.ds.query<ProfileRow[]>(
       `SELECT u.id, u.username, u.display_name, u.gender, u.mobile, u.email, u.avatar_url, u.locale,
               d.name AS dept_name
          FROM iam_user u
-         LEFT JOIN iam_dept d ON d.id = u.dept_id AND d.deleted_at IS NULL
-        WHERE u.id = ? AND u.deleted_at IS NULL`,
-      [userId],
+         LEFT JOIN iam_dept d ON d.id = u.dept_id AND d.tenant_id = u.tenant_id AND d.deleted_at IS NULL
+        WHERE u.id = ? AND u.tenant_id = ? AND u.deleted_at IS NULL`,
+      [userId, tid],
     )
     if (!u) throw new NotFoundException()
     const [roles, positions] = await Promise.all([
       this.ds.query<{ name: string }[]>(
         `SELECT r.name FROM iam_user_roles ur
-           JOIN iam_role r ON r.id = ur.role_id AND r.enabled = 1 AND r.deleted_at IS NULL
-          WHERE ur.user_id = ? AND ur.deleted_at IS NULL ORDER BY r.sort_no, r.id`,
-        [userId],
+           JOIN iam_role r ON r.id = ur.role_id AND r.tenant_id = ur.tenant_id AND r.enabled = 1
+                AND r.deleted_at IS NULL
+          WHERE ur.user_id = ? AND ur.tenant_id = ? AND ur.deleted_at IS NULL ORDER BY r.sort_no, r.id`,
+        [userId, tid],
       ),
       this.ds.query<{ name: string }[]>(
         `SELECT p.name FROM iam_user_positions up
-           JOIN iam_position p ON p.id = up.position_id AND p.deleted_at IS NULL
-          WHERE up.user_id = ? AND up.deleted_at IS NULL ORDER BY p.sort_no, p.id`,
-        [userId],
+           JOIN iam_position p ON p.id = up.position_id AND p.tenant_id = up.tenant_id
+                AND p.deleted_at IS NULL
+          WHERE up.user_id = ? AND up.tenant_id = ? AND up.deleted_at IS NULL ORDER BY p.sort_no, p.id`,
+        [userId, tid],
       ),
     ])
     return {
@@ -118,8 +123,8 @@ export class ProfileService {
     const { currentPassword, mobileCode, ...fields } = dto
     const set = Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== undefined))
     const [stored] = await this.ds.query<{ mobile: string | null; password_hash: string }[]>(
-      'SELECT mobile, password_hash FROM iam_user WHERE id = ? AND deleted_at IS NULL',
-      [p.userId],
+      'SELECT mobile, password_hash FROM iam_user WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL',
+      [p.userId, tenantId()],
     )
     if (!stored) throw new NotFoundException()
     const mobileChanged = fields.mobile !== undefined && fields.mobile !== stored.mobile
@@ -179,8 +184,8 @@ export class ProfileService {
    */
   async setLocale(userId: number, locale: Locale): Promise<void> {
     await this.ds.query(
-      'UPDATE iam_user SET locale = ?, updated_by = ? WHERE id = ? AND deleted_at IS NULL',
-      [locale, userId, userId],
+      'UPDATE iam_user SET locale = ?, updated_by = ? WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL',
+      [locale, userId, userId, tenantId()],
     )
     await this.permVersion.bumpUser(userId)
   }
@@ -209,16 +214,17 @@ export class ProfileService {
     )
     const avatarUrl = obj.url!
     // row lock: of two concurrent uploads each deletes the avatar it replaced, never the same one
+    const tid = tenantId()
     const previous = await this.ds
       .transaction(async (q) => {
         const [row] = await q.query<{ avatar_url: string | null }[]>(
-          'SELECT avatar_url FROM iam_user WHERE id = ? AND deleted_at IS NULL FOR UPDATE',
-          [userId],
+          'SELECT avatar_url FROM iam_user WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL FOR UPDATE',
+          [userId, tid],
         )
         if (!row) throw new NotFoundException()
         await q.query(
-          'UPDATE iam_user SET avatar_url = ?, updated_by = ? WHERE id = ? AND deleted_at IS NULL',
-          [avatarUrl, userId, userId],
+          'UPDATE iam_user SET avatar_url = ?, updated_by = ? WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL',
+          [avatarUrl, userId, userId, tid],
         )
         return row.avatar_url
       })
@@ -235,8 +241,8 @@ export class ProfileService {
   private async removeAvatar(userId: number, url: string): Promise<void> {
     const [obj] = await this.ds
       .query<{ id: number }[]>(
-        "SELECT id FROM fs_object WHERE public_url = ? AND biz_tag = 'avatar' AND uploader_id = ? AND deleted_at IS NULL",
-        [url, userId],
+        "SELECT id FROM fs_object WHERE public_url = ? AND biz_tag = 'avatar' AND uploader_id = ? AND tenant_id = ? AND deleted_at IS NULL",
+        [url, userId, tenantId()],
       )
       .catch(() => [])
     if (obj) await this.removeObject(userId, Number(obj.id))
@@ -266,9 +272,10 @@ export class ProfileService {
       throw e
     }
     const { oldPassword, newPassword } = parsed.data
+    const tid = tenantId()
     const [row] = await this.ds.query<{ password_hash: string }[]>(
-      'SELECT password_hash FROM iam_user WHERE id = ? AND deleted_at IS NULL',
-      [p.userId],
+      'SELECT password_hash FROM iam_user WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL',
+      [p.userId, tid],
     )
     await this.auth.checkCurrentPassword(
       p,
@@ -281,12 +288,13 @@ export class ProfileService {
     // compare-and-set on the verified hash: of two concurrent changes only one wins (and revokes)
     const res = await this.ds.query<{ affectedRows: number }>(
       `UPDATE iam_user SET password_hash = ?, password_changed_at = ?, updated_by = ?
-        WHERE id = ? AND password_hash = ? AND deleted_at IS NULL`,
+        WHERE id = ? AND tenant_id = ? AND password_hash = ? AND deleted_at IS NULL`,
       [
         await bcrypt.hash(newPassword, BCRYPT_COST),
         new Date(),
         p.userId,
         p.userId,
+        tid,
         row.password_hash,
       ],
     )
@@ -303,8 +311,8 @@ export class ProfileService {
   /** The user's value of `key`, `null` while unset. */
   async getPref(userId: number, key: string): Promise<TableColumnsPref | null> {
     const [row] = await this.ds.query<{ value: TableColumnsPref }[]>(
-      'SELECT value FROM iam_user_pref WHERE user_id = ? AND pref_key = ? AND deleted_at IS NULL',
-      [userId, key],
+      'SELECT value FROM iam_user_pref WHERE user_id = ? AND pref_key = ? AND tenant_id = ? AND deleted_at IS NULL',
+      [userId, key, tenantId()],
     )
     return row?.value ?? null
   }
@@ -314,9 +322,9 @@ export class ProfileService {
     const json = JSON.stringify(value)
     if (Buffer.byteLength(json) > PREF_VALUE_MAX_BYTES) throw new BizError(Err.PAYLOAD_TOO_LARGE)
     await this.ds.query(
-      `INSERT INTO iam_user_pref (user_id, pref_key, value) VALUES (?, ?, ?) AS n
+      `INSERT INTO iam_user_pref (user_id, pref_key, value, tenant_id) VALUES (?, ?, ?, ?) AS n
          ON DUPLICATE KEY UPDATE value = n.value, deleted_at = NULL`,
-      [userId, key, json],
+      [userId, key, json, tenantId()],
     )
   }
 
@@ -324,8 +332,8 @@ export class ProfileService {
   async deletePref(userId: number, key: string): Promise<void> {
     await this.ds.query(
       `UPDATE iam_user_pref SET deleted_at = CURRENT_TIMESTAMP(3)
-        WHERE user_id = ? AND pref_key = ? AND deleted_at IS NULL`,
-      [userId, key],
+        WHERE user_id = ? AND pref_key = ? AND tenant_id = ? AND deleted_at IS NULL`,
+      [userId, key, tenantId()],
     )
   }
 }

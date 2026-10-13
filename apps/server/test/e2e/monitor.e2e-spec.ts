@@ -33,6 +33,7 @@ import { findId, insertRow } from '../../src/db/seeds/upsert.js'
 import { logOf } from '../setup/audit.js'
 import { bearer, signIn } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 const PREFIX = 'e2e-monitor-'
 const URL = '/api/monitor'
@@ -56,15 +57,20 @@ const bare = (name: CacheNamespaceName, ...parts: string[]) =>
   redisKey(name, ...parts).slice(keyPrefix().length)
 
 async function addUser(name: string, role?: number) {
-  const id = await insertRow(ds.manager, 'iam_user', {
-    username: `${PREFIX}${name}`,
-    display_name: name,
-    password_hash: 'not-used-by-this-spec',
-    password_changed_at: new Date(),
-  })
+  const id = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_user', {
+      username: `${PREFIX}${name}`,
+      display_name: name,
+      password_hash: 'not-used-by-this-spec',
+      password_changed_at: new Date(),
+    }),
+  )
   userIds.push(id)
   if (role)
-    await ds.query('INSERT INTO iam_user_roles (user_id, role_id) VALUES (?, ?)', [id, role])
+    await ds.query('INSERT INTO iam_user_roles (user_id, role_id, tenant_id) VALUES (?, ?, 1)', [
+      id,
+      role,
+    ])
   return (await signIn(app, `${PREFIX}${name}`)).accessToken
 }
 
@@ -75,18 +81,20 @@ beforeAll(async () => {
   ds = app.get<DataSource>(getDataSourceToken())
   redis = app.get(REDIS)
   await cleanRedis(redis)
-  roleId = await insertRow(ds.manager, 'iam_role', {
-    code: `${PREFIX}reader`,
-    name: `${PREFIX}reader`,
-    data_scope: 'all',
-  })
+  roleId = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_role', {
+      code: `${PREFIX}reader`,
+      name: `${PREFIX}reader`,
+      data_scope: 'all',
+    }),
+  )
   for (const perms of [
     monitorPerms.server,
     monitorPerms.redis,
     monitorPerms.cache,
     monitorPerms.mysql,
   ])
-    await ds.query('INSERT INTO iam_role_menus (role_id, menu_id) VALUES (?, ?)', [
+    await ds.query('INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, 1)', [
       roleId,
       await findId(ds.manager, 'iam_menu', { kind: 'action', perms }),
     ])

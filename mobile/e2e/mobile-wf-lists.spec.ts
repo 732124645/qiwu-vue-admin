@@ -20,13 +20,14 @@ const NOTE = 'FYI'
 // peer's processes waiting on the user; REST: also one done task, two started processes and two copies.
 const SEED = `
 import { DataSource } from 'typeorm'
+import { withTenant } from './dist/core/context/tenant.js'
 import { dataSourceOptions } from './dist/db/data-source.js'
 import { seedLimitedUser } from './dist/db/seeds/iam/iam.seed.js'
 import { insertRow } from './dist/db/seeds/upsert.js'
 const { USER, PEER, TODO_DAYS, REST, COMMENT, NOTE } = process.env
 const ds = await new DataSource(dataSourceOptions()).initialize()
 try {
-  await ds.transaction(async (q) => {
+  await withTenant(1, () => ds.transaction(async (q) => {
     const user = JSON.parse(USER)
     const peer = JSON.parse(PEER)
     const me = await seedLimitedUser(q, user.username, user.password)
@@ -67,7 +68,7 @@ try {
     await insertRow(q, 'wf_cc', {
       instance_id: await instance(other, at(7, 7)), node_id: 'notify', user_id: me, created_at: at(7, 7, 13),
     })
-  })
+  }))
 } finally {
   await ds.destroy()
 }

@@ -1,11 +1,15 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
+import { useBrand } from '@/core/composables/use-brand'
 import BrandMark from './BrandMark.vue'
 
-/** Mark + app name linking home, on the side bar / top bar; `collapsed` keeps only the mark. */
+/**
+ * Mark + app name (the tenant's brand when it set one) linking home, on the side bar / top bar;
+ * `collapsed` keeps only the mark.
+ */
 const { collapsed = false } = defineProps<{ collapsed?: boolean }>()
 const { t } = useI18n()
-const appTitle = import.meta.env.VITE_APP_TITLE
+const { name, title, logoUrl } = useBrand()
 </script>
 
 <template>
@@ -13,11 +17,11 @@ const appTitle = import.meta.env.VITE_APP_TITLE
     to="/"
     class="app-logo"
     :class="{ 'app-logo--collapsed': collapsed }"
-    :aria-label="appTitle || t('common.app.title')"
+    :aria-label="title"
   >
-    <BrandMark />
+    <BrandMark :src="logoUrl" />
     <span v-show="!collapsed" class="app-logo__text">
-      <template v-if="appTitle">{{ appTitle }}</template>
+      <template v-if="name">{{ name }}</template>
       <template v-else>
         {{ t('common.app.name') }}<span class="app-logo__suffix">{{ t('common.app.suffix') }}</span>
       </template>

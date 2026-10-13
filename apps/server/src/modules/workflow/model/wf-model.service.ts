@@ -6,22 +6,32 @@ import {
   Err,
   fieldsFromFormSchema,
   type Page,
+  type WF_ASSIGNEE_ID_KINDS,
+  type WfAssigneeKind,
   type WfBeginNode,
   type WfCompileError,
   type WfDraftBody,
   type WfFields,
   type WfFormSnapshot,
   wfFormSchemaJson,
+  type WfInitiatorScope,
   type WfModelDetailVo,
   type WfModelQuery,
   type WfModelSortBody,
   type WfPublishBody,
+  type WfStep,
   type WfVersionDetailVo,
   wfPerms,
 } from '@qiwu/shared'
-import type { DeepPartial, QueryDeepPartialEntity, SelectQueryBuilder } from 'typeorm'
+import type {
+  DeepPartial,
+  EntityManager,
+  QueryDeepPartialEntity,
+  SelectQueryBuilder,
+} from 'typeorm'
 import type { z } from 'zod'
 import { clsGet } from '../../../core/context/cls.js'
+import { tenantId } from '../../../core/context/tenant.js'
 import { BaseCrudService } from '../../../core/db/base-crud.service.js'
 import { contains, paginate } from '../../../core/db/page.js'
 import { BizError } from '../../../core/http/biz-error.js'
@@ -61,11 +71,99 @@ function notThisKind(field: 'tree' | 'xml'): ValidationException {
   return e
 }
 
+/** The users, roles, positions and depts a model names, by id (repeats allowed). */
+interface OrgRefs {
+  users: number[]
+  roles: number[]
+  positions: number[]
+  depts: number[]
+}
+
+const ASSIGNEE_REFS = {
+  users: 'users',
+  roles: 'roles',
+  positions: 'positions',
+  deptMembers: 'depts',
+  deptHead: 'depts',
+} as const satisfies Record<(typeof WF_ASSIGNEE_ID_KINDS)[number], keyof OrgRefs>
+
+/** A step and every step after it, fork paths included. */
+function* stepsOf(step: WfStep | undefined): Generator<WfStep> {
+  for (let s = step; s; s = s.next) {
+    yield s
+    if (s.type === 'fork') for (const p of s.paths) yield* stepsOf(p.child)
+  }
+}
+
+/**
+ * The org ids of a compiled tree: assignees naming users, roles, positions or depts, `fallbackUserId`,
+ * conditions on the initiator's depts and roles and on `user` / `dept` form fields (`fields`).
+ */
+function treeRefs(root: WfBeginNode, fields: WfFields): OrgRefs {
+  const refs: OrgRefs = { users: [], roles: [], positions: [], depts: [] }
+  for (const s of stepsOf(root.next)) {
+    if (s.type !== 'fork') {
+      const kinds: Partial<Record<WfAssigneeKind, keyof OrgRefs>> = ASSIGNEE_REFS
+      const kind = kinds[s.assignee.kind]
+      if (kind) refs[kind].push(...(s.assignee.ids ?? []))
+      if (s.type === 'review' && s.fallbackUserId !== undefined) refs.users.push(s.fallbackUserId)
+      continue
+    }
+    for (const c of s.paths.flatMap((p) => p.when.flat())) {
+      const type = Object.hasOwn(fields, c.field) ? fields[c.field] : undefined
+      const kind =
+        c.field === '$initiator.dept' || type === 'dept'
+          ? 'depts'
+          : c.field === '$initiator.roles'
+            ? 'roles'
+            : type === 'user'
+              ? 'users'
+              : null
+      if (kind) refs[kind].push(...[c.value].flat().filter((v) => typeof v === 'number'))
+    }
+  }
+  return refs
+}
+
+/** `initiator_scope` and `manager_user_ids` as a create or update sets them (undefined / null: none). */
+const settingRefs = (scope: unknown, managers: unknown): OrgRefs => {
+  const s = (scope ?? {}) as Partial<WfInitiatorScope>
+  return {
+    users: [...(s.userIds ?? []), ...((managers ?? []) as number[])],
+    roles: s.roleIds ?? [],
+    positions: [],
+    depts: s.deptIds ?? [],
+  }
+}
+
+// a deleted one still belongs to its tenant (and reaches nobody at run time, the org chart's rule)
+const ORG_SQL: Record<keyof OrgRefs, string> = {
+  users: 'SELECT id FROM iam_user WHERE id IN (?) AND tenant_id = ?', // qw:include-deleted
+  roles: 'SELECT id FROM iam_role WHERE id IN (?) AND tenant_id = ?', // qw:include-deleted
+  positions: 'SELECT id FROM iam_position WHERE id IN (?) AND tenant_id = ?', // qw:include-deleted
+  depts: 'SELECT id FROM iam_dept WHERE id IN (?) AND tenant_id = ?', // qw:include-deleted
+}
+
+/**
+ * Every id of `refs` names a user, role, position or dept of the current tenant (deleted or not), else
+ * 404 (see docs/design-notes.md#tenancy): another tenant's id is refused as an unknown one.
+ */
+async function assertOrgRefs(tx: EntityManager, refs: OrgRefs): Promise<void> {
+  const tid = tenantId()
+  for (const kind of Object.keys(ORG_SQL) as (keyof OrgRefs)[]) {
+    const wanted = [...new Set(refs[kind])]
+    if (!wanted.length) continue
+    const found = await tx.query<unknown[]>(ORG_SQL[kind], [wanted, tid])
+    if (found.length !== wanted.length) throw new NotFoundException()
+  }
+}
+
 /**
  * Process models (see docs/design-notes.md#workflow) over BaseCrudService (not data-scoped: `wfPerms` guard the admin pages).
  * `model_key` is unique among live models (DB, 409 `duplicate`); a published model cannot be deleted (409
  * `in_use`, wf-model.entity.ts). Publishing compiles the tree against the form's fields and appends a
- * `wf_version` under the model's row lock.
+ * `wf_version` under the model's row lock. The users, roles, positions and depts a model names (initiator
+ * scope, process managers, a published tree) are the current tenant's, else 404 (`assertOrgRefs`).
  */
 @Injectable()
 export class WfModelService extends BaseCrudService<WfModel> {
@@ -108,14 +206,16 @@ export class WfModelService extends BaseCrudService<WfModel> {
     if (!p?.root && !p?.perms.includes(wfPerms.model.managers)) throw new ForbiddenException()
   }
 
-  override create(dto: DeepPartial<WfModel>): Promise<WfModel> {
+  override async create(dto: DeepPartial<WfModel>): Promise<WfModel> {
     this.assertManagers(dto.managerUserIds as number[] | undefined, null)
+    await assertOrgRefs(this.txHost.tx, settingRefs(dto.initiatorScope, dto.managerUserIds))
     return super.create(dto)
   }
 
   override async update(id: number, dto: QueryDeepPartialEntity<WfModel>): Promise<void> {
     if (dto.managerUserIds !== undefined)
       this.assertManagers(dto.managerUserIds as number[], (await this.get(id)).managerUserIds)
+    await assertOrgRefs(this.txHost.tx, settingRefs(dto.initiatorScope, dto.managerUserIds))
     return super.update(id, dto)
   }
 
@@ -214,6 +314,7 @@ export class WfModelService extends BaseCrudService<WfModel> {
         if (!r.ok) throw invalidTree(r.errors)
         root = r.flow.root
       }
+      await assertOrgRefs(this.txHost.tx, treeRefs(root, formSnapshot.fields))
       const versions = this.txHost.tx.getRepository(WfVersion)
       const last = await versions.maximum('version', { modelId: id })
       const row = await versions.save(

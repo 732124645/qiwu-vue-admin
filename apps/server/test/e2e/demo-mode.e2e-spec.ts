@@ -31,6 +31,7 @@ import { insertRow } from '../../src/db/seeds/upsert.js'
 import { bearer, signIn } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
 import { closeSockets, connect, socketOf } from '../setup/socket.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 // Independent contract: deleting an exemption from the guard must fail this suite too.
 const EXEMPT = new Set([
@@ -47,6 +48,8 @@ const EXEMPT = new Set([
   'POST /api/messaging/inboxes/mine/read-all',
   'POST /api/messaging/inboxes/mine/:id/read',
   'POST /api/wf/ccs/:id/read',
+  'POST /api/iam/tenants/:id/enter',
+  'POST /api/iam/tenants/leave',
 ])
 const PW = 'Demo-mode#2026'
 const PREFIX = 'demo-mode-e2e-'
@@ -110,25 +113,29 @@ describe.each(['false', 'true'])('APP_DEMO_MODE=%s', (mode) => {
     await app.get(ParamService).invalidate(CAPTCHA_MODE_PARAM)
   }
   const user = async (name: string, changed: Date | null = new Date()) => {
-    const id = await insertRow(ds.manager, 'iam_user', {
-      username: PREFIX + name,
-      display_name: name,
-      password_hash: await bcrypt.hash(PW, 4),
-      password_changed_at: changed,
-    })
+    const id = await inTenant1(async () =>
+      insertRow(ds.manager, 'iam_user', {
+        username: PREFIX + name,
+        display_name: name,
+        password_hash: await bcrypt.hash(PW, 4),
+        password_changed_at: changed,
+      }),
+    )
     userIds.push(id)
     return id
   }
   const inbox = async (owner: number) => {
-    const id = await insertRow(ds.manager, 'msg_inbox', {
-      user_id: owner,
-      template_code: 'test.demoMode',
-      locale: 'en-US',
-      category: 'system',
-      title: 'Demo mode test',
-      body: 'Test message',
-      status: 'delivered',
-    })
+    const id = await inTenant1(() =>
+      insertRow(ds.manager, 'msg_inbox', {
+        user_id: owner,
+        template_code: 'test.demoMode',
+        locale: 'en-US',
+        category: 'system',
+        title: 'Demo mode test',
+        body: 'Test message',
+        status: 'delivered',
+      }),
+    )
     inboxIds.push(id)
     return id
   }
@@ -225,7 +232,7 @@ describe.each(['false', 'true'])('APP_DEMO_MODE=%s', (mode) => {
 
   if (mode === 'false') return
 
-  it('enumerates every registered controller method, including hidden/new routes; only the 13 exact writes pass', () => {
+  it('enumerates every registered controller method, including hidden/new routes; only the 15 exact writes pass', () => {
     const guard = new DemoModeGuard(app.get(AppConfigService))
     const scanner = new MetadataScanner()
     const found = new Set<string>()
@@ -279,8 +286,15 @@ describe.each(['false', 'true'])('APP_DEMO_MODE=%s', (mode) => {
     }
     expect(found.size).toBeGreaterThan(0)
     expect(writes).toBeGreaterThan(0)
-    expect(EXEMPT.size).toBe(13)
-    for (const key of EXEMPT) expect(found.has(key)).toBe(true)
+    expect(EXEMPT.size).toBe(15)
+    // every exemption passes the guard, registered or not
+    for (const key of EXEMPT) {
+      const [verb, path] = key.split(' ')
+      expect(guard.canActivate(new ExecutionContextHost([{ method: verb, route: { path } }]))).toBe(
+        true,
+      )
+    }
+    expect([...EXEMPT].filter((key) => !found.has(key))).toEqual([])
     expect(found.has('POST /api/demo-mode-fixture/new-write')).toBe(true)
     process.stdout.write(
       `demo-mode inventory: ${found.size} method/routes, ${writes} denied writes, ${EXEMPT.size} exemptions\n`,
@@ -443,32 +457,37 @@ describe.each(['false', 'true'])('APP_DEMO_MODE=%s', (mode) => {
     for (const { ip } of entries) {
       sids.push((await signIn(app, username, { ip, ua: CHROME })).session.sid)
       signinIds.push(
-        await insertRow(ds.manager, 'aud_signin_log', {
-          kind: 'password',
-          user_id: userId,
-          username,
-          client_id: 'console',
-          ip,
-          location,
-          browser: 'Chrome 131.0.0.0',
-          os: 'macOS 10.15.7',
-          ok: 1,
-        }),
+        await inTenant1(() =>
+          insertRow(ds.manager, 'aud_signin_log', {
+            kind: 'password',
+            user_id: userId,
+            username,
+            client_id: 'console',
+            ip,
+            location,
+            browser: 'Chrome 131.0.0.0',
+            os: 'macOS 10.15.7',
+            ok: 1,
+          }),
+        ),
       )
       actionIds.push(
-        await insertRow(ds.manager, 'aud_action_log', {
-          domain,
-          verb: 'modify',
-          user_id: userId,
-          username,
-          http_method: 'PUT',
-          url: '/api/iam/profile/locale',
-          ip,
-          location,
-          user_agent: CHROME,
-          ok: 1,
-          cost_ms: 1,
-        }),
+        await inTenant1(() =>
+          insertRow(ds.manager, 'aud_action_log', {
+            domain,
+            verb: 'modify',
+            user_id: userId,
+            username,
+            http_method: 'PUT',
+            url: '/api/iam/profile/locale',
+            ip,
+            location,
+            user_agent: CHROME,
+            ok: 1,
+            cost_ms: 1,
+            actor_tenant_id: 1,
+          }),
+        ),
       )
       traceIds.push(
         await insertRow(ds.manager, 'aud_http_trace', {
@@ -618,6 +637,7 @@ describe.each(['false', 'true'])('APP_DEMO_MODE=%s', (mode) => {
             url: '/api/iam/profile/locale',
             ok: 1,
             cost_ms: 1,
+            actor_tenant_id: 1,
           },
         ],
         [
@@ -633,7 +653,7 @@ describe.each(['false', 'true'])('APP_DEMO_MODE=%s', (mode) => {
         ],
         ['aud_http_fault', { method: 'GET', url: '/api/demo/fault', error_name: 'Error' }],
       ] as const)
-        await insertRow(ds.manager, table, { username, ip, ...fields })
+        await inTenant1(() => insertRow(ds.manager, table, { username, ip, ...fields }))
     }
     for (const path of [...paths.map((p) => `/api/audit/${p}`), '/api/iam/sessions']) {
       const query = { username, pageSize: 200 }
@@ -723,13 +743,15 @@ describe.each(['false', 'true'])('APP_DEMO_MODE=%s', (mode) => {
   it('bulletin read/read-all, inbox read/read-all and cc read reach real owned rows; strangers still get 404', async () => {
     for (let n = 0; n < 2; n++)
       bulletinIds.push(
-        await insertRow(ds.manager, 'msg_bulletin', {
-          title: `Demo ${n}`,
-          kind: 'notice',
-          body: '<p>Test</p>',
-          published: 1,
-          published_at: new Date(),
-        }),
+        await inTenant1(() =>
+          insertRow(ds.manager, 'msg_bulletin', {
+            title: `Demo ${n}`,
+            kind: 'notice',
+            body: '<p>Test</p>',
+            published: 1,
+            published_at: new Date(),
+          }),
+        ),
       )
     const read = `/api/messaging/bulletins/feed/${bulletinIds[0]}/read`
     await http().post(read).expect(401)
@@ -759,11 +781,13 @@ describe.each(['false', 'true'])('APP_DEMO_MODE=%s', (mode) => {
     // No FK on wf_cc: the read endpoint needs only this owned receipt, not a process start.
     for (const owner of [userId, userIds.at(-1)!])
       ccIds.push(
-        await insertRow(ds.manager, 'wf_cc', {
-          instance_id: 999999,
-          node_id: 'test',
-          user_id: owner,
-        }),
+        await inTenant1(() =>
+          insertRow(ds.manager, 'wf_cc', {
+            instance_id: 999999,
+            node_id: 'test',
+            user_id: owner,
+          }),
+        ),
       )
     await http().post(`/api/wf/ccs/${ccIds[0]}/read`).expect(401)
     await http().post(`/api/wf/ccs/${ccIds[1]}/read`).set(as()).expect(404)

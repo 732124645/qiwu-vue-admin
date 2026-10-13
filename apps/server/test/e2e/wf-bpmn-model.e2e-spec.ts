@@ -18,6 +18,7 @@ import { WfHandlers } from '../../src/modules/workflow/runtime/wf-handlers.js'
 import { cfg, fixture, type Fx } from '../fixtures/wf/bpmn-fixture.js'
 import { bearer, signIn } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 const PREFIX = 'e2e-wfb-'
 const MODELS = '/api/wf/models'
@@ -115,12 +116,14 @@ const handler = {
 }
 
 async function user(name: string) {
-  u[name] = await insertRow(ds.manager, 'iam_user', {
-    username: PREFIX + name,
-    display_name: name,
-    password_hash: 'not-used-by-this-spec',
-    password_changed_at: new Date(),
-  })
+  u[name] = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_user', {
+      username: PREFIX + name,
+      display_name: name,
+      password_hash: 'not-used-by-this-spec',
+      password_changed_at: new Date(),
+    }),
+  )
   tokens[name] = (await signIn(app, PREFIX + name)).accessToken
 }
 

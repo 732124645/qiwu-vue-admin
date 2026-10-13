@@ -23,6 +23,7 @@ import type { WfInstanceRow } from '../../src/modules/workflow/runtime/wf-runtim
 import { chain, parallel, review } from '../fixtures/wf/flow.js'
 import { bearer, signIn } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 const PREFIX = 'e2e-wfd-'
 const LEAVE = `${PREFIX}leave`
@@ -109,15 +110,14 @@ async function model(steps: WfStep[], opts: ModelOpts = {}): Promise<string> {
     access: opts.access,
     next: chain(...steps),
   }
-  const m = await ds.query('INSERT INTO wf_model (model_key, name, form_kind) VALUES (?, ?, ?)', [
-    key,
-    key,
-    opts.custom ? 'custom' : 'dynamic',
-  ])
+  const m = await ds.query(
+    'INSERT INTO wf_model (model_key, name, form_kind, tenant_id) VALUES (?, ?, ?, 1)',
+    [key, key, opts.custom ? 'custom' : 'dynamic'],
+  )
   const fields = opts.fields ?? (opts.custom ? { days: 'number' } : {})
   const v = await ds.query(
-    `INSERT INTO wf_version (model_id, model_key, version, tree_json, form_snapshot)
-     VALUES (?, ?, 1, ?, ?)`,
+    `INSERT INTO wf_version (model_id, model_key, version, tree_json, form_snapshot, tenant_id)
+     VALUES (?, ?, 1, ?, ?, 1)`,
     [m.insertId, key, JSON.stringify(root), JSON.stringify({ fields })],
   )
   await ds.query('UPDATE wf_model SET current_version_id = ? WHERE id = ?', [
@@ -132,8 +132,10 @@ async function begin(
   modelKey: string,
   extra: { formValues?: Record<string, unknown>; businessKey?: string } = {},
 ) {
-  const { inst } = await cls.run(() =>
-    starts.start(u.alice!, { formValues: {}, initiatorPicks: {}, ...extra, modelKey }),
+  const { inst } = await inTenant1(() =>
+    cls.run(() =>
+      starts.start(u.alice!, { formValues: {}, initiatorPicks: {}, ...extra, modelKey }),
+    ),
   )
   return inst.id
 }
@@ -178,13 +180,15 @@ const eventCount = async (id: number, action: string) =>
     .length
 
 async function user(name: string, dept: number) {
-  u[name] = await insertRow(ds.manager, 'iam_user', {
-    username: PREFIX + name,
-    display_name: name,
-    dept_id: dept,
-    password_hash: 'not-used-by-this-spec',
-    password_changed_at: new Date(),
-  })
+  u[name] = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_user', {
+      username: PREFIX + name,
+      display_name: name,
+      dept_id: dept,
+      password_hash: 'not-used-by-this-spec',
+      password_changed_at: new Date(),
+    }),
+  )
   made.iam_user.push(u[name])
 }
 
@@ -211,11 +215,13 @@ beforeAll(async () => {
   handler = app.get(LeaveHandler)
   await cleanRedis(redis)
   await cleanup()
-  const dept = await insertRow(ds.manager, 'iam_dept', {
-    parent_id: 0,
-    name: `${PREFIX}dept`,
-    tree_path: '/',
-  })
+  const dept = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_dept', {
+      parent_id: 0,
+      name: `${PREFIX}dept`,
+      tree_path: '/',
+    }),
+  )
   made.iam_dept.push(dept)
   await ds.query('UPDATE iam_dept SET tree_path = ? WHERE id = ?', [`/${dept}/`, dept])
   for (const name of ['alice', 'bob', 'carol', 'erin', 'frank']) await user(name, dept)
@@ -437,14 +443,16 @@ describe('resubmit', () => {
 
 describe('custom form', () => {
   const leave = (days: number) =>
-    insertRow(ds.manager, 'biz_leave_request', {
-      user_id: u.alice,
-      leave_kind: 'annual',
-      start_at: new Date(),
-      end_at: new Date(),
-      days,
-      reason: REASON,
-    })
+    inTenant1(() =>
+      insertRow(ds.manager, 'biz_leave_request', {
+        user_id: u.alice,
+        leave_kind: 'annual',
+        start_at: new Date(),
+        end_at: new Date(),
+        days,
+        reason: REASON,
+      }),
+    )
   const leaveState = async (id: number) =>
     (
       await ds.query<{ state: string }[]>(

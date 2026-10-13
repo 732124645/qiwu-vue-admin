@@ -13,5 +13,6 @@
   "refresh_reuse": "刷新令牌被重放，会话已吊销",
   "lock_screen_exceeded": "锁屏密码错误次数过多，会话已吊销",
   "password_check_exceeded": "当前密码错误次数过多，所有会话已吊销",
-  "kicked": "被管理员 {by} 强制下线"
+  "kicked": "被管理员 {by} 强制下线",
+  "tenant_unavailable": "租户已停用、已到期或未启用多租户"
 }

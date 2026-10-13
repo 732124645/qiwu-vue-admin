@@ -1,0 +1,13 @@
+{
+  "field": {
+    "iam": {
+      "tenantPackage": {
+        "name": "套餐名称",
+        "enabled": "启用状态",
+        "note": "备注",
+        "menuIds": "可用菜单",
+        "tenantCount": "使用的租户数"
+      }
+    }
+  }
+}

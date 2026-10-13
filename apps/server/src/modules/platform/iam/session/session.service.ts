@@ -1,11 +1,11 @@
 import { Injectable, NotFoundException } from '@nestjs/common'
 import { TransactionHost } from '@nestjs-cls/transactional'
 import type { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm'
-import { Err, type Page, type SessionQuery, type SessionVo } from '@qiwu/shared'
+import { DEFAULT_TENANT_ID, Err, type Page, type SessionQuery, type SessionVo } from '@qiwu/shared'
 import { AuditWriter, parseUa } from '../../../../core/audit/audit-writer.js'
 import { demoNetwork } from '../../../../core/audit/demo-network.js'
 import { ipLocator } from '../../../../core/audit/ip-location.js'
-import { type Principal, ROOT_ROLE } from '../../../../core/auth/principal.js'
+import type { Principal } from '../../../../core/auth/principal.js'
 import { KICKED, SessionRevoker } from '../../../../core/auth/session-revoker.js'
 import {
   type OnlineSession,
@@ -13,15 +13,20 @@ import {
   TokenService,
 } from '../../../../core/auth/token.service.js'
 import { clsGet } from '../../../../core/context/cls.js'
+import { tenantId } from '../../../../core/context/tenant.js'
 import { demoMode } from '../../../../core/config/demo-mode.js'
 import { BaseCrudService } from '../../../../core/db/base-crud.service.js'
 import { BizError } from '../../../../core/http/biz-error.js'
+import { mayManage, protectedUsers } from '../user/protected-users.js'
 import { User } from '../user/user.entity.js'
 
 const iso = (ms: number) => new Date(ms).toISOString()
 /** Case-insensitive "contains"; no filter passes everything. */
 const contains = (value: string | null | undefined, q: string | undefined) =>
   !q || (value ?? '').toLowerCase().includes(q.toLowerCase())
+
+/** Whether session `s` is of the data tenant (one that does not name its tenant predates them: the default one's). */
+const ofDataTenant = (s: Session) => (s.tenantId ?? DEFAULT_TENANT_ID) === tenantId()
 
 /** The caller (AuthGuard put it in CLS; every route here needs a session). */
 const principal = (): Principal => {
@@ -36,8 +41,9 @@ const principal = (): Principal => {
  * and disconnects them) and write a `kicked` sign-in log row per ended session.
  * Data scope (IDOR; see docs/design-notes.md#security): a session belongs to its user, so a non-root caller lists and
  * kicks only the sessions of users in its `iam_user` scope (`scopedQb`, the route's perm); a kick
- * naming any other session or user is 404 for the whole call (`lockScopedIds`), and a root user's
- * sessions are never kicked by a non-root caller (422). Root sees and kicks every session.
+ * naming any other session or user is 404 for the whole call (`lockScopedIds`), and a protected user's
+ * sessions are kicked only as `mayManage` lets (422). Root sees and kicks every session of the data
+ * tenant; another tenant's is 404 to it too (see docs/design-notes.md#tenancy).
  */
 @Injectable()
 export class SessionService extends BaseCrudService<User> {
@@ -85,11 +91,11 @@ export class SessionService extends BaseCrudService<User> {
   async kick(sids: readonly string[]): Promise<number> {
     const by = principal()
     const unique = [...new Set(sids)]
-    const owners = by.root
-      ? []
-      : (await Promise.all(unique.map((sid) => this.tokens.load(sid)))).flatMap((s) =>
-          s ? [s.userId] : [],
-        )
+    const live = (await Promise.all(unique.map((sid) => this.tokens.load(sid)))).flatMap((s) =>
+      s ? [s] : [],
+    )
+    if (by.root && !live.every(ofDataTenant)) throw new NotFoundException()
+    const owners = by.root ? [] : live.map((s) => s.userId)
     return this.guarded(owners, async () => {
       let kicked = 0
       for (const sid of unique) {
@@ -120,9 +126,9 @@ export class SessionService extends BaseCrudService<User> {
     })
   }
 
-  /** The sessions whose users are in the caller's scope; root: all of them. */
+  /** The sessions whose users are in the caller's scope; root: those of the data tenant. */
   private async visible(sessions: OnlineSession[]): Promise<OnlineSession[]> {
-    if (principal().root) return sessions
+    if (principal().root) return sessions.filter(ofDataTenant)
     const ids = [...new Set(sessions.flatMap((s) => (s.userId === null ? [] : [s.userId])))]
     if (!ids.length) return []
     const rows = await this.scopedQb('t')
@@ -134,32 +140,23 @@ export class SessionService extends BaseCrudService<User> {
   }
 
   /**
-   * Runs `kick` once the caller may end sessions of `owners` (their user ids): root always; anyone
-   * else inside one transaction that locks those users in its scope (a user outside it, unknown, or a
-   * session without a user → 404 for all) and refuses a root user (422 `iam.user_protected`), so
-   * neither can change while the sessions end.
+   * Runs `kick` once the caller may end sessions of `owners` (their user ids), inside one transaction
+   * that locks those users: root those of the data tenant (another tenant's → 404); anyone else those
+   * in its scope (a user outside it, unknown, or a session without a user → 404 for all), not a
+   * protected user `mayManage` refuses (422 `iam.user_protected`), so neither can change while the
+   * sessions end.
    */
   private async guarded<T>(owners: readonly (number | null)[], kick: () => Promise<T>): Promise<T> {
-    if (principal().root) return kick()
+    const p = principal()
     return this.txHost.withTransaction(async () => {
       const ids = [...new Set(owners)]
       if (ids.includes(null)) throw new NotFoundException()
+      // root too: the tenant condition holds for it (it skips the data scope only)
       await this.lockScopedIds(ids as number[])
-      if (ids.length && (await this.anyRoot(ids as number[])))
-        throw new BizError(Err.IAM_USER_PROTECTED)
+      for (const why of (await protectedUsers(this.txHost.tx, ids as number[])).values())
+        if (!mayManage(p, why)) throw new BizError(Err.IAM_USER_PROTECTED)
       return kick()
     })
-  }
-
-  /** Whether any of `ids` holds the builtin root role. */
-  private async anyRoot(ids: readonly number[]): Promise<boolean> {
-    const [row] = await this.txHost.tx.query<unknown[]>(
-      `SELECT 1 FROM iam_user_roles ur
-         JOIN iam_role r ON r.id = ur.role_id AND r.deleted_at IS NULL
-        WHERE ur.user_id IN (?) AND ur.deleted_at IS NULL AND r.code = ? AND r.is_builtin = 1 LIMIT 1`,
-      [ids, ROOT_ROLE],
-    )
-    return row !== undefined
   }
 
   /** The kicked user's sign-in log row: the session's own client, IP and UA; `by` the admin. */

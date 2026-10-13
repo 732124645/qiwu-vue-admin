@@ -6,6 +6,7 @@ import { DataSource } from 'typeorm'
 import { dataSourceOptions } from '../../src/db/data-source.js'
 import { insertRow } from '../../src/db/seeds/upsert.js'
 import { typeormOrg } from '../../src/modules/workflow/typeorm-org.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 const PREFIX = 'wf-org-e2e-'
 const GONE = { deleted_at: new Date() }
@@ -24,7 +25,7 @@ const path: Record<string, string> = {}
 const org = () => typeormOrg(ds)
 
 async function add(table: string, row: Record<string, unknown>) {
-  const id = await insertRow(ds.manager, table, row)
+  const id = await inTenant1(() => insertRow(ds.manager, table, row))
   made[table].push(id)
   return id
 }
@@ -60,11 +61,10 @@ async function user(
   const link = (table: string, column: string, ids: Record<string, number>, names: string[]) =>
     Promise.all(
       names.map((n) =>
-        ds.query(`INSERT INTO ${table} (user_id, ${column}, deleted_at) VALUES (?, ?, ?)`, [
-          u[name],
-          ids[n.replace('!', '')],
-          n.endsWith('!') ? new Date() : null,
-        ]),
+        ds.query(
+          `INSERT INTO ${table} (user_id, ${column}, deleted_at, tenant_id) VALUES (?, ?, ?, 1)`,
+          [u[name], ids[n.replace('!', '')], n.endsWith('!') ? new Date() : null],
+        ),
       ),
     )
   await link('iam_user_roles', 'role_id', r, roles)
@@ -133,73 +133,99 @@ const users = (...names: string[]) => names.map((n) => u[n])
 
 describe('typeormOrg', () => {
   it('enabledUsers: enabled, live users among the ids, ascending, each once; unknown ids dropped', async () => {
-    expect(await org().enabledUsers(users('off', 'b', 'gone', 'a', 'b').concat(NO_SUCH))).toEqual(
-      users('a', 'b'),
-    )
-    expect(await org().enabledUsers([])).toEqual([])
+    expect(
+      await inTenant1(() =>
+        org().enabledUsers(users('off', 'b', 'gone', 'a', 'b').concat(NO_SUCH)),
+      ),
+    ).toEqual(users('a', 'b'))
+    expect(await inTenant1(() => org().enabledUsers([]))).toEqual([])
   })
 
   it('usersOfRoles: enabled holders of an enabled, live role over a live link, ascending, each once', async () => {
-    expect(await org().usersOfRoles([r.R2, r.R1])).toEqual(users('a', 'b', 'c', 'e'))
+    expect(await inTenant1(() => org().usersOfRoles([r.R2, r.R1]))).toEqual(
+      users('a', 'b', 'c', 'e'),
+    )
     // e's R2 link row is deleted
-    expect(await org().usersOfRoles([r.R2])).toEqual(users('b', 'c'))
-    expect(await org().usersOfRoles([r.Roff, r.Rgone])).toEqual([])
-    expect(await org().usersOfRoles([])).toEqual([])
+    expect(await inTenant1(() => org().usersOfRoles([r.R2]))).toEqual(users('b', 'c'))
+    expect(await inTenant1(() => org().usersOfRoles([r.Roff, r.Rgone]))).toEqual([])
+    expect(await inTenant1(() => org().usersOfRoles([]))).toEqual([])
   })
 
   it('usersOfPositions: the same rules for positions', async () => {
-    expect(await org().usersOfPositions([p.P1, p.P2])).toEqual(users('b', 'c', 'dd'))
+    expect(await inTenant1(() => org().usersOfPositions([p.P1, p.P2]))).toEqual(
+      users('b', 'c', 'dd'),
+    )
     // e's P2 link row is deleted
-    expect(await org().usersOfPositions([p.P2])).toEqual(users('c', 'dd'))
-    expect(await org().usersOfPositions([p.Poff, p.Pgone])).toEqual([])
-    expect(await org().usersOfPositions([])).toEqual([])
+    expect(await inTenant1(() => org().usersOfPositions([p.P2]))).toEqual(users('c', 'dd'))
+    expect(await inTenant1(() => org().usersOfPositions([p.Poff, p.Pgone]))).toEqual([])
+    expect(await inTenant1(() => org().usersOfPositions([]))).toEqual([])
   })
 
   it('usersOfDepts: enabled members of these depts, not of their sub-depts; a deleted dept has none', async () => {
-    expect(await org().usersOfDepts([d.D, d.C])).toEqual(users('c', 'dd', 'e'))
-    expect(await org().usersOfDepts([d.B])).toEqual(users('b'))
-    expect(await org().usersOfDepts([d.X])).toEqual([])
-    expect(await org().usersOfDepts([])).toEqual([])
+    expect(await inTenant1(() => org().usersOfDepts([d.D, d.C]))).toEqual(users('c', 'dd', 'e'))
+    expect(await inTenant1(() => org().usersOfDepts([d.B]))).toEqual(users('b'))
+    expect(await inTenant1(() => org().usersOfDepts([d.X]))).toEqual([])
+    expect(await inTenant1(() => org().usersOfDepts([]))).toEqual([])
   })
 
   it('deptOfUser: the live dept; a disabled or deleted user keeps theirs', async () => {
-    expect(await org().deptOfUser(u.dd)).toBe(d.D)
-    expect(await org().deptOfUser(u.off)).toBe(d.C)
-    expect(await org().deptOfUser(u.gone)).toBe(d.C)
-    expect(await org().deptOfUser(u.f)).toBeNull()
-    expect(await org().deptOfUser(u.x)).toBeNull()
-    expect(await org().deptOfUser(NO_SUCH)).toBeNull()
+    expect(await inTenant1(() => org().deptOfUser(u.dd))).toBe(d.D)
+    expect(await inTenant1(() => org().deptOfUser(u.off))).toBe(d.C)
+    expect(await inTenant1(() => org().deptOfUser(u.gone))).toBe(d.C)
+    expect(await inTenant1(() => org().deptOfUser(u.f))).toBeNull()
+    expect(await inTenant1(() => org().deptOfUser(u.x))).toBeNull()
+    expect(await inTenant1(() => org().deptOfUser(NO_SUCH))).toBeNull()
   })
 
   it('deptHeads: enabled heads up the tree_path, nearest first, `levels` depts, each once', async () => {
     // D has no head, C's head is disabled
-    expect(await org().deptHeads(d.D, 2)).toEqual([])
-    expect(await org().deptHeads(d.D, 3)).toEqual(users('b'))
-    expect(await org().deptHeads(d.D, Infinity)).toEqual(users('b', 'a'))
-    expect(await org().deptHeads(d.D, 0)).toEqual([])
+    expect(await inTenant1(() => org().deptHeads(d.D, 2))).toEqual([])
+    expect(await inTenant1(() => org().deptHeads(d.D, 3))).toEqual(users('b'))
+    expect(await inTenant1(() => org().deptHeads(d.D, Infinity))).toEqual(users('b', 'a'))
+    expect(await inTenant1(() => org().deptHeads(d.D, 0))).toEqual([])
     // F and E share their head
-    expect(await org().deptHeads(d.F, Infinity)).toEqual(users('b', 'a'))
+    expect(await inTenant1(() => org().deptHeads(d.F, Infinity))).toEqual(users('b', 'a'))
     // G's head is deleted
-    expect(await org().deptHeads(d.G, 1)).toEqual([])
-    expect(await org().deptHeads(d.G, 2)).toEqual(users('b'))
+    expect(await inTenant1(() => org().deptHeads(d.G, 1))).toEqual([])
+    expect(await inTenant1(() => org().deptHeads(d.G, 2))).toEqual(users('b'))
     // a deleted dept: none of its own, and none as a link of a chain
-    expect(await org().deptHeads(d.X, 9)).toEqual([])
-    expect(await org().deptHeads(d.Y, 2)).toEqual(users('c'))
-    expect(await org().deptHeads(d.Y, 3)).toEqual(users('c', 'a'))
-    expect(await org().deptHeads(NO_SUCH, 9)).toEqual([])
+    expect(await inTenant1(() => org().deptHeads(d.X, 9))).toEqual([])
+    expect(await inTenant1(() => org().deptHeads(d.Y, 2))).toEqual(users('c'))
+    expect(await inTenant1(() => org().deptHeads(d.Y, 3))).toEqual(users('c', 'a'))
+    expect(await inTenant1(() => org().deptHeads(NO_SUCH, 9))).toEqual([])
   })
 
   it('initiatorCtx: the live dept tree_path and the ids of enabled, live roles over live links, ascending', async () => {
-    expect(await org().initiatorCtx(u.b)).toEqual({ deptTreePath: path.B, roleIds: [r.R1, r.R2] })
-    expect(await org().initiatorCtx(u.a)).toEqual({ deptTreePath: path.A, roleIds: [r.R1] })
-    expect(await org().initiatorCtx(u.e)).toEqual({ deptTreePath: path.D, roleIds: [r.R1] })
+    expect(await inTenant1(() => org().initiatorCtx(u.b))).toEqual({
+      deptTreePath: path.B,
+      roleIds: [r.R1, r.R2],
+    })
+    expect(await inTenant1(() => org().initiatorCtx(u.a))).toEqual({
+      deptTreePath: path.A,
+      roleIds: [r.R1],
+    })
+    expect(await inTenant1(() => org().initiatorCtx(u.e))).toEqual({
+      deptTreePath: path.D,
+      roleIds: [r.R1],
+    })
     expect(path.D).toBe(`/${d.A}/${d.B}/${d.C}/${d.D}/`)
-    expect(await org().initiatorCtx(u.f)).toEqual({ deptTreePath: null, roleIds: [] })
-    expect(await org().initiatorCtx(u.x)).toEqual({ deptTreePath: null, roleIds: [] })
-    expect(await org().initiatorCtx(NO_SUCH)).toEqual({ deptTreePath: null, roleIds: [] })
+    expect(await inTenant1(() => org().initiatorCtx(u.f))).toEqual({
+      deptTreePath: null,
+      roleIds: [],
+    })
+    expect(await inTenant1(() => org().initiatorCtx(u.x))).toEqual({
+      deptTreePath: null,
+      roleIds: [],
+    })
+    expect(await inTenant1(() => org().initiatorCtx(NO_SUCH))).toEqual({
+      deptTreePath: null,
+      roleIds: [],
+    })
   })
 
   it("reads through a transaction's EntityManager too", async () => {
-    expect(await ds.transaction((tx) => typeormOrg(tx).usersOfDepts([d.B]))).toEqual(users('b'))
+    expect(
+      await inTenant1(() => ds.transaction((tx) => typeormOrg(tx).usersOfDepts([d.B]))),
+    ).toEqual(users('b'))
   })
 })

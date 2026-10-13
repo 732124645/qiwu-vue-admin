@@ -29,6 +29,7 @@ import {
 import { WxMpService } from '../../src/modules/platform/iam/social/wx-mp.service.js'
 import { bearer, signIn } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 const PREFIX = 'wxmp-e2e-'
 const PW = 'WxMp-e2e#2026'
@@ -92,13 +93,15 @@ const setParam = async (key: string, value: string) => {
   await params.invalidate(key)
 }
 async function user(name: string, over: Record<string, unknown> = {}) {
-  const id = await insertRow(ds.manager, 'iam_user', {
-    username: PREFIX + name,
-    display_name: name,
-    password_hash: await bcrypt.hash(PW, 4),
-    password_changed_at: new Date(),
-    ...over,
-  })
+  const id = await inTenant1(async () =>
+    insertRow(ds.manager, 'iam_user', {
+      username: PREFIX + name,
+      display_name: name,
+      password_hash: await bcrypt.hash(PW, 4),
+      password_changed_at: new Date(),
+      ...over,
+    }),
+  )
   users.set(name, id)
   return id
 }
@@ -193,12 +196,14 @@ describe('switch', () => {
   it('param off, or no AppID/secret: sign-in and bind 404, WeChat is never asked; the own bindings stay listable and removable', async () => {
     const { accessToken } = await signIn(app, PREFIX + 'erin')
     const auth = bearer(accessToken)
-    const row = await insertRow(ds.manager, 'iam_user_social', {
-      provider: 'wx-mp',
-      appid: APPID,
-      openid: 'o-kept',
-      user_id: users.get('erin'),
-    })
+    const row = await inTenant1(() =>
+      insertRow(ds.manager, 'iam_user_social', {
+        provider: 'wx-mp',
+        appid: APPID,
+        openid: 'o-kept',
+        user_id: users.get('erin'),
+      }),
+    )
     const signIns = async () => [
       await wxLogin(code('o-off')),
       await bind({ ticket: 'x'.repeat(32), username: 'a', password: 'b' }),
@@ -371,7 +376,9 @@ describe('sign-in and binding', () => {
       [id],
     )
     const refused = async (proof: object, err: { code: string }) =>
-      expect(wx.insert(t, id, proof)).rejects.toMatchObject({ err: { code: err.code } })
+      expect(inTenant1(() => wx.insert(t, id, proof))).rejects.toMatchObject({
+        err: { code: err.code },
+      })
     await ds.query('UPDATE iam_user SET mobile = ? WHERE id = ?', ['13800992003', id])
     await refused({ passwordHash: `${hash}x` }, Err.AUTH_BAD_CREDENTIALS)
     await refused({ mobile: '13800992999' }, Err.AUTH_SMS_CODE_INVALID)
@@ -440,13 +447,15 @@ describe('sign-in and binding', () => {
     } finally {
       await ds.query('UPDATE iam_user SET deleted_at = NULL WHERE id = ?', [users.get('gone')])
     }
-    await insertRow(ds.manager, 'msg_sms_otp', {
-      mobile: '13800992002',
-      scene: 'signin',
-      code: '246810',
-      daily_seq: 1,
-      request_ip: '127.0.0.1',
-    })
+    await inTenant1(() =>
+      insertRow(ds.manager, 'msg_sms_otp', {
+        mobile: '13800992002',
+        scene: 'signin',
+        code: '246810',
+        daily_seq: 1,
+        request_ip: '127.0.0.1',
+      }),
+    )
     const sms = { ticket: await ticketFor('o-smsoff', ip), mobile: '13800992002', code: '246810' }
     expectErr(await bind(sms, ip), 400, Err.AUTH_SMS_CODE_INVALID)
     expect([
@@ -458,13 +467,15 @@ describe('sign-in and binding', () => {
 
   it('bind by SMS code → binding and session; a wrong code 400', async () => {
     const ip = nextIp()
-    await insertRow(ds.manager, 'msg_sms_otp', {
-      mobile: '13800992001',
-      scene: 'signin',
-      code: '135790',
-      daily_seq: 1,
-      request_ip: '127.0.0.1',
-    })
+    await inTenant1(() =>
+      insertRow(ds.manager, 'msg_sms_otp', {
+        mobile: '13800992001',
+        scene: 'signin',
+        code: '135790',
+        daily_seq: 1,
+        request_ip: '127.0.0.1',
+      }),
+    )
     const wrong = { ticket: await ticketFor('o-sms', ip), mobile: '13800992001', code: '000000' }
     expectErr(await bind(wrong, ip), 400, Err.AUTH_SMS_CODE_INVALID)
     const res = await bind(
@@ -494,13 +505,15 @@ describe('sign-in and binding', () => {
     )
     expect(await binding('bob')).toMatchObject([{ openid: 'o-bob' }])
     // by SMS code too (sms holds o-sms since the test above)
-    await insertRow(ds.manager, 'msg_sms_otp', {
-      mobile: '13800992001',
-      scene: 'signin',
-      code: '975310',
-      daily_seq: 1,
-      request_ip: '127.0.0.1',
-    })
+    await inTenant1(() =>
+      insertRow(ds.manager, 'msg_sms_otp', {
+        mobile: '13800992001',
+        scene: 'signin',
+        code: '975310',
+        daily_seq: 1,
+        request_ip: '127.0.0.1',
+      }),
+    )
     const bySms = { ticket: await ticketFor('o-sms-2', ip), mobile: '13800992001', code: '975310' }
     expectErr(await bind(bySms, ip), 409, Err.AUTH_WX_MP_USER_BOUND)
 
@@ -559,13 +572,15 @@ describe('credential changes and unbinding', () => {
     expect(kept(changed).status).toBe(200)
 
     await bound('pwsms', 'o-pwsms')
-    await insertRow(ds.manager, 'msg_sms_otp', {
-      mobile: '13800992004',
-      scene: 'reset_password',
-      code: '864209',
-      daily_seq: 1,
-      request_ip: '127.0.0.1',
-    })
+    await inTenant1(() =>
+      insertRow(ds.manager, 'msg_sms_otp', {
+        mobile: '13800992004',
+        scene: 'reset_password',
+        code: '864209',
+        daily_seq: 1,
+        request_ip: '127.0.0.1',
+      }),
+    )
     const reset = await http()
       .post('/api/auth/password/reset-by-sms')
       .set('X-Forwarded-For', nextIp())
@@ -682,12 +697,14 @@ describe('bound accounts', () => {
   it('only this app’s binding of the exact openid signs in: another case or another app’s binding gets a ticket', async () => {
     expect((await wxLogin(code('o-alice'))).body.data).toHaveProperty('tokens')
     expect((await wxLogin(code('O-ALICE'))).body.data).toEqual({ bindTicket: expect.any(String) })
-    const row = await insertRow(ds.manager, 'iam_user_social', {
-      provider: 'wx-mp',
-      appid: 'wx00e2e0000000000b',
-      openid: 'o-other-app',
-      user_id: users.get('carol'),
-    })
+    const row = await inTenant1(() =>
+      insertRow(ds.manager, 'iam_user_social', {
+        provider: 'wx-mp',
+        appid: 'wx00e2e0000000000b',
+        openid: 'o-other-app',
+        user_id: users.get('carol'),
+      }),
+    )
     try {
       expect((await wxLogin(code('o-other-app'))).body.data).toEqual({
         bindTicket: expect.any(String),

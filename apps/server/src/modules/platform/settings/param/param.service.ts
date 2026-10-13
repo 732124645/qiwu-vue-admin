@@ -52,8 +52,8 @@ const shown = (p: Parameter): Parameter =>
   p.isSecret ? { ...p, paramValue: PARAM_SECRET_MASK } : p
 
 /**
- * Sign-up switch, role and dept, and the WeChat sign-in switch are root-managed (403
- * `grant_exceeds_own`; see docs/design-notes.md#permissions).
+ * Sign-up switch, role and dept, and the WeChat sign-in switch are root-managed, root being the
+ * platform's super admin only (403 `grant_exceeds_own`; see docs/design-notes.md#permissions, #tenancy).
  */
 const ROOT_ONLY: ReadonlySet<unknown> = new Set([
   signupParams.enabled,

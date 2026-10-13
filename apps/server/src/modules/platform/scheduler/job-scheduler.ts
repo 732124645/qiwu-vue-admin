@@ -14,6 +14,12 @@ import { CronJob, CronTime } from 'cron'
 import { ClsService } from 'nestjs-cls'
 import type { DataSource } from 'typeorm'
 import type { AppClsStore } from '../../../core/context/cls.js'
+import {
+  clearTenantContext,
+  DEFAULT_TENANT_ID,
+  tenantId,
+  withTenant,
+} from '../../../core/context/tenant.js'
 import { RedisLock } from '../../../core/guard/redis-lock.js'
 import { Notifier } from '../../../core/notify/notify.js'
 import { redisChannel, redisKey } from '../../../core/redis/cache-namespaces.js'
@@ -63,7 +69,8 @@ export class JobTimeoutError extends Error {
  * once, every other one through the Redis channel `job:sync`, and every minute each instance reconciles
  * its cron jobs with the stored tasks, so a missed message heals), fired by its cron or once on request
  * (`runOnce`). Syncs of one task run one after another, each reading the task fresh. A fire runs the task's registered handler with its params in a fresh CLS context (a cron
- * timer created during a request would otherwise inherit that request's principal) and writes one
+ * timer created during a request would otherwise inherit that request's principal and tenant; tasks are the
+ * platform's, so the context has no tenant and each handler picks `withTenant` or `allTenants`) and writes one
  * `job_run` row per attempt. A cron tick first checks the stored task still has that cron and is
  * enabled: a stale schedule (a write whose broadcast this instance missed) runs nothing and re-syncs.
  * On shutdown running handlers are aborted and awaited.
@@ -279,6 +286,8 @@ export class JobScheduler implements OnApplicationBootstrap, BeforeApplicationSh
     return this.cls
       .run({ ifNested: 'override' }, async () => {
         this.cls.set('traceId', randomUUID())
+        // no tenant: each handler picks withTenant or allTenants itself
+        clearTenantContext()
         if (trigger === 'misfire') return this.catchUpRun(taskId, scheduledAt)
         const task = await this.tasks.findOneBy({ id: taskId })
         const stale = !task?.enabled || (cron !== undefined && task.cron !== cron)
@@ -533,25 +542,30 @@ export class JobScheduler implements OnApplicationBootstrap, BeforeApplicationSh
         attempt,
       })
       try {
-        const roots = await this.ds.query<{ id: number }[]>(
-          `SELECT DISTINCT u.id FROM iam_user u
-             JOIN iam_user_roles ur ON ur.user_id = u.id AND ur.deleted_at IS NULL
-             JOIN iam_role r ON r.id = ur.role_id
-            WHERE u.enabled = 1 AND u.deleted_at IS NULL
-              AND r.code = ? AND r.is_builtin = 1 AND r.enabled = 1 AND r.deleted_at IS NULL`,
-          ['root'],
-        )
-        await this.notifier.send({
-          template: 'scheduler.job.timeout',
-          to: roots.map(({ id }) => Number(id)),
-          channels: ['inbox'],
-          params: {
-            task: { i18n: task.name },
-            handler: task.handler,
-            timeoutMs: task.timeoutMs,
-            startedAt: { datetime: started.toISOString() },
-            attempt,
-          },
+        // qw:cross-tenant tasks are the platform's: only the default tenant's root accounts hear of them
+        await withTenant(DEFAULT_TENANT_ID, async () => {
+          const tid = tenantId()
+          const roots = await this.ds.query<{ id: number }[]>(
+            `SELECT DISTINCT u.id FROM iam_user u
+               JOIN iam_user_roles ur ON ur.user_id = u.id AND ur.deleted_at IS NULL AND ur.tenant_id = ?
+               JOIN iam_role r ON r.id = ur.role_id
+              WHERE u.enabled = 1 AND u.deleted_at IS NULL AND u.tenant_id = ?
+                AND r.tenant_id = ? AND r.code = ? AND r.is_builtin = 1 AND r.enabled = 1
+                AND r.deleted_at IS NULL`,
+            [tid, tid, tid, 'root'],
+          )
+          await this.notifier.send({
+            template: 'scheduler.job.timeout',
+            to: roots.map(({ id }) => Number(id)),
+            channels: ['inbox'],
+            params: {
+              task: { i18n: task.name },
+              handler: task.handler,
+              timeoutMs: task.timeoutMs,
+              startedAt: { datetime: started.toISOString() },
+              attempt,
+            },
+          })
         })
       } catch (err) {
         this.logger.warn({ taskId: task.id, err }, 'job timeout notification failed')

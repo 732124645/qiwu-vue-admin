@@ -93,11 +93,16 @@ async function withParam(
 test('password sign-in starts a mobile session, the next start resumes it; remember username', async ({
   page,
 }) => {
+  const tenancy = page.waitForResponse((r) => r.url().endsWith('/api/auth/tenancy'))
   await page.goto('/')
+  // multi-tenancy off: no tenant code field, none sent
+  expect((await (await tenancy).json()).data).toEqual({ enabled: false })
+  await expect(page.locator('.qw-login__tenant')).toHaveCount(0)
   await expect(field(page, 'username')).toHaveValue('')
   await remember(page).click()
   const [res] = await Promise.all([signInResponse(page), signIn(page, USERS.admin)])
   expect(res.request().postDataJSON()).toMatchObject({ clientId: 'mobile', keepSignedIn: true })
+  expect(res.request().postDataJSON()).not.toHaveProperty('tenantCode')
   expect((await res.json()).data.refreshToken).toBeTruthy()
   await expect(page).toHaveURL(HOME)
 

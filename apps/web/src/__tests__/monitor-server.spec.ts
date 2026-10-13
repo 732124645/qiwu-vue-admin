@@ -9,9 +9,10 @@ import ElementPlus from 'element-plus'
 import type { MonitorServerVo } from '@qiwu/shared'
 import { i18n, setLocale } from '@/core/i18n'
 import { accessToken } from '@/core/request/http'
+import { useAuthStore } from '@/core/stores/auth'
 import ServerPage from '@/views/platform/monitor/server/index.vue'
 import { bytes, duration } from '@/views/platform/monitor/format'
-import { mockApi, ok } from './mock-api'
+import { me, mockApi, ok } from './mock-api'
 
 const GiB = 1024 ** 3
 const DATA: MonitorServerVo = {
@@ -105,6 +106,26 @@ describe('server monitor', () => {
     const disk = host.find('.el-table__body .el-table__row')
     expect(disk.text()).toContain('460.0 GB')
     expect(disk.text()).toContain('92.0%')
+  })
+
+  it('names the multi-tenancy switch read only while it is on (`/me.tenant`); off, no such row', async () => {
+    const labels = () => host.findAll('.el-descriptions__label').map((l) => l.text())
+    const t = i18n.global.t
+    expect(labels()).not.toContain(t('monitor.server.multiTenant'))
+    useAuthStore().me = {
+      ...me(['*']),
+      tenant: {
+        id: 1,
+        code: 'default',
+        name: 'seed.tenant.default',
+        brandName: null,
+        logoUrl: null,
+        acting: false,
+      },
+    }
+    await flushPromises()
+    expect(labels()).toContain(t('monitor.server.multiTenant'))
+    expect(host.text()).toContain(t('monitor.server.multiTenantOn'))
   })
 
   it('polls every 5 s while visible and active, pauses when hidden or parked, resumes at once', async () => {

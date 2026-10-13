@@ -17,9 +17,16 @@ import {
 import type { Request, Response } from 'express'
 import { z } from 'zod'
 import { PermVersion } from '../../../../core/auth/perm-version.js'
+import { SessionCurrent } from '../../../../core/auth/session-current.js'
 import { SessionRevoker } from '../../../../core/auth/session-revoker.js'
-import { isFirstParty, TokenService } from '../../../../core/auth/token.service.js'
+import {
+  isFirstParty,
+  TenantUnavailable,
+  TokenService,
+} from '../../../../core/auth/token.service.js'
 import { USER_LOOKUP, type UserLookup } from '../../../../core/auth/user-lookup.js'
+import { clsGet } from '../../../../core/context/cls.js'
+import { tenantId } from '../../../../core/context/tenant.js'
 import { BizError } from '../../../../core/http/biz-error.js'
 import { ParamService } from '../../../../core/settings/param.service.js'
 import { oauthModel } from './oauth-model.js'
@@ -102,6 +109,7 @@ export class OAuthProvider {
     private readonly tokens: TokenService,
     private readonly revoker: SessionRevoker,
     private readonly permVersion: PermVersion,
+    private readonly sessions: SessionCurrent,
     private readonly params: ParamService,
     @Inject(USER_LOOKUP) private readonly lookup: UserLookup,
   ) {}
@@ -165,6 +173,8 @@ export class OAuthProvider {
         scopes: req.scopes,
         challenge: req.challenge,
         credVer,
+        // the approving session's own tenant (see docs/design-notes.md#tenancy)
+        tenantId: clsGet('principal')?.tenantId,
         exp: Date.now() + CODE_TTL_MS,
       },
       CODE_TTL_MS,
@@ -174,17 +184,17 @@ export class OAuthProvider {
 
   /**
    * GET /authorize (the consent page): the client, the scopes a code would carry and those still
-   * needing the user's consent (not auto-approved, no live consent; all of them when consents are
-   * not remembered). Changes nothing.
+   * needing the user's consent (not auto-approved, no live consent of the user's own tenant, where
+   * `remember` stores them; all of them when consents are not remembered). Changes nothing.
    */
   async preview(userId: number, q: AuthorizeQuery): Promise<AuthorizeVo> {
     const { c, scopes } = await this.check(q)
     const granted = (await this.consentDays())
       ? (
           await this.txHost.tx.query<{ scope: string }[]>(
-            `SELECT scope FROM oauth_consent WHERE user_id = ? AND client_id = ?
+            `SELECT scope FROM oauth_consent WHERE user_id = ? AND client_id = ? AND tenant_id = ?
               AND expires_at > CURRENT_TIMESTAMP(3) AND deleted_at IS NULL`,
-            [userId, c.id],
+            [userId, c.id, tenantId()],
           )
         ).map((r) => r.scope)
       : []
@@ -259,10 +269,11 @@ export class OAuthProvider {
     const asked = scopes.filter((s) => !c.autoApprove.includes(s))
     if (!days || !asked.length) return
     const until = new Date(Date.now() + days * 86_400_000)
+    const tid = tenantId()
     await this.txHost.tx.query(
-      `INSERT INTO oauth_consent (user_id, client_id, scope, expires_at) VALUES ? AS n
-        ON DUPLICATE KEY UPDATE expires_at = n.expires_at, deleted_at = NULL`,
-      [asked.map((s) => [userId, c.id, s, until])],
+      `INSERT INTO oauth_consent (user_id, client_id, scope, expires_at, tenant_id) VALUES ? AS n
+        ON DUPLICATE KEY UPDATE expires_at = n.expires_at, deleted_at = NULL, tenant_id = n.tenant_id`,
+      [asked.map((s) => [userId, c.id, s, until, tid])],
     )
   }
 
@@ -282,6 +293,7 @@ export class OAuthProvider {
           tokens: this.tokens,
           revoker: this.revoker,
           permVersion: this.permVersion,
+          sessions: this.sessions,
         },
         at,
       ),
@@ -315,7 +327,11 @@ export class OAuthProvider {
       .json(r.body)
   }
 
-  /** RFC 7662: the caller's own live tokens are `active`; anything else (another client's) is not. */
+  /**
+   * RFC 7662: the caller's own live tokens are `active`; anything else (another client's) is not. A user's
+   * session is reloaded first, as a request's (SessionCurrent): one whose user or tenant is no longer
+   * available (a tenant end set since it was issued too) is not active.
+   */
   async introspect(req: Request, res: Response): Promise<void> {
     const body = tokenAuthForm.safeParse(req.body)
     if (!body.success) return void invalidRequest(res)
@@ -324,13 +340,17 @@ export class OAuthProvider {
     const t = await this.tokens.inspect(body.data.token)
     res.set(NO_STORE)
     if (!t || t.session.clientId !== c.clientId) return void res.json({ active: false })
-    const s = t.session
+    const s = await this.sessions.current(t.session).catch((e: unknown) => {
+      if (e instanceof TenantUnavailable) return null
+      throw e
+    })
+    if (!s) return void res.json({ active: false })
     res.json({
       active: true,
       client_id: s.clientId,
       scope: s.scopes.join(' '),
       ...(t.kind === 'access' && { token_type: 'Bearer' }),
-      exp: secs(t.expiresAt),
+      exp: secs(Math.min(t.expiresAt, s.absoluteExpAt)),
       ...(s.userId !== null && { sub: String(s.userId), username: s.username }),
     })
   }

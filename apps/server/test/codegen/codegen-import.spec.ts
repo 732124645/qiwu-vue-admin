@@ -37,6 +37,7 @@ const PROBES = [
   'demo_cg_names',
   'demo_cg_hints',
   'demo_cg_alive',
+  'demo_cg_tenant',
   'pdx_customer',
   'pdy_customer',
   'pdx_user',
@@ -120,8 +121,21 @@ beforeAll(async () => {
     id bigint unsigned NOT NULL AUTO_INCREMENT,
     code varchar(20) NOT NULL,
     deleted_at datetime(3) NULL,
+    tenant_id bigint unsigned NOT NULL DEFAULT 1,
     PRIMARY KEY (id),
-    UNIQUE KEY uk_demo_cg_alive_code (code)
+    UNIQUE KEY uk_demo_cg_alive_code (tenant_id, code)
+  ) COMMENT='x'`)
+  // a tenant table with one unique key per tenant and one across all tenants
+  await ds.query(`CREATE TABLE demo_cg_tenant (
+    id bigint unsigned NOT NULL AUTO_INCREMENT,
+    code varchar(20) NOT NULL,
+    name varchar(20) NOT NULL,
+    deleted_at datetime(3) NULL,
+    alive tinyint AS (IF(deleted_at IS NULL, 1, NULL)) VIRTUAL,
+    tenant_id bigint unsigned NOT NULL DEFAULT 1,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_demo_cg_tenant_code (code, alive),
+    UNIQUE KEY uk_demo_cg_tenant_name (tenant_id, name, alive)
   ) COMMENT='x'`)
   await ds.query('CREATE VIEW demo_cg_view AS SELECT id FROM demo_cg_probe')
   // one business in two project domains, one beside the built-in iam_user
@@ -139,6 +153,7 @@ beforeAll(async () => {
       id bigint unsigned NOT NULL AUTO_INCREMENT,
       name varchar(64) NOT NULL,
       deleted_at datetime(3) NULL,
+      tenant_id bigint unsigned NOT NULL DEFAULT 1,
       PRIMARY KEY (id)
     ) COMMENT='x'`)
 })
@@ -222,6 +237,7 @@ it('imports iam_position with the rule defaults (the golden sample)', async () =
     'updated_by',
     'updated_at',
     'deleted_at',
+    'tenant_id',
   ])
   expect(byName.id).toMatchObject({ isPk: true, isAutoInc: true, inList: false, inForm: false })
   expect(byName.code).toMatchObject({
@@ -261,16 +277,25 @@ it('imports iam_position with the rule defaults (the golden sample)', async () =
   })
   expect(byName.created_at).toMatchObject({ tsType: 'Date', inList: true, queryOp: 'between' })
   expect(byName.updated_by).toMatchObject({ inList: false, inForm: false })
+  // the tenant column: a system column, shown nowhere, never required, never unique itself
+  expect(byName.tenant_id).toMatchObject({
+    inList: false,
+    inForm: false,
+    inQuery: false,
+    sortable: false,
+    required: false,
+    options: {},
+  })
 })
 
-it('marks a column unique when it is alone in a unique index, generated columns aside', async () => {
+it('marks a column unique when it is alone in a unique index, generated columns and tenant_id aside', async () => {
   const {
     ids: [id],
   } = await run(() => svc.import(['demo_book']))
   const byName = Object.fromEntries(
     (await run(() => svc.detail(id!))).columns.map((c) => [c.columnName, c]),
   )
-  // uk_demo_book_isbn (isbn, alive): unique among live rows
+  // uk_demo_book_isbn (tenant_id, isbn, alive): unique among a tenant's live rows
   expect(byName.isbn!.options).toEqual({ unique: true })
   expect(byName.title!.options).toEqual({})
 })
@@ -282,6 +307,19 @@ it('hints at a unique key without alive, imported anyway', async () => {
   expect(ids).toHaveLength(4)
   expect(hints).toEqual([
     { tableName: 'demo_cg_alive', missing: 'alive', key: 'uk_demo_cg_alive_code' },
+    // no tenant_id: every tenant would share its rows
+    { tableName: 'demo_cg_probe', missing: 'tenant_column', key: 'tenant_id' },
+  ])
+})
+
+it('hints at a table that is no platform table without tenant_id and at a unique key not led by it, imported anyway; a platform table gets neither', async () => {
+  const { ids, hints } = await run(() =>
+    svc.import(['demo_cg_tenant', 'demo_cg_probe', 'cfg_param', 'aud_http_trace']),
+  )
+  expect(ids).toHaveLength(4)
+  expect(hints).toEqual([
+    { tableName: 'demo_cg_tenant', missing: 'tenant_key', key: 'uk_demo_cg_tenant_code' },
+    { tableName: 'demo_cg_probe', missing: 'tenant_column', key: 'tenant_id' },
   ])
 })
 
@@ -331,7 +369,12 @@ it('deleted_at dropped after the import: sync (config unchanged), render, previe
 it('a G0 config (the codegen seed) refuses a table that misses the convention', async () => {
   await expect(
     seedCgConfig(ds.manager, { tableName: 'demo_cg_hints', table: {}, columns: {} }),
-  ).rejects.toThrow('codegen seed demo_cg_hints: misses deleted_at, uk_demo_cg_hints_code')
+  ).rejects.toThrow(
+    'codegen seed demo_cg_hints: misses deleted_at, uk_demo_cg_hints_code, tenant_id (docs/',
+  )
+  await expect(
+    seedCgConfig(ds.manager, { tableName: 'demo_cg_tenant', table: {}, columns: {} }),
+  ).rejects.toThrow('codegen seed demo_cg_tenant: misses uk_demo_cg_tenant_code (docs/')
   expect(await configCount()).toBe(0)
 })
 

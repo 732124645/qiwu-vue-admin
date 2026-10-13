@@ -1,13 +1,16 @@
 // Migration round trip through the compiled output (criterion c; see docs/adr/002-orm.md): spawns
-// `node dist/db/reset.js` (drop + run) and `node dist/db/migrate.js` run → revert one by one down to an
+// `node dist/db/reset.js` (drop + run + tenancy-harden) and `node dist/db/migrate.js` run → revert one by one down to an
 // empty schema → run, checking the tables and `meta_migrations` rows after every step, plus the DDL
 // conventions (soft delete everywhere, no foreign keys; the soft-delete migration's down restores the old shape).
 // Needs a fresh build (`pnpm db:reset` and ci:local build first).
 import { spawnSync } from 'node:child_process'
 import { existsSync, readdirSync } from 'node:fs'
 import { DataSource } from 'typeorm'
+import { GLOBAL_UNIQUE, PLATFORM_TABLES } from '../../src/core/db/tenant-tables.js'
 import { dataSourceOptions } from '../../src/db/data-source.js'
-import { runSeeds } from '../../src/db/seeds/index.js'
+import { Tenancy20261007100000 } from '../../src/db/migrations/20261007100000-tenant.js'
+import { tenantDefaults } from '../../src/db/tenancy-harden.js'
+import { restoreTestSchema } from '../setup/schema.js'
 
 /** Migrations in run order with the tables each creates. A new migration adds its line here. */
 const MIGRATIONS: [name: string, tables: string[]][] = [
@@ -71,6 +74,10 @@ const MIGRATIONS: [name: string, tables: string[]][] = [
   ['CfgAppVersion20261002110000', ['cfg_app_version']],
   ['DictSingleDefault20261002120000', []],
   ['AuditUserType20261002120100', []],
+  [
+    'Tenancy20261007100000',
+    ['iam_tenant', 'iam_tenant_domain', 'iam_tenant_package', 'iam_tenant_package_menus'],
+  ],
 ]
 /** Applied migrations once SoftDeleteAll is reverted: its down is checked there. */
 const BEFORE_SOFT_DELETE = MIGRATIONS.findIndex(([name]) => name === 'SoftDeleteAll20260929100000')
@@ -139,9 +146,8 @@ beforeAll(async () => {
 })
 
 afterAll(async () => {
-  // leave the globalSetup state (migrated + seeded) behind, whatever a failed case reverted
-  node('dist/db/migrate.js', ['run'])
-  if (ds?.isInitialized) await runSeeds(ds)
+  // leave the globalSetup state (migrated, hardened, seeded) behind, whatever a failed case reverted
+  if (ds?.isInitialized) await restoreTestSchema(ds)
   await ds?.destroy()
 })
 
@@ -206,6 +212,7 @@ async function roundTrip(migrate: (command: 'run' | 'revert') => void) {
   const reset = node('dist/db/reset.js')
   expect(reset).toMatchObject({ status: 0 })
   await expectApplied(MIGRATIONS.length)
+  expect(await tenantDefaults(ds)).toEqual([]) // reset hardens the tenant columns before seeding
 
   migrate('run') // nothing pending: a no-op
   await expectApplied(MIGRATIONS.length)
@@ -221,11 +228,12 @@ async function roundTrip(migrate: (command: 'run' | 'revert') => void) {
     "INSERT INTO cfg_param (param_key, param_value, name) VALUES ('core.default_timezone', 'UTC', 'again')",
   )
   const { insertId: bulletin } = await ds.query(
-    "INSERT INTO msg_bulletin (title, kind, body, deleted_at) VALUES ('gone', 'notice', 'x', NOW(3))",
+    "INSERT INTO msg_bulletin (tenant_id, title, kind, body, deleted_at) VALUES (1, 'gone', 'notice', 'x', NOW(3))",
   )
-  await ds.query('INSERT INTO msg_bulletin_receipt (bulletin_id, user_id) VALUES (?, 1)', [
-    bulletin,
-  ])
+  await ds.query(
+    'INSERT INTO msg_bulletin_receipt (tenant_id, bulletin_id, user_id) VALUES (1, ?, 1)',
+    [bulletin],
+  )
 
   for (let n = MIGRATIONS.length - 1; n >= 0; n--) {
     migrate('revert')
@@ -251,6 +259,17 @@ async function roundTrip(migrate: (command: 'run' | 'revert') => void) {
   migrate('run')
   await expectApplied(MIGRATIONS.length)
   expect(await foreignKeys()).toEqual([])
+  // the migrations' own shape (multi-tenancy off keeps it; hardening drops the defaults): every tenant
+  // column and the operator's tenant default to 1
+  const defaulted = await tenantDefaults(ds)
+  expect(defaulted).toHaveLength(33)
+  expect(
+    await ds.query(
+      `SELECT DISTINCT column_default AS d FROM information_schema.columns
+        WHERE table_schema = DATABASE() AND CONCAT(table_name, '.', column_name) IN (?)`,
+      [defaulted],
+    ),
+  ).toEqual([{ d: '1' }])
 }
 
 it('ProjectPaths moves the stored view paths of the moved views, down moves them back', async () => {
@@ -376,7 +395,7 @@ describe('DDL conventions', () => {
   })
 
   it.each([
-    ['iam_dept', "INSERT INTO iam_dept (tree_path, name) VALUES (?, 'x')"],
+    ['iam_dept', "INSERT INTO iam_dept (tenant_id, tree_path, name) VALUES (1, ?, 'x')"],
     ['iam_menu', "INSERT INTO iam_menu (tree_path, kind, name) VALUES (?, 'group', 'x')"],
   ])('%s.tree_path is ascii and must end with /', async (table, insert) => {
     const [col] = await ds.query(
@@ -403,16 +422,16 @@ describe('Workflow tables', () => {
       [WF_TABLES],
     )
     expect(Object.fromEntries(rows.map((r) => [r.t, r.cols]))).toEqual({
-      wf_model: `id model_key name category icon description form_kind flow_kind form_id create_route view_component draft_json draft_xml initiator_scope manager_user_ids allow_cancel allow_withdraw enabled sort_no current_version_id ${AUDIT} alive`,
+      wf_model: `id model_key name category icon description form_kind flow_kind form_id create_route view_component draft_json draft_xml initiator_scope manager_user_ids allow_cancel allow_withdraw enabled sort_no current_version_id ${AUDIT} alive tenant_id`,
       wf_version:
-        'id model_id model_key version tree_json bpmn_xml form_snapshot published_by published_at deleted_at alive',
-      wf_instance: `id version_id model_key business_key initiator_id initiator_dept_id state form_values initiator_picks initiator_ctx active_node_ids urged_at started_at ended_at ${AUDIT}`,
-      wf_task: `id instance_id node_id node_name assignee_id owner_id parent_task_id from_task_id sign_kind seq state comment due_at reminded_at handled_at ${AUDIT}`,
+        'id model_id model_key version tree_json bpmn_xml form_snapshot published_by published_at deleted_at alive tenant_id',
+      wf_instance: `id version_id model_key business_key initiator_id initiator_dept_id state form_values initiator_picks initiator_ctx active_node_ids urged_at started_at ended_at ${AUDIT} tenant_id`,
+      wf_task: `id instance_id node_id node_name assignee_id owner_id parent_task_id from_task_id sign_kind seq state comment due_at reminded_at handled_at ${AUDIT} tenant_id`,
       wf_cc:
-        'id instance_id node_id user_id from_task_id from_user_id reason read_at created_at deleted_at',
+        'id instance_id node_id user_id from_task_id from_user_id reason read_at created_at deleted_at tenant_id',
       wf_event:
-        'id instance_id task_id node_id actor_id action target_ids comment created_at deleted_at',
-      biz_leave_request: `id user_id dept_id leave_kind start_at end_at days reason state instance_id ${AUDIT}`,
+        'id instance_id task_id node_id actor_id action target_ids comment created_at deleted_at tenant_id',
+      biz_leave_request: `id user_id dept_id leave_kind start_at end_at days reason state instance_id ${AUDIT} tenant_id`,
     })
     // the engine's ids, lengths and json columns (WfInstance / WfTask, shared wf-engine.ts)
     const types = Object.fromEntries(
@@ -455,19 +474,24 @@ describe('Workflow tables', () => {
     expect(Object.fromEntries(keys.map((r: { k: string; cols: string }) => [r.k, r.cols]))).toEqual(
       {
         'biz_leave_request.idx_biz_leave_request_dept': 'dept_id',
+        'biz_leave_request.idx_biz_leave_request_tenant': 'tenant_id',
         'biz_leave_request.idx_biz_leave_request_user': 'user_id',
         'wf_cc.idx_wf_cc_instance': 'instance_id',
+        'wf_cc.idx_wf_cc_tenant': 'tenant_id',
         'wf_cc.idx_wf_cc_user': 'user_id',
         'wf_event.idx_wf_event_instance': 'instance_id',
+        'wf_event.idx_wf_event_tenant': 'tenant_id',
         'wf_instance.idx_wf_instance_business': 'business_key',
         'wf_instance.idx_wf_instance_dept': 'initiator_dept_id',
         'wf_instance.idx_wf_instance_initiator_state': 'initiator_id,state',
-        'wf_model.uk_wf_model_key': 'model_key,alive',
+        'wf_instance.idx_wf_instance_tenant': 'tenant_id',
+        'wf_model.uk_wf_model_key': 'tenant_id,model_key,alive',
         'wf_task.idx_wf_task_assignee_state': 'assignee_id,state',
         'wf_task.idx_wf_task_instance': 'instance_id',
         'wf_task.idx_wf_task_state_due': 'state,due_at',
+        'wf_task.idx_wf_task_tenant': 'tenant_id',
         'wf_version.idx_wf_version_model': 'model_id',
-        'wf_version.uk_wf_version_model_version': 'model_key,version,alive',
+        'wf_version.uk_wf_version_model_version': 'tenant_id,model_key,version,alive',
       },
     )
   })
@@ -477,15 +501,15 @@ describe('Workflow tables', () => {
     await qr.startTransaction()
     try {
       const model =
-        "INSERT INTO wf_model (model_key, name, form_kind) VALUES ('mig-t', 'x', 'custom')"
+        "INSERT INTO wf_model (tenant_id, model_key, name, form_kind) VALUES (1, 'mig-t', 'x', 'custom')"
       const dup = { driverError: { code: 'ER_DUP_ENTRY' } }
       const { insertId } = await qr.query(model)
       await expect(qr.query(model)).rejects.toMatchObject(dup)
       await qr.query('UPDATE wf_model SET deleted_at = NOW(3) WHERE id = ?', [insertId])
       await qr.query(model)
 
-      const version = `INSERT INTO wf_version (model_id, model_key, version, tree_json, form_snapshot)
-        VALUES (?, 'mig-t', ?, '{}', '{}')`
+      const version = `INSERT INTO wf_version (tenant_id, model_id, model_key, version, tree_json, form_snapshot)
+        VALUES (1, ?, 'mig-t', ?, '{}', '{}')`
       const { insertId: v1 } = await qr.query(version, [insertId, 1])
       await qr.query(version, [insertId, 2])
       await expect(qr.query(version, [insertId, 1])).rejects.toMatchObject(dup)
@@ -507,6 +531,7 @@ describe('Sign-in bindings', () => {
         GROUP BY index_name ORDER BY k`,
     )
     expect(keys).toEqual([
+      { k: 'idx_iam_user_social_tenant', cols: 'tenant_id' },
       { k: 'uk_iam_user_social_openid', cols: 'provider,appid,openid,alive' },
       { k: 'uk_iam_user_social_user', cols: 'user_id,provider,appid,alive' },
     ])
@@ -515,7 +540,7 @@ describe('Sign-in bindings', () => {
     try {
       const bind = (userId: number, openid: string) =>
         qr.query(
-          "INSERT INTO iam_user_social (provider, appid, openid, user_id) VALUES ('wx-mp', 'wx-app', ?, ?)",
+          "INSERT INTO iam_user_social (tenant_id, provider, appid, openid, user_id) VALUES (1, 'wx-mp', 'wx-app', ?, ?)",
           [openid, userId],
         )
       const dup = { driverError: { code: 'ER_DUP_ENTRY' } }
@@ -525,11 +550,17 @@ describe('Sign-in bindings', () => {
       // WeChat ids are case-sensitive (ascii_bin): another case is another identity
       await bind(3, 'O-1')
       await qr.query(
-        "INSERT INTO iam_user_social (provider, appid, openid, user_id) VALUES ('wx-mp', 'other-app', 'o-1', 1)",
+        "INSERT INTO iam_user_social (tenant_id, provider, appid, openid, user_id) VALUES (1, 'wx-mp', 'other-app', 'o-1', 1)",
       )
       await qr.query('UPDATE iam_user_social SET deleted_at = NOW(3) WHERE id = ?', [insertId])
       await bind(2, 'o-1')
       await bind(1, 'o-2')
+      // across tenants too: a live identity binds one user of one tenant
+      await expect(
+        qr.query(
+          "INSERT INTO iam_user_social (tenant_id, provider, appid, openid, user_id) VALUES (2, 'wx-mp', 'wx-app', 'o-1', 4)",
+        ),
+      ).rejects.toMatchObject(dup)
     } finally {
       await qr.rollbackTransaction()
       await qr.release()
@@ -885,7 +916,7 @@ describe('OAuth2 clients and consents', () => {
       expect(again).not.toBe(insertId)
       const consent = (clientPk: number) =>
         qr.query(
-          "INSERT INTO oauth_consent (user_id, client_id, scope, expires_at) VALUES (1, ?, 'user.read', NOW(3))",
+          "INSERT INTO oauth_consent (tenant_id, user_id, client_id, scope, expires_at) VALUES (1, 1, ?, 'user.read', NOW(3))",
           [clientPk],
         )
       await consent(insertId)
@@ -897,4 +928,263 @@ describe('OAuth2 clients and consents', () => {
       await qr.release()
     }
   })
+})
+
+describe('Tenancy', () => {
+  const dup = { driverError: { code: 'ER_DUP_ENTRY' } }
+  const TENANT_TABLES = ALL_TABLES.filter((t) => !PLATFORM_TABLES.includes(t))
+  /** `tenant_id` of every table that has one: table → `type nullable`. */
+  const tenantColumns = async (): Promise<Record<string, string>> =>
+    Object.fromEntries(
+      (
+        await ds.query(
+          `SELECT table_name AS t, CONCAT(column_type, ' ', is_nullable) AS c
+             FROM information_schema.columns
+            WHERE table_schema = DATABASE() AND table_name IN (?) AND column_name = 'tenant_id'`,
+          [ALL_TABLES],
+        )
+      ).map((r: { t: string; c: string }) => [r.t, r.c]),
+    )
+  /** Every column and key the migration adds or changes, to compare whole states. */
+  const tenancyState = async () => ({
+    columns: await ds.query(
+      `SELECT CONCAT(table_name, '.', column_name, ' ', column_type, ' ', is_nullable, ' ',
+                     COALESCE(column_default, '-'), ' ', ordinal_position, ' ', column_comment) AS c
+         FROM information_schema.columns
+        WHERE table_schema = DATABASE() AND table_name IN (?)
+          AND column_name IN ('tenant_id', 'actor_tenant_id', 'platform_only')
+        ORDER BY c`,
+      [ALL_TABLES],
+    ),
+    keys: await ds.query(
+      `SELECT CONCAT(table_name, '.', index_name, ' ', non_unique, ' ',
+                     GROUP_CONCAT(column_name ORDER BY seq_in_index)) AS k
+         FROM information_schema.statistics
+        WHERE table_schema = DATABASE() AND table_name IN (?)
+        GROUP BY table_name, index_name, non_unique ORDER BY k`,
+      [ALL_TABLES],
+    ),
+  })
+  const keyColumns = async (table: string, key: string) =>
+    (
+      await ds.query(
+        `SELECT GROUP_CONCAT(column_name ORDER BY seq_in_index) AS cols FROM information_schema.statistics
+          WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?`,
+        [table, key],
+      )
+    )[0].cols
+  /** Runs `body` in a transaction that is always rolled back. */
+  const rolledBack = async (
+    body: (query: (sql: string, params?: unknown[]) => Promise<any>) => Promise<void>,
+  ) => {
+    const qr = ds.createQueryRunner()
+    await qr.startTransaction()
+    try {
+      await body((sql, params) => qr.query(sql, params))
+    } finally {
+      await qr.rollbackTransaction()
+      await qr.release()
+    }
+  }
+
+  it('every table but the platform ones has a non-null tenant_id (nullable on aud_signin_log); only three platform tables have a plain one', async () => {
+    expect(
+      PLATFORM_TABLES.filter((t) => t !== 'meta_migrations' && !ALL_TABLES.includes(t)),
+    ).toEqual([])
+    expect(TENANT_TABLES).toHaveLength(32)
+    // their defaults: hardened or not, depending on what ran before (see the migration round trip)
+    expect(await tenantColumns()).toEqual({
+      ...Object.fromEntries(
+        TENANT_TABLES.map((t) => [
+          t,
+          t === 'aud_signin_log' ? 'bigint unsigned YES' : 'bigint unsigned NO',
+        ]),
+      ),
+      aud_http_fault: 'bigint unsigned YES',
+      aud_http_trace: 'bigint unsigned YES',
+      iam_tenant_domain: 'bigint unsigned NO',
+    })
+    const added = await ds.query(
+      `SELECT CONCAT(table_name, '.', column_name, ' ', column_type, ' ', is_nullable) AS c
+         FROM information_schema.columns
+        WHERE table_schema = DATABASE() AND column_name IN ('actor_tenant_id', 'platform_only')
+        ORDER BY c`,
+    )
+    expect(added.map((r: { c: string }) => r.c)).toEqual([
+      'aud_action_log.actor_tenant_id bigint unsigned NO',
+      'iam_menu.platform_only tinyint(1) NO',
+    ])
+    expect(
+      await ds.query('SELECT id, code, name, enabled, package_id, expires_at FROM iam_tenant'),
+    ).toEqual([
+      {
+        id: 1,
+        code: 'default',
+        name: 'seed.tenant.default',
+        enabled: 1,
+        package_id: null,
+        expires_at: null,
+      },
+    ])
+  })
+
+  it('an index led by tenant_id on every table with one but the join tables; unique keys start with it unless listed as global', async () => {
+    const tablesWhere = async (condition: string) =>
+      new Set(
+        (
+          await ds.query(
+            `SELECT DISTINCT table_name AS t FROM information_schema.statistics
+              WHERE table_schema = DATABASE() AND table_name IN (?) AND ${condition}`,
+            [ALL_TABLES],
+          )
+        ).map((r: { t: string }) => r.t),
+      )
+    const led = await tablesWhere("seq_in_index = 1 AND column_name = 'tenant_id'")
+    const joins = await tablesWhere("index_name = 'PRIMARY' AND seq_in_index = 2")
+    expect(joins.size).toBe(8)
+    expect(
+      [...TENANT_TABLES, 'aud_http_fault', 'aud_http_trace', 'iam_tenant_domain'].filter(
+        (t) => !joins.has(t) && !led.has(t),
+      ),
+    ).toEqual([])
+
+    const uniques: { t: string; k: string; cols: string }[] = await ds.query(
+      `SELECT table_name AS t, index_name AS k, GROUP_CONCAT(column_name ORDER BY seq_in_index) AS cols
+         FROM information_schema.statistics
+        WHERE table_schema = DATABASE() AND table_name IN (?) AND non_unique = 0 AND index_name <> 'PRIMARY'
+        GROUP BY table_name, index_name`,
+      [TENANT_TABLES],
+    )
+    expect(
+      uniques.filter((u) => !Object.hasOwn(GLOBAL_UNIQUE, u.k) && !u.cols.startsWith('tenant_id,')),
+    ).toEqual([])
+    expect(uniques.filter((u) => u.cols.startsWith('tenant_id,'))).toHaveLength(13)
+    // every global key is a key of its table, each with how a taken value is freed
+    expect(
+      Object.fromEntries(
+        uniques.filter((u) => Object.hasOwn(GLOBAL_UNIQUE, u.k)).map((u) => [u.k, u.t]),
+      ),
+    ).toEqual(Object.fromEntries(Object.entries(GLOBAL_UNIQUE).map(([k, { table }]) => [k, table])))
+    for (const { release } of Object.values(GLOBAL_UNIQUE))
+      expect(['none', 'row-delete', 'takeover']).toContain(release)
+  })
+
+  it('two tenants each have an admin, a top-level dept of one name and a model key; within a tenant they stay unique', async () => {
+    await rolledBack(async (query) => {
+      const user = (tenant: number, username: string) =>
+        query(
+          "INSERT INTO iam_user (tenant_id, username, password_hash, display_name) VALUES (?, ?, 'x', 'x')",
+          [tenant, username],
+        )
+      await user(1, 'mig-admin')
+      await user(2, 'mig-admin')
+      await expect(user(2, 'mig-admin')).rejects.toMatchObject(dup)
+      await expect(user(1, 'mig-admin')).rejects.toMatchObject(dup)
+      const dept = (tenant: number) =>
+        query("INSERT INTO iam_dept (tenant_id, tree_path, name) VALUES (?, '/', 'mig-top')", [
+          tenant,
+        ])
+      await dept(1)
+      await dept(2)
+      await expect(dept(2)).rejects.toMatchObject(dup)
+      const model = (tenant: number) =>
+        query(
+          "INSERT INTO wf_model (tenant_id, model_key, name, form_kind) VALUES (?, 'mig-t', 'x', 'custom')",
+          [tenant],
+        )
+      await model(1)
+      await model(2)
+      await expect(model(1)).rejects.toMatchObject(dup)
+    })
+  })
+
+  it('a live tenant code and a live domain are unique across tenants; a deleted domain is free again', async () => {
+    await rolledBack(async (query) => {
+      const tenant = (code: string) =>
+        query("INSERT INTO iam_tenant (code, name) VALUES (?, 'x')", [code])
+      const { insertId: second } = await tenant('mig-two')
+      await expect(tenant('mig-two')).rejects.toMatchObject(dup)
+      await expect(tenant('default')).rejects.toMatchObject(dup)
+      const bind = (tenantId: number, domain: string) =>
+        query('INSERT INTO iam_tenant_domain (tenant_id, domain) VALUES (?, ?)', [tenantId, domain])
+      const { insertId } = await bind(1, 'a.example.com')
+      await bind(1, 'b.example.com') // a tenant binds several
+      await expect(bind(second, 'a.example.com')).rejects.toMatchObject(dup)
+      await query('UPDATE iam_tenant_domain SET deleted_at = NOW(3) WHERE id = ?', [insertId])
+      await bind(second, 'a.example.com')
+    })
+  })
+
+  it('down refuses while a second tenant exists and changes nothing', async () => {
+    const before = await tenancyState()
+    const { insertId } = await ds.query(
+      "INSERT INTO iam_tenant (code, name) VALUES ('mig-second', 'x')",
+    )
+    try {
+      const r = node('dist/db/migrate.js', ['revert'])
+      expect(r.status).toBe(1)
+      expect(r.stdout + r.stderr).toContain('Tenancy down refused')
+      await expectApplied(MIGRATIONS.length)
+      expect(await tenancyState()).toEqual(before)
+    } finally {
+      migrateOnce('run') // back, had the down gone through
+      await ds.query('DELETE FROM iam_tenant WHERE id = ?', [insertId])
+    }
+  })
+
+  it('an up stopped halfway finishes when run again', async () => {
+    const before = await tenancyState()
+    try {
+      // as if up had failed halfway: not recorded, some steps done, others not
+      await ds.query("DELETE FROM meta_migrations WHERE name = 'Tenancy20261007100000'")
+      await ds.query('ALTER TABLE wf_task DROP INDEX idx_wf_task_tenant')
+      await ds.query(
+        'ALTER TABLE wf_form DROP INDEX uk_wf_form_name, ADD UNIQUE KEY uk_wf_form_name (name, alive)',
+      )
+      await ds.query('ALTER TABLE wf_cc DROP COLUMN tenant_id')
+      await ds.query('ALTER TABLE iam_menu DROP COLUMN platform_only')
+      expect(await tenancyState()).not.toEqual(before)
+    } finally {
+      migrateOnce('run')
+    }
+    await expectApplied(MIGRATIONS.length)
+    expect(await tenancyState()).toEqual(before)
+  }, 30_000)
+
+  it('up fails in bounded time while another session holds a table it alters, and finishes once released', async () => {
+    const holder = ds.createQueryRunner()
+    const runner = ds.createQueryRunner()
+    const tenancy = new Tenancy20261007100000()
+    tenancy.lockWait = { seconds: 1, attempts: 2, pauseMs: 100 }
+    try {
+      await ds.query('ALTER TABLE wf_task DROP INDEX idx_wf_task_tenant')
+      await holder.startTransaction()
+      await holder.query('SELECT id FROM wf_task LIMIT 1') // its metadata lock is held until commit
+      const query = runner.query.bind(runner)
+      const tries: string[] = []
+      runner.query = ((sql: string, ...rest: unknown[]) => {
+        if (sql.startsWith('ALTER TABLE wf_task ')) tries.push(sql)
+        return (query as (...args: unknown[]) => unknown)(sql, ...rest)
+      }) as typeof runner.query
+      const started = Date.now()
+      await expect(tenancy.up(runner)).rejects.toMatchObject({
+        driverError: { code: 'ER_LOCK_WAIT_TIMEOUT' },
+      })
+      const elapsed = Date.now() - started
+      expect(elapsed).toBeLessThan(10_000)
+      // tried as often as allowed, each time waiting the bounded time
+      expect(tries).toHaveLength(2)
+      expect(elapsed).toBeGreaterThanOrEqual(2000)
+      runner.query = query
+      expect(await keyColumns('wf_task', 'idx_wf_task_tenant')).toBeNull()
+      await holder.commitTransaction()
+      await tenancy.up(runner)
+      expect(await keyColumns('wf_task', 'idx_wf_task_tenant')).toBe('tenant_id')
+    } finally {
+      if (holder.isTransactionActive) await holder.rollbackTransaction()
+      await holder.release()
+      await new Tenancy20261007100000().up(runner) // whatever failed above
+      await runner.release()
+    }
+  }, 30_000)
 })

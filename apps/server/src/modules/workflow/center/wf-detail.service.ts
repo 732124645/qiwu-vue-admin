@@ -15,6 +15,7 @@ import {
 } from '@qiwu/shared'
 import { I18nService } from 'nestjs-i18n'
 import { clsGet } from '../../../core/context/cls.js'
+import { tenantId } from '../../../core/context/tenant.js'
 import {
   applyScopes,
   type DataScopeColumns,
@@ -59,22 +60,24 @@ export class WfDetailService {
   /**
    * May the caller see instance `id`: its initiator, anyone with a task on it (any state: current, done, or
    * waiting their turn; the owner of a delegated one too), a cc recipient, or a `wf.instance.view` holder
-   * whose scope for that perm covers the initiator's dept (root: any). Unknown / deleted → false.
+   * whose scope for that perm covers the initiator's dept (root: any). Unknown / deleted / another tenant's → false.
    */
   async canView(id: number): Promise<boolean> {
     const p = clsGet('principal')
     if (!p) return false
     const { tx } = this.txHost
+    const tid = tenantId()
     const hit = await tx.query<unknown[]>(
       `SELECT 1 FROM wf_instance i
-        WHERE i.id = ? AND i.deleted_at IS NULL
+        WHERE i.id = ? AND i.tenant_id = ? AND i.deleted_at IS NULL
           AND (i.initiator_id = ?
             OR EXISTS (SELECT 1 FROM wf_task t
-                        WHERE t.instance_id = i.id AND ? IN (t.assignee_id, t.owner_id)
-                          AND t.deleted_at IS NULL)
+                        WHERE t.instance_id = i.id AND t.tenant_id = ?
+                          AND ? IN (t.assignee_id, t.owner_id) AND t.deleted_at IS NULL)
             OR EXISTS (SELECT 1 FROM wf_cc c
-                        WHERE c.instance_id = i.id AND c.user_id = ? AND c.deleted_at IS NULL))`,
-      [id, p.userId, p.userId, p.userId],
+                        WHERE c.instance_id = i.id AND c.tenant_id = ? AND c.user_id = ?
+                          AND c.deleted_at IS NULL))`,
+      [id, tid, p.userId, tid, p.userId, tid, p.userId],
     )
     return hit.length > 0 || this.viewerOf(id)
   }
@@ -295,15 +298,16 @@ export class WfDetailService {
   private async versionOf(
     inst: WfInstanceRow,
   ): Promise<{ v: VersionModel; flow: WfCompiled | null }> {
+    const tid = tenantId()
     const [v] = await this.txHost.tx.query<VersionModel[]>(
       // qw:include-deleted a model or version deleted since keeps its name for the instances it started
       `SELECT m.name, m.form_kind AS formKind, m.view_component AS viewComponent,
               v.tree_json AS tree, v.bpmn_xml AS bpmnXml, v.form_snapshot AS form,
               m.deleted_at IS NULL AND m.allow_cancel AS allowCancel,
               m.deleted_at IS NULL AND m.allow_withdraw AS allowWithdraw
-         FROM wf_version v JOIN wf_model m ON m.id = v.model_id
-        WHERE v.id = ?`,
-      [inst.versionId],
+         FROM wf_version v JOIN wf_model m ON m.id = v.model_id AND m.tenant_id = ?
+        WHERE v.id = ? AND v.tenant_id = ?`,
+      [tid, inst.versionId, tid],
     )
     if (!v) throw new Error(`wf_instance ${inst.id}: version ${inst.versionId} has no model`)
     const compiled = compile(v.tree, v.form.fields)
@@ -332,8 +336,8 @@ export class WfDetailService {
     if (!ids.length) return new Map()
     const rows = await this.txHost.tx.query<{ id: number; display_name: string }[]>(
       // qw:include-deleted a deleted user's name stays on the timeline
-      'SELECT id, display_name FROM iam_user WHERE id IN (?)',
-      [[...new Set(ids)]],
+      'SELECT id, display_name FROM iam_user WHERE id IN (?) AND tenant_id = ?',
+      [[...new Set(ids)], tenantId()],
     )
     return new Map(rows.map((r) => [Number(r.id), r.display_name]))
   }
@@ -341,10 +345,12 @@ export class WfDetailService {
   /** model names by version id (the lists' titles); a deleted model keeps its name */
   async modelNames(versionIds: number[]): Promise<Map<number, string>> {
     if (!versionIds.length) return new Map()
+    const tid = tenantId()
     const rows = await this.txHost.tx.query<{ id: number; name: string }[]>(
       // qw:include-deleted a model or version deleted since keeps its name for the instances it started
-      'SELECT v.id, m.name FROM wf_version v JOIN wf_model m ON m.id = v.model_id WHERE v.id IN (?)',
-      [[...new Set(versionIds)]],
+      `SELECT v.id, m.name FROM wf_version v JOIN wf_model m ON m.id = v.model_id AND m.tenant_id = ?
+        WHERE v.id IN (?) AND v.tenant_id = ?`,
+      [tid, [...new Set(versionIds)], tid],
     )
     return new Map(rows.map((r) => [Number(r.id), r.name]))
   }

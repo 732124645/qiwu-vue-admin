@@ -1,5 +1,6 @@
 import { Column, Entity } from 'typeorm'
 import { BaseEntity } from '../../../../core/db/base.entity.js'
+import { TenantColumn } from '../../../../core/db/tenant-filter.js'
 
 /** A user's sign-in binding of a third-party identity (`iam_user_social`); unbind = soft delete. */
 @Entity('iam_user_social')
@@ -19,4 +20,7 @@ export class UserSocial extends BaseEntity {
 
   @Column({ name: 'user_id', type: 'bigint', unsigned: true })
   userId: number
+
+  @TenantColumn()
+  tenantId: number
 }

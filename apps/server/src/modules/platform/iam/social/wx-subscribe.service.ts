@@ -7,6 +7,7 @@ import {
   type WxSubscribeTemplates,
 } from '@qiwu/shared'
 import type { DataSource } from 'typeorm'
+import { tenantId } from '../../../../core/context/tenant.js'
 import { formatInZone } from '../../../../core/excel/excel.js'
 import { currentTimezone, timezoneOf } from '../../../../core/i18n/locale.js'
 import { fillTemplate } from '../../../../core/notify/notify.js'
@@ -117,13 +118,17 @@ export class WxSubscribeService {
     return null
   }
 
-  /** The user's live binding of `appid` and stored zone, or undefined. */
+  /**
+   * The user's live binding of `appid` and stored zone, or undefined; in the data tenant (the inbox
+   * row's on delivery, the caller's own for the template ids).
+   */
   private async recipient(userId: number, appid: string) {
     const [row] = await this.ds.query<{ openid: string; timezone: string | null }[]>(
-      `SELECT s.openid, u.timezone FROM iam_user_social s JOIN iam_user u ON u.id = s.user_id
-        WHERE s.user_id = ? AND s.provider = ? AND s.appid = ? AND s.deleted_at IS NULL
-          AND u.deleted_at IS NULL`,
-      [userId, WX_MP, appid],
+      `SELECT s.openid, u.timezone FROM iam_user_social s
+         JOIN iam_user u ON u.id = s.user_id AND u.tenant_id = s.tenant_id
+        WHERE s.user_id = ? AND s.provider = ? AND s.appid = ? AND s.tenant_id = ?
+          AND s.deleted_at IS NULL AND u.deleted_at IS NULL`,
+      [userId, WX_MP, appid, tenantId()],
     )
     return row
   }

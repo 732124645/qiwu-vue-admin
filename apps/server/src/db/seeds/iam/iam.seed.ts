@@ -7,6 +7,7 @@ import { USER_INITIAL_PASSWORD_PARAM } from '@qiwu/shared'
 import bcrypt from 'bcryptjs'
 import type { EntityManager } from 'typeorm'
 import { demoMode } from '../../../core/config/demo-mode.js'
+import { tenantId } from '../../../core/context/tenant.js'
 import { BCRYPT_COST } from '../../../core/auth/password-hash.js'
 import { addLinks, type LinkTable } from '../../../core/db/links.js'
 import { findId, insertRow, upsert } from '../upsert.js'
@@ -57,10 +58,10 @@ async function seedDepts(
       { tree_path: parentPath }, // placeholder: the id is only known after the insert
     )
     const path = `${parentPath}${id}/`
-    await q.query('UPDATE iam_dept SET tree_path = ? WHERE id = ? AND deleted_at IS NULL', [
-      path,
-      id,
-    ])
+    await q.query(
+      'UPDATE iam_dept SET tree_path = ? WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL',
+      [path, id, tenantId()],
+    )
     ids.set(dept.name, id)
     await seedDepts(q, dept.children ?? [], id, path, ids)
   }

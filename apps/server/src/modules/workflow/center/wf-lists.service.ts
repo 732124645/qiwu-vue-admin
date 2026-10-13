@@ -17,6 +17,7 @@ import {
   type WfUserOptionQuery,
 } from '@qiwu/shared'
 import { IsNull } from 'typeorm'
+import { tenantId } from '../../../core/context/tenant.js'
 import { forest } from '../../../core/db/base-tree.service.js'
 import { contains, paginate } from '../../../core/db/page.js'
 import { BizError } from '../../../core/http/biz-error.js'
@@ -72,29 +73,30 @@ export class WfListService {
     // idx_wf_event_instance
     const which = `t.handledAt IS NOT NULL AND NOT EXISTS (
       SELECT 1 FROM wf_event e
-       WHERE e.instance_id = t.instanceId AND e.task_id = t.id AND e.action = 'timeout'
-         AND e.comment IN (:...handled) AND e.deleted_at IS NULL)`
+       WHERE e.instance_id = t.instanceId AND e.task_id = t.id AND e.tenant_id = :tenant
+         AND e.action = 'timeout' AND e.comment IN (:...handled) AND e.deleted_at IS NULL)`
     return this.tasks(
       me,
       which,
       { ...q, sort: q.sort ?? [{ field: 'handledAt', order: 'DESC' }] },
-      { handled: SYSTEM_HANDLED },
+      { handled: SYSTEM_HANDLED, tenant: tenantId() },
     )
   }
 
   /**
-   * GET /wf/users/options: whom a process dialog picks, every enabled live user (OrgDirectory.enabledUsers'
-   * rule; the org chart, not the caller's data scope), by display name.
+   * GET /wf/users/options: whom a process dialog picks, every enabled live user of the caller's tenant
+   * (OrgDirectory.enabledUsers' rule; the org chart, not the caller's data scope), by display name.
    */
   async userOptions({ keyword }: WfUserOptionQuery): Promise<WfUserOption[]> {
+    const tid = tenantId()
     const rows = await this.txHost.tx.query<
       { id: number; display_name: string; dept_name: string | null }[]
     >(
       `SELECT u.id, u.display_name, d.name AS dept_name FROM iam_user u
-         LEFT JOIN iam_dept d ON d.id = u.dept_id AND d.deleted_at IS NULL
-        WHERE u.enabled = 1 AND u.deleted_at IS NULL AND u.display_name LIKE ?
+         LEFT JOIN iam_dept d ON d.id = u.dept_id AND d.tenant_id = ? AND d.deleted_at IS NULL
+        WHERE u.tenant_id = ? AND u.enabled = 1 AND u.deleted_at IS NULL AND u.display_name LIKE ?
         ORDER BY u.display_name, u.id LIMIT ?`,
-      [contains(keyword ?? ''), PAGE_SIZE_MAX],
+      [tid, tid, contains(keyword ?? ''), PAGE_SIZE_MAX],
     )
     return rows.map((r) => ({
       id: Number(r.id),
@@ -105,13 +107,14 @@ export class WfListService {
 
   /**
    * GET /wf/depts/options: the depts a process form's dept field picks, every enabled live dept of
-   * the org (not the caller's data scope, as `userOptions`), in GET /iam/depts/tree's shape: a forest by
-   * `sort_no, id`, a dept whose parent is disabled a root.
+   * the caller's tenant (not the caller's data scope, as `userOptions`), in GET /iam/depts/tree's shape: a
+   * forest by `sort_no, id`, a dept whose parent is disabled a root.
    */
   async deptOptions(): Promise<DeptTreeNode[]> {
     const rows = await this.txHost.tx.query<{ id: number; parent_id: number; name: string }[]>(
       `SELECT id, parent_id, name FROM iam_dept
-        WHERE enabled = 1 AND deleted_at IS NULL ORDER BY sort_no, id`,
+        WHERE tenant_id = ? AND enabled = 1 AND deleted_at IS NULL ORDER BY sort_no, id`,
+      [tenantId()],
     )
     return forest(
       rows.map((r) => ({ id: Number(r.id), parentId: Number(r.parent_id), name: r.name })),

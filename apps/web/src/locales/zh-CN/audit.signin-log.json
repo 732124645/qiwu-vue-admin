@@ -7,7 +7,9 @@
       "cleaned": "已清空",
       "unlock": "解锁账户",
       "unlockConfirm": "确定解除用户名「{username}」的登录锁定吗？",
-      "unlocked": "已解锁 {username}"
+      "unlocked": "已解锁 {username}",
+      "platform": "平台",
+      "unresolvedTenant": "未解析租户"
     }
   },
   "menu": {

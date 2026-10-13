@@ -40,6 +40,9 @@ import { z } from 'zod'
 import { ActionLog } from '<%= m.up %>core/audit/action-log.js'
 <%_ } _%>
 import { RequirePerm } from '<%= m.up %>core/auth/decorators.js'
+<%_ if (m.platform) { _%>
+import { PlatformOnly } from '<%= m.up %>core/auth/platform-only.js'
+<%_ } _%>
 <%_ if (m.withExport || m.withImport) { _%>
 import { ExcelService, XLSX_TYPE } from '<%= m.up %>core/excel/excel.service.js'
 <%_ } _%>
@@ -74,6 +77,9 @@ export class <%= B %>Controller {
 <%_ if (tree) { _%>
   @Get()
   @RequirePerm(<%= b %>Perms.browse)
+<%_ if (m.platform) { _%>
+  @PlatformOnly()
+<%_ } _%>
   @ApiOperation({ summary: <%= str(`${Nouns} matching the filters as a forest (not paged)`) %> })
   @ApiEnvelope(z.array(<%= b %>NodeVo))
   list(@Query({ schema: <%= b %>Query }) query: <%= B %>Query) {
@@ -82,6 +88,9 @@ export class <%= B %>Controller {
 <%_ } else { _%>
   @Get()
   @RequirePerm(<%= b %>Perms.browse)
+<%_ if (m.platform) { _%>
+  @PlatformOnly()
+<%_ } _%>
   @ApiOperation({ summary: <%= str(`Page of ${m.nouns}`) %> })
   @ApiEnvelope(pageVo(<%= b %>Vo))
   page(@Query({ schema: <%= b %>Query }) query: <%= B %>Query) {
@@ -93,6 +102,9 @@ export class <%= B %>Controller {
   /** The list's rows (same filters and sort, no paging) as .xlsx. */
   @Get('export')
   @RequirePerm(<%= b %>Perms.export)
+<%_ if (m.platform) { _%>
+  @PlatformOnly()
+<%_ } _%>
   @ActionLog({ domain: '<%= m.key %>', verb: 'export' })
   @ApiOperation({ summary: <%= str(`Export the filtered ${m.nouns} (.xlsx)`) %> })
   @ApiProduces(XLSX_TYPE)
@@ -105,6 +117,9 @@ export class <%= B %>Controller {
   /** Dict columns come with a dropdown of their labels. */
   @Get('import-template')
   @RequirePerm(<%= b %>Perms.import)
+<%_ if (m.platform) { _%>
+  @PlatformOnly()
+<%_ } _%>
   @ApiOperation({ summary: 'Import template (.xlsx)' })
   @ApiProduces(XLSX_TYPE)
   importTemplate() {
@@ -114,6 +129,9 @@ export class <%= B %>Controller {
   @Post('import')
   @HttpCode(200)
   @RequirePerm(<%= b %>Perms.import)
+<%_ if (m.platform) { _%>
+  @PlatformOnly()
+<%_ } _%>
   // above @UploadFile: its interceptors run first, so the key covers the file (a double submit)
   @Idempotent()
   @UploadFile('file', excelImportParams.maxMb, DEFAULT_EXCEL_IMPORT_LIMITS.maxMb)
@@ -152,6 +170,9 @@ export class <%= B %>Controller {
 
   @Get(':id')
   @RequirePerm(<%= b %>Perms.view)
+<%_ if (m.platform) { _%>
+  @PlatformOnly()
+<%_ } _%>
   @ApiOperation({ summary: <%= str(`One ${m.noun}${withSubs}`) %> })
   @ApiEnvelope(<%= one %>)
   get(@Param('id', ParseIntPipe) id: number) {
@@ -161,6 +182,9 @@ export class <%= B %>Controller {
 <%_ if (w) { _%>
   @Post()
   @RequirePerm(<%= b %>Perms.create)
+<%_ if (m.platform) { _%>
+  @PlatformOnly()
+<%_ } _%>
   @Idempotent()
   @ActionLog({
     domain: '<%= m.key %>',
@@ -175,6 +199,9 @@ export class <%= B %>Controller {
 
   @Put(':id')
   @RequirePerm(<%= b %>Perms.modify)
+<%_ if (m.platform) { _%>
+  @PlatformOnly()
+<%_ } _%>
   @ActionLog({ domain: '<%= m.key %>', verb: 'modify' })
   @ApiOperation({ summary: <%= str(`Change ${m.aNoun}${tree ? ' (a new parent moves its whole subtree)' : ''}${subs.length ? ` (${subs.map((s) => s.prop).join(', ')} sent: the whole new list)` : ''}`) %> })
   @ApiEnvelope()
@@ -188,6 +215,9 @@ export class <%= B %>Controller {
 
   @Put(':id/enabled')
   @RequirePerm(<%= b %>Perms.modify)
+<%_ if (m.platform) { _%>
+  @PlatformOnly()
+<%_ } _%>
   @ActionLog({ domain: '<%= m.key %>', verb: 'modify' })
 <%_ if (tree) { _%>
   @ApiOperation({
@@ -207,6 +237,9 @@ export class <%= B %>Controller {
 
   @Delete(':id')
   @RequirePerm(<%= b %>Perms.remove)
+<%_ if (m.platform) { _%>
+  @PlatformOnly()
+<%_ } _%>
   @ActionLog({ domain: '<%= m.key %>', verb: 'remove' })
   @ApiOperation({ summary: <%= str(`Delete ${m.aNoun}${tree ? ' without children' : ''}${withSubs}`) %> })
   @ApiEnvelope()
@@ -218,6 +251,9 @@ export class <%= B %>Controller {
   @Post('batch-delete')
   @HttpCode(200)
   @RequirePerm(<%= b %>Perms.remove)
+<%_ if (m.platform) { _%>
+  @PlatformOnly()
+<%_ } _%>
   @ActionLog({ domain: '<%= m.key %>', verb: 'remove' })
   @ApiOperation({ summary: <%= str(`Delete ${m.nouns}: all or none`) %> })
   @ApiEnvelope()

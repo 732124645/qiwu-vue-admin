@@ -1,12 +1,13 @@
 import { Body, Controller, Post, Req } from '@nestjs/common'
 import { ApiBody, ApiOperation, ApiTags } from '@nestjs/swagger'
-import { DEFAULT_PASSWORD_POLICY, Err, signupBody } from '@qiwu/shared'
+import { DEFAULT_PASSWORD_POLICY, DEFAULT_TENANT_ID, Err, signupBody } from '@qiwu/shared'
 import type { Request } from 'express'
 import { z } from 'zod'
 import { ActionLog } from '../../../../core/audit/action-log.js'
 import { plainIp } from '../../../../core/auth/auth-params.js'
 import { AuthParams } from '../../../../core/auth/auth-params.js'
 import { Public } from '../../../../core/auth/decorators.js'
+import { LoginTenantResolver } from '../../../../core/auth/login-tenant.js'
 import { CaptchaTicketVerifier } from '../../../../core/captcha/captcha-ticket.js'
 import { CaptchaService } from '../../../../core/captcha/captcha.service.js'
 import { Idempotent } from '../../../../core/guard/idempotent.js'
@@ -20,7 +21,9 @@ import { SignupService } from './signup.service.js'
  * Self sign-up `POST /api/auth/signup` (see docs/design-notes.md#auth-sessions): public, off unless `auth.signup.enabled`; the
  * body is checked against the current password policy, then a `signup` captcha ticket bound to the
  * caller's IP is required unless `captcha.mode` is off. Role and dept come only from the
- * `auth.signup.*` params (SignupService). Lives in iam: core never imports modules.
+ * `auth.signup.*` params (SignupService), which serve the default tenant alone: with multi-tenancy on, a
+ * sign-up whose tenant (resolveLoginTenant) is another one or none answers like sign-up off, the same for
+ * a code that exists and one that does not. Lives in iam: core never imports modules.
  */
 @ApiTags('auth')
 @Controller('auth')
@@ -30,6 +33,7 @@ export class SignupController {
     private readonly authParams: AuthParams,
     private readonly captcha: CaptchaService,
     private readonly tickets: CaptchaTicketVerifier,
+    private readonly loginTenants: LoginTenantResolver,
   ) {}
 
   @Public()
@@ -51,6 +55,11 @@ export class SignupController {
     if (!(await this.authParams.signup()).enabled) throw new BizError(Err.AUTH_SIGNUP_DISABLED)
     // the body first: a typo in the form must not spend the single-use captcha ticket
     const dto = await this.signupService.parse(body)
+    if (
+      (await this.loginTenants.resolveLoginTenant(req, dto.tenantCode)).tenantId !==
+      DEFAULT_TENANT_ID
+    )
+      throw new BizError(Err.AUTH_SIGNUP_DISABLED)
     if (
       (await this.captcha.mode()) !== 'off' &&
       !(await this.tickets.verify('signup', plainIp(req.ip), dto.captchaTicket))

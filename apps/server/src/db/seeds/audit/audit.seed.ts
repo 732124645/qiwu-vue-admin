@@ -50,6 +50,8 @@ const VERBS: [value: string, zh: string, en: string, tagType?: string][] = [
   ['withdraw', '撤回', 'Withdraw', 'warning'],
   ['cancel', '撤销', 'Cancel', 'danger'],
   ['urge', '催办', 'Send reminder', 'warning'],
+  ['enter', '进入租户', 'Enter tenant', 'warning'],
+  ['leave', '退出租户', 'Leave tenant', 'info'],
 ]
 
 const DICTS: DictSeed[] = [

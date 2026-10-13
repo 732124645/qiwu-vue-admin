@@ -6,6 +6,7 @@
 
 - Redis **≥ 7**，支持 `SSUBSCRIBE`、`SPUBLISH`、`PUBSUB SHARDNUMSUB`，并允许既有业务命令以及限流 Lua 使用的 `EVAL`、`TIME`、ZSET、hash、过期和删除命令。现有 `qiwu` 用户的 `qw:*` 键与频道授权覆盖分片适配器；不需要给经典适配器添加模式订阅 ACL。
 - 同一部署的实例使用同一 MySQL 库、同一 Redis 服务、同一 `REDIS_DB` 与 `REDIS_KEY_PREFIX`，并使用相同的 `APP_SECRET`、认证配置、种子及应用版本。凭据只放在忽略文件或部署环境中，不放入前端 `VITE_*`。
+- 全部实例使用同一个多租户开关 `APP_MULTI_TENANT`。它只在启动时读取，切换时全部实例重启才算完成；新旧取值混跑期间，各实例对同一会话的判定不同（开关关闭的实例会结束非默认租户的会话）。步骤见 [multi-tenancy.md](multi-tenancy.md#开关)。
 - 不同部署使用不同 Redis 库号与频道前缀。Pub/Sub 不受 `SELECT` 隔离，频道必须经 `cache-namespaces.ts` 的 `redisChannel` 生成：`qw:socket.io:<REDIS_DB>`、`qw:job:sync:<REDIS_DB>`。同库同前缀即同一个部署，不能共用于独立的开发、预发、生产环境。
 - 本地文件存储要求所有实例访问**同一路径的共享卷**，反向代理公开的 `/files/` 也从该卷的 `public/` 读取；私有目录不能公开。跨主机建议使用已有 S3 存储配置。共享卷与 S3 的真实部署访问需部署方验收，两进程测试不证明这些外部存储已配置正确。
 

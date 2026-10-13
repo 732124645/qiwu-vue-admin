@@ -8,7 +8,7 @@
     custom-class="qw-tabbar"
     @change="go"
   >
-    <wd-tabbar-item v-for="tab in TABS" :key="tab" :name="tab">
+    <wd-tabbar-item v-for="tab in tabs" :key="tab" :name="tab">
       <template #icon="{ active }">
         <view class="qw-tabbar__icon">
           <image class="qw-tabbar__img" :src="icon(tab, active)" aria-hidden="true" />
@@ -26,8 +26,9 @@
 </template>
 
 <script setup lang="ts">
-import { onUnmounted } from 'vue'
+import { computed, onUnmounted } from 'vue'
 import { onHide, onShow } from '@dcloudio/uni-app'
+import { visibleTabs, type Tab } from '@/core/features'
 import { t } from '@/core/i18n'
 import { pollCounts, startRealtime } from '@/core/realtime'
 import { LOGIN_PAGE, hasSession, toPasswordChange } from '@/core/request'
@@ -43,18 +44,17 @@ import { isDark, whiteStatusBar } from '@/core/theme'
  * stays shown; App: it keeps the status bar text white on the navy (core/theme.ts). Our own
  * drawn icons (static SVGs, one set per theme: the mini program's <image> reads no CSS variables), the red
  * badge read out with the tab's name (a visually hidden text: an aria-label on wot-ui's role-less node is
- * not read, and the mini program's virtual host drops it).
+ * not read, and the mini program's virtual host drops it). The approval tab only with the workflow feature (the
+ * tenant's package, `/me.features`).
  */
 // mp-weixin / App may flash the native bar once before hideTabBar; a native custom-tab-bar
 // (mp-weixin) would avoid it
 defineOptions({ options: { virtualHost: true } })
-type Tab = 'home' | 'approval' | 'message' | 'mine'
 const props = defineProps<{ current: Tab }>()
-
-const TABS: Tab[] = ['home', 'approval', 'message', 'mine']
 
 const auth = useAuthStore()
 const counts = useCountsStore()
+const tabs = computed(visibleTabs)
 /** the approval tab shows my to-dos, the message tab my unread messages; 0 / null show no badge */
 const badge = (tab: Tab) =>
   (tab === 'approval' ? counts.todo : tab === 'message' ? counts.unread : null) || 0

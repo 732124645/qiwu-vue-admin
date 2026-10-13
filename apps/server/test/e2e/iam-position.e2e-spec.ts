@@ -2,12 +2,12 @@
 // iam.position (generated CRUD; see docs/design-notes.md#codegen, #api-envelope): list filters/sort/paging, get, create, update, delete,
 // batch delete, enabled toggle, options, export;
 // 403 per permission, 400 translated, 409 duplicate, 404 unknown ids, @Idempotent, @ActionLog rows,
-// Swagger. Only the standard cases: module-specific ones go into a hand-written
+// Swagger, tenant isolation (the switch on). Only the standard cases: module-specific ones go into a hand-written
 // iam-position-extra.e2e-spec.ts.
 import type { NestExpressApplication } from '@nestjs/platform-express'
 import { Test } from '@nestjs/testing'
 import { getDataSourceToken } from '@nestjs/typeorm'
-import { Err, positionPerms } from '@qiwu/shared'
+import { DEFAULT_TENANT_ID, Err, positionPerms } from '@qiwu/shared'
 import ExcelJS from 'exceljs'
 import { I18nService } from 'nestjs-i18n'
 import request from 'supertest'
@@ -19,6 +19,13 @@ import { findId, insertRow } from '../../src/db/seeds/upsert.js'
 import { logOf } from '../setup/audit.js'
 import { bearer, signIn } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
+import {
+  bootApp,
+  createTenant,
+  inTenant1,
+  signInDirect,
+  type TestTenant,
+} from '../setup/tenants.js'
 
 const PREFIX = 'e2e-position-'
 const URL = '/api/iam/positions'
@@ -82,14 +89,20 @@ async function dictLabel(code: string, value: string, lang = 'zh-CN') {
 }
 
 async function user(name: string, roles: number[]) {
-  const id = await insertRow(ds.manager, 'iam_user', {
-    username: PREFIX + name,
-    display_name: name,
-    password_hash: 'not-used-by-this-spec',
-    password_changed_at: new Date(),
-  })
+  const id = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_user', {
+      username: PREFIX + name,
+      display_name: name,
+      password_hash: 'not-used-by-this-spec',
+      password_changed_at: new Date(),
+    }),
+  )
   for (const r of roles)
-    await ds.query('INSERT INTO iam_user_roles (user_id, role_id) VALUES (?, ?)', [id, r])
+    await ds.query('INSERT INTO iam_user_roles (user_id, role_id, tenant_id) VALUES (?, ?, ?)', [
+      id,
+      r,
+      DEFAULT_TENANT_ID,
+    ])
   userIds.push(id)
   return (await signIn(app, PREFIX + name)).accessToken
 }
@@ -103,13 +116,19 @@ beforeAll(async () => {
   i18n = app.get(I18nService)
   await cleanRedis(redis)
   lastId = Number((await ds.query('SELECT COALESCE(MAX(id), 0) AS n FROM iam_position'))[0].n)
-  roleId = await insertRow(ds.manager, 'iam_role', {
-    code: `${PREFIX}reader`,
-    name: `${PREFIX}reader`,
-    data_scope: 'all',
-  })
+  roleId = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_role', {
+      code: `${PREFIX}reader`,
+      name: `${PREFIX}reader`,
+      data_scope: 'all',
+    }),
+  )
   const browse = await findId(ds.manager, 'iam_menu', { perms: positionPerms.browse })
-  await ds.query('INSERT INTO iam_role_menus (role_id, menu_id) VALUES (?, ?)', [roleId, browse])
+  await ds.query('INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, ?)', [
+    roleId,
+    browse,
+    DEFAULT_TENANT_ID,
+  ])
   tokens.admin = (await signIn(app)).accessToken
   tokens.reader = await user('reader', [roleId])
   tokens.plain = await user('plain', [])
@@ -431,4 +450,96 @@ it('Swagger documents every route', async () => {
   expect(
     doc.paths[URL].get.responses['200'].content['application/json'].schema.properties.data,
   ).toMatchObject({ properties: { items: { type: 'array' }, total: { type: 'integer' } } })
+})
+
+describe('tenant isolation (see docs/design-notes.md#tenancy): the switch on, the rows of another tenant', () => {
+  let on: NestExpressApplication
+  let other: TestTenant
+  /** on `on`: the default tenant's admin, the other tenant's administrator (tenant_admin) */
+  const as = { mine: '', theirs: '' }
+  const http = (
+    who: keyof typeof as,
+    method: 'get' | 'post' | 'put' | 'delete',
+    path = '',
+    body?: object,
+  ) => {
+    const req = request(on.getHttpServer())[method](`${URL}${path}`).set(bearer(as[who]))
+    return body ? req.send(body) : req
+  }
+  const denied = (res: request.Response) => {
+    expect(res.status).toBe(404)
+    expect(res.body.code).toBe(Err.NOT_FOUND.code)
+  }
+  /** A row the other tenant adds through the API, as POST answers it. */
+  const theirs = async (tag = unique(), over: object = {}) =>
+    (await http('theirs', 'post', '', body(tag, over)).expect(201)).body.data
+
+  beforeAll(async () => {
+    on = await bootApp({ multiTenant: true })
+    other = await createTenant(on)
+    as.mine = (await signIn(on)).accessToken
+    as.theirs = (await signInDirect(on, other.ownerId))!.accessToken
+  })
+
+  afterAll(async () => {
+    await other?.dispose()
+    await on?.close()
+  })
+
+  it('their rows are in no list or options; get, update, enabled, delete and a batch holding one → 404, nothing written', async () => {
+    const tag = unique()
+    const their = await theirs(tag)
+    const mine = (await http('mine', 'post', '', body(unique())).expect(201)).body.data
+    const listed = idsOf(
+      await http('mine', 'get').query({ sort: '-id', pageSize: 100 }).expect(200),
+    )
+    expect(listed).toContain(mine.id)
+    expect(listed).not.toContain(their.id)
+    const options = (await http('mine', 'get', '/options').expect(200)).body.data.map(
+      (r: { id: number }) => r.id,
+    )
+    expect(options).toContain(mine.id)
+    expect(options).not.toContain(their.id)
+    denied(await http('mine', 'get', `/${their.id}`))
+    denied(await http('mine', 'put', `/${their.id}`, body(unique())))
+    denied(await http('mine', 'put', `/${their.id}/enabled`, { enabled: false }))
+    denied(await http('mine', 'delete', `/${their.id}`))
+    // one id of another tenant: the whole batch is refused
+    denied(await http('mine', 'post', '/batch-delete', { ids: [mine.id, their.id] }))
+    expect((await http('theirs', 'get', `/${their.id}`).expect(200)).body.data).toEqual(their)
+    expect((await http('mine', 'get', `/${mine.id}`).expect(200)).body.data).toEqual(mine)
+  })
+
+  it('create: the row is the caller’s tenant’s, a tenantId in the body changes nothing; a unique value of another tenant is free', async () => {
+    const tag = unique()
+    const their = await theirs(tag)
+    const mine = (await http('mine', 'post', '', { ...body(tag), tenantId: other.id }).expect(201))
+      .body.data
+    expect(
+      await ds.query(
+        'SELECT id, tenant_id AS tenantId FROM iam_position WHERE id IN (?) ORDER BY id',
+        [[their.id, mine.id]],
+      ),
+    ).toEqual([
+      { id: their.id, tenantId: other.id },
+      { id: mine.id, tenantId: DEFAULT_TENANT_ID },
+    ])
+  })
+
+  it('export: the caller’s tenant’s rows only', async () => {
+    // a row of theirs: counted and looked for below
+    const their = await theirs()
+    const res = await http('mine', 'get', '/export')
+      .query({ sort: '-id' })
+      .buffer(true)
+      .parse(binary)
+      .expect(200)
+    const ws = (await sheet(res.body))!
+    const [{ n }] = await ds.query(
+      'SELECT COUNT(*) AS n FROM iam_position WHERE tenant_id = ? AND deleted_at IS NULL',
+      [DEFAULT_TENANT_ID],
+    )
+    expect(ws.actualRowCount).toBe(Number(n) + 1)
+    expect(ws.getColumn(1).values).not.toContain(their.code)
+  })
 })

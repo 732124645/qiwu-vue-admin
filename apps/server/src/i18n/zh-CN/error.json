@@ -34,7 +34,11 @@
     "wx_mp_bound": "该微信已绑定其他账号",
     "wx_mp_user_bound": "该账号已绑定微信，请先在个人中心解绑",
     "wx_mp_refused": "该微信绑定的账号已停用",
-    "wx_mp_upstream": "微信服务暂时不可用，请稍后再试"
+    "wx_mp_upstream": "微信服务暂时不可用，请稍后再试",
+    "bad_credentials_tenant": "租户编码、用户名或密码错误",
+    "tenant_switched": "当前标签页所在的租户已切换，请刷新页面",
+    "tenant_host_mismatch": "租户编码与当前访问的域名不符",
+    "tenant_inactive": "所在租户已停用或已到期，请联系管理员"
   },
   "excel": {
     "invalid": "不是有效的 Excel（.xlsx）文件",
@@ -54,7 +58,7 @@
     "grant_exceeds_own": "不能授予超出自己权限或数据范围的角色",
     "user_self": "不能删除或停用自己的账号",
     "user_protected": "超级管理员账号受保护，不能执行此操作",
-    "initial_password_unset": "未设置初始密码参数或其不符合密码策略，请填写密码",
+    "initial_password_unset": "初始密码不可用或不符合密码策略，请填写密码",
     "dept_has_users": "部门下还有用户，不能删除",
     "menu_parent_kind": "上级菜单下不能添加这种类型的菜单（操作只能在页面下，操作下不能再添加）",
     "menu_granted": "菜单已授权给角色，请先在角色中取消授权再删除",
@@ -62,7 +66,11 @@
     "role_has_users": "角色已分配给用户，请先取消分配再删除",
     "own_mobile_in_profile": "请在个人中心修改自己的手机号（需验证密码与短信验证码）",
     "mobile_change_unavailable": "短信验证码未配置，无法在个人中心修改手机号，请联系管理员修改",
-    "menu_route_name_fixed": "分组的路由名称保存后不能修改：种子与生成的页面按它查找分组"
+    "menu_route_name_fixed": "分组的路由名称保存后不能修改：种子与生成的页面按它查找分组",
+    "tenant_user_quota": "已达到租户的用户数上限",
+    "tenant_package_platform_menu": "套餐只能包含租户可用的菜单，不能包含平台专属菜单",
+    "tenant_default_fixed": "默认租户不能停用、设置到期时间或套餐，编码也不能修改；默认租户的初始密码在参数 iam.user.initial_password 中设置",
+    "tenant_domain_reserved": "绑定域名不能是平台自身的域名"
   },
   "storage": {
     "file_required": "请选择要上传的文件",
@@ -77,7 +85,7 @@
     "secret_required": "修改存储连接信息后，请重新填写访问密钥"
   },
   "codegen": {
-    "table_unavailable": "数据表 {table} 不可用：当前数据库中不存在、属于框架表（meta_、test_、cg_）或已导入",
+    "table_unavailable": "数据表 {table} 不可用：当前数据库中不存在、属于框架表或保留表（meta_、test_、cg_、wxoa_）或已导入",
     "identifier_invalid": "{name} 不能用于代码生成：表名和列名只能包含小写字母、数字和下划线并以字母开头，类名和属性名不能是保留字或生成代码已使用的名称，项目领域不能是保留名称",
     "options_label_missing": "数据表 {table} 没有可作为下拉选项标签的文本列（名称、标题或其他文本列），不能开启下拉选项接口",
     "tree_columns": "数据表 {table} 不能使用树模板：需要 parent_id 与 tree_path 列（属性名 parentId、treePath）和一个文本显示列",

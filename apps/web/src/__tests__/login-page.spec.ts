@@ -21,6 +21,8 @@ async function page(
   signup = 'false',
 ) {
   const calls = mockApi({
+    // multi-tenancy off: no tenant code field
+    'GET /auth/tenancy': ok({ enabled: false }),
     'GET /settings/params/public/auth.signup.enabled': setting('auth.signup.enabled', signup),
     'GET /settings/params/public/captcha.mode': setting('captcha.mode', mode),
     'POST /auth/login': login,

@@ -14,6 +14,7 @@ import {
 } from '@qiwu/shared'
 import { ActionLog } from '../../../core/audit/action-log.js'
 import { RequirePerm } from '../../../core/auth/decorators.js'
+import { RequireFeature } from '../../../core/auth/tenant-scope.js'
 import { Idempotent } from '../../../core/guard/idempotent.js'
 import { ApiEnvelope } from '../../../core/http/api-envelope.decorator.js'
 import type { Leave } from './leave.entity.js'
@@ -33,8 +34,10 @@ export class LeaveController {
     return this.leaves.page(query)
   }
 
-  // sign-in only (access model; see docs/design-notes.md#workflow): an approver needs no leave perm to see what they decide on
+  // sign-in only (access model; see docs/design-notes.md#workflow): an approver needs no leave perm to see what they decide on;
+  // part of the approvals, so of the `workflow` feature (see docs/design-notes.md#tenancy)
   @Get(':id')
+  @RequireFeature('workflow')
   @ApiOperation({
     summary: 'One leave request: its owner, or who may see its process instance',
   })

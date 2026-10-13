@@ -7,7 +7,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import eioSource from 'socket.io-client/../engine.io-client/build/esm/globals.js?raw'
 import * as eioGlobals from '@/core/eio-globals'
 import { pollCounts, realtimeUp, startRealtime, stopRealtime } from '@/core/realtime'
-import { hasSession, setSession } from '@/core/request'
+import { hasSession, sessionEnd, setSession } from '@/core/request'
 import { useAuthStore } from '@/core/stores/auth'
 
 /** A uni SocketTask whose server side the spec plays. */
@@ -205,6 +205,32 @@ it('a kick ends the session: the sign-in page, then the reason', async () => {
   expect(hasSession()).toBe(false)
   expect(realtimeUp.value).toBe(false)
   expect(vi.mocked(uni.reLaunch).mock.calls[0]![0]).toMatchObject({ url: '/pages/login/index' })
+  expect(uni.showToast).toHaveBeenCalledWith({
+    title: '你已被管理员强制下线，请重新登录',
+    icon: 'none',
+  })
+})
+
+it('a kick for a reason (the tenant is gone) says that reason, and the sign-in page keeps it', async () => {
+  startRealtime()
+  await handshake()
+  tasks[0]!.recv(push('session:kicked', { sid: 's', reason: 'tenant_unavailable' }))
+  await flush()
+  expect(hasSession()).toBe(false)
+  expect(sessionEnd.value).toBe('tenant_unavailable')
+  expect(uni.showToast).toHaveBeenCalledWith({
+    title: '所在租户已停用或已到期，请联系管理员',
+    icon: 'none',
+  })
+
+  // a plain kick after a sign-in: the plain text, no reason kept
+  setSession(tokens(2))
+  startRealtime()
+  await handshake()
+  vi.mocked(uni.showToast).mockClear()
+  tasks.at(-1)!.recv(push('session:kicked', { sid: 's' }))
+  await flush()
+  expect(sessionEnd.value).toBeNull()
   expect(uni.showToast).toHaveBeenCalledWith({
     title: '你已被管理员强制下线，请重新登录',
     icon: 'none',

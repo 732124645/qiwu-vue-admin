@@ -1,6 +1,10 @@
 <template>
   <LoginShell v-model:tab="tab" :sub="t('login.subtitle')">
     <text class="qw-login__title qw-sr-only" role="heading">{{ t('login.title') }}</text>
+    <text v-if="sessionEnd" class="qw-login__ended" role="alert">{{
+      t(SESSION_END_TEXT[sessionEnd])
+    }}</text>
+    <TenantCodeField :tenant="tenant" />
     <view v-if="tab === 'password'" class="qw-login__form">
       <PasswordFields :form="form" :errors="errors" @confirm="submit" />
       <wd-checkbox v-model="remember" custom-class="qw-login__remember">
@@ -24,7 +28,8 @@
         {{ t('common.action.signIn') }}
       </wd-button>
     </view>
-    <SmsForm v-else :ask="ask" @done="goHome" />
+    <!-- no "remember" box on this tab: it keeps the tenant code -->
+    <SmsForm v-else :ask="ask" :tenant="tenant" @done="signedIn(true)" />
     <template #foot>
       <view class="qw-login__foot">
         <view
@@ -67,16 +72,20 @@ import QwCaptcha from '@/core/components/QwCaptcha.vue'
 import QwIcon from '@/core/components/QwIcon.vue'
 import { withCaptcha, type AskCaptcha } from '@/core/captcha'
 import { LANGUAGE_KEY, fieldErrors, locale, setLocale, t } from '@/core/i18n'
-import { ApiError, errorText, hasSession } from '@/core/request'
+import { ApiError, SESSION_END_TEXT, errorText, hasSession, sessionEnd } from '@/core/request'
 import { takeWxLaunch, useAuthStore } from '@/core/stores/auth'
+import { useTenantCode } from '@/core/tenancy'
 import LoginShell from './LoginShell.vue'
 import PasswordFields from './PasswordFields.vue'
 import SmsForm from './SmsForm.vue'
+import TenantCodeField from './TenantCodeField.vue'
 
 /**
  * The start page: password sign-in (captcha by `captcha.mode`, or when the server demands one after cross-IP
  * failures), SMS sign-in, remember username, language. A stored session goes straight to the app; in the
- * WeChat mini program, WeChat sign-in comes first, once per launch.
+ * WeChat mini program, WeChat sign-in comes first, once per launch. While multi-tenancy is on, the tenant
+ * code above both tabs (core/tenancy), and why the last session ended when its tenant did (core/request
+ * `sessionEnd`).
  */
 /** the workbench tab */
 const HOME_PAGE = '/pages/home/index'
@@ -108,8 +117,14 @@ const issues = ref<ValidationIssue[]>([])
 const errors = computed(() => fieldErrors(loginBody, issues.value))
 const loading = ref(false)
 const error = ref('')
+const tenant = useTenantCode()
 
 const goHome = () => uni.reLaunch({ url: HOME_PAGE })
+/** Signed in (either tab): `keep` the tenant code for the next sign-in; on to the workbench. */
+function signedIn(keep: boolean) {
+  tenant.remember(keep)
+  goHome()
+}
 onLoad(() => {
   if (hasSession()) return goHome()
   // #ifdef MP-WEIXIN
@@ -137,11 +152,14 @@ async function submit() {
   loading.value = true
   error.value = ''
   try {
+    // the tenant field may still wait for `/auth/tenancy`
+    const code = await tenant.read()
+    if (!code) return
     const done = await withCaptcha(
       ask,
       'signin',
       async (captchaTicket) => {
-        await auth.login({ ...parsed.data, ...(captchaTicket ? { captchaTicket } : {}) })
+        await auth.login({ ...parsed.data, ...code, ...(captchaTicket ? { captchaTicket } : {}) })
         return true
       },
       (e) => e instanceof ApiError && e.code === Err.AUTH_CAPTCHA_REQUIRED.code,
@@ -149,7 +167,7 @@ async function submit() {
     if (!done) return
     if (remember.value) uni.setStorageSync(USERNAME_KEY, parsed.data.username)
     else uni.removeStorageSync(USERNAME_KEY)
-    goHome()
+    signedIn(remember.value)
   } catch (e) {
     // the server's message is already translated (Accept-Language)
     error.value = errorText(e)
@@ -209,6 +227,18 @@ async function submit() {
 .qw-login__error {
   font-size: var(--qw-fs-caption);
   color: var(--qw-danger);
+}
+
+/* why the last session ended (its tenant): above the fields */
+.qw-login__ended {
+  display: block;
+  margin-bottom: 26rpx;
+  padding: 19rpx 26rpx;
+  border-radius: var(--qw-radius-lg);
+  font-size: var(--qw-fs-caption);
+  line-height: 37rpx;
+  color: var(--qw-warning);
+  background: var(--qw-warning-weak);
 }
 
 .qw-login__foot {

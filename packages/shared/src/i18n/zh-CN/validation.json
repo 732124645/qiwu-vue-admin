@@ -85,5 +85,8 @@
     "duplicate": "{field}有重复项",
     "refresh_needs_code": "启用刷新令牌须同时启用授权码",
     "auto_approve_subset": "{field}只能从授权范围中选择"
-  }
+  },
+  "tenant_code_reserved": "{field}是保留字，不能使用",
+  "tenant_domain": "{field}须为主机名：字母、数字、连字符与点（按小写保存），不含协议、端口、路径与通配符",
+  "tenant_domain_duplicate": "{field}有重复项"
 }

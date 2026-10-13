@@ -9,7 +9,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 // service APIs are not in templates, so the on-demand resolver does not add their styles
 import 'element-plus/es/components/message/style/css'
 import 'element-plus/es/components/message-box/style/css'
-import { Err, type ApiOk, type Page, type TokenPayload } from '@qiwu/shared'
+import { Err, type ApiOk, type Page, type SessionEndReason, type TokenPayload } from '@qiwu/shared'
 import { currentLocale, i18n } from '@/core/i18n'
 import router from '@/core/router'
 
@@ -77,6 +77,26 @@ function notePermVer(config: InternalAxiosRequestConfig, headers: AxiosResponse[
 /** The current session epoch: work started under another one must not apply its results. */
 export const sessionEpoch = () => epoch
 
+/**
+ * Why the session ended when it was neither a sign-out nor a plain kick: a 401 `A1042` (its tenant was
+ * disabled or expired, or multi-tenancy was turned off for it), a refresh's included, or a `session:kicked`
+ * with a reason. The sign-in page says so; the next sign-in or sign-out clears it. Dropping the session
+ * state keeps it: pages meeting the 401 drop that state on their way to the sign-in page.
+ */
+export const sessionEnd = ref<SessionEndReason | null>(null)
+/** The text of each reason. */
+export const SESSION_END_TEXT: Record<SessionEndReason, string> = {
+  tenant_unavailable: 'auth.tenant.unavailable',
+}
+
+/**
+ * The data tenant this tab shows (`/me.tenant.id`, kept by the auth store; null while multi-tenancy is off
+ * or before `/me`), sent as `X-Tenant-Expect`. When the session works in another tenant by now (another tab
+ * entered or left one, or signed in elsewhere on the shared refresh cookie) the server refuses the request
+ * (409 `A1040`) and the tab reloads. The header can only fail a request, never pick a tenant.
+ */
+export const tenantExpect = ref<number | null>(null)
+
 /** Drops the access token and starts a new session epoch (sign-in, sign-out). */
 export function resetSession() {
   epoch++
@@ -92,6 +112,7 @@ http.interceptors.request.use((config) => {
   config.headers['Accept-Language'] = currentLocale()
   config.headers['X-Request-Id'] = crypto.randomUUID()
   config.headers['X-Timezone'] = Intl.DateTimeFormat().resolvedOptions().timeZone
+  if (tenantExpect.value) config.headers['X-Tenant-Expect'] = String(tenantExpect.value)
   return config
 })
 
@@ -222,6 +243,19 @@ http.interceptors.response.use(
       body.errors,
       body.traceId,
     )
+
+    // the session works in another tenant than this tab shows: reload the whole page, no toast
+    if (err.code === Err.AUTH_TENANT_SWITCHED.code) {
+      if (config._epoch === epoch) location.reload()
+      throw err
+    }
+
+    if (
+      response.status === 401 &&
+      err.code === Err.AUTH_TENANT_INACTIVE.code &&
+      config._epoch === epoch
+    )
+      sessionEnd.value = 'tenant_unavailable'
 
     // a request of an earlier session (signed out, or in as someone else since) is never refreshed or replayed
     if (

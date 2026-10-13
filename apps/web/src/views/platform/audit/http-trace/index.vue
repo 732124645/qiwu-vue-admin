@@ -3,15 +3,18 @@
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import dayjs from 'dayjs'
-import { httpTracePerms, type HttpTraceVo } from '@qiwu/shared'
+import { httpTracePerms, type HttpTraceVo, type TenantOption } from '@qiwu/shared'
 import { httpTraceApi } from '@/api/platform/audit/http-trace'
+import { tenantApi } from '@/api/platform/iam/tenant'
 import QwTable from '@/core/components/QwTable.vue'
 import Pagination from '@/core/components/Pagination.vue'
 import TableToolbar from '@/core/components/TableToolbar.vue'
 import { useCrudList } from '@/core/composables/use-crud'
 import type { QwColumn } from '@/core/composables/use-table-prefs'
+import { tx } from '@/core/i18n'
 import { Icon } from '@/core/icons'
 import { usePerm } from '@/core/permission'
+import { useAuthStore } from '@/core/stores/auth'
 import HttpTraceDetail from './detail.vue'
 
 // keep-alive name = the seeded menu's component_name
@@ -33,6 +36,7 @@ const {
 } = useCrudList({
   api: httpTraceApi,
   filters: {
+    tenantId: null as number | null,
     url: '',
     traceId: '',
     username: '',
@@ -45,9 +49,24 @@ const {
   sort: '-id',
 })
 const showSearch = ref(true)
+const auth = useAuthStore()
+// the tenant filter and column: only while multi-tenancy is on, and for the platform root (the rows of
+// every tenant are its alone then)
+const tenantShown = computed(() => !!auth.tenant && auth.platformRoot)
+const tenants = ref<TenantOption[]>([])
+// failures are toasted by the request layer
+if (tenantShown.value)
+  void tenantApi
+    .options()
+    .then((list) => (tenants.value = list))
+    .catch(() => undefined)
+const tenantName = (id: number | null) => {
+  const tenant = id == null ? undefined : tenants.value.find((o) => o.id === id)
+  return tenant ? tx(tenant.name) : (id ?? '')
+}
 // order and visibility are the user's column settings (table id `audit.httpTrace`); short columns get a
 // fixed width (longest locale's header + sort caret); the free text, else the name, takes the rest
-const columns: QwColumn[] = [
+const columns = computed((): QwColumn[] => [
   {
     prop: 'username',
     label: 'field.audit.httpTrace.username',
@@ -55,6 +74,16 @@ const columns: QwColumn[] = [
     showOverflowTooltip: true,
   },
   { prop: 'method', label: 'field.audit.httpTrace.method', width: 140, showOverflowTooltip: true },
+  ...(tenantShown.value
+    ? [
+        {
+          prop: 'tenantId',
+          label: 'field.audit.httpTrace.tenantId',
+          width: 160,
+          showOverflowTooltip: true,
+        },
+      ]
+    : []),
   {
     prop: 'statusCode',
     label: 'field.audit.httpTrace.statusCode',
@@ -78,7 +107,7 @@ const columns: QwColumn[] = [
     align: 'right',
   },
   { prop: 'url', label: 'field.audit.httpTrace.url', minWidth: 120, showOverflowTooltip: true },
-]
+])
 // computed: the perms reload when the server's permission version moves
 const perm = usePerm()
 // the detail drawer loads GET /:id, which needs `view`
@@ -101,6 +130,16 @@ function openDetail(row: HttpTraceVo) {
         </el-form-item>
         <el-form-item :label="t('field.audit.httpTrace.traceId')">
           <el-input v-model="query.traceId" name="traceId" clearable />
+        </el-form-item>
+        <el-form-item v-if="tenantShown" :label="t('field.audit.httpTrace.tenantId')">
+          <el-select v-model="query.tenantId" clearable filterable>
+            <el-option
+              v-for="o in tenants"
+              :key="o.id"
+              :label="`${tx(o.name)} (${o.code})`"
+              :value="o.id"
+            />
+          </el-select>
         </el-form-item>
         <el-form-item :label="t('field.audit.httpTrace.username')">
           <el-input v-model="query.username" name="username" clearable />
@@ -163,6 +202,7 @@ function openDetail(row: HttpTraceVo) {
         @sort-change="onSortChange"
         @reset-filters="reset"
       >
+        <template #cell-tenantId="{ row }">{{ tenantName(row.tenantId) }}</template>
         <template #cell-startedAt="{ row }">{{
           dayjs(row.startedAt).format('YYYY-MM-DD HH:mm')
         }}</template>

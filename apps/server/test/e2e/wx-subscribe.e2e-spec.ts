@@ -27,6 +27,7 @@ import {
 } from '../../src/modules/platform/iam/social/wx-mp.gateway.js'
 import { bearer, signIn } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 const PREFIX = 'wxsub-e2e.'
 const CODE = `${PREFIX}todo`
@@ -97,34 +98,40 @@ async function user(
   over: Record<string, unknown> = {},
   binding: Record<string, unknown> | null = {},
 ) {
-  const id = await insertRow(ds.manager, 'iam_user', {
-    username: `wxsub-e2e-${name}`,
-    display_name: name,
-    password_hash: 'unused',
-    password_changed_at: new Date(),
-    locale: 'zh-CN',
-    timezone: 'Asia/Shanghai',
-    ...over,
-  })
+  const id = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_user', {
+      username: `wxsub-e2e-${name}`,
+      display_name: name,
+      password_hash: 'unused',
+      password_changed_at: new Date(),
+      locale: 'zh-CN',
+      timezone: 'Asia/Shanghai',
+      ...over,
+    }),
+  )
   users.set(name, id)
   if (binding)
-    await insertRow(ds.manager, 'iam_user_social', {
-      provider: 'wx-mp',
-      appid: APPID,
-      openid: `o-${name}`,
-      user_id: id,
-      ...binding,
-    })
+    await inTenant1(() =>
+      insertRow(ds.manager, 'iam_user_social', {
+        provider: 'wx-mp',
+        appid: APPID,
+        openid: `o-${name}`,
+        user_id: id,
+        ...binding,
+      }),
+    )
   return id
 }
 /** Sends CODE (or `template`) to `name` outside a transaction (flushed at once), then waits for the pushes. */
 const notify = async (name: string, template = CODE, initiator = 'Ada&Bo') => {
-  await app.get(Notifier).send({
-    template,
-    to: [users.get(name)!],
-    params: { instanceId: 7, initiator, model: { i18n: 'seed.unused' } },
-    channels: ['inbox'],
-  })
+  await inTenant1(() =>
+    app.get(Notifier).send({
+      template,
+      to: [users.get(name)!],
+      params: { instanceId: 7, initiator, model: { i18n: 'seed.unused' } },
+      channels: ['inbox'],
+    }),
+  )
   await dispatcher.idle()
 }
 const inbox = (name: string) =>
@@ -340,12 +347,14 @@ describe('switch on', () => {
 
   it('a rolled-back send writes no inbox row and calls no WeChat', async () => {
     await expect(
-      app.get(TxCalls).fails({
-        template: CODE,
-        to: [users.get('rollback')!],
-        params: { instanceId: 7 },
-        channels: ['inbox'],
-      }),
+      inTenant1(() =>
+        app.get(TxCalls).fails({
+          template: CODE,
+          to: [users.get('rollback')!],
+          params: { instanceId: 7 },
+          channels: ['inbox'],
+        }),
+      ),
     ).rejects.toThrow('rollback')
     await dispatcher.idle()
     expect(await inbox('rollback')).toEqual([])

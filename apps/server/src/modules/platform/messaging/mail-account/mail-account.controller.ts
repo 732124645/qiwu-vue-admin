@@ -32,6 +32,7 @@ import {
 import { z } from 'zod'
 import { ActionLog } from '../../../../core/audit/action-log.js'
 import { RequirePerm } from '../../../../core/auth/decorators.js'
+import { PlatformOnly } from '../../../../core/auth/platform-only.js'
 import { Idempotent } from '../../../../core/guard/idempotent.js'
 import { ApiEnvelope } from '../../../../core/http/api-envelope.decorator.js'
 import type { MailAccount } from './mail-account.entity.js'
@@ -48,6 +49,7 @@ export class MailAccountController {
 
   @Get()
   @RequirePerm(mailAccountPerms.browse)
+  @PlatformOnly()
   @ApiOperation({ summary: 'Page of mail accounts' })
   @ApiEnvelope(pageVo(mailAccountVo))
   page(@Query({ schema: mailAccountQuery }) query: MailAccountQuery) {
@@ -64,6 +66,7 @@ export class MailAccountController {
 
   @Get(':id')
   @RequirePerm(mailAccountPerms.view)
+  @PlatformOnly()
   @ApiOperation({ summary: 'One mail account' })
   @ApiEnvelope(mailAccountVo)
   get(@Param('id', ParseIntPipe) id: number) {
@@ -72,6 +75,7 @@ export class MailAccountController {
 
   @Post()
   @RequirePerm(mailAccountPerms.create)
+  @PlatformOnly()
   @Idempotent()
   @ActionLog({
     domain: 'messaging.mailAccount',
@@ -86,6 +90,7 @@ export class MailAccountController {
 
   @Put(':id')
   @RequirePerm(mailAccountPerms.modify)
+  @PlatformOnly()
   @ActionLog({ domain: 'messaging.mailAccount', verb: 'modify' })
   @ApiOperation({ summary: 'Change a mail account' })
   @ApiEnvelope()
@@ -98,6 +103,7 @@ export class MailAccountController {
 
   @Put(':id/enabled')
   @RequirePerm(mailAccountPerms.modify)
+  @PlatformOnly()
   @ActionLog({ domain: 'messaging.mailAccount', verb: 'modify' })
   @ApiOperation({ summary: 'Enable or disable a mail account' })
   @ApiEnvelope()
@@ -111,6 +117,7 @@ export class MailAccountController {
   @Post(':id/test')
   @HttpCode(200)
   @RequirePerm(mailAccountPerms.modify)
+  @PlatformOnly()
   @ActionLog({ domain: 'messaging.mailAccount', verb: 'test' })
   @ApiOperation({ summary: 'Test the stored mail account; only {ok} is returned' })
   @ApiEnvelope(connectionTestVo)
@@ -120,6 +127,7 @@ export class MailAccountController {
 
   @Delete(':id')
   @RequirePerm(mailAccountPerms.remove)
+  @PlatformOnly()
   @ActionLog({ domain: 'messaging.mailAccount', verb: 'remove' })
   @ApiOperation({ summary: 'Delete a mail account' })
   @ApiEnvelope()
@@ -130,6 +138,7 @@ export class MailAccountController {
   @Post('batch-delete')
   @HttpCode(200)
   @RequirePerm(mailAccountPerms.remove)
+  @PlatformOnly()
   @ActionLog({ domain: 'messaging.mailAccount', verb: 'remove' })
   @ApiOperation({ summary: 'Delete mail accounts: all or none' })
   @ApiEnvelope()

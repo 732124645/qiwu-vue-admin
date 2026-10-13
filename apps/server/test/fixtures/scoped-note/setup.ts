@@ -1,5 +1,7 @@
 // Fixture DDL (see docs/design-notes.md#data-scope): test-only tables live here, never in src migrations.
+// They are tenant tables like the real ones: `tenant_id` last, the unique key led by it.
 import type { DataSource } from 'typeorm'
+import { refreshTenantTables } from '../../../src/core/db/tenant-filter.js'
 
 const DDL = [
   `CREATE TABLE IF NOT EXISTS test_dept (
@@ -8,6 +10,7 @@ const DDL = [
     tree_path varchar(512) CHARACTER SET ascii NOT NULL COMMENT 'Ancestor ids incl. self, /1/5/9/',
     name varchar(64) NOT NULL COMMENT 'Dept name',
     deleted_at datetime(3) NULL COMMENT 'Soft-deleted at (UTC)',
+    tenant_id bigint unsigned NOT NULL DEFAULT 1 COMMENT 'Tenant id',
     PRIMARY KEY (id),
     KEY idx_test_dept_tree_path (tree_path)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Test fixture: dept tree'`,
@@ -21,8 +24,9 @@ const DDL = [
     updated_at datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT 'Updated at (UTC)',
     deleted_at datetime(3) NULL COMMENT 'Soft-deleted at (UTC)',
     alive tinyint AS (IF(deleted_at IS NULL, 1, NULL)) VIRTUAL COMMENT '1 while live, NULL once soft-deleted',
+    tenant_id bigint unsigned NOT NULL DEFAULT 1 COMMENT 'Tenant id',
     PRIMARY KEY (id),
-    UNIQUE KEY uk_test_scoped_note_title (title, alive),
+    UNIQUE KEY uk_test_scoped_note_title (tenant_id, title, alive),
     KEY idx_test_scoped_note_dept (dept_id)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Test fixture: data-scoped note'`,
   // links between notes: the reference registry's and the link helpers' fixture (core-db spec)
@@ -30,13 +34,16 @@ const DDL = [
     note_id bigint unsigned NOT NULL COMMENT 'Linking note id',
     target_id bigint unsigned NOT NULL COMMENT 'Linked note id',
     deleted_at datetime(3) NULL COMMENT 'Soft-deleted at (UTC)',
+    tenant_id bigint unsigned NOT NULL DEFAULT 1 COMMENT 'Tenant id',
     PRIMARY KEY (note_id, target_id),
     KEY idx_test_note_link_target (target_id)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Test fixture: note links'`,
 ]
 
+// created after the DataSource read its tenant tables: re-read them, so joins by name are filtered too
 export const createScopedNoteTables = async (ds: DataSource) => {
   for (const sql of DDL) await ds.query(sql)
+  await refreshTenantTables(ds)
 }
 
 export const truncateScopedNoteTables = async (ds: DataSource) => {

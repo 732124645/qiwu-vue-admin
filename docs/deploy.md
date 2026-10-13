@@ -4,7 +4,7 @@
 
 ## 构建产物与环境
 
-使用 Node 22（≥ 22.22.1）、pnpm 11.28.3、MySQL 与 Redis ≥ 7。下列 POSIX 命令与服务器绝对路径均为部署示例，由部署管理员执行；本地安装见 [入门指南](getting-started.md)。以完整 checkout 部署到 `/srv/qiwu/current` 为例，在仓库根安装并构建：
+使用 Node 22（≥ 22.22.1）、pnpm 11.28.3、MySQL（推荐 8.4，最低 8.0.17）与 Redis ≥ 7.0。下列 POSIX 命令与服务器绝对路径均为部署示例，由部署管理员执行；版本原因与本地安装见 [入门指南](getting-started.md#1-准备运行环境)。以完整 checkout 部署到 `/srv/qiwu/current` 为例，在仓库根安装并构建：
 
 ```sh
 pnpm i --frozen-lockfile
@@ -68,9 +68,66 @@ node --env-file-if-exists=.env.local --env-file-if-exists=.env dist/main.js
 
 部署后由管理员检查 `GET /api/health`、登录、上传 / 私有下载及推送。本文只给出源码核对过的配置示例，未在真实 PM2 / nginx 服务器执行；生产网络、TLS、权限、存储与容量需要实际验收。
 
+### 打开多租户开关
+
+多租户开关 `APP_MULTI_TENANT` 默认关闭。关闭时什么都不用做：租户列保留迁移加上的默认值，升级不停服、可以回退。打开开关前，租户列的默认值要先去掉（只改元数据，在线执行），之后漏写租户的插入直接报错，而不是落到默认租户；生产环境打开开关、仍有租户列带默认值时，服务拒绝启动。
+
+开关写在 `apps/server/.env`（不是秘密），只在启动时读取：
+
+```dotenv
+APP_MULTI_TENANT=true
+```
+
+打开前先复核默认租户里持有平台菜单的角色：开关打开后 API 访问日志、API 错误日志与缓存监控只限平台 root，其余平台页（字典、参数、存储、任务、租户管理等）对默认租户里的这些角色照旧可用。多实例部署时全部实例都重启才算切换完成。功能与运维见 [multi-tenancy.md](multi-tenancy.md)。
+
+- **全新安装**可以一开始就打开：第一次 `pnpm db:migrate` 在同一次运行里完成迁移并去掉默认值。
+- **已有库**分两次部署：
+  1. 先以开关关闭升级到本版本，确认全部实例健康（单独一次部署）。
+  2. 改 env 打开开关，运行 `db:migrate`（照常部署时本来就会运行；开关打开时迁移后自动去掉默认值），再重启全部实例。
+
+  同一次运行刚加上租户列时不会去掉默认值，并打印提示：这时旧版本仍在服务，它的插入不写租户列。
+
+  开关打开的部署被启动自检拒绝、自动切回旧版本后，先把开关改回关闭，按第 1 步重新部署并确认健康，再打开开关。
+
+- 也可以单独运行，命令幂等：
+
+  ```sh
+  cd /srv/qiwu/current/apps/server
+  node --env-file-if-exists=.env.local --env-file-if-exists=.env dist/db/tenancy-harden.js
+  ```
+
+  每张表最多等待 5 秒的元数据锁、共试 3 次；热表上有长事务时会报错退出，低峰期重跑即可。
+
+- 打开过开关的库不能回退到 `1.1.0` 之前的任何版本（含其间从主线导出的补丁版本）：更早的代码有的原始 SQL 不按租户过滤，插入还会因缺少租户列报错。
+
+### 租户绑定域名
+
+租户可以绑定自己的域名（在租户管理里填写），用户在这个域名上登录不填租户编码。每个绑定的域名都要指到同一套服务：
+
+- DNS 指向反向代理；nginx 的 `server_name` 加上这些域名（与主域名同一个 `server` 块，或复制一份只改 `server_name` 与证书），`/api/`、`/socket.io/`、`/files/` 与 SPA 回退的配置同主域名。转发时保留浏览器的 `Host`（示例的 `proxy_set_header Host $http_host`）：服务端按主机名识别租户，也按它核对 refresh 与 WebSocket 的 Origin。
+- 证书覆盖每个绑定的域名（多域名证书或通配符证书）；生产环境只走 HTTPS。
+- `CORS_ORIGIN` 只列平台自己的源，不要写租户的域名：同源请求本来就通过，而 `CORS_ORIGIN` 里的主机名被当作平台主机名，绑定给租户时 422。
+- 平台人员用主域名登录；别的租户的令牌在已绑定租户的域名上回 401。
+- 改绑域名最多 60 秒后生效（主机名查找有进程内缓存）。
+
+### 关闭多租户开关
+
+关闭开关不改变租户的启用状态：再打开的那一刻，全部已启用、未到期的非默认租户立刻恢复可用。按以下顺序关闭：
+
+1. 开关仍打开时，在租户管理里停用或设到期所有不再服务的租户（同时结束它们的会话）。
+2. 改 env 为 `APP_MULTI_TENANT=false`，全部实例重启。之后只有默认租户可用，其他租户的数据保留，会话在下一次请求时结束。
+3. 关闭期间，启动日志对仍启用的非默认租户打印 warn；需要时在开关关闭的状态下停用它们（命令幂等，只改这些租户的 `enabled`）：
+
+   ```sh
+   cd /srv/qiwu/current/apps/server
+   node --env-file-if-exists=.env.local --env-file-if-exists=.env dist/db/tenant-disable.js <编码…>
+   ```
+
+以后临时打开开关（例如释放停用租户占用的小程序微信号，见 [multi-tenancy.md](multi-tenancy.md#全局唯一值的释放)）之前，先按启动日志的 warn 确认不再服务的租户都已停用。
+
 ## Windows：构建与启动（PowerShell 5.1）
 
-原生 Windows 11 + Windows PowerShell 5.1（含 cmd 入口）已验证用于开发与完整本地闸门（`pnpm ci:local --serial`）；无文件 symlink 权限时，符号链接防护测试跳过；Windows 服务器部署及 App / 小程序发布未验证。服务须由用户提供已验证的 MySQL 与 Redis ≥ 7，账号、ACL、隔离与浏览器准备见[入门指南](getting-started.md#windows原生-powershell-51)。本文 nginx / PM2 / 开机自启及 `/srv/` 路径属于 POSIX 主机示例，未验证 Windows 服务守护与反代安装。
+原生 Windows 11 + Windows PowerShell 5.1（含 cmd 入口）已验证用于开发与完整本地闸门（`pnpm ci:local --serial`）；无文件 symlink 权限时，符号链接防护测试跳过；Windows 服务器部署及 App / 小程序发布未验证。服务须由用户提供已验证的 MySQL（推荐 8.4，最低 8.0.17）与 Redis ≥ 7.0，见[入门指南](getting-started.md#1-准备运行环境)；账号、ACL、隔离与浏览器准备见[入门指南](getting-started.md#windows原生-powershell-51)。本文 nginx / PM2 / 开机自启及 `/srv/` 路径属于 POSIX 主机示例，未验证 Windows 服务守护与反代安装。
 
 `pnpm.cmd` 仅随 npm / Corepack 安装提供，避免 `.ps1` 执行策略且不改执行策略；独立 `pnpm.exe`（winget / get.pnpm.io）使用 plain `pnpm`，将下列 `pnpm.cmd` 换成 `pnpm`。 在部署副本根目录先按上文准备非秘密 `.env` 和 git 忽略的 `.env.local`（秘密键不放 `.env`，即便为空），路径改为自己的 Windows 目录，例如 `STORAGE_LOCAL_ROOT=C:/qiwu/uploads`。用编辑器保存 UTF-8 / LF，并限制凭据文件 ACL。发布步骤串行、先 migrate 再 seed，失败立即停止：
 
@@ -248,16 +305,30 @@ pm2 startup
 仓库带两个工作流和 `scripts/deploy/` 下的服务器部署套件。复刻仓库时，把两个工作流里的 `github.repository == '732124645/qiwu-vue-admin'` 改成自己的仓库名，`deploy.env` 的 `QW_REPO` 也一样。两个工作流必须一起改：只改了 `release.yml` 时，main 推送的 CI 运行会跳过门禁却显示成功，发布工作流会因其中的 `gate` 作业被跳过而报错退出。
 
 - [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)：main 推送、PR 与手动触发时运行。ubuntu-24.04 上启动 MySQL 8.4 与 Redis 8 服务容器（账号密码每次随机；Redis 用户与生产一样只能访问 `qw:*`），`PW_CHANNEL=chromium` 让 Playwright 使用自带的 Chromium（本地默认仍是 Edge），然后运行完整门禁 `pnpm ci:local`；失败时上传 Playwright 结果（保留 7 天）。只在上游仓库自动运行，其他仓库只能手动触发。
-- [`.github/workflows/release.yml`](../.github/workflows/release.yml)：推送 `vX.Y.Z` 标签时不再重跑门禁。先校验标签格式、标签指向本次运行的提交且该提交在 `main` 上、`CHANGELOG.md` 中有非空的 `## [X.Y.Z]` 一节 → 再通过 Actions API 确认本仓库的 CI 工作流（按文件 `.github/workflows/ci.yml` 识别）已为同一提交成功跑完一次推送运行：事件为 `push`、分支为 `main`、提交号完全一致、已完成且结论为成功，同一仓库而非 fork，且这次运行中的 `gate` 作业结论为成功（被跳过不算：所有作业都被跳过的运行整体也显示成功）；PR、手动触发或其他分支的运行都不算 → 以该节创建 GitHub Release → 等待环境 `demo` 审批 → 通过 SSH 把 `<标签> <提交号>` 发给服务器执行部署。预发布标签（如 `v1.1.0-rc.1`）不触发。
+- [`.github/workflows/release.yml`](../.github/workflows/release.yml)：推送 `vX.Y.Z` 标签时不再重跑门禁。先校验标签格式、标签指向本次运行的提交且该提交在 `main` 上、`CHANGELOG.md` 中有非空的 `## [X.Y.Z]` 一节 → 再通过 Actions API 确认本仓库的 CI 工作流（按文件 `.github/workflows/ci.yml` 识别）已为同一提交成功跑完一次推送运行：事件为 `push`、分支为 `main`、提交号完全一致、已完成且结论为成功，同一仓库而非 fork，且这次运行中的 `gate` 作业结论为成功（被跳过不算：所有作业都被跳过的运行整体也显示成功）；PR、手动触发或其他分支的运行都不算 → 以该节创建 GitHub Release → 部署作业进入环境 `demo`（设了必需审批人时先等审批）→ 通过 SSH 把 `<标签> <提交号>` 发给服务器执行部署。预发布标签（如 `v1.1.0-rc.1`）不触发。
 
-发布顺序因此是：推 `main` → 等 CI 通过 → 推标签。CI 还在运行、失败或没有运行时，发布工作流报错退出，不建 Release 也不部署；CI 通过后在 Actions 页面重新运行该发布工作流即可（校验在运行时进行）。标签必须打在 CI 实际测过的那次推送的尖端提交上：一次推送多个提交时只有最后一个有 CI 运行，提交信息带 `[skip ci]` 的推送没有运行，这两种情况重跑多少次发布工作流都不会通过。CI 偶发失败时，先在 Actions 页面重跑那次 CI 运行，通过后再重跑发布工作流。
+发布一个版本（`CHANGELOG.md` 须已有非空的 `## [X.Y.Z]` 一节，版本号即标签去掉 `v`）：
+
+```sh
+git push origin main                  # 1. 推送 main，CI 为这次推送的尖端提交运行
+# 2. 在 Actions 页面等这次 CI 运行成功
+git tag -a vX.Y.Z -m "vX.Y.Z"         # 3. 标签打在刚推送、CI 已通过的提交上（当前 HEAD）
+git push origin vX.Y.Z                # 4. 推送标签，触发发布工作流
+```
+
+发布工作流拒绝 `main` 上没有成功推送 CI 运行的提交：CI 还在运行、失败或没有运行时，发布工作流报错退出，不建 Release 也不部署；CI 通过后在 Actions 页面重新运行该发布工作流即可（校验在运行时进行）。标签必须打在 CI 实际测过的那次推送的尖端提交上：一次推送多个提交时只有最后一个有 CI 运行，提交信息带 `[skip ci]` 的推送没有运行，这两种情况重跑多少次发布工作流都不会通过。CI 偶发失败时，先在 Actions 页面重跑那次 CI 运行，通过后再重跑发布工作流。
 
 第三方 action 均按完整提交号固定。只有创建 Release 的作业有 `contents: write`（另有读取 CI 运行记录的 `actions: read`）；部署作业没有令牌权限，只拿环境机密。
 
 ### 仓库设置
 
-1. Settings → Environments 新建 `demo`：Required reviewers 填仓库所有者（可以审批自己的发布）；Deployment branches and tags 选 Selected，只加标签规则 `v*`。环境机密：
+1. Settings → Environments 新建 `demo`：Deployment branches and tags 选 Selected，只加标签规则 `v*`。Required reviewers 可选：填仓库所有者（可以审批自己的发布）时，部署作业等审批通过才运行；不填时，创建 Release 的作业一成功就开始部署。两种做法都保留这条标签规则和下面的环境机密。环境机密：
    - `DEPLOY_SSH_KEY`：部署私钥。用 `ssh-keygen -t ed25519 -N '' -C deploy -f deploy_key` 生成，公钥交给下文的准备脚本，私钥存进机密后从本机删除。
+     Windows PowerShell 5.1 会丢掉传给外部程序的空字符串参数，改用 `ssh-keygen -t ed25519 -N '""' -C deploy -f deploy_key`。
+     复制公钥 `deploy_key.pub`，在服务器上存成同名文件，放在运行准备脚本的目录（按下文 `sudo -i` 后即 `/root/deploy_key.pub`），供准备脚本的 `--pubkey deploy_key.pub` 使用：
+     - macOS：`pbcopy < deploy_key.pub`
+     - Linux：`xclip -selection clipboard < deploy_key.pub`（Wayland 用 `wl-copy < deploy_key.pub`；都没有时 `cat deploy_key.pub` 后手动复制）
+     - Windows PowerShell：`Get-Content .\deploy_key.pub | Set-Clipboard`
    - `DEPLOY_HOST`：服务器地址；前面有 CDN 时填源站 IP，不填经代理的域名。
    - `DEPLOY_KNOWN_HOSTS`：服务器主机公钥行（准备脚本最后打印），主机字段须与 `DEPLOY_HOST` 完全一致。
 

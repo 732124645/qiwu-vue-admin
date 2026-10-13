@@ -9,6 +9,7 @@ import {
   pageVo,
 } from '@qiwu/shared'
 import { SkipActionLog } from '../../../../core/audit/action-log.js'
+import { HomeTenant } from '../../../../core/auth/tenant-scope.js'
 import { clsGet } from '../../../../core/context/cls.js'
 import { ApiEnvelope } from '../../../../core/http/api-envelope.decorator.js'
 import { BizError } from '../../../../core/http/biz-error.js'
@@ -22,6 +23,7 @@ function myId(): number {
 
 @ApiTags('messaging')
 @Controller('messaging/inboxes/mine')
+@HomeTenant()
 export class MyInboxController {
   constructor(private readonly inbox: MyInboxService) {}
 

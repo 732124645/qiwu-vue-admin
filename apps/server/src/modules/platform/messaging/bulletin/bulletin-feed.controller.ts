@@ -3,6 +3,7 @@ import { ApiOperation, ApiTags } from '@nestjs/swagger'
 import { bulletinFeedDetailVo, bulletinFeedVo, bulletinUnreadVo, Err } from '@qiwu/shared'
 import { SkipActionLog } from '../../../../core/audit/action-log.js'
 import { SkipHttpTrace } from '../../../../core/audit/http-trace.js'
+import { HomeTenant } from '../../../../core/auth/tenant-scope.js'
 import { clsGet } from '../../../../core/context/cls.js'
 import { ApiEnvelope } from '../../../../core/http/api-envelope.decorator.js'
 import { BizError } from '../../../../core/http/biz-error.js'
@@ -23,6 +24,7 @@ function myId(): number {
  */
 @ApiTags('messaging')
 @Controller('messaging/bulletins/feed')
+@HomeTenant()
 export class BulletinFeedController {
   constructor(private readonly feed: BulletinFeedService) {}
 

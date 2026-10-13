@@ -17,7 +17,13 @@ import { join } from 'node:path'
 import type { NestExpressApplication } from '@nestjs/platform-express'
 import { Test } from '@nestjs/testing'
 import { getDataSourceToken } from '@nestjs/typeorm'
-import { Err, FS_OBJECT_KEY, storageObjectPerms, storageParams } from '@qiwu/shared'
+import {
+  DEFAULT_TENANT_ID,
+  Err,
+  FS_OBJECT_KEY,
+  storageObjectPerms,
+  storageParams,
+} from '@qiwu/shared'
 import { ZipArchive } from 'archiver'
 import ExcelJS from 'exceljs'
 import { fileTypeFromBuffer } from 'file-type'
@@ -41,6 +47,7 @@ import {
 import { logOf } from '../setup/audit.js'
 import { bearer, signIn } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 const PREFIX = 'fs-e2e-'
 const URL = '/api/storage/objects'
@@ -100,15 +107,21 @@ const rawStatus = (path: string) =>
   })
 
 async function user(name: string, roles: number[] = []) {
-  const id = await insertRow(ds.manager, 'iam_user', {
-    username: PREFIX + name,
-    display_name: name,
-    password_hash: 'not-used-by-this-spec',
-    password_changed_at: new Date(),
-  })
+  const id = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_user', {
+      username: PREFIX + name,
+      display_name: name,
+      password_hash: 'not-used-by-this-spec',
+      password_changed_at: new Date(),
+    }),
+  )
   ids[name] = id
   for (const r of roles)
-    await ds.query('INSERT INTO iam_user_roles (user_id, role_id) VALUES (?, ?)', [id, r])
+    await ds.query('INSERT INTO iam_user_roles (user_id, role_id, tenant_id) VALUES (?, ?, ?)', [
+      id,
+      r,
+      DEFAULT_TENANT_ID,
+    ])
   return (await signIn(app, PREFIX + name)).accessToken
 }
 
@@ -154,12 +167,18 @@ beforeAll(async () => {
     name: 'menu.action.view',
     perms: storageObjectPerms.view,
   })
-  roleId = await insertRow(ds.manager, 'iam_role', {
-    code: `${PREFIX}viewer`,
-    name: `${PREFIX}viewer`,
-    data_scope: 'all',
-  })
-  await ds.query('INSERT INTO iam_role_menus (role_id, menu_id) VALUES (?, ?)', [roleId, menuId])
+  roleId = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_role', {
+      code: `${PREFIX}viewer`,
+      name: `${PREFIX}viewer`,
+      data_scope: 'all',
+    }),
+  )
+  await ds.query('INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, ?)', [
+    roleId,
+    menuId,
+    DEFAULT_TENANT_ID,
+  ])
   tokens.admin = (await signIn(app)).accessToken
   tokens.owner = await user('owner')
   tokens.other = await user('other')
@@ -393,16 +412,18 @@ describe('private download', () => {
       }),
     })
     const key = '2026/09/28/0b6f7a3e-1d2c-4e5f-8a9b-0c1d2e3f4a5b.pdf'
-    const id = await insertRow(ds.manager, 'fs_object', {
-      storage_id: storageId,
-      object_key: key,
-      original_name: '报告.pdf',
-      mime: 'application/pdf',
-      size: 10,
-      is_public: 0,
-      biz_tag: 'attachment',
-      uploader_id: ids.owner,
-    })
+    const id = await inTenant1(() =>
+      insertRow(ds.manager, 'fs_object', {
+        storage_id: storageId,
+        object_key: key,
+        original_name: '报告.pdf',
+        mime: 'application/pdf',
+        size: 10,
+        is_public: 0,
+        biz_tag: 'attachment',
+        uploader_id: ids.owner,
+      }),
+    )
     try {
       await download(null, id).expect(401)
       await download('other', id).expect(403)
@@ -442,7 +463,10 @@ describe('bindRefs', () => {
     who = ids.owner!,
     ref = 'wf:1',
     tag: typeof WF | 'attachment' = WF,
-  ) => ds.transaction((tx) => app.get(StorageService).bindRefs(list, tag, ref, who, tx))
+  ) =>
+    ds.transaction((tx) =>
+      inTenant1(() => app.get(StorageService).bindRefs(list, tag, ref, who, tx)),
+    )
   const refOf = async (id: number) =>
     (
       (await ds.query('SELECT biz_ref FROM fs_object WHERE id = ?', [id])) as { biz_ref: string }[]
@@ -456,16 +480,18 @@ describe('bindRefs', () => {
   })
   /** A row only (bindRefs never reads the body; uploads here would pass the route's 60/min limit). */
   const up = (who: 'owner' | 'other' = 'owner', tag = WF) =>
-    insertRow(ds.manager, 'fs_object', {
-      storage_id: storageId,
-      object_key: `bind/${process.pid}-${n++}.pdf`,
-      original_name: 'form.pdf',
-      mime: 'application/pdf',
-      size: pdf.length,
-      is_public: 0,
-      biz_tag: tag,
-      uploader_id: ids[who],
-    })
+    inTenant1(() =>
+      insertRow(ds.manager, 'fs_object', {
+        storage_id: storageId,
+        object_key: `bind/${process.pid}-${n++}.pdf`,
+        original_name: 'form.pdf',
+        mime: 'application/pdf',
+        size: pdf.length,
+        is_public: 0,
+        biz_tag: tag,
+        uploader_id: ids[who],
+      }),
+    )
 
   it('wf.attachment is private: uploads take it, others get 403 while it is unbound', async () => {
     const res = await upload('owner', pdf, 'form.pdf', WF).expect(201)
@@ -483,14 +509,14 @@ describe('bindRefs', () => {
     const c = await up()
     await expect(
       ds.transaction(async (tx) => {
-        await app.get(StorageService).bindRefs([c], WF, 'wf:102', ids.owner!, tx)
+        await inTenant1(() => app.get(StorageService).bindRefs([c], WF, 'wf:102', ids.owner!, tx))
         throw new Error('caller fails later')
       }),
     ).rejects.toThrow('caller fails later')
     expect(await refOf(c)).toBeNull()
     // no transaction (e.g. `txHost.tx` outside `@Transactional`): refused before anything is written
     await expect(
-      app.get(StorageService).bindRefs([c], WF, 'wf:103', ids.owner!, ds.manager),
+      inTenant1(() => app.get(StorageService).bindRefs([c], WF, 'wf:103', ids.owner!, ds.manager)),
     ).rejects.toThrow('bindRefs needs a transaction')
     expect(await refOf(c)).toBeNull()
   })
@@ -835,15 +861,17 @@ describe('config', () => {
 
   it('a storage still holding live files is not deleted (409 in_use), deleted ones do not count (its secret stays until they are purged); the seeded local one is found by its text', async () => {
     const { id } = (await cfgCall('post', '', s3Body('in-use')).expect(201)).body.data
-    const obj = await insertRow(ds.manager, 'fs_object', {
-      storage_id: id,
-      object_key: '2026/09/28/00000000-0000-4000-8000-000000000001.txt',
-      original_name: 'x.txt',
-      mime: 'text/plain',
-      size: 1,
-      biz_tag: 'attachment',
-      uploader_id: ids.owner,
-    })
+    const obj = await inTenant1(() =>
+      insertRow(ds.manager, 'fs_object', {
+        storage_id: id,
+        object_key: '2026/09/28/00000000-0000-4000-8000-000000000001.txt',
+        original_name: 'x.txt',
+        mime: 'text/plain',
+        size: 1,
+        biz_tag: 'attachment',
+        uploader_id: ids.owner,
+      }),
+    )
     const res = await cfgCall('delete', `/${id}`).expect(409)
     expect(res.body.code).toBe(Err.IN_USE.code)
     // the object deleted (soft: its body waits for the purge, which reads the deleted storage's config)
@@ -1065,6 +1093,20 @@ describe('presign', () => {
       await http().delete(`${URL}/${obj.id}`).set(bearer(tokens.admin)).expect(200)
       expect(objects.has(objectPath(p.key))).toBe(true)
       await download('owner', obj.id).expect(404)
+    }))
+
+  it('a grant issued before grants named their tenant belongs to the default tenant: its owner confirms it', () =>
+    onS3(async () => {
+      const p = (await presign('owner', pdfBody()).expect(200)).body.data
+      const key = redisKey('presign', p.key)
+      const { tid, ...old } = JSON.parse((await redis.get(key))!)
+      expect(tid).toBe('1')
+      await redis.set(key, JSON.stringify(old), { expiration: { type: 'EX', value: 60 } })
+      expect((await put(p, pdf)).status).toBe(200)
+      await confirm('other', p.key).expect(404)
+      const obj = (await confirm('owner', p.key).expect(201)).body.data
+      expect(obj).toMatchObject({ originalName: '合同.pdf', size: pdf.length })
+      expect(await grant(p.key)).toBe(0)
     }))
 
   it('a public image is public only once checked, served with the sniffed type; the SHA-256 is signed and recorded', () =>

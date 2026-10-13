@@ -7,6 +7,11 @@
     "hint": "{name}，请输入密码解锁",
     "unlock": "解锁"
   },
+  "tenant": {
+    "banner": "正在以平台人员身份操作租户 {name}，所有操作记入审计",
+    "leave": "退出租户",
+    "lockHint": "正在操作租户 {name}"
+  },
   "search": {
     "placeholder": "搜索菜单"
   },

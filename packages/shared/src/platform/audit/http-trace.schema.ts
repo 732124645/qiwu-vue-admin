@@ -27,6 +27,8 @@ export const httpTraceQuery = pageQuery(['statusCode', 'startedAt', 'costMs', 'i
     ip: z.string().trim().max(64).optional(),
     startedAtFrom: z.iso.datetime({ offset: true }).optional(),
     startedAtTo: z.iso.datetime({ offset: true }).optional(),
+    /** the requests of one tenant (the anonymous ones have none) */
+    tenantId: z.coerce.number().int().positive().optional(),
   })
   .register(fieldDomains, { domain: 'audit.httpTrace' })
 export type HttpTraceQuery = z.output<typeof httpTraceQuery>
@@ -49,5 +51,7 @@ export const httpTraceVo = z.object({
   userAgent: z.string().nullable(),
   startedAt: z.iso.datetime(),
   costMs: z.number().int(),
+  /** the signed-in caller's data tenant; null for an anonymous request */
+  tenantId: z.number().int().nullable(),
 })
 export type HttpTraceVo = z.infer<typeof httpTraceVo>

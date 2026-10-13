@@ -13,6 +13,7 @@ import { clientApi } from '@/api/platform/oauth/client'
 import ImageUpload from '@/core/components/ImageUpload.vue'
 import { useCrudForm } from '@/core/composables/use-crud'
 import { uploadField } from '@/core/composables/use-upload'
+import { useAuthStore } from '@/core/stores/auth'
 
 /**
  * Add / edit form of the client list, opened with `openDialog(ClientForm, { id })`. No secret here: an add
@@ -25,6 +26,8 @@ const emit = defineEmits<{
   cancel: []
 }>()
 const { t } = useI18n()
+// `/me.tenant` only while multi-tenancy is on: client credentials then sign in as the platform
+const auth = useAuthStore()
 const { model, formRef, rules, loading, submitting, submit } = useCrudForm({
   api: clientApi,
   schema: clientCreate,
@@ -85,6 +88,9 @@ watch(
           {{ t(`oauth.client.grant.${g}`) }}
         </el-checkbox>
       </el-checkbox-group>
+      <div v-if="auth.tenant" class="client-form__hint">
+        {{ t('oauth.client.credentialsHint') }}
+      </div>
     </el-form-item>
     <el-form-item
       :label="t('field.oauth.client.redirectUris')"
@@ -138,3 +144,13 @@ watch(
     </el-button>
   </div>
 </template>
+
+<style scoped>
+.client-form__hint {
+  width: 100%;
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--qw-text-3);
+}
+</style>

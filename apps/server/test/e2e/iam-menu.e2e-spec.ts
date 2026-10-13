@@ -23,6 +23,7 @@ import { findId, insertRow } from '../../src/db/seeds/upsert.js'
 import { logOf } from '../setup/audit.js'
 import { bearer, signIn } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
+import { createTenant, inTenant1, type TestTenant } from '../setup/tenants.js'
 
 const PREFIX = 'e2e-menu-'
 const URL = '/api/iam/menus'
@@ -59,6 +60,7 @@ const tokens: Record<'admin' | 'reader' | 'plain' | 'editor', string> = {
   editor: '',
 }
 const userIds: number[] = []
+const tenants: TestTenant[] = []
 let roleId: number
 let editorRoleId: number
 /** the table's last id before this spec: every row above it is this spec's (cleanup) */
@@ -137,14 +139,19 @@ const action = (parent: number, over: object = {}) => ({
 })
 
 async function user(name: string, roles: number[]) {
-  const id = await insertRow(ds.manager, 'iam_user', {
-    username: PREFIX + name,
-    display_name: name,
-    password_hash: 'not-used-by-this-spec',
-    password_changed_at: new Date(),
-  })
+  const id = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_user', {
+      username: PREFIX + name,
+      display_name: name,
+      password_hash: 'not-used-by-this-spec',
+      password_changed_at: new Date(),
+    }),
+  )
   for (const r of roles)
-    await ds.query('INSERT INTO iam_user_roles (user_id, role_id) VALUES (?, ?)', [id, r])
+    await ds.query('INSERT INTO iam_user_roles (user_id, role_id, tenant_id) VALUES (?, ?, 1)', [
+      id,
+      r,
+    ])
   userIds.push(id)
   return (await signIn(app, PREFIX + name)).accessToken
 }
@@ -158,21 +165,28 @@ beforeAll(async () => {
   i18n = app.get(I18nService)
   await cleanRedis(redis)
   lastId = Number((await ds.query('SELECT COALESCE(MAX(id), 0) AS n FROM iam_menu'))[0].n)
-  roleId = await insertRow(ds.manager, 'iam_role', {
-    code: `${PREFIX}reader`,
-    name: `${PREFIX}reader`,
-    data_scope: 'all',
-  })
+  roleId = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_role', {
+      code: `${PREFIX}reader`,
+      name: `${PREFIX}reader`,
+      data_scope: 'all',
+    }),
+  )
   const browse = await findId(ds.manager, 'iam_menu', { perms: menuPerms.browse })
-  await ds.query('INSERT INTO iam_role_menus (role_id, menu_id) VALUES (?, ?)', [roleId, browse])
+  await ds.query('INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, 1)', [
+    roleId,
+    browse,
+  ])
   // a non-root menu editor: every menu perm but remove
-  editorRoleId = await insertRow(ds.manager, 'iam_role', {
-    code: `${PREFIX}editor`,
-    name: `${PREFIX}editor`,
-    data_scope: 'all',
-  })
+  editorRoleId = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_role', {
+      code: `${PREFIX}editor`,
+      name: `${PREFIX}editor`,
+      data_scope: 'all',
+    }),
+  )
   for (const perms of [menuPerms.browse, menuPerms.view, menuPerms.create, menuPerms.modify])
-    await ds.query('INSERT INTO iam_role_menus (role_id, menu_id) VALUES (?, ?)', [
+    await ds.query('INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, 1)', [
       editorRoleId,
       await findId(ds.manager, 'iam_menu', { perms }),
     ])
@@ -184,6 +198,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (ds) {
+    for (const tenant of tenants) await tenant.dispose()
     await ds.query('DELETE FROM iam_menu WHERE id > ?', [lastId])
     if (userIds.length) {
       await ds.query('DELETE FROM iam_user_roles WHERE user_id IN (?)', [userIds])
@@ -725,12 +740,53 @@ describe('rules', () => {
     const p = (await create(page(g.id)).expect(201)).body.data
     const a = (await create(action(p.id)).expect(201)).body.data
     expectErr(await call('admin', 'delete', `/${p.id}`), 409, Err.TREE_HAS_CHILDREN.code)
-    await ds.query('INSERT INTO iam_role_menus (role_id, menu_id) VALUES (?, ?)', [roleId, a.id])
+    await ds.query('INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, 1)', [
+      roleId,
+      a.id,
+    ])
     const res = await call('admin', 'delete', `/${a.id}`)
     expectErr(res, 409, Err.IAM_MENU_GRANTED.code)
     expect(res.body.msg).toBe(t('zh-CN', Err.IAM_MENU_GRANTED.key))
     await ds.query('DELETE FROM iam_role_menus WHERE role_id = ? AND menu_id = ?', [roleId, a.id])
     for (const id of [a.id, p.id, g.id]) await call('admin', 'delete', `/${id}`).expect(200)
+  })
+
+  it("rules: delete — another tenant's grants go with the menu; a grant in the caller's tenant still refuses it (409)", async () => {
+    const other = await createTenant(app)
+    tenants.push(other)
+    const g = await add(0)
+    const p = (await create(page(g.id)).expect(201)).body.data
+    const a = (await create(action(p.id)).expect(201)).body.data
+    const { insertId: otherRole } = await ds.query(
+      "INSERT INTO iam_role (code, name, data_scope, tenant_id) VALUES (?, ?, 'all', ?)",
+      [unique(), unique(), other.id],
+    )
+    await ds.query(
+      'INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, ?), (?, ?, ?)',
+      [otherRole, a.id, other.id, otherRole, p.id, other.id],
+    )
+    const live = async (menuId: number) =>
+      (
+        await ds.query<{ tenant: number }[]>(
+          'SELECT tenant_id AS tenant FROM iam_role_menus WHERE menu_id = ? AND deleted_at IS NULL ORDER BY tenant_id',
+          [menuId],
+        )
+      ).map((r) => Number(r.tenant))
+
+    await call('admin', 'delete', `/${a.id}`).expect(200)
+    expect(await live(a.id)).toEqual([])
+    const [gone] = await ds.query('SELECT deleted_at FROM iam_role_menus WHERE menu_id = ?', [a.id])
+    expect(gone.deleted_at).toBeInstanceOf(Date)
+
+    await ds.query('INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, 1)', [
+      roleId,
+      p.id,
+    ])
+    expectErr(await call('admin', 'delete', `/${p.id}`), 409, Err.IAM_MENU_GRANTED.code)
+    expect(await live(p.id)).toEqual([1, other.id])
+    await ds.query('DELETE FROM iam_role_menus WHERE role_id = ? AND menu_id = ?', [roleId, p.id])
+    for (const id of [p.id, g.id]) await call('admin', 'delete', `/${id}`).expect(200)
+    expect(await live(p.id)).toEqual([])
   })
 
   it('rules: PUT /sort renumbers several menus at once; an unknown id → 404 and nothing changes; 403 / 400', async () => {
@@ -819,13 +875,15 @@ describe('rules', () => {
     const g = await add(0)
     const p = (await create(page(g.id)).expect(201)).body.data
     const a = (await create(action(p.id, { perms: menuPerms.browse })).expect(201)).body.data
-    const holderRole = await insertRow(ds.manager, 'iam_role', {
-      code: `${PREFIX}holder`,
-      name: `${PREFIX}holder`,
-      data_scope: 'all',
-    })
+    const holderRole = await inTenant1(() =>
+      insertRow(ds.manager, 'iam_role', {
+        code: `${PREFIX}holder`,
+        name: `${PREFIX}holder`,
+        data_scope: 'all',
+      }),
+    )
     try {
-      await ds.query('INSERT INTO iam_role_menus (role_id, menu_id) VALUES (?, ?)', [
+      await ds.query('INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, 1)', [
         holderRole,
         a.id,
       ])

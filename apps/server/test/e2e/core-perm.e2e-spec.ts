@@ -22,6 +22,7 @@ import { REDIS, type Redis } from '../../src/core/redis/redis.module.js'
 import { findId, insertRow } from '../../src/db/seeds/upsert.js'
 import { bearer, signIn } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 const BROWSE = 'test.probe.browse'
 const VIEW = 'test.probe.view'
@@ -109,26 +110,36 @@ async function menu(perm: string) {
 }
 
 async function role(code: string, menuIds: number[]) {
-  const roleId = await insertRow(ds.manager, 'iam_role', {
-    code,
-    name: code,
-    data_scope: 'own_dept',
-  })
+  const roleId = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_role', {
+      code,
+      name: code,
+      data_scope: 'own_dept',
+    }),
+  )
   for (const menuId of menuIds)
-    await ds.query('INSERT INTO iam_role_menus (role_id, menu_id) VALUES (?, ?)', [roleId, menuId])
+    await ds.query('INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, 1)', [
+      roleId,
+      menuId,
+    ])
   return roleId
 }
 
 async function user(username: string, roleIds: number[], extra: Record<string, unknown> = {}) {
-  const userId = await insertRow(ds.manager, 'iam_user', {
-    username,
-    display_name: username,
-    password_hash: 'not-used-by-these-specs',
-    password_changed_at: new Date(),
-    ...extra,
-  })
+  const userId = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_user', {
+      username,
+      display_name: username,
+      password_hash: 'not-used-by-these-specs',
+      password_changed_at: new Date(),
+      ...extra,
+    }),
+  )
   for (const roleId of roleIds)
-    await ds.query('INSERT INTO iam_user_roles (user_id, role_id) VALUES (?, ?)', [userId, roleId])
+    await ds.query('INSERT INTO iam_user_roles (user_id, role_id, tenant_id) VALUES (?, ?, 1)', [
+      userId,
+      roleId,
+    ])
   return userId
 }
 
@@ -169,7 +180,7 @@ beforeAll(async () => {
     perms: VIEW,
   })
   id.nested = await role('probe-nested', [id.mNested])
-  const rd = await findId(ds.manager, 'iam_dept', { name: 'seed.dept.rd' })
+  const rd = await inTenant1(() => findId(ds.manager, 'iam_dept', { name: 'seed.dept.rd' }))
   id.uBrowser = await user('perm-e2e-browser', [id.browser])
   id.uBoth = await user('perm-e2e-both', [id.browser, id.remover], {
     dept_id: rd,
@@ -238,7 +249,7 @@ describe('AuthGuard', () => {
   })
 
   it('other clients: 401 outside @OAuthScope, 403 without the scope, 200 with it', async () => {
-    const u = (await permVersion.load(id.uBrowser))!
+    const u = (await inTenant1(() => permVersion.load(id.uBrowser)))!
     const opts = { keepSignedIn: false, ip: '127.0.0.1', ua: 'probe', clientId: 'probe-app' }
     const scoped = await tokens.issue(u, { ...opts, scopes: ['user.read'] })
     expect((await get('me', scoped.accessToken)).status).toBe(401)
@@ -276,7 +287,7 @@ describe('AuthGuard', () => {
     expect(await any()).toBe(403)
 
     // a role assigned to the user: applies once the user's version moves (bumpUser)
-    await ds.query('INSERT INTO iam_user_roles (user_id, role_id) VALUES (?, ?)', [
+    await ds.query('INSERT INTO iam_user_roles (user_id, role_id, tenant_id) VALUES (?, ?, 1)', [
       id.uTemp,
       id.temp,
     ])
@@ -287,11 +298,11 @@ describe('AuthGuard', () => {
     // the role loses its menu: bumpUsersOfRole
     await ds.query('DELETE FROM iam_role_menus WHERE role_id = ?', [id.temp])
     expect(await any()).toBe(VIEW)
-    await permVersion.bumpUsersOfRole(id.temp)
+    await inTenant1(() => permVersion.bumpUsersOfRole(id.temp))
     expect(await any()).toBe(403)
 
     // granted again, then the menu disabled: bumpAll reaches every session
-    await ds.query('INSERT INTO iam_role_menus (role_id, menu_id) VALUES (?, ?)', [
+    await ds.query('INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, 1)', [
       id.temp,
       id.mView,
     ])
@@ -306,7 +317,7 @@ describe('AuthGuard', () => {
     await permVersion.bumpAll()
     expect(await any()).toBe(VIEW)
     await ds.query('UPDATE iam_role SET enabled = 0 WHERE id = ?', [id.temp])
-    await permVersion.bumpUsersOfRole(id.temp)
+    await inTenant1(() => permVersion.bumpUsersOfRole(id.temp))
     expect(await any()).toBe(403)
     await ds.query('UPDATE iam_role SET enabled = 1 WHERE id = ?', [id.temp])
   })

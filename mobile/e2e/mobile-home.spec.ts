@@ -87,6 +87,9 @@ test('workbench: counts on show and every minute, tab badges, shortcuts by permi
     '16px',
   )
   await expect(page).toHaveTitle('工作台')
+  // multi-tenancy off: the app's own name and mark
+  await expect(page.locator('.qw-home__brand')).toHaveText('栖梧')
+  await expect(page.locator('.qw-mark.is-logo')).toHaveCount(0)
   await expect(page.locator('.qw-home__name')).toHaveText(`你好，${USERS.sms.username}`)
   await expect(value(page, 'todo')).toHaveText(String(now.todo))
   await expect(value(page, 'running')).toHaveText(String(now.running))

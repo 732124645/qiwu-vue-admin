@@ -2,7 +2,8 @@
 // with the server's translated msg. The access token lives in memory only, the refresh token of the
 // `mobile` session in uni storage (no HttpOnly cookie on mp/App) and travels in the /auth/refresh body. One
 // refresh at a time with the web's rotation semantics (see docs/design-notes.md#auth-sessions); a rejected refresh sends the user to sign in.
-import { Err, type ApiOk, type TokenPayload } from '@qiwu/shared'
+import { ref } from 'vue'
+import { Err, type ApiOk, type SessionEndReason, type TokenPayload } from '@qiwu/shared'
 import { locale, t } from './i18n'
 
 /** Sign-in and refresh answers of a `mobile` session carry the refresh token too. */
@@ -70,6 +71,17 @@ interface Raw {
   data: unknown
 }
 
+/**
+ * Why the session ended when it was neither a sign-out nor a plain kick: a 401 `A1042` (its tenant was
+ * disabled or expired, or multi-tenancy was turned off for it), a refresh's included, or a `session:kicked`
+ * with a reason (core/realtime). The sign-in page says so; the next sign-in or sign-out clears it.
+ */
+export const sessionEnd = ref<SessionEndReason | null>(null)
+/** The text of each reason. */
+export const SESSION_END_TEXT: Record<SessionEndReason, string> = {
+  tenant_unavailable: 'common.error.tenantUnavailable',
+}
+
 let accessToken = ''
 /** Each sign-in / sign-out starts a new epoch: a refresh or replay of an older one never applies. */
 let epoch = 0
@@ -82,8 +94,10 @@ const storedRt = (): string => uni.getStorageSync(RT_KEY) || ''
 export function setSession(tokens: MobileTokens | null) {
   epoch++
   accessToken = tokens?.accessToken ?? ''
-  if (tokens) uni.setStorageSync(RT_KEY, tokens.refreshToken)
-  else uni.removeStorageSync(RT_KEY)
+  if (tokens) {
+    uni.setStorageSync(RT_KEY, tokens.refreshToken)
+    sessionEnd.value = null
+  } else uni.removeStorageSync(RT_KEY)
 }
 
 /** The access token the next call sends ('' until a sign-in or refresh): the realtime handshake's. */
@@ -165,6 +179,8 @@ async function exchange<T>(o: RequestOptions, send: () => Promise<Raw>, replay =
     body.errors,
     body.traceId,
   )
+  if (res.statusCode === 401 && err.code === Err.AUTH_TENANT_INACTIVE.code && at === epoch)
+    sessionEnd.value = 'tenant_unavailable'
   // a request of an earlier session (signed out, or in as someone else since) is never refreshed or replayed
   if (res.statusCode === 401 && !replay && !NO_REFRESH.test(o.url) && at === epoch) {
     try {

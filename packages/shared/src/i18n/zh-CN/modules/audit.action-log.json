@@ -19,7 +19,8 @@
         "ok": "是否成功",
         "errorMsg": "失败原因",
         "costMs": "耗时（毫秒）",
-        "userType": "用户类型"
+        "userType": "用户类型",
+        "actorTenantId": "操作者租户"
       }
     }
   }

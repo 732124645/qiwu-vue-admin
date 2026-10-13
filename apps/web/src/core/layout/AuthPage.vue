@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
 import LocaleSwitch from '@/core/components/LocaleSwitch.vue'
+import { useBrand } from '@/core/composables/use-brand'
 import { Icon } from '@/core/icons'
 import BrandMark from './BrandMark.vue'
 
@@ -10,7 +11,8 @@ import BrandMark from './BrandMark.vue'
  */
 const { title, subtitle } = defineProps<{ title: string; subtitle?: string }>()
 const { t } = useI18n()
-const appTitle = import.meta.env.VITE_APP_TITLE
+// the tenant's brand when it set one (the host's before sign-in, the session's after)
+const { name, logoUrl } = useBrand()
 const year = new Date().getFullYear()
 
 const POINTS = [
@@ -24,9 +26,9 @@ const POINTS = [
   <div class="auth-page">
     <aside class="auth-brand">
       <div class="auth-brand__logo">
-        <BrandMark :size="32" />
+        <BrandMark :size="32" :src="logoUrl" />
         <span>
-          <template v-if="appTitle">{{ appTitle }}</template>
+          <template v-if="name">{{ name }}</template>
           <template v-else>
             {{ t('common.app.name')
             }}<span class="auth-brand__suffix">{{ t('common.app.suffix') }}</span>

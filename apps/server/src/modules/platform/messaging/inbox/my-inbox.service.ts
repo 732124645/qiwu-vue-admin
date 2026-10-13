@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common'
 import { InjectDataSource } from '@nestjs/typeorm'
 import { myInboxItemVo, type MyInboxQuery } from '@qiwu/shared'
 import type { DataSource } from 'typeorm'
+import { tenantId } from '../../../../core/context/tenant.js'
 import { paginate } from '../../../../core/db/page.js'
 import { Inbox } from './inbox.entity.js'
 
@@ -44,21 +45,22 @@ export class MyInboxService {
 
   async unread(userId: number) {
     const [{ n }]: { n: number }[] = await this.ds.query(
-      'SELECT COUNT(*) AS n FROM msg_inbox WHERE user_id = ? AND read_at IS NULL AND deleted_at IS NULL',
-      [userId],
+      'SELECT COUNT(*) AS n FROM msg_inbox WHERE user_id = ? AND read_at IS NULL AND deleted_at IS NULL AND tenant_id = ?',
+      [userId, tenantId()],
     )
     return { unread: Number(n) }
   }
 
   async read(userId: number, id: number) {
     const result: { affectedRows: number } = await this.ds.query(
-      'UPDATE msg_inbox SET read_at = COALESCE(read_at, UTC_TIMESTAMP(3)) WHERE id = ? AND user_id = ? AND deleted_at IS NULL',
-      [id, userId],
+      `UPDATE msg_inbox SET read_at = COALESCE(read_at, UTC_TIMESTAMP(3))
+        WHERE id = ? AND user_id = ? AND deleted_at IS NULL AND tenant_id = ?`,
+      [id, userId, tenantId()],
     )
     if (!result.affectedRows) {
       const [row] = await this.ds.query(
-        'SELECT id FROM msg_inbox WHERE id = ? AND user_id = ? AND deleted_at IS NULL',
-        [id, userId],
+        'SELECT id FROM msg_inbox WHERE id = ? AND user_id = ? AND deleted_at IS NULL AND tenant_id = ?',
+        [id, userId, tenantId()],
       )
       if (!row) throw new NotFoundException()
     }
@@ -67,8 +69,9 @@ export class MyInboxService {
 
   async readAll(userId: number) {
     await this.ds.query(
-      'UPDATE msg_inbox SET read_at = UTC_TIMESTAMP(3) WHERE user_id = ? AND read_at IS NULL AND deleted_at IS NULL',
-      [userId],
+      `UPDATE msg_inbox SET read_at = UTC_TIMESTAMP(3)
+        WHERE user_id = ? AND read_at IS NULL AND deleted_at IS NULL AND tenant_id = ?`,
+      [userId, tenantId()],
     )
     return this.unread(userId)
   }

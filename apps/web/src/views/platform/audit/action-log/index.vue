@@ -4,7 +4,7 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import dayjs from 'dayjs'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { actionLogPerms, type ActionLogVo } from '@qiwu/shared'
+import { actionLogPerms, DEFAULT_TENANT_ID, type ActionLogVo } from '@qiwu/shared'
 import { actionLogApi } from '@/api/platform/audit/action-log'
 import DictSelect from '@/core/components/DictSelect.vue'
 import DictTag from '@/core/components/DictTag.vue'
@@ -14,8 +14,10 @@ import TableToolbar from '@/core/components/TableToolbar.vue'
 import { useCrudList } from '@/core/composables/use-crud'
 import type { QwColumn } from '@/core/composables/use-table-prefs'
 import { useDateRangeShortcuts } from '@/core/date-shortcuts'
+import { tx } from '@/core/i18n'
 import { Icon } from '@/core/icons'
 import { usePerm } from '@/core/permission'
+import { useAuthStore } from '@/core/stores/auth'
 import ActionLogDetail from './detail.vue'
 
 // keep-alive name = the seeded menu's component_name
@@ -52,9 +54,10 @@ const {
   sort: '-createdAt',
 })
 const showSearch = ref(true)
+const auth = useAuthStore()
 // order and visibility are the user's column settings (table id `audit.actionLog`); short columns get a
 // fixed width (longest locale's header + sort caret); the free text, else the name, takes the rest
-const columns: QwColumn[] = [
+const columns = computed((): QwColumn[] => [
   { prop: 'domain', label: 'field.audit.actionLog.domain', width: 160, showOverflowTooltip: true },
   { prop: 'verb', label: 'field.audit.actionLog.verb', width: 120, showOverflowTooltip: true },
   { prop: 'bizId', label: 'field.audit.actionLog.bizId', width: 160, showOverflowTooltip: true },
@@ -64,6 +67,17 @@ const columns: QwColumn[] = [
     width: 160,
     showOverflowTooltip: true,
   },
+  // only while multi-tenancy is on (`/me.tenant`)
+  ...(auth.tenant
+    ? [
+        {
+          prop: 'actorTenantId',
+          label: 'field.audit.actionLog.actorTenantId',
+          width: 140,
+          showOverflowTooltip: true,
+        },
+      ]
+    : []),
   {
     prop: 'httpMethod',
     label: 'field.audit.actionLog.httpMethod',
@@ -81,7 +95,13 @@ const columns: QwColumn[] = [
     align: 'right',
   },
   { prop: 'createdAt', label: 'field.common.createdAt', sortable: true, width: 160 },
-]
+])
+/**
+ * Who acted: the platform (its staff working inside this tenant, or anyone of the default tenant) or this
+ * tenant's own users, the only two kinds of rows a tenant's log holds.
+ */
+const actorTenant = ({ actorTenantId }: ActionLogVo) =>
+  actorTenantId === DEFAULT_TENANT_ID ? t('audit.actionLog.platform') : tx(auth.tenant?.name ?? '')
 // computed: the perms reload when the server's permission version moves
 const perm = usePerm()
 // the detail drawer loads GET /:id, which needs `view`
@@ -216,6 +236,7 @@ async function clean() {
         <template #cell-ok="{ row }">
           <DictTag code="core.yes_no" :value="row.ok" />
         </template>
+        <template #cell-actorTenantId="{ row }">{{ actorTenant(row) }}</template>
         <template #cell-createdAt="{ row }">{{
           dayjs(row.createdAt).format('YYYY-MM-DD HH:mm')
         }}</template>

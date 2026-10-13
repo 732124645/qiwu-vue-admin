@@ -6,7 +6,8 @@ import { withCaptcha } from '@/core/captcha'
 /**
  * Sending an SMS code: a public `scene` goes through the `sms_send` captcha (only its ticket
  * is sent); a signed-in `request` (the profile's bind code) is sent as is. Then a countdown from the
- * server's `cooldownSec`. `send` resolves true when sent, false when the
+ * server's `cooldownSec`; a public scene's `tenantCode` (the sign-in pages' field) goes along. `send`
+ * resolves true when sent, false when the
  * captcha was closed; server errors (429 limits, 400) are thrown for the form to show. The answer is the
  * same whether the number has an account or not, and so is what the forms show.
  */
@@ -22,7 +23,7 @@ export function useSmsCode(
     clearInterval(timer)
   })
 
-  async function send(mobile: string) {
+  async function send(mobile: string, tenantCode?: string) {
     if (sending.value || cooldown.value) return
     sending.value = true
     try {
@@ -33,6 +34,7 @@ export function useSmsCode(
               authExtraApi.smsCode({
                 mobile,
                 scene: source,
+                tenantCode,
                 ...(ticket ? { captchaTicket: ticket } : {}),
               }),
             )

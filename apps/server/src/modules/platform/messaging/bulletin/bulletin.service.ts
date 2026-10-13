@@ -4,6 +4,7 @@ import { TransactionHost } from '@nestjs-cls/transactional'
 import type { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm'
 import { type BulletinQuery, RT, type RealtimePayloads } from '@qiwu/shared'
 import { type DeepPartial, In, type QueryDeepPartialEntity, type SelectQueryBuilder } from 'typeorm'
+import { tenantId } from '../../../../core/context/tenant.js'
 import { BaseCrudService } from '../../../../core/db/base-crud.service.js'
 import { contains } from '../../../../core/db/page.js'
 import { RealtimeService } from '../../../../core/realtime/realtime.service.js'
@@ -18,7 +19,8 @@ const cleanBody = <T extends { body?: unknown }>(dto: T): T =>
  * Bulletins over BaseCrudService: the body is sanitized on every write, publishing is its own action;
  * a (soft) delete takes the read receipts with it (the reference registry's cascade, bulletin.module.ts).
  * Whatever changes the readers' feed (publish, withdraw, deleting a published one) is pushed to every
- * signed-in socket after the commit (`notify:bulletin`, ids only), so header bells reload at once.
+ * signed-in socket of its tenant after the commit (`notify:bulletin`, ids only), so header bells reload
+ * at once.
  */
 @Injectable()
 export class BulletinService extends BaseCrudService<Bulletin> {
@@ -82,6 +84,6 @@ export class BulletinService extends BaseCrudService<Bulletin> {
   }
 
   private push(action: RealtimePayloads['notify:bulletin']['action'], ids: number[]) {
-    this.realtime.broadcast({ type: RT.notifyBulletin, payload: { action, ids } })
+    this.realtime.toTenant(tenantId(), { type: RT.notifyBulletin, payload: { action, ids } })
   }
 }

@@ -1,6 +1,7 @@
 import { Column, Entity } from 'typeorm'
 import { DataScoped } from '../../../../core/data-scope/data-scope.js'
 import { BaseEntity } from '../../../../core/db/base.entity.js'
+import { TenantColumn } from '../../../../core/db/tenant-filter.js'
 
 /** `iam_dept`, data-scoped by its own id (the dept list/tree is the `checkDept` equivalent; see docs/design-notes.md#data-scope). */
 @Entity('iam_dept')
@@ -32,4 +33,7 @@ export class Dept extends BaseEntity {
 
   @Column({ type: 'boolean', default: true })
   enabled: boolean
+
+  @TenantColumn()
+  tenantId: number
 }

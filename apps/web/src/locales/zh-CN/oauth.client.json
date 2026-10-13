@@ -7,6 +7,7 @@
         "refresh_token": "刷新令牌",
         "client_credentials": "客户端凭证"
       },
+      "credentialsHint": "客户端凭证只用于平台自身的系统集成：签出的令牌属于平台（默认租户），不属于任何其他租户；租户的应用请用授权码接入",
       "redirectHint": "回车添加；须为 https，本机调试可用 http://localhost",
       "secretTitle": "保存客户端密钥",
       "secretOnce": "密钥只显示这一次，请立即保存；丢失后只能重置",

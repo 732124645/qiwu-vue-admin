@@ -44,7 +44,7 @@ pnpm dev
 
 ### Windows（原生 PowerShell 5.1）
 
-原生 Windows 11 + Windows PowerShell 5.1（含 cmd 入口）已验证用于开发与完整本地闸门（`pnpm ci:local --serial`）；无文件 symlink 权限时，符号链接防护测试跳过；Windows 服务器部署及 App / 小程序发布未验证。 用户须提供已验证的 MySQL 与 Redis ≥ 7 服务，按[入门指南的 Windows 清单](docs/getting-started.md#windows原生-powershell-51)准备独立数据库、ACL、浏览器与 `.env.local` 凭据。
+原生 Windows 11 + Windows PowerShell 5.1（含 cmd 入口）已验证用于开发与完整本地闸门（`pnpm ci:local --serial`）；无文件 symlink 权限时，符号链接防护测试跳过；Windows 服务器部署及 App / 小程序发布未验证。用户须提供已验证的 MySQL（推荐 8.4，最低 8.0.17）与 Redis ≥ 7.0 服务，见[入门指南](docs/getting-started.md#1-准备运行环境)；按[入门指南的 Windows 清单](docs/getting-started.md#windows原生-powershell-51)准备独立数据库、ACL、浏览器与 `.env.local` 凭据。
 
 下列手敲命令使用 `pnpm.cmd`，避开 PowerShell 的 `.ps1` 执行策略，不修改执行策略。`pnpm.cmd` 仅随 npm / Corepack 安装提供；独立安装的 `pnpm.exe`（如 winget / get.pnpm.io）请把示例中的 `pnpm.cmd` 换成 `pnpm`。 完成环境准备后，在仓库根逐行执行，每步失败即停止：
 
@@ -63,6 +63,8 @@ pnpm.cmd dev
 `pnpm.cmd dev` 仅由使用者交互启动，Ctrl+C 停止。Windows 完整产品闸门用 `pnpm.cmd ci:local --serial`。
 
 ### 文档与目录
+
+教程与功能介绍见文档站 [qiwuadmin.com](https://qiwuadmin.com)；下表是随代码一起版本化的技术参考。
 
 | 入口                                                                 | 内容                                               |
 | -------------------------------------------------------------------- | -------------------------------------------------- |
@@ -117,11 +119,13 @@ Run migrations before seeds. Start `pnpm dev` interactively in your terminal. Th
 
 ### Windows (native PowerShell 5.1)
 
-Native Windows 11 + Windows PowerShell 5.1 (including the cmd entry) is verified for development and the full local gate (`pnpm ci:local --serial`); symlink-protection tests skip without file-symlink privilege; server deployment and App / mini-program publishing on Windows are not verified. Prepare your isolated services and credentials with the [Windows setup](docs/getting-started.md#windows原生-powershell-51).
+Native Windows 11 + Windows PowerShell 5.1 (including the cmd entry) is verified for development and the full local gate (`pnpm ci:local --serial`); symlink-protection tests skip without file-symlink privilege; server deployment and App / mini-program publishing on Windows are not verified. Provide MySQL (8.4 recommended, 8.0.17 minimum) and Redis ≥ 7.0, see the [getting-started guide](docs/getting-started.md#1-准备运行环境); prepare your isolated services and credentials with the [Windows setup](docs/getting-started.md#windows原生-powershell-51).
 
 Use the PowerShell commands in the Chinese Windows section above, in order: install, build shared contracts, migrate, seed, then start development interactively. Check `$LASTEXITCODE` after each native command and stop on failure. `pnpm.cmd` avoids the `.ps1` shim without changing execution policy; it exists only with npm / Corepack installs. With standalone `pnpm.exe` (winget / get.pnpm.io), use plain `pnpm` instead. Store secrets in `apps/server/.env.local`; do not define their keys in `.env`, even as empty values. Use `pnpm.cmd ci:local --serial` for the full Windows product gate.
 
 ### Structure and guides
+
+Tutorials and feature introductions are on the docs site [qiwuadmin.com](https://qiwuadmin.com); the guides below are the technical reference versioned with the code.
 
 - `apps/server`: NestJS server; `apps/web`: Vue Web app; `packages/shared`: schemas, types and i18n.
 - `mobile/`: optional uni-app employee client outside the root workspace. PC-only users can remove it using the [mobile guide](docs/mobile.md). Keep the internal `@qiwu/*` scope; place application code in project-domain directories.

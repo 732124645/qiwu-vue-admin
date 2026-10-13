@@ -25,6 +25,7 @@ import { findId, insertRow } from '../../src/db/seeds/upsert.js'
 import { logOf } from '../setup/audit.js'
 import { bearer, signIn } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 const PREFIX = 'profile-e2e-'
 const URL = '/api/iam/profile'
@@ -62,24 +63,28 @@ const image = (width: number, height: number, background: string) =>
 
 /** A signed-in user without any permission: the personal center needs none. */
 async function user(name: string, row: Record<string, unknown> = {}) {
-  const id = await insertRow(ds.manager, 'iam_user', {
-    username: PREFIX + name,
-    display_name: name,
-    password_hash: await bcrypt.hash(PW, 4),
-    password_changed_at: new Date(),
-    ...row,
-  })
+  const id = await inTenant1(async () =>
+    insertRow(ds.manager, 'iam_user', {
+      username: PREFIX + name,
+      display_name: name,
+      password_hash: await bcrypt.hash(PW, 4),
+      password_changed_at: new Date(),
+      ...row,
+    }),
+  )
   users[name] = { id, token: (await signIn(app, PREFIX + name)).accessToken }
   return id
 }
 
 async function role(code: string, enabled: number) {
-  const id = await insertRow(ds.manager, 'iam_role', {
-    code: PREFIX + code,
-    name: `${PREFIX}${code}-name`,
-    data_scope: 'own_rows',
-    enabled,
-  })
+  const id = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_role', {
+      code: PREFIX + code,
+      name: `${PREFIX}${code}-name`,
+      data_scope: 'own_rows',
+      enabled,
+    }),
+  )
   roleIds.push(id)
   return id
 }
@@ -97,7 +102,9 @@ beforeAll(async () => {
   ds = app.get<DataSource>(getDataSourceToken())
   redis = app.get(REDIS)
   await cleanRedis(redis)
-  const platform = await findId(ds.manager, 'iam_dept', { name: 'seed.dept.platform' })
+  const platform = await inTenant1(() =>
+    findId(ds.manager, 'iam_dept', { name: 'seed.dept.platform' }),
+  )
   const [on, off] = [await role('on', 1), await role('off', 0)]
   const ann = await user('ann', {
     dept_id: platform,
@@ -106,15 +113,18 @@ beforeAll(async () => {
     gender: 'female',
   })
   for (const r of [on, off])
-    await ds.query('INSERT INTO iam_user_roles (user_id, role_id) VALUES (?, ?)', [ann, r])
+    await ds.query('INSERT INTO iam_user_roles (user_id, role_id, tenant_id) VALUES (?, ?, 1)', [
+      ann,
+      r,
+    ])
   const positions = await ds.query<{ id: number }[]>(
     'SELECT id FROM iam_position ORDER BY sort_no, id LIMIT 2',
   )
   for (const p of positions)
-    await ds.query('INSERT INTO iam_user_positions (user_id, position_id) VALUES (?, ?)', [
-      ann,
-      p.id,
-    ])
+    await ds.query(
+      'INSERT INTO iam_user_positions (user_id, position_id, tenant_id) VALUES (?, ?, 1)',
+      [ann, p.id],
+    )
   await user('bob', { mobile: '13900000002', email: 'bob@profile.test' })
 })
 
@@ -399,7 +409,7 @@ describe('mobile', () => {
       ).body.code,
     ).toBe(Err.AUTH_SMS_CODE_INVALID.code)
     await ds.query(
-      "INSERT INTO msg_sms_otp (mobile, scene, code, attempts, daily_seq, request_ip) VALUES (?, 'signin', '123456', 0, 1, '127.0.0.1')",
+      "INSERT INTO msg_sms_otp (mobile, scene, code, attempts, daily_seq, request_ip, tenant_id) VALUES (?, 'signin', '123456', 0, 1, '127.0.0.1', 1)",
       ['13877700005'],
     )
     expect(
@@ -495,7 +505,7 @@ describe('mobile', () => {
     const number = '13877700006'
     const other = (await signIn(app, `${PREFIX}mobileA`)).accessToken
     await ds.query(
-      "INSERT INTO msg_sms_otp (mobile, scene, code, attempts, daily_seq, request_ip) VALUES (?, 'signin', '555555', 0, 1, '127.0.0.1')",
+      "INSERT INTO msg_sms_otp (mobile, scene, code, attempts, daily_seq, request_ip, tenant_id) VALUES (?, 'signin', '555555', 0, 1, '127.0.0.1', 1)",
       [old],
     )
     await code('mobileA', '13877700007').expect(200)

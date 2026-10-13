@@ -60,7 +60,7 @@
 
 范围所需的 principal 与 `checkedPerm` 在请求 CLS 中读取；每次构造查询时应用规则，没有跨请求缓存完整查询结果。角色、权限和部门事实随会话缓存，由 Redis 权限版本失效：`PermVersion.current()` 读用户与全局两个计数，`AuthGuard` 在版本变化时重载；`bumpUser` / `bumpUsers` / `bumpUsersOfRole` / `bumpAll` 必须在事务提交后调用，防止其他请求按新版本读到旧数据。不靠进程内永久缓存维持授权。
 
-默认链 `defaultScopeRules()` 是 `[deptScopeRule(), tenantRule]`。`tenantRule` 当前是 no-op，没有租户隔离；完整改造清单见[多租户扩展说明](multi-tenancy.md)，不能仅替换这一条就宣称已经支持多租户。
+默认链 `defaultScopeRules()` 是 `[deptScopeRule()]`。租户条件不在规则链里：它由 ORM 层对租户表的每条查询与 join 自动追加，root 与 `@SkipDataScope()` 都跳不过，见[多租户设计](design-notes.md#tenancy)与[多租户指南](multi-tenancy.md)。
 
 ## 代码核对与人工观察
 

@@ -11,9 +11,11 @@ import {
   type CacheNamespaceName,
   keyPart,
   keyPattern,
+  keyPatternAllTenants,
   keyPrefix,
   redisKey,
 } from '../../../core/redis/cache-namespaces.js'
+import { clsGet } from '../../../core/context/cls.js'
 import { REDIS, type Redis } from '../../../core/redis/redis.module.js'
 import { BizError } from '../../../core/http/biz-error.js'
 import { DictService } from '../../../core/settings/dict.service.js'
@@ -34,6 +36,32 @@ const BY_PREFIX = [...NAMES].sort(
 const namespaceOf = (key: string): CacheNamespaceName | undefined =>
   BY_PREFIX.find((n) => key.startsWith(CACHE_NAMESPACES[n].prefix))
 
+// failed sign-in counters of tenant codes other than the default one (core/auth `failKeys`)
+const OTHER_TENANT_FAIL = /^(tp|tu):/
+
+/** Whether the caller is root: every tenant's keys are its to see. */
+const root = () => clsGet('principal')?.root === true
+
+/**
+ * Whether a caller other than root sees `key` of namespace `name` (see docs/design-notes.md#tenancy):
+ * not another tenant's (one only reaches the page with multi-tenancy off, when other tenants' keys can
+ * still be left over). A `tenant` namespace's keys of the caller's tenant (its `keyPattern`), sign-in
+ * counters without another tenant code's segment; the rest as they are.
+ */
+const visible = (name: CacheNamespaceName, key: string): boolean => {
+  if (CACHE_NAMESPACES[name].tenancy === 'tenant')
+    return (keyPrefix() + key).startsWith(keyPattern(name).slice(0, -1))
+  return (
+    name !== 'authFail' || !OTHER_TENANT_FAIL.test(key.slice(CACHE_NAMESPACES[name].prefix.length))
+  )
+}
+
+/** The registered namespace of a key the caller may see; undefined when none or another tenant's. */
+const visibleNamespace = (key: string): CacheNamespaceName | undefined => {
+  const name = namespaceOf(key)
+  return name && (root() || visible(name, key)) ? name : undefined
+}
+
 /**
  * The cache monitor over the key registry (core/redis/cache-namespaces.ts): only registered
  * namespaces are listed, read or cleared, keys only by SCAN under the app's prefix (`qw:`, the ACL
@@ -41,7 +69,8 @@ const namespaceOf = (key: string): CacheNamespaceName | undefined =>
  * (never `auth:*`: sessions end through SessionRevoker; never the `dict:ver:` / `param:ver:` versions, shown
  * read-only). Cached dicts and params are cleared through DictService / ParamService, which bump their
  * versions: a plain delete would let a fill that read the database before the clear store its
- * stale value after it. Keys travel without the global prefix.
+ * stale value after it. Keys travel without the global prefix. Root works on every tenant's keys;
+ * anyone else on none of another tenant's (listed, read or deleted alike: 404).
  */
 @Injectable()
 export class CacheMonitorService {
@@ -68,7 +97,7 @@ export class CacheMonitorService {
 
   /** Type, TTL and (unless masked) the value, capped; a key outside every namespace → 404. */
   async value(key: string): Promise<CacheValueVo> {
-    const name = namespaceOf(key)
+    const name = visibleNamespace(key)
     if (!name) throw new NotFoundException()
     const full = keyPrefix() + key
     const [type, ttl] = await Promise.all([this.redis.type(full), this.redis.ttl(full)])
@@ -85,7 +114,7 @@ export class CacheMonitorService {
   /** Deletes a clearable namespace's keys or one key of one; unknown → 404, not clearable → 422. */
   async clear(q: { ns?: string; key?: string }): Promise<{ deleted: number }> {
     if (q.key !== undefined) {
-      const name = namespaceOf(q.key)
+      const name = visibleNamespace(q.key)
       if (!name) throw new NotFoundException()
       this.assertClearable(name)
       return { deleted: await this.clearKey(name, q.key) }
@@ -140,16 +169,20 @@ export class CacheMonitorService {
     if (!CACHE_NAMESPACES[name].clearable) throw new BizError(Err.UNPROCESSABLE)
   }
 
-  /** The namespace's keys without the global prefix (not those of a longer registered prefix). */
+  /**
+   * The namespace's keys without the global prefix (not those of a longer registered prefix): every
+   * tenant's for root, the ones the caller may see otherwise (`visible`).
+   */
   private async *scan(name: CacheNamespaceName): AsyncGenerator<string> {
     const head = keyPrefix().length
+    const all = root()
     for await (const found of this.redis.scanIterator({
-      MATCH: keyPattern(name),
+      MATCH: all ? keyPatternAllTenants(name) : keyPattern(name),
       COUNT: SCAN_COUNT,
     }))
       for (const full of found) {
         const key = full.slice(head)
-        if (namespaceOf(key) === name) yield key
+        if (namespaceOf(key) === name && (all || visible(name, key))) yield key
       }
   }
 

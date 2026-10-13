@@ -227,7 +227,7 @@ importers:
         specifier: ^4.1.306
         version: 4.1.306
       typeorm:
-        specifier: ^1.1.1
+        specifier: 1.1.1
         version: 1.1.1(mysql2@3.24.4(@types/node@22.20.4))(redis@6.2.1)
       zod:
         specifier: 'catalog:'

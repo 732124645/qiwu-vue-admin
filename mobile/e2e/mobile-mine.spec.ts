@@ -24,16 +24,17 @@ const PNG = Buffer.from(
 // straight into the throwaway database
 const SEED = `
 import { DataSource } from 'typeorm'
+import { withTenant } from './dist/core/context/tenant.js'
 import { dataSourceOptions } from './dist/db/data-source.js'
 import { seedLimitedUser } from './dist/db/seeds/iam/iam.seed.js'
 const ds = await new DataSource(dataSourceOptions()).initialize()
 try {
-  await ds.transaction(async (q) => {
+  await withTenant(1, () => ds.transaction(async (q) => {
     for (const user of JSON.parse(process.env.USERS)) {
       const id = await seedLimitedUser(q, user.username, user.password)
       if (user.initial) await q.query('UPDATE iam_user SET password_changed_at = NULL WHERE id = ?', [id])
     }
-  })
+  }))
 } finally {
   await ds.destroy()
 }

@@ -1,12 +1,15 @@
 // The OA leave sample (see docs/design-notes.md#workflow): five demo users holding the seeded role
 // `staff` and process `leave` routing between them. Model, node and path names are seed.wf.* keys (shared
 // seed.json); user names and routing made up for this project. Runs after the workflow menus (role staff).
+// The other tenants get a process of their own instead (seedTenantLeave).
 import { randomBytes } from 'node:crypto'
 import { compile, type WfBeginNode, type WfReviewNode } from '@qiwu/shared'
 import bcrypt from 'bcryptjs'
 import type { EntityManager } from 'typeorm'
 import { demoMode } from '../../../core/config/demo-mode.js'
 import { BCRYPT_COST } from '../../../core/auth/password-hash.js'
+import { TENANT_ADMIN_ROLE } from '../../../core/auth/principal.js'
+import { tenantId } from '../../../core/context/tenant.js'
 import { addLinks, type LinkTable } from '../../../core/db/links.js'
 import { findId, findRow, insertRow } from '../../../db/seeds/upsert.js'
 import { LEAVE_FIELDS, LEAVE_MODEL } from './leave-wf.handler.js'
@@ -137,9 +140,45 @@ export async function seedLeave(q: EntityManager): Promise<string[]> {
   ]
 }
 
+/** The process of a tenant other than the default one: one review by its builtin `tenant_admin` role. */
+export const tenantLeaveTree = (adminRoleId: number): WfBeginNode => ({
+  id: 'begin',
+  type: 'begin',
+  name: 'seed.wf.node.begin',
+  next: {
+    id: 'tenant-admin',
+    type: 'review',
+    name: 'seed.wf.node.tenantAdmin',
+    assignee: { kind: 'roles', ids: [adminRoleId] },
+    sign: 'any',
+    whenNobody: 'autoPass',
+    whenInitiatorIsReviewer: 'skip',
+    onReject: 'finish',
+  },
+})
+
+/**
+ * A tenant seed (`TENANT_SEEDS`, run in the tenant; see docs/design-notes.md#tenancy): model `leave` of a
+ * tenant other than the default one, so its users can submit the leave page, reviewed by the tenant's
+ * builtin `tenant_admin` role (no demo users there). Inserted once, like the default tenant's: an existing
+ * or deleted model stays as the administrator left it.
+ */
+export async function seedTenantLeave(q: EntityManager): Promise<string[]> {
+  if (await findRow(q, 'wf_model', { model_key: LEAVE_MODEL })) return []
+  const role = await findRow(q, 'iam_role', { code: TENANT_ADMIN_ROLE, is_builtin: 1 })
+  if (!role || role.deleted) throw new Error('seedTenantLeave: the tenant_admin role is missing')
+  await insertModel(q, tenantLeaveTree(role.id))
+  return []
+}
+
 async function seedModel(q: EntityManager, ids: Record<Who, number>): Promise<void> {
   if (await findRow(q, 'wf_model', { model_key: LEAVE_MODEL })) return
-  const r = compile(leaveTree(ids), LEAVE_FIELDS)
+  await insertModel(q, leaveTree(ids))
+}
+
+/** Model `leave` with `tree` as its draft and its published version 1. */
+async function insertModel(q: EntityManager, tree: WfBeginNode): Promise<void> {
+  const r = compile(tree, LEAVE_FIELDS)
   if (!r.ok) throw new Error(`seedLeave: the leave process does not compile: ${JSON.stringify(r)}`)
   const modelId = await insertRow(q, 'wf_model', {
     model_key: LEAVE_MODEL,
@@ -160,8 +199,8 @@ async function seedModel(q: EntityManager, ids: Record<Who, number>): Promise<vo
     tree_json: r.flow.root,
     form_snapshot: { fields: LEAVE_FIELDS },
   })
-  await q.query('UPDATE wf_model SET current_version_id = ? WHERE id = ? AND deleted_at IS NULL', [
-    versionId,
-    modelId,
-  ])
+  await q.query(
+    'UPDATE wf_model SET current_version_id = ? WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL',
+    [versionId, modelId, tenantId()],
+  )
 }

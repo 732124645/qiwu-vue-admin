@@ -17,7 +17,7 @@ import {
  *
  * - `GET /` `cgTableQuery` → `Page<cgTableVo>` (browse): the imported configs
  * - `GET /importable` → `cgImportableVo[]` (import): base tables of this database not imported yet, without
- *   the framework tables `meta_%` / `test_%` / `cg_%`; `noDeletedAt` marks the ones import refuses
+ *   the framework tables `meta_%` / `test_%` / `cg_%` / `wxoa_%`; `noDeletedAt` marks the ones import refuses
  * - `POST /import` `cgImportBody` → `cgImportVo` (import): all or none; a name not importable → 422 C3001,
  *   outside the identifier whitelist → 422 C3002, a table without `deleted_at` → 422 C3010; hints
  *   name the unique keys without `alive` and a missing default parent group
@@ -129,12 +129,14 @@ export type CgImportBody = z.infer<typeof cgImportBody>
  * What an imported table misses; the config is imported anyway (a table without
  * `deleted_at` is not: 422 C3010): `alive` = unique key `key` lacks the
  * generated `alive` column (a deleted row keeps its value taken), `parent_menu` = no pickable group `key`
- * (the table's domain, or a built-in prefix's group) nor one below it matches: the page's parent is `biz`
- *.
+ * (the table's domain, or a built-in prefix's group) nor one below it matches: the page's parent is `biz`,
+ * `tenant_column` = a table that is no platform table lacks the tenant column `key` (`tenant_id`: its rows
+ * are shared by every tenant), `tenant_key` = unique key `key` of a tenant table does not start with
+ * `tenant_id` (a value is unique across all tenants).
  */
 export const cgImportHint = z.object({
   tableName: z.string(),
-  missing: z.enum(['alive', 'parent_menu']),
+  missing: z.enum(['alive', 'parent_menu', 'tenant_column', 'tenant_key']),
   key: z.string().nullable(),
 })
 export type CgImportHint = z.infer<typeof cgImportHint>

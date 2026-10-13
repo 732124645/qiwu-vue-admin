@@ -2,7 +2,9 @@ import { NotFoundException } from '@nestjs/common'
 import { Err } from '@qiwu/shared'
 import type { EntityManager } from 'typeorm'
 import { clsGet } from '../context/cls.js'
+import { allTenants, tenantId } from '../context/tenant.js'
 import { BizError } from '../http/biz-error.js'
+import { tenantTablesOf } from './tenant-filter.js'
 
 /**
  * A column of `table` holding ids of another table's rows (no foreign keys, integrity in the
@@ -14,6 +16,9 @@ import { BizError } from '../http/biz-error.js'
  * `table` (BaseCrudService / BaseTreeService create and update: `assertReferencesLive`) reads the
  * referenced row FOR SHARE: missing or deleted → 404, and a delete running meanwhile either waits for the
  * write (then sees the new reference, 409) or makes the write wait (then 404): no orphan either way.
+ * Tenants (see docs/design-notes.md#tenancy): every statement on a tenant table keeps to the current
+ * tenant; a platform row (a storage config, an OAuth client) is referenced from every tenant, so its
+ * restrict checks and cascades span them all.
  */
 export interface Reference {
   table: string
@@ -40,18 +45,37 @@ export function referencedBy(parent: string, ...refs: Reference[]): void {
 /** The registered references to rows of `parent`. */
 export const referencesTo = (parent: string): readonly Reference[] => registry.get(parent) ?? []
 
+/** Whether `table` is a tenant table of the connection (`tenant_id`, no platform table). */
+export function isTenantTableOf(q: EntityManager, table: string): boolean {
+  const tables = tenantTablesOf(q.connection)
+  if (!tables) throw new Error('tenant tables not read yet: initialize the DataSource first')
+  return tables.has(table)
+}
+
+/**
+ * ` AND tenant_id = ?` and its value, for raw SQL on `table`: the current tenant's rows of a tenant table;
+ * nothing for a platform table, nor under `allTenants`.
+ */
+export function andTenant(q: EntityManager, table: string): [sql: string, params: number[]] {
+  if (!isTenantTableOf(q, table) || clsGet('allTenants')) return ['', []]
+  return [' AND tenant_id = ?', [tenantId()]]
+}
+
 /**
  * The writing side of a reference (what the foreign key refused): row `id` of `table` must be live, else
  * 404; null / undefined = no reference. Inside the caller's transaction the row is read FOR SHARE, so a
  * delete of it waits for the write and then finds the new reference (409 `in_use`), and a write waiting
- * for a delete's lock finds the row deleted (404): no live row ever points at a deleted one.
+ * for a delete's lock finds the row deleted (404): no live row ever points at a deleted one. A row of a
+ * tenant table must be the current tenant's (another tenant's is missing, 404); a platform row is
+ * everyone's.
  */
 export async function assertLive(q: EntityManager, table: string, id: unknown): Promise<void> {
   if (id == null) return
+  const [tenant, tid] = andTenant(q, table)
   const [live] = await q.query(
-    // arch-allow: sql-concat the table identifier is a code constant; the id is bound
-    `SELECT 1 AS live FROM ${table} WHERE id = ? AND deleted_at IS NULL FOR SHARE`,
-    [id],
+    // arch-allow: sql-concat the table identifier is a code constant; the id is bound; tenant: andTenant (the current tenant of a tenant table)
+    `SELECT 1 AS live FROM ${table} WHERE id = ? AND deleted_at IS NULL${tenant} FOR SHARE`,
+    [id, ...tid],
   )
   if (!live) throw new NotFoundException()
 }
@@ -90,7 +114,8 @@ export async function assertReferencesLive(
  * Soft-deletes the live rows of `table` whose `column` is one of `ids`: `deleted_at` = now and, when
  * the table has `updated_by` (its entity maps it) and a principal is set, `updated_by` = the caller.
  * A secret does not outlive its row: the nullable `*_enc` columns the entity maps (SecretBox
- * ciphertext, the generator's `secret` widget) are set NULL in the same UPDATE.
+ * ciphertext, the generator's `secret` widget) are set NULL in the same UPDATE. A tenant table: the
+ * current tenant's rows only, every tenant's under `allTenants`.
  */
 export async function softDeleteWhere(
   q: EntityManager,
@@ -106,11 +131,12 @@ export async function softDeleteWhere(
     .filter((c) => c.isNullable && c.databaseName.endsWith('_enc'))
     .map((c) => `, ${c.databaseName} = NULL`)
     .join('')
+  const [tenant, tid] = andTenant(q, table)
   await q.query(
-    // arch-allow: sql-concat table/column identifiers are code constants (entities, referencedBy); values bound
+    // arch-allow: sql-concat table/column identifiers are code constants (entities, referencedBy); values bound; tenant: andTenant (the current tenant of a tenant table)
     `UPDATE ${table} SET deleted_at = CURRENT_TIMESTAMP(3)${audited ? ', updated_by = ?' : ''}${secrets}
-      WHERE ${column} IN (?) AND deleted_at IS NULL`,
-    audited ? [me, [...ids]] : [[...ids]],
+      WHERE ${column} IN (?) AND deleted_at IS NULL${tenant}`,
+    [...(audited ? [me, [...ids]] : [[...ids]]), ...tid],
   )
 }
 
@@ -123,6 +149,9 @@ export async function softDeleteWhere(
  * locked (FOR UPDATE) and go through their own restrict and cascade references, so a line still in use
  * refuses the whole delete (409; the caller's transaction rolls back what was already written). Other
  * cascaded tables (links, receipts) are one UPDATE.
+ * The rows of a tenant table are the current tenant's (locked in it), and so are the rows referencing
+ * them. A platform row is referenced from every tenant: its restrict checks and cascades run across all
+ * of them, else a reference in another tenant would be left pointing at a deleted row.
  */
 export async function softDeleteRows(
   q: EntityManager,
@@ -130,24 +159,32 @@ export async function softDeleteRows(
   ids: readonly number[],
 ): Promise<void> {
   if (!ids.length) return
+  if (isTenantTableOf(q, table)) return deleteRows(q, table, ids)
+  // qw:cross-tenant a platform row is referenced from every tenant
+  return allTenants(() => deleteRows(q, table, ids))
+}
+
+async function deleteRows(q: EntityManager, table: string, ids: readonly number[]): Promise<void> {
   const refs = referencesTo(table)
   for (const { table: ref, column } of refs.filter((r) => !r.cascade)) {
     const self = ref === table
+    const [tenant, tid] = andTenant(q, ref)
     const [hit] = await q.query(
-      // arch-allow: sql-concat table/column identifiers are referencedBy code constants; values bound
-      `SELECT 1 AS hit FROM ${ref} WHERE ${column} IN (?) AND deleted_at IS NULL${self ? ' AND id NOT IN (?)' : ''}
+      // arch-allow: sql-concat table/column identifiers are referencedBy code constants; values bound; tenant: andTenant (the current tenant of a tenant table)
+      `SELECT 1 AS hit FROM ${ref} WHERE ${column} IN (?) AND deleted_at IS NULL${self ? ' AND id NOT IN (?)' : ''}${tenant}
         LIMIT 1 FOR SHARE`,
-      self ? [ids, ids] : [ids],
+      [...(self ? [ids, ids] : [ids]), ...tid],
     )
     if (hit) throw new BizError(Err.IN_USE)
   }
   const cascades = refs.filter((r) => r.cascade)
   const nested = (ref: string) => ref !== table && referencesTo(ref).length > 0
   for (const { table: ref, column } of cascades.filter((r) => nested(r.table))) {
+    const [tenant, tid] = andTenant(q, ref)
     const rows: { id: number }[] = await q.query(
-      // arch-allow: sql-concat table/column identifiers are referencedBy code constants; values bound
-      `SELECT id FROM ${ref} WHERE ${column} IN (?) AND deleted_at IS NULL FOR UPDATE`,
-      [ids],
+      // arch-allow: sql-concat table/column identifiers are referencedBy code constants; values bound; tenant: andTenant (the current tenant of a tenant table)
+      `SELECT id FROM ${ref} WHERE ${column} IN (?) AND deleted_at IS NULL${tenant} FOR UPDATE`,
+      [ids, ...tid],
     )
     await softDeleteRows(
       q,

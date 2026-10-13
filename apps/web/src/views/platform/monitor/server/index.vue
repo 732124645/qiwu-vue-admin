@@ -6,6 +6,7 @@ import dayjs from 'dayjs'
 import type { MonitorServerVo } from '@qiwu/shared'
 import { monitorApi } from '@/api/platform/monitor'
 import IconButton from '@/core/components/IconButton.vue'
+import { useAuthStore } from '@/core/stores/auth'
 import { bytes, duration, loadColor, percent } from '../format'
 import GaugeCard from '../GaugeCard.vue'
 
@@ -16,6 +17,8 @@ defineOptions({ name: 'MonitorServer' })
 const POLL_MS = 5000
 
 const { t } = useI18n()
+// `/me.tenant` is there only while multi-tenancy is on (set by the environment, read only here)
+const auth = useAuthStore()
 const data = shallowRef<MonitorServerVo>()
 const updatedAt = ref<Date>()
 const loading = ref(false)
@@ -152,6 +155,9 @@ const barText = (p: number) => `${p.toFixed(1)}%`
             </el-descriptions-item>
             <el-descriptions-item :label="t('field.monitor.server.uptime')">
               {{ duration(data.process.uptime) }}
+            </el-descriptions-item>
+            <el-descriptions-item v-if="auth.tenant" :label="t('monitor.server.multiTenant')">
+              {{ t('monitor.server.multiTenantOn') }}
             </el-descriptions-item>
           </el-descriptions>
         </el-card>

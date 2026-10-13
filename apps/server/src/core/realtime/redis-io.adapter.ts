@@ -113,7 +113,7 @@ export class RedisIoAdapter
     return settled
   }
 
-  /** Room joins wait only for the shared channels and their own user/sid/type subscriptions. */
+  /** Room joins wait only for the shared channels and their own user/sid/tenant/type subscriptions. */
   async ready(rooms?: readonly string[]): Promise<void> {
     const selected = () =>
       [...this.channels].filter(

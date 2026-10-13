@@ -1,7 +1,16 @@
 import type { Locale } from '@qiwu/shared'
 
-/** Code of the super admin role; only the builtin role with it is root (see docs/design-notes.md#auth-sessions). */
+/**
+ * Code of the super admin role; only the default tenant's builtin role with it, held by a user of the
+ * default tenant, is root (see docs/design-notes.md#auth-sessions, #tenancy).
+ */
 export const ROOT_ROLE = 'root'
+
+/**
+ * Code of a tenant's administrator role; only the builtin role with it is one: perms = every menu open
+ * to tenants, not root (see docs/design-notes.md#tenancy).
+ */
+export { TENANT_ADMIN_ROLE } from '@qiwu/shared'
 
 /** Role data scope codes (see docs/design-notes.md#data-scope). */
 export type DataScope = 'all' | 'picked_depts' | 'own_dept' | 'own_dept_tree' | 'own_rows'
@@ -40,6 +49,24 @@ export interface Principal {
    * scope. The only super admin test; `perms` containing `*` is not one.
    */
   root?: boolean
+  /**
+   * Holds the builtin `tenant_admin` role of the user's tenant: the tenant's own root for the data-scope
+   * grant rules, and may manage other holders (see docs/design-notes.md#tenancy).
+   */
+  tenantAdmin?: boolean
+  /**
+   * The user's own tenant (`iam_user.tenant_id`): the operator's tenant `@PlatformOnly()` checks. AuthGuard
+   * always sets it (a session signed before it was recorded is reloaded first); absent only where a
+   * principal is built by hand.
+   */
+  tenantId?: number
+  /**
+   * The tenant a platform user entered (the session's `actingTenantId`): the data tenant of this request
+   * unless the route runs in the user's own (`@HomeTenant()`, `@PlatformOnly()`). Absent = not entered.
+   */
+  actingTenantId?: number
+  /** The session's feature set (`SessionUser.features`): absent = unrestricted. */
+  features?: string[]
   /** `iam_user.locale`: the language after `?lang` and `Accept-Language` (see docs/design-notes.md#api-envelope). */
   locale?: Locale | null
 }

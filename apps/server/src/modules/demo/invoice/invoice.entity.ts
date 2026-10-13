@@ -2,6 +2,7 @@
 import { Column, Entity } from 'typeorm'
 import { BaseEntity, decimalNumber } from '../../../core/db/base.entity.js'
 import { referencedBy } from '../../../core/db/references.js'
+import { TenantColumn } from '../../../core/db/tenant-filter.js'
 
 // other tables' rows holding these ids, checked on delete (no foreign keys: core/db/references.ts)
 // 发票明细（生成器示例）
@@ -29,4 +30,7 @@ export class Invoice extends BaseEntity {
   /** 状态（字典 demo.invoice_state） */
   @Column({ length: 16, default: 'draft' })
   state: string
+
+  @TenantColumn()
+  tenantId: number
 }

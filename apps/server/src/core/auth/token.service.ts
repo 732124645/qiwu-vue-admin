@@ -1,6 +1,8 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { Inject, Injectable } from '@nestjs/common'
 import {
+  DEFAULT_TENANT_ID,
+  Err,
   FIRST_PARTY_CLIENTS,
   type FirstPartyClient,
   type Locale,
@@ -8,6 +10,7 @@ import {
 } from '@qiwu/shared'
 import { AppConfigService } from '../config/config.module.js'
 import { deriveKey, open, seal, type Sealed } from '../crypto/secret-box.js'
+import { BizError } from '../http/biz-error.js'
 import { redisKey } from '../redis/cache-namespaces.js'
 import { REDIS, type Redis } from '../redis/redis.module.js'
 import type { PrincipalRole } from './principal.js'
@@ -49,6 +52,20 @@ export interface SessionUser {
   perms: string[]
   /** holds the builtin root role (Principal.root) */
   root?: boolean
+  /** holds the builtin `tenant_admin` role (Principal.tenantAdmin) */
+  tenantAdmin?: boolean
+  /**
+   * the user's own tenant (`iam_user.tenant_id`, Principal.tenantId); absent on sessions signed before it
+   * was recorded: those are reloaded before use (SessionCurrent), never taken for the default tenant
+   */
+  tenantId?: number
+  /** the end of the user's tenant (epoch ms) when it has one; the session ends with it */
+  tenantExpAt?: number
+  /**
+   * the route names of the top-level menu groups the user's tenant package opens (`@RequireFeature`,
+   * `/me.features`); absent = unrestricted (see docs/design-notes.md#tenancy)
+   */
+  features?: string[]
   locale: Locale | null
   /** `auth:permver:{userId}` + `auth:permver:all` when loaded (PermVersion) */
   permVer: string
@@ -77,6 +94,14 @@ export interface Session extends SessionUser {
   absoluteExpAt: number
   /** third-party sessions only; absent = first-party (ACCESS_TTL_SEC / REFRESH_TTL_SEC, sliding) */
   ttl?: SessionTtl
+  /**
+   * set while a platform user works inside another tenant (see docs/design-notes.md#tenancy): that tenant
+   * is the data tenant of every route but those running in the user's own (`@HomeTenant()`,
+   * `@PlatformOnly()`); the user, perms and roles stay the user's own
+   */
+  actingTenantId?: number
+  /** when the entered tenant is left at the latest */
+  actingUntil?: number
 }
 
 /** A live session as the online list shows it (TokenService.online). */
@@ -116,6 +141,11 @@ export interface CodeEntry {
   challenge: string
   /** the user's credver when the code was issued: a revocation since then refuses the exchange */
   credVer: string
+  /**
+   * the user's own tenant (the approving session's): the exchange runs in it and refuses a user of
+   * another; absent on codes issued before it was recorded, which belong to the default tenant
+   */
+  tenantId?: number
   /** epoch ms */
   exp: number
 }
@@ -142,8 +172,8 @@ export interface IssuedTokens {
 
 export type RefreshOutcome =
   | { kind: 'rotated'; tokens: IssuedTokens; session: Session }
-  /** unknown, expired or revoked token */
-  | { kind: 'rejected' }
+  /** unknown, expired or revoked token; `tenantUnavailable`: its session just ended with its tenant */
+  | { kind: 'rejected'; tenantUnavailable?: true }
   /** a rotated token replayed after the grace window or from another UA: the whole session was revoked */
   | { kind: 'reused'; session: Session | null }
 
@@ -162,6 +192,31 @@ interface GraceEntry extends Sealed {
   until: number
 }
 
+/** Revocation reason (and `session:kicked` reason) of a session whose tenant is no longer available. */
+export const TENANT_UNAVAILABLE = 'tenant_unavailable'
+
+/**
+ * A session ended because its tenant is disabled, expired or multi-tenancy is off for it: answered 401
+ * `A1042` (see docs/design-notes.md#tenancy).
+ */
+export class TenantUnavailable extends BizError {
+  constructor() {
+    super(Err.AUTH_TENANT_INACTIVE)
+  }
+}
+
+/** What a refresh needs besides the token (AuthService). */
+export interface RefreshOptions {
+  /**
+   * the tenant the request's host is bound to (null: none), asked only once a live session is found:
+   * a session of another tenant is rejected untouched
+   */
+  expectTenant?: () => Promise<number | null>
+  /** reloads the session before it rotates (SessionCurrent.current); null = ended */
+  reload?: (session: Session) => Promise<Session | null>
+}
+
+const REJECTED = { kind: 'rejected' } as const
 const newToken = () => randomBytes(32).toString('base64url')
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex')
 const secs = (ms: number) => Math.floor(ms / 1000)
@@ -255,6 +310,9 @@ export class TokenService {
   issue(user: SessionUser, opts: IssueOptions & { credVer: string }): Promise<Issued | null>
   issue(user: SessionUser, opts: IssueOptions): Promise<Issued>
   async issue(user: SessionUser, opts: IssueOptions): Promise<Issued | null> {
+    // every user session names its tenant: a sign-in path that forgets it fails here, never defaults
+    if (user.userId !== null && !Number.isSafeInteger(user.tenantId))
+      throw new Error('TokenService.issue: a user session needs the tenant of its user')
     const now = Date.now()
     const session: Session = {
       ...user,
@@ -266,13 +324,16 @@ export class TokenService {
       ip: opts.ip,
       ua: opts.ua,
       loginAt: now,
-      absoluteExpAt:
+      // never past the tenant's end
+      absoluteExpAt: Math.min(
         now +
-        (opts.ttl?.refreshMs ??
-          (opts.keepSignedIn ? ABSOLUTE_MS.keepSignedIn : ABSOLUTE_MS.session)),
+          (opts.ttl?.refreshMs ??
+            (opts.keepSignedIn ? ABSOLUTE_MS.keepSignedIn : ABSOLUTE_MS.session)),
+        user.tenantExpAt ?? Infinity,
+      ),
       ...(opts.ttl && { ttl: opts.ttl }),
     }
-    const life = session.absoluteExpAt - now
+    const life = Math.max(session.absoluteExpAt - now, 1)
     const t = this.mint(session, now)
     const issued = await this.redis.eval(ISSUE, {
       keys: [
@@ -313,9 +374,10 @@ export class TokenService {
     const atKey = redisKey('authAccess', sha256(accessToken))
     const [raw, ttl] = await this.redis.multi().get(atKey).pTTL(atKey).exec()
     if (typeof raw !== 'string') return null
-    const session = await this.load((JSON.parse(raw) as AccessEntry).sid)
+    const session = await this.live((JSON.parse(raw) as AccessEntry).sid)
+    if (session === TENANT_UNAVAILABLE) throw new TenantUnavailable()
     const now = Date.now()
-    if (!session || now >= session.absoluteExpAt) return null
+    if (!session) return null
     await Promise.all([
       this.redis.zAdd(redisKey('authSeen'), { score: now, value: session.sid }),
       !session.ttl &&
@@ -345,7 +407,7 @@ export class TokenService {
       const raw = raws[i]
       if (!raw) return []
       const session = JSON.parse(raw) as Session
-      if (now >= session.absoluteExpAt) return []
+      if (now >= session.absoluteExpAt || this.tenantEnded(session, now)) return []
       const last = seen[i]
       return [
         { ...session, expiresAt: Number(score), lastSeenAt: last == null ? null : Number(last) },
@@ -365,9 +427,8 @@ export class TokenService {
       const [raw, ttl] = await this.redis.multi().get(key).pTTL(key).exec()
       if (typeof raw !== 'string') continue
       const session = await this.load((JSON.parse(raw) as AccessEntry).sid)
-      const now = Date.now()
-      if (!session || now >= session.absoluteExpAt) return null
-      return { session, kind, expiresAt: Math.min(now + Number(ttl), session.absoluteExpAt) }
+      if (!session) return null
+      return { session, kind, expiresAt: Math.min(Date.now() + Number(ttl), session.absoluteExpAt) }
     }
     return null
   }
@@ -389,10 +450,43 @@ export class TokenService {
     return raw ? (JSON.parse(raw) as CodeEntry) : null
   }
 
-  /** Current session JSON by id (null once expired or revoked). */
+  /**
+   * Current session JSON by id: null once past `absoluteExpAt`, revoked, or ended with its tenant (`live`).
+   */
   async load(sid: string): Promise<Session | null> {
+    const session = await this.live(sid)
+    return session === TENANT_UNAVAILABLE ? null : session
+  }
+
+  /**
+   * The session, unless it ended: past `absoluteExpAt` (null) or with its tenant (TENANT_UNAVAILABLE,
+   * revoked here; see docs/design-notes.md#tenancy). Every use of a session passes here: requests,
+   * refresh, introspection, sockets. Only what the session itself holds is checked (the switch and the
+   * tenant end it was loaded with); the tenant row is read when the user is (SessionCurrent).
+   */
+  async live(sid: string): Promise<Session | null | typeof TENANT_UNAVAILABLE> {
     const raw = await this.redis.get(redisKey('authSession', sid))
-    return raw ? (JSON.parse(raw) as Session) : null
+    if (!raw) return null
+    const session = JSON.parse(raw) as Session
+    const now = Date.now()
+    if (this.tenantEnded(session, now)) {
+      await this.revoker.revokeSession(sid, TENANT_UNAVAILABLE)
+      return TENANT_UNAVAILABLE
+    }
+    return now >= session.absoluteExpAt ? null : session
+  }
+
+  /**
+   * Multi-tenancy is off and the session is of another tenant than the default one, or its tenant's end
+   * passed. A session that does not name its tenant is not judged: it is reloaded first.
+   */
+  private tenantEnded(s: Session, now: number): boolean {
+    return (
+      (s.tenantId !== undefined &&
+        s.tenantId !== DEFAULT_TENANT_ID &&
+        !this.cfg.get('APP_MULTI_TENANT')) ||
+      (s.tenantExpAt !== undefined && now >= s.tenantExpAt)
+    )
   }
 
   /** The session a live refresh token belongs to; null when unknown, rotated away or expired. */
@@ -416,12 +510,14 @@ export class TokenService {
    * the same session and UA, gets the same new pair again (parallel tabs); replayed later or from
    * another UA it revokes the whole session (`reused`: the caller logs `refresh_reuse`). A token of
    * a session of another client than `clientId` (the channel it came in: cookie = console, body =
-   * mobile) is `rejected` untouched: neither rotated nor revoked.
+   * mobile), or of another tenant than `opts.expectTenant`, is `rejected` untouched: neither rotated nor
+   * revoked. The session is reloaded first (`opts.reload`), so it rotates with its current facts.
    */
   async refresh(
     refreshToken: string,
     ua: string,
     clientId: string = CONSOLE_CLIENT,
+    opts: RefreshOptions = {},
   ): Promise<RefreshOutcome> {
     const hash = sha256(refreshToken)
     const rtKey = redisKey('authRefresh', hash)
@@ -429,10 +525,9 @@ export class TokenService {
     const raw = await this.redis.get(rtKey)
     if (raw) {
       const entry = JSON.parse(raw) as RefreshEntry
-      const session = await this.load(entry.sid)
+      const session = await this.refreshable(entry.sid, clientId, opts)
+      if ('kind' in session) return session
       const now = Date.now()
-      if (!session || now >= session.absoluteExpAt || session.clientId !== clientId)
-        return { kind: 'rejected' }
       const t = this.mint(session, now)
       const grace = this.seal(refreshToken, session.sid, ua, t.tokens, now + REFRESH_GRACE_MS)
       const rotated = await this.redis.eval(ROTATE, {
@@ -462,15 +557,35 @@ export class TokenService {
       // lost the race to a parallel refresh of the same token: its grace entry answers below
     }
     const graceRaw = await this.redis.get(graceKeyName)
-    if (!graceRaw) return { kind: 'rejected' }
+    if (!graceRaw) return REJECTED
     const grace = JSON.parse(graceRaw) as GraceEntry
-    const session = await this.load(grace.sid)
-    if (!session || Date.now() >= session.absoluteExpAt || session.clientId !== clientId)
-      return { kind: 'rejected' }
+    const session = await this.refreshable(grace.sid, clientId, opts)
+    if ('kind' in session) return session
     const tokens = await this.unseal(refreshToken, ua, grace)
     if (tokens) return { kind: 'rotated', tokens, session }
     await this.revoker.revokeSession(grace.sid, 'refresh_reuse')
     return { kind: 'reused', session }
+  }
+
+  /** The session a refresh may rotate (see `refresh`), else what the refresh answers. */
+  private async refreshable(
+    sid: string,
+    clientId: string,
+    opts: RefreshOptions,
+  ): Promise<Session | Extract<RefreshOutcome, { kind: 'rejected' }>> {
+    const live = await this.live(sid)
+    if (live === TENANT_UNAVAILABLE) return { kind: 'rejected', tenantUnavailable: true }
+    if (!live || live.clientId !== clientId) return REJECTED
+    let session: Session | null = live
+    try {
+      if (opts.reload) session = await opts.reload(live)
+    } catch (e) {
+      if (e instanceof TenantUnavailable) return { kind: 'rejected', tenantUnavailable: true }
+      throw e
+    }
+    if (!session) return REJECTED
+    const expected = opts.expectTenant ? await opts.expectTenant() : null
+    return expected !== null && session.tenantId !== expected ? REJECTED : session
   }
 
   /**

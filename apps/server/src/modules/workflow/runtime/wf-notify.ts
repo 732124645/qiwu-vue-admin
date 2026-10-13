@@ -11,6 +11,7 @@ import {
   type QueryRunner,
   type TransactionCommitEvent,
 } from 'typeorm'
+import { tenantId } from '../../../core/context/tenant.js'
 import { Notifier, type NotifyParams } from '../../../core/notify/notify.js'
 import { RealtimeService } from '../../../core/realtime/realtime.service.js'
 import { timeoutKey, type WfTimeoutOutcome } from '../engine/timeout.js'
@@ -153,8 +154,8 @@ export class WfNotify implements EntitySubscriberInterface, OnModuleInit {
   ): Promise<void> {
     const [row] = await this.txHost.tx.query<{ name: string }[]>(
       // qw:include-deleted a deleted assignee keeps their name on the notice
-      'SELECT display_name AS name FROM iam_user WHERE id = ?',
-      [task.assigneeId],
+      'SELECT display_name AS name FROM iam_user WHERE id = ? AND tenant_id = ?',
+      [task.assigneeId, tenantId()],
     )
     await this.notifier.send({
       template: 'wf.task.timeout',
@@ -181,11 +182,13 @@ export class WfNotify implements EntitySubscriberInterface, OnModuleInit {
 
   /** what every template names: the model, the initiator, the instance and when it started */
   private async params(inst: WfInstanceRow): Promise<NotifyParams> {
+    const tid = tenantId()
     const [row] = await this.txHost.tx.query<{ model: string | null; initiator: string | null }[]>(
       // qw:include-deleted a model or initiator deleted since still names its running instances
-      `SELECT (SELECT m.name FROM wf_version v JOIN wf_model m ON m.id = v.model_id WHERE v.id = ?) AS model,
-              (SELECT u.display_name FROM iam_user u WHERE u.id = ?) AS initiator`,
-      [inst.versionId, inst.initiatorId],
+      `SELECT (SELECT m.name FROM wf_version v JOIN wf_model m ON m.id = v.model_id AND m.tenant_id = ?
+                WHERE v.id = ? AND v.tenant_id = ?) AS model,
+              (SELECT u.display_name FROM iam_user u WHERE u.id = ? AND u.tenant_id = ?) AS initiator`,
+      [tid, inst.versionId, tid, inst.initiatorId, tid],
     )
     return {
       model: { i18n: row?.model ?? inst.modelKey },

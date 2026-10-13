@@ -33,6 +33,7 @@ import { z } from 'zod'
 import { ActionLog, SkipActionLog } from '../../../../core/audit/action-log.js'
 import { clientOf } from '../../../../core/auth/auth.controller.js'
 import { OAuthScope, Public } from '../../../../core/auth/decorators.js'
+import { HomeTenant } from '../../../../core/auth/tenant-scope.js'
 import { clsGet } from '../../../../core/context/cls.js'
 import { RateLimit } from '../../../../core/guard/rate-limit.decorator.js'
 import { ApiEnvelope } from '../../../../core/http/api-envelope.decorator.js'
@@ -96,7 +97,9 @@ const RfcErrors = () =>
 export class ProviderController {
   constructor(private readonly provider: OAuthProvider) {}
 
+  // the user's own consent: stored and coded in the user's own tenant
   @Get('authorize')
+  @HomeTenant()
   @RateLimit(120, 60_000)
   @ApiOperation({
     summary:
@@ -108,6 +111,7 @@ export class ProviderController {
   }
 
   @Post('authorize')
+  @HomeTenant()
   @RateLimit(120, 60_000)
   @HttpCode(200)
   @ActionLog({ domain: 'oauth.consent', verb: 'grant', bizId: (req) => req.query.client_id })

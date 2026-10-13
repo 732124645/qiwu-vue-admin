@@ -9,6 +9,8 @@ import {
   type MePayload,
   type RefreshBody,
   refreshBody,
+  type TenancyVo,
+  tenancyVo,
   type TokenPayload,
   type VerifyPasswordBody,
   verifyPasswordBody,
@@ -27,6 +29,7 @@ import { plainIp } from './auth-params.js'
 import { AuthService, type Client } from './auth.service.js'
 import { Public } from './decorators.js'
 import type { Principal } from './principal.js'
+import { HomeTenant } from './tenant-scope.js'
 import { CONSOLE_CLIENT, type IssuedTokens, MOBILE_CLIENT } from './token.service.js'
 
 /** HttpOnly refresh-token cookie, sent only to /api/auth/* (see docs/design-notes.md#auth-sessions). */
@@ -43,6 +46,7 @@ export const tokenPayload = z.object({
 export const clientOf = (req: Request): Client => ({
   ip: plainIp(req.ip),
   ua: (req.get('user-agent') ?? '').slice(0, 512),
+  host: req.hostname,
 })
 
 const cookieOptions = (cfg: AppConfigService): CookieOptions => ({
@@ -112,7 +116,7 @@ export class AuthController {
   @HttpCode(200)
   @ApiOperation({
     summary:
-      'Password sign-in; captchaTicket (scene signin) required by captcha.mode or cross-IP failures (403 A1021); sets the refresh cookie (clientId mobile: returns the refresh token instead)',
+      'Password sign-in; captchaTicket (scene signin) required by captcha.mode or cross-IP failures (403 A1021); sets the refresh cookie (clientId mobile: returns the refresh token instead). Multi-tenancy on: the tenant is the host’s, else tenantCode (blank = the default tenant); a tenantCode contradicting the host’s tenant → 400 A1041',
   })
   @ApiEnvelope(tokenPayload)
   async login(
@@ -125,6 +129,18 @@ export class AuthController {
   }
 
   @Public()
+  @RateLimit(60, 60_000)
+  @Get('tenancy')
+  @ApiOperation({
+    summary:
+      'Sign-in pages: whether multi-tenancy is on and, on a host bound to a tenant, its code and brand (the tenant code field shows when on and no tenant is returned)',
+  })
+  @ApiEnvelope(tenancyVo)
+  tenancy(@Req() req: Request): Promise<TenancyVo> {
+    return this.auth.tenancy(req.hostname)
+  }
+
+  @Public()
   // routine token rotation; a replayed token is in the sign-in log (`refresh_reuse`)
   @SkipActionLog()
   @RateLimit(60, 60_000)
@@ -132,7 +148,7 @@ export class AuthController {
   @HttpCode(200)
   @ApiOperation({
     summary:
-      'Rotate the refresh cookie for a new access token (checks Origin; no bearer needed); mobile sessions send body.refreshToken instead',
+      'Rotate the refresh cookie for a new access token (checks Origin; no bearer needed); mobile sessions send body.refreshToken instead; 401 A1042 when the session ended with its tenant',
   })
   @ApiEnvelope(tokenPayload)
   async refresh(
@@ -149,7 +165,12 @@ export class AuthController {
     const out = rt ? await this.auth.refresh(rt, clientOf(req), clientId) : null
     if (out?.kind !== 'rotated') {
       if (!viaBody) res.clearCookie(REFRESH_COOKIE, cookieOptions(this.cfg))
-      throw new BizError(Err.AUTH_REFRESH_REJECTED)
+      // the sign-in page tells why when the session ended with its tenant
+      throw new BizError(
+        out?.kind === 'rejected' && out.tenantUnavailable
+          ? Err.AUTH_TENANT_INACTIVE
+          : Err.AUTH_REFRESH_REJECTED,
+      )
     }
     // the cookie kind chosen at sign-in survives every rotation
     return answerWithTokens(res, this.cfg, out.tokens, out.session.keepSignedIn, clientId)
@@ -158,6 +179,7 @@ export class AuthController {
   // the sign-in log records it (`signout`)
   @SkipActionLog()
   @Post('logout')
+  @HomeTenant()
   @HttpCode(200)
   @ApiOperation({ summary: 'End the current session and clear the refresh cookie' })
   @ApiEnvelope()
@@ -170,6 +192,7 @@ export class AuthController {
   // a lock-screen check changes nothing; the lockout it can cause is in the sign-in log (`locked`)
   @SkipActionLog()
   @Post('verify-password')
+  @HomeTenant()
   @HttpCode(200)
   @ApiOperation({
     summary: 'Lock screen: check the password; too many failures end the session (401)',
@@ -184,15 +207,17 @@ export class AuthController {
   }
 
   @Get('me')
+  @HomeTenant()
   @ApiOperation({
     summary:
-      'Current user: profile (dept and role names), role codes, perms, password flags, password policy',
+      'Current user: profile (dept and role names), role codes, perms, password flags, password policy; multi-tenancy on: the session’s tenant (decided by the session, never by a request header) and the top-level menu groups it may use',
   })
   me(): Promise<MePayload> {
     return this.auth.me(principal())
   }
 
   @Get('menus')
+  @HomeTenant()
   @ApiOperation({
     summary: 'Granted group/page tree with every ancestor; actions are in /me perms',
   })

@@ -3,7 +3,8 @@
     "root": "Super administrator",
     "demo": "Demo role",
     "member": "Registered member",
-    "staff": "Staff"
+    "staff": "Staff",
+    "tenantAdmin": "Tenant administrator"
   },
   "dept": {
     "hq": "Headquarters",
@@ -58,7 +59,8 @@
       "hr": "HR approval",
       "director": "Director approval",
       "twoLevels": "Two levels of supervisors in turn",
-      "byAmount": "By claimed amount"
+      "byAmount": "By claimed amount",
+      "tenantAdmin": "Tenant administrator approval"
     },
     "path": {
       "over5": "Over 5 days",
@@ -97,5 +99,14 @@
   },
   "oauth": {
     "console": "Admin console"
+  },
+  "tenant": {
+    "default": "Default tenant",
+    "yunshan": "Yunshan Technology (sample)",
+    "qinghe": "Qinghe Trading (sample)"
+  },
+  "tenantPackage": {
+    "full": "Sample package: everything",
+    "noWorkflow": "Sample package: no approvals"
   }
 }

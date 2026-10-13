@@ -191,7 +191,7 @@ curl -sS -H "Authorization: Bearer $AT" "$BASE/api/oauth2/userinfo"
 | 字段        | 说明                                                                                                                                        |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | `sub`       | 用户 ID（字符串），在本系统内不变，用它关联第三方的账号                                                                                     |
-| `username`  | 登录名（管理员可以修改，关联账号请用 `sub`）                                                                                                |
+| `username`  | 登录名（管理员可以修改；开启多租户后不同租户可以有同名用户，username 不能用来识别账号，只有 `sub` 全局唯一，关联账号请用 `sub`）            |
 | `name`      | 显示名                                                                                                                                      |
 | `avatarUrl` | 没有头像时为 `null`。文件存在本地存储时是**本站相对路径**（`/files/…`），要拼上后台的源（`$BASE`）才能访问；用 S3 存储时是完整的 https 地址 |
 | `locale`    | 用户选的界面语言（`zh-CN` / `en-US`），没选过为 `null`                                                                                      |
@@ -266,6 +266,7 @@ curl -sS -u "$CLIENT_ID:$CLIENT_SECRET" --data-urlencode grant_type=client_crede
 - `scope` 可选，省略时取客户端登记的全部 scope；超出登记范围 → `invalid_scope`。客户端没有 `client_credentials` 授权 → `unauthorized_client`。
 - 令牌不代表任何用户：调 userinfo → 403 `B4003`，调其他需要登录的接口 → 401。v1 里还没有接受机器令牌的业务接口；可以对它做 introspect（结果没有 `sub`）和 revoke。
 - 这种会话也出现在「系统监控 → 在线用户」里，但只有 root 能看到和强退。
+- 只用于平台自身的系统集成：开启多租户（见 [multi-tenancy.md](multi-tenancy.md)）后，机器令牌的会话属于默认租户（平台），不代表任何其他租户，也没有指定租户的参数。要接入某个租户的数据，走授权码流程，由该租户的用户登录并同意。
 
 ## 4. 错误
 
@@ -338,6 +339,7 @@ curl -sS -u "$CLIENT_ID:$CLIENT_SECRET" --data-urlencode grant_type=client_crede
 - `/api/oauth2/authorize` 只接受后台自己的登录会话，第三方令牌一律 401，所以客户端没法替用户点"同意"。
 - `console`、`mobile` 是本系统自己的客户端标识：就算表里有这样命名的第三方行，`/token` 也当它不存在（`invalid_client`）。
 - introspect 对后台会话的令牌也只回答 `{"active": false}`。
+- 开启多租户后，授权码记下批准它的用户本人的租户，兑换与刷新都在该租户里进行，用户不属于该租户时按无效授权码处理。同意页在用户自己的租户（绑定的域名或主域名加租户编码）登录后打开。
 
 第三方会话出现在「系统监控 → 在线用户」里（"客户端"一列为它的 `client_id`，可按客户端筛选），强退后令牌立即失效。`client_credentials` 的会话只有 root 能看到和强退；其他有在线用户权限的操作员只能看到用户授权的会话。
 
@@ -372,7 +374,7 @@ curl -sS -u "$CLIENT_ID:$CLIENT_SECRET" --data-urlencode grant_type=client_crede
 4. 拿到授权码马上兑换（300 秒内，只能用一次；兑换失败的码也会作废）。
 5. 刷新令牌加密存在服务端；刷新后立刻换用新的一对令牌；后端发请求用固定的 User-Agent。
 6. 刷新返回 `invalid_grant` 时，让用户重新走 `/sso`（已记住的授权会自动通过）。
-7. 用 `sub` 关联账号，不要用 `username`；`avatarUrl` 是相对路径时拼上后台的源。
+7. 用 `sub` 关联账号，不要用 `username`（开启多租户后不同租户可以有同名用户，只有 `sub` 全局唯一）；`avatarUrl` 是相对路径时拼上后台的源。
 8. 用户在第三方退出登录或解除绑定时，调用 revoke。
 9. 按 `error` 处理错误，不要解析 `error_description`；遇到 429 稍后重试。
 10. 使用非演示安装走查；核对客户端停用/删除、同标识重新注册、撤销后的授权码及第三方令牌隔离，不能只测试成功换码。

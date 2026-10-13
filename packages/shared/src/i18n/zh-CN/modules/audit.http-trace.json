@@ -19,7 +19,8 @@
         "startedAt": "请求时间",
         "startedAtFrom": "请求时间起",
         "startedAtTo": "请求时间止",
-        "costMs": "耗时"
+        "costMs": "耗时",
+        "tenantId": "租户"
       }
     }
   }

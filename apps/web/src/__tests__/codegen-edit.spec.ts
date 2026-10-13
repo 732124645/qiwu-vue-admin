@@ -159,6 +159,7 @@ function backend(d = detail(), extra: Record<string, Route> = {}) {
           col(2, 'shelf_id', { columnType: 'bigint unsigned' }),
           col(3, 'title'),
           col(4, 'created_by', { columnType: 'bigint unsigned' }),
+          col(5, 'tenant_id', { columnType: 'bigint unsigned' }),
         ],
       }),
     ),
@@ -534,8 +535,8 @@ describe('codegen edit', () => {
     refSelect('Referencing table 2').vm.$emit('update:modelValue', 'biz_shelf_slot')
     await flushPromises()
     expect(input('[aria-label="Reference label 2"]').element.value).toBe('Slots')
-    // a config's table: its id columns (integer, not the key nor an audit one) once the column picker
-    // opens; the label follows the table's comment
+    // a config's table: its id columns (integer, not the key, the tenant nor an audit one) once the
+    // column picker opens; the label follows the table's comment
     refSelect('Referencing table 2').vm.$emit('update:modelValue', 'demo_plain')
     refSelect('Referencing column 2').vm.$emit('visible-change', true)
     await flushPromises()

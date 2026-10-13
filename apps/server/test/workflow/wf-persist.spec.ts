@@ -38,6 +38,7 @@ import {
   T0,
   users,
 } from '../fixtures/wf/flow.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 const CUSTOM = 'persist.custom'
 
@@ -75,36 +76,38 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 async function publish(steps: WfStep[], key = `persist.m${++seq}`): Promise<number> {
   const tree = { id: 'begin', type: 'begin', name: 'Begin', next: chain(...steps) }
   const m = await ds.query(
-    'INSERT INTO wf_model (model_key, name, form_kind, manager_user_ids) VALUES (?, ?, ?, ?)',
+    'INSERT INTO wf_model (tenant_id, model_key, name, form_kind, manager_user_ids) VALUES (1, ?, ?, ?, ?)',
     [key, key, key === CUSTOM ? 'custom' : 'dynamic', JSON.stringify([7])],
   )
   const v = await ds.query(
-    'INSERT INTO wf_version (model_id, model_key, version, tree_json, form_snapshot) VALUES (?, ?, 1, ?, ?)',
+    'INSERT INTO wf_version (tenant_id, model_id, model_key, version, tree_json, form_snapshot) VALUES (1, ?, ?, 1, ?, ?)',
     [m.insertId, key, JSON.stringify(tree), JSON.stringify({ fields })],
   )
   return v.insertId
 }
 
 const start = (versionId: number, businessKey: string | null = null, now = T0) =>
-  cls.run(() =>
-    store.start(
-      {
-        versionId,
-        initiatorId: 4,
-        initiatorDeptId: 3,
-        businessKey,
-        formValues: { amount: 1 },
-        initiatorPicks: { x: [2] },
-        initiatorCtx: { deptTreePath: '/1/2/3/', roleIds: [5] },
-      },
-      now,
+  inTenant1(() =>
+    cls.run(() =>
+      store.start(
+        {
+          versionId,
+          initiatorId: 4,
+          initiatorDeptId: 3,
+          businessKey,
+          formValues: { amount: 1 },
+          initiatorPicks: { x: [2] },
+          initiatorCtx: { deptTreePath: '/1/2/3/', roleIds: [5] },
+        },
+        now,
+      ),
     ),
   )
 const act = (
   instanceId: number,
   fn: (run: WfRun) => WfChangeSet | Promise<WfChangeSet>,
   now = T0,
-) => cls.run({ ifNested: 'override' }, () => store.act(instanceId, fn, now)) // own transaction, nested too
+) => cls.run({ ifNested: 'override' }, () => inTenant1(() => store.act(instanceId, fn, now))) // own transaction, nested too
 /** the open task of `userId` in `run` */
 const taskOf = (run: WfRun, userId: number) =>
   run.tasks.find((t) => t.assigneeId === userId && t.state === 'pending')!
@@ -112,13 +115,16 @@ const taskOf = (run: WfRun, userId: number) =>
 const approveBy = (instanceId: number, userId: number, now = T0) =>
   act(instanceId, (r) => approve(r.ctx, r.inst, r.tasks, taskOf(r, userId), { comment: null }), now)
 
-const instanceRow = (id: number) => ds.getRepository(WfInstanceRow).findOneByOrFail({ id })
+const instanceRow = (id: number) =>
+  inTenant1(() => ds.getRepository(WfInstanceRow).findOneByOrFail({ id }))
 const tasksOf = (instanceId: number) =>
-  ds.getRepository(WfTaskRow).find({ where: { instanceId }, order: { id: 'ASC' } })
+  inTenant1(() => ds.getRepository(WfTaskRow).find({ where: { instanceId }, order: { id: 'ASC' } }))
 const ccsOf = (instanceId: number) =>
-  ds.getRepository(WfCcRow).find({ where: { instanceId }, order: { id: 'ASC' } })
+  inTenant1(() => ds.getRepository(WfCcRow).find({ where: { instanceId }, order: { id: 'ASC' } }))
 const eventsOf = (instanceId: number) =>
-  ds.getRepository(WfEventRow).find({ where: { instanceId }, order: { id: 'ASC' } })
+  inTenant1(() =>
+    ds.getRepository(WfEventRow).find({ where: { instanceId }, order: { id: 'ASC' } }),
+  )
 /** every wf row of an instance, to show an action left nothing behind */
 const snapshot = async (instanceId: number) => ({
   inst: await instanceRow(instanceId),
@@ -416,12 +422,14 @@ describe('acting in a transaction that read before (its snapshot predates the in
     fn: Parameters<typeof act>[1],
   ) => {
     const host = moduleRef.get<TransactionHost<TransactionalAdapterTypeOrm>>(TransactionHost)
-    return cls.run(() =>
-      host.withTransaction(async () => {
-        await host.tx.query('SELECT id FROM wf_task WHERE instance_id = ?', [id])
-        await meanwhile()
-        return store.act(id, fn, T0)
-      }),
+    return inTenant1(async () =>
+      cls.run(() =>
+        host.withTransaction(async () => {
+          await host.tx.query('SELECT id FROM wf_task WHERE instance_id = ?', [id])
+          await meanwhile()
+          return store.act(id, fn, T0)
+        }),
+      ),
     )
   }
 
@@ -495,8 +503,8 @@ describe('WfBusinessHandler', () => {
 
   beforeEach(async () => {
     const r = await ds.query(
-      `INSERT INTO biz_leave_request (user_id, dept_id, leave_kind, start_at, end_at, days, reason)
-       VALUES (4, 3, 'annual', ?, ?, 1, 'wf-persist')`,
+      `INSERT INTO biz_leave_request (tenant_id, user_id, dept_id, leave_kind, start_at, end_at, days, reason)
+       VALUES (1, 4, 3, 'annual', ?, ?, 1, 'wf-persist')`,
       [T0, T0],
     )
     leaveId = r.insertId

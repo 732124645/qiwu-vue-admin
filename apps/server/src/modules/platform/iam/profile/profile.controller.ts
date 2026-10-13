@@ -36,6 +36,7 @@ import { z } from 'zod'
 import { ActionLog, SkipActionLog } from '../../../../core/audit/action-log.js'
 import { plainIp } from '../../../../core/auth/auth-params.js'
 import { clientOf } from '../../../../core/auth/auth.controller.js'
+import { HomeTenant } from '../../../../core/auth/tenant-scope.js'
 import { clsGet } from '../../../../core/context/cls.js'
 import { Idempotent } from '../../../../core/guard/idempotent.js'
 import { RateLimit } from '../../../../core/guard/rate-limit.decorator.js'
@@ -56,6 +57,7 @@ export function myId(): number {
 
 @ApiTags('iam')
 @Controller('iam/profile')
+@HomeTenant()
 export class ProfileController {
   constructor(
     private readonly profile: ProfileService,

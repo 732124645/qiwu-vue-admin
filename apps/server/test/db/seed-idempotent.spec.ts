@@ -43,6 +43,7 @@ import {
   leavePerms,
   LOCALES,
   loginSecurityParams,
+  newTenantCode,
   mailAccountPerms,
   mailRecordPerms,
   mailTemplatePerms,
@@ -52,6 +53,7 @@ import {
   oauthParams,
   paramPerms,
   passwordPolicyParams,
+  PLATFORM_ONLY_ROUTES,
   positionPerms,
   rolePerms,
   signupParams,
@@ -65,6 +67,8 @@ import {
   storageObjectPerms,
   storageParams,
   taskPerms,
+  tenantPackagePerms,
+  tenantPerms,
   topicPerms,
   USER_INITIAL_PASSWORD_PARAM,
   userPerms,
@@ -86,7 +90,7 @@ import { dataSourceOptions } from '../../src/db/data-source.js'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { CG_SEEDS } from '../../src/db/seeds/codegen/codegen.seed.js'
 import { seedLimitedUser } from '../../src/db/seeds/iam/iam.seed.js'
-import { runSeeds } from '../../src/db/seeds/index.js'
+import { runSeeds, runTenantSeeds } from '../../src/db/seeds/index.js'
 import {
   PROJECT_MENU_GROUPS,
   type ProjectMenuGroup,
@@ -102,12 +106,15 @@ import { TABLE_PREFIXES } from '../../src/modules/platform/codegen/rules.js'
 import { NotifyDispatchOn20260928140100 } from '../../src/db/migrations/20260928140100-notify-dispatch-on.js'
 import { SignupRoleId20260928150000 } from '../../src/db/migrations/20260928150000-signup-role-id.js'
 import { IamUserLookup } from '../../src/modules/platform/iam/iam-user-lookup.js'
+import { type MenuPermRow, tenantAdminPerms } from '../../src/modules/platform/iam/menu-tree.js'
 import { findRow, insertRow } from '../../src/db/seeds/upsert.js'
 import { LEAVE_FIELDS } from '../../src/modules/biz/leave/leave-wf.handler.js'
 import { LEAVE_DEMO_USERS } from '../../src/modules/biz/leave/leave.seed.js'
 import { typeormOrg } from '../../src/modules/workflow/typeorm-org.js'
 import { WF_TEMPLATES } from '../../src/db/seeds/workflow/process-templates.seed.js'
 import { org as wfOrg, run, T0 } from '../fixtures/wf/flow.js'
+import { DEMO_TENANT_ADMIN, DEMO_TENANTS } from '../../src/db/seeds/iam/tenant-demo.seed.js'
+import { createTenant, disposeTenant, inTenant1, type TestTenant } from '../setup/tenants.js'
 
 const TABLES = [
   'iam_user',
@@ -133,6 +140,8 @@ const TABLES = [
 ]
 
 let ds: DataSource
+/** The second tenant of the cases with one (gone after each: the other cases count whole tables). */
+let other: TestTenant | undefined
 
 // every row, soft-deleted ones too (DELETE keeps the auto-increment counters: ids are never reused)
 const truncate = async () => {
@@ -146,6 +155,21 @@ const snapshot = async () => {
 const one = async (sql: string, params: unknown[] = []) => (await ds.query(sql, params))[0]
 const LIVE_MENU = 'SELECT id FROM iam_menu WHERE id = ? AND deleted_at IS NULL'
 const LIVE_GRANT = 'SELECT role_id FROM iam_role_menus WHERE menu_id = ? AND deleted_at IS NULL'
+/** Whether the grant of menu ? in tenant ? is soft-deleted (`gone`). */
+const GRANT_IN =
+  'SELECT deleted_at IS NOT NULL AS gone FROM iam_role_menus WHERE menu_id = ? AND tenant_id = ?'
+/** Grants menu `menuId` to the `tenant_admin` role of the other tenant (`other`). */
+const grantInOther = async (menuId: number) => {
+  const [role] = await ds.query(
+    "SELECT id FROM iam_role WHERE code = 'tenant_admin' AND tenant_id = ?",
+    [other!.id],
+  )
+  await ds.query('INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, ?)', [
+    role.id,
+    menuId,
+    other!.id,
+  ])
+}
 /** The one-time notice of the generated initial password of new users (every fresh seed prints it). */
 const INITIAL_NOTICE = new RegExp(
   `^seed: initial password of new users \\(${USER_INITIAL_PASSWORD_PARAM}\\): `,
@@ -285,6 +309,11 @@ it('keeps an administrator-edited sign-up role id across re-seeding', async () =
   ).toBe('999999')
 })
 
+afterEach(async () => {
+  await other?.dispose()
+  other = undefined
+})
+
 afterAll(async () => {
   vi.unstubAllEnvs()
   if (ds?.isInitialized) {
@@ -328,6 +357,137 @@ it('root role, admin in it with SEED_ADMIN_PASSWORD, dept tree paths', async () 
   for (const d of depts)
     expect(d.tree_path).toBe(`${byId.get(d.parent_id)?.tree_path ?? '/'}${d.id}/`)
   expect(depts.filter((d) => d.parent_id === 0).map((d) => d.name)).toEqual(['seed.dept.hq'])
+})
+
+it("re-seeding keeps to the default tenant: another tenant's role, dept and user under the seeds' natural keys stay as they are", async () => {
+  await runSeeds(ds)
+  other = await createTenant(ds)
+  const tid = other.id
+  await ds.query(
+    "INSERT INTO iam_role (code, name, data_scope, tenant_id) VALUES ('root', 'theirs', 'own_rows', ?)",
+    [tid],
+  )
+  await ds.query(
+    "INSERT INTO iam_dept (parent_id, tree_path, name, tenant_id) VALUES (0, '/', 'seed.dept.hq', ?)",
+    [tid],
+  )
+  await ds.query(
+    "INSERT INTO iam_user (username, password_hash, display_name, tenant_id) VALUES ('admin', 'theirs', 'theirs', ?)",
+    [tid],
+  )
+  // every row of the other tenant, and any link of the default tenant naming its user or role
+  const theirs = async () => {
+    const rows: Record<string, unknown[]> = {}
+    for (const t of TABLES)
+      rows[t] = (await ds.query(`SHOW COLUMNS FROM ${t} LIKE 'tenant_id'`)).length
+        ? await ds.query(`SELECT * FROM ${t} WHERE tenant_id = ? ORDER BY 1, 2`, [tid])
+        : []
+    rows.crossing = await ds.query(
+      `SELECT * FROM iam_user_roles
+        WHERE user_id IN (SELECT id FROM iam_user WHERE tenant_id = ?)
+           OR role_id IN (SELECT id FROM iam_role WHERE tenant_id = ?)
+        ORDER BY 1, 2`,
+      [tid, tid],
+    )
+    return rows
+  }
+  const before = await theirs()
+  // its own builtin tenant_admin (opening it made one) and the root role it made
+  expect(before.iam_role.map((r) => (r as { code: string }).code).sort()).toEqual([
+    'root',
+    'tenant_admin',
+  ])
+  const mine = await snapshot()
+  await runSeeds(ds)
+  expect(await theirs()).toEqual(before)
+  const after = await snapshot()
+  for (const t of TABLES)
+    expect(after[t].filter((r) => (r as { tenant_id?: number }).tenant_id !== tid)).toEqual(
+      mine[t].filter((r) => (r as { tenant_id?: number }).tenant_id !== tid),
+    )
+  expect(await one("SELECT name FROM iam_role WHERE code = 'root' AND tenant_id = 1")).toEqual({
+    name: 'seed.role.root',
+  })
+})
+
+it('tenant seeds (SEEDS.tenant): a re-run changes nothing; what the tenant deleted stays deleted; one it lacks is added; the default tenant gets none', async () => {
+  await runSeeds(ds)
+  other = await createTenant(ds)
+  const tid = other.id
+  const tenantRows = async () => {
+    const rows: Record<string, unknown[]> = {}
+    for (const t of TABLES)
+      if ((await ds.query(`SHOW COLUMNS FROM ${t} LIKE 'tenant_id'`)).length)
+        rows[t] = await ds.query(`SELECT * FROM ${t} WHERE tenant_id = ? ORDER BY 1, 2`, [tid])
+    return rows
+  }
+  const defaultRows = async () => {
+    const rows = await snapshot()
+    for (const t of TABLES)
+      rows[t] = rows[t]!.filter((r) => (r as { tenant_id?: number }).tenant_id !== tid)
+    return rows
+  }
+  const opened = await tenantRows()
+  const mine = await defaultRows()
+  expect(await runSeeds(ds)).toEqual([])
+  expect(await tenantRows()).toEqual(opened)
+  expect(await defaultRows()).toEqual(mine)
+
+  // the tenant deleted its root dept and its leave model; a release added the process templates
+  const [root] = await ds.query('SELECT id FROM iam_dept WHERE parent_id = 0 AND tenant_id = ?', [
+    tid,
+  ])
+  await ds.query('UPDATE iam_dept SET deleted_at = NOW(3) WHERE id = ?', [root.id])
+  await ds.query(
+    "UPDATE wf_model SET deleted_at = NOW(3) WHERE model_key = 'leave' AND tenant_id = ?",
+    [tid],
+  )
+  await ds.query('DELETE FROM wf_model WHERE model_key LIKE ? AND tenant_id = ?', [
+    `${WF_TEMPLATE_KEY_PREFIX}%`,
+    tid,
+  ])
+  await ds.query('DELETE FROM wf_form WHERE tenant_id = ?', [tid])
+  // a disabled, expired tenant is seeded all the same (enabled again or renewed, it is usable at once)
+  await ds.query(
+    'UPDATE iam_tenant SET enabled = 0, expires_at = NOW(3) - INTERVAL 1 DAY WHERE id = ?',
+    [tid],
+  )
+  try {
+    await runSeeds(ds)
+  } finally {
+    await ds.query('UPDATE iam_tenant SET enabled = 1, expires_at = NULL WHERE id = ?', [tid])
+  }
+  expect(
+    await ds.query(
+      'SELECT id, deleted_at IS NOT NULL AS deleted FROM iam_dept WHERE tenant_id = ?',
+      [tid],
+    ),
+  ).toEqual([{ id: root.id, deleted: 1 }])
+  expect(
+    await ds.query(
+      "SELECT deleted_at IS NOT NULL AS deleted FROM wf_model WHERE model_key = 'leave' AND tenant_id = ?",
+      [tid],
+    ),
+  ).toEqual([{ deleted: 1 }])
+  expect(
+    (
+      await ds.query(
+        'SELECT model_key FROM wf_model WHERE model_key LIKE ? AND tenant_id = ? AND deleted_at IS NULL ORDER BY model_key',
+        [`${WF_TEMPLATE_KEY_PREFIX}%`, tid],
+      )
+    ).map((m: { model_key: string }) => m.model_key),
+  ).toEqual(WF_TEMPLATES.map((t) => WF_TEMPLATE_KEY_PREFIX + t.key).sort())
+  // the tenant's roles and people as they were: no administrator is made, nothing else added
+  const now = await tenantRows()
+  for (const t of ['iam_role', 'iam_user', 'iam_user_roles', 'wf_version'])
+    expect(now[t]).toEqual(opened[t])
+  expect(await defaultRows()).toEqual(mine)
+
+  // never in the default tenant: no tenant_admin role there
+  await expect(runTenantSeeds(ds.manager, 1)).rejects.toThrow('not for the default tenant')
+  expect(
+    await one("SELECT COUNT(*) AS n FROM iam_role WHERE code = 'tenant_admin' AND tenant_id = 1"),
+  ).toEqual({ n: 0 })
 })
 
 it('menu tree paths follow the parents, also when a re-seed moves a page back with its actions', async () => {
@@ -401,8 +561,9 @@ it('menus: home page; system group → dict page (actions) → hidden entries pa
   expect(await menu("route_name = 'settings-dict-viewer'")).toBeUndefined()
 })
 
-it('menus: an older database loses the dictionary viewer page and its grants', async () => {
+it("menus: an older database loses the dictionary viewer page and its grants, another tenant's too", async () => {
   await runSeeds(ds)
+  other = await createTenant(ds)
   const group = await one("SELECT id FROM iam_menu WHERE route_name = 'system'")
   const viewer = await insertRow(ds.manager, 'iam_menu', {
     parent_id: group.id,
@@ -412,12 +573,17 @@ it('menus: an older database loses the dictionary viewer page and its grants', a
     route_path: '/settings/dict-viewer',
     component: 'platform/settings/dict-viewer/index',
   })
-  const [role] = await ds.query("SELECT id FROM iam_role WHERE code = 'root'")
-  await ds.query('INSERT INTO iam_role_menus (role_id, menu_id) VALUES (?, ?)', [role.id, viewer])
+  const [role] = await ds.query("SELECT id FROM iam_role WHERE code = 'root' AND tenant_id = 1")
+  await ds.query('INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, 1)', [
+    role.id,
+    viewer,
+  ])
+  await grantInOther(viewer)
   await runSeeds(ds)
-  // soft-deleted: the rows stay, marked deleted
+  // soft-deleted: the rows stay, marked deleted; no tenant keeps a grant of the page
   expect(await one(LIVE_MENU, [viewer])).toBeUndefined()
   expect(await one(LIVE_GRANT, [viewer])).toBeUndefined()
+  expect(await one(GRANT_IN, [viewer, other.id])).toEqual({ gone: 1 })
   expect(
     await one('SELECT deleted_at IS NOT NULL AS gone FROM iam_menu WHERE id = ?', [viewer]),
   ).toEqual({
@@ -669,6 +835,8 @@ it('users: system group → user page (first) → one action per userPerms, assi
     'settings-app-version',
     'geo-area',
     'oauth-client',
+    'iam-tenant',
+    'iam-tenant-package',
   ])
   const page = await one(
     "SELECT id, kind, name, route_path, component, component_name, visible, keep_alive FROM iam_menu WHERE route_name = 'iam-user'",
@@ -1055,6 +1223,8 @@ it('menu groups and pages follow the requested order', async () => {
     'audit',
     'storage',
     'oauth-client',
+    'iam-tenant',
+    'iam-tenant-package',
   ])
   expect(await children(await id('messaging'))).toEqual([
     'messaging-bulletin',
@@ -1369,14 +1539,14 @@ it('moves an existing granted page, removes empty old groups and updates generat
     `/${oldId}/${page.id}/`,
     page.id,
   ])
-  const userId = await ds.transaction((q) => seedLimitedUser(q, 'menu-migration', 'Limited@123'))
+  const userId = await inTenant1(() =>
+    ds.transaction((q) => seedLimitedUser(q, 'menu-migration', 'Limited@123')),
+  )
   const role = await one("SELECT id FROM iam_role WHERE code = 'demo'")
-  await ds.query('INSERT INTO iam_role_menus (role_id, menu_id) VALUES (?, ?), (?, ?)', [
-    role.id,
-    oldId,
-    role.id,
-    page.id,
-  ])
+  await ds.query(
+    'INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, 1), (?, ?, 1)',
+    [role.id, oldId, role.id, page.id],
+  )
   await ds.query(
     "UPDATE cg_table SET parent_menu_route_name = 'iam' WHERE table_name = 'iam_position'",
   )
@@ -1394,15 +1564,16 @@ it('moves an existing granted page, removes empty old groups and updates generat
   ).toEqual({
     parent_menu_route_name: 'system',
   })
-  const tree = await new IamUserLookup(ds).menus(userId, false)
+  const tree = await inTenant1(() => new IamUserLookup(ds, null as never).menus(userId, false))
   expect(tree.map((n) => n.routeName)).toEqual(['home', 'system'])
   expect(tree.find((n) => n.routeName === 'system')?.children.map((n) => n.routeName)).toEqual([
     'iam-user',
   ])
 })
 
-it('--only keeps an obsolete group with an admin page until that page is removed', async () => {
+it("--only keeps an obsolete group with an admin page until that page is removed; a group removed takes every tenant's grants of it", async () => {
   await runSeeds(ds)
+  other = await createTenant(ds)
   const oldSettings = await insertRow(ds.manager, 'iam_menu', {
     parent_id: 0,
     kind: 'group',
@@ -1424,13 +1595,13 @@ it('--only keeps an obsolete group with an admin page until that page is removed
     route_name: 'custom-page',
     route_path: '/custom',
   })
-  const root = await one("SELECT id FROM iam_role WHERE code = 'root'")
-  await ds.query('INSERT INTO iam_role_menus (role_id, menu_id) VALUES (?, ?), (?, ?)', [
-    root.id,
-    oldSettings,
-    root.id,
-    oldScheduler,
-  ])
+  const root = await one("SELECT id FROM iam_role WHERE code = 'root' AND tenant_id = 1")
+  await ds.query(
+    'INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, 1), (?, ?, 1)',
+    [root.id, oldSettings, root.id, oldScheduler],
+  )
+  await grantInOther(oldSettings)
+  await grantInOther(oldScheduler)
   await ds.query(
     "UPDATE cg_table SET parent_menu_route_name = 'settings' WHERE table_name = 'demo_book'",
   )
@@ -1441,8 +1612,11 @@ it('--only keeps an obsolete group with an admin page until that page is removed
   expect(await one('SELECT id FROM iam_menu WHERE id = ?', [oldSettings])).toEqual({
     id: oldSettings,
   })
+  // the group kept keeps its grants, the other tenant's too
+  expect(await one(GRANT_IN, [oldSettings, other.id])).toEqual({ gone: 0 })
   expect(await one(LIVE_MENU, [oldScheduler])).toBeUndefined()
   expect(await one(LIVE_GRANT, [oldScheduler])).toBeUndefined()
+  expect(await one(GRANT_IN, [oldScheduler, other.id])).toEqual({ gone: 1 })
   expect(
     await ds.query(
       "SELECT table_name, parent_menu_route_name FROM cg_table WHERE table_name IN ('demo_book', 'demo_topic') ORDER BY table_name",
@@ -1456,6 +1630,7 @@ it('--only keeps an obsolete group with an admin page until that page is removed
   await runSeeds(ds, ['iam'])
   expect(await one(LIVE_MENU, [oldSettings])).toBeUndefined()
   expect(await one(LIVE_GRANT, [oldSettings])).toBeUndefined()
+  expect(await one(GRANT_IN, [oldSettings, other.id])).toEqual({ gone: 1 })
 })
 
 it('Menus: storage → file list, configs; monitor → tasks, run log; one action per perm', async () => {
@@ -1712,7 +1887,7 @@ it('staff and member: home, the approval center and leave pages; 流程审批 wi
     ),
   ).toEqual([])
 
-  const lookup = new IamUserLookup(ds)
+  const lookup = new IamUserLookup(ds, null as never)
   const tree = (nodes: MenuNode[]): unknown[] =>
     nodes.map((n) => (n.children.length ? { [n.routeName!]: tree(n.children) } : n.routeName))
   const workflow = [
@@ -1725,19 +1900,25 @@ it('staff and member: home, the approval center and leave pages; 流程审批 wi
     'wf-instance-detail',
   ]
   for (const code of ['staff', 'member']) {
-    const userId = await insertRow(ds.manager, 'iam_user', {
-      username: `wf-menus-${code}`,
-      display_name: code,
-      password_hash: 'x',
-    })
+    const userId = await inTenant1(() =>
+      insertRow(ds.manager, 'iam_user', {
+        username: `wf-menus-${code}`,
+        display_name: code,
+        password_hash: 'x',
+      }),
+    )
     const role = await one('SELECT id FROM iam_role WHERE code = ?', [code])
-    await insertRow(ds.manager, 'iam_user_roles', { user_id: userId, role_id: role.id })
-    expect({ code, menus: tree(await lookup.menus(userId, false)) }).toEqual({
+    await inTenant1(() =>
+      insertRow(ds.manager, 'iam_user_roles', { user_id: userId, role_id: role.id }),
+    )
+    expect({ code, menus: tree(await inTenant1(() => lookup.menus(userId, false))) }).toEqual({
       code,
       menus: ['home', { workflow }],
     })
   }
-  const all = (await lookup.menus(0, true)).find((n) => n.routeName === 'workflow')!
+  const all = (await inTenant1(() => lookup.menus(0, true))).find(
+    (n) => n.routeName === 'workflow',
+  )!
   expect(all.children.map((n) => n.routeName)).toEqual([
     ...workflow.map((w) => (typeof w === 'string' ? w : 'biz-leave')),
     'wf-admin',
@@ -1869,7 +2050,7 @@ it('OA demo password: a new one per install (a fresh process draws its own)', as
     await ds.query('DELETE FROM iam_user WHERE id IN (?)', [ids])
     vi.resetModules() // drop the per-process password cache
     const { seedLeave } = await import('../../src/modules/biz/leave/leave.seed.js')
-    const [notice] = await seedLeave(ds.manager)
+    const [notice] = await inTenant1(() => seedLeave(ds.manager))
     return notice?.split(': ').pop()
   }
   const first = await draw()
@@ -1907,13 +2088,14 @@ it('OA leave process: a custom-form model of its pages; supervisor, then > 5 day
   // the engine over the seeded org: the employee's leave of `days`, the supervisor approves (if asked)
   const id = await oaIds()
   const ctx = { flow: c.flow, fields: LEAVE_FIELDS, org: typeormOrg(ds), managerIds: [], now: T0 }
-  const route = async (days: number, initiator = 'oa.employee') => {
-    const r = await run(ctx, { initiatorId: id[initiator], formValues: { days } })
-    const first = r.pending()
-    const sup = r.open().find((t) => t.nodeId === 'supervisor')
-    if (sup) await r.approve(sup)
-    return [first, r.pending(), r.instance.state]
-  }
+  const route = (days: number, initiator = 'oa.employee') =>
+    inTenant1(async () => {
+      const r = await run(ctx, { initiatorId: id[initiator], formValues: { days } })
+      const first = r.pending()
+      const sup = r.open().find((t) => t.nodeId === 'supervisor')
+      if (sup) await r.approve(sup)
+      return [first, r.pending(), r.instance.state]
+    })
   const sup = [['supervisor', id['oa.supervisor']]]
   const director = (node: string) => [node, id['oa.director']]
   for (const days of [6, 5.1])
@@ -2198,6 +2380,9 @@ it('dicts with labels in every language, params with defaults', async () => {
     ['signup', '注册', 'Sign up'],
     ['reset-password-sms', '短信找回密码', 'Reset password by SMS'],
     ['kick', '强制退出', 'End session'],
+    // written whether multi-tenancy is on or off
+    ['enter', '进入租户', 'Enter tenant'],
+    ['leave', '退出租户', 'Leave tenant'],
   ]) {
     expect(
       entries.find((e) => e.dict_code === 'audit.verb' && e.value === value)?.label_i18n,
@@ -2551,7 +2736,9 @@ it('dicts: what the dict pages edit survives a re-seed; only missing languages a
 
 it('re-seeding never revives what an administrator deleted: rows and links stay deleted', async () => {
   await runSeeds(ds)
-  const userId = await ds.transaction((q) => seedLimitedUser(q, 'seed-deleted', 'Limited@123'))
+  const userId = await inTenant1(() =>
+    ds.transaction((q) => seedLimitedUser(q, 'seed-deleted', 'Limited@123')),
+  )
   const gone = {
     action: await one('SELECT id FROM iam_menu WHERE perms = ?', [dictPerms.remove]),
     entry: await one(
@@ -2621,7 +2808,7 @@ it('re-seeding never revives what an administrator deleted: rows and links stay 
     links: [{ positions: 0, roles: 0, grants: 0 }],
   })
   await runSeeds(ds)
-  await ds.transaction((q) => seedLimitedUser(q, 'seed-deleted', 'Limited@123'))
+  await inTenant1(() => ds.transaction((q) => seedLimitedUser(q, 'seed-deleted', 'Limited@123')))
   expect(await rows()).toEqual(before)
 })
 
@@ -2650,8 +2837,14 @@ it('without SEED_ADMIN_PASSWORD: a random password, printed once, that must be c
 
 it('seedLimitedUser: role demo with the home page only (no dict permission), idempotent', async () => {
   await runSeeds(ds)
-  const id = await ds.transaction((q) => seedLimitedUser(q, 'e2e-seed-limited', 'Limited@123'))
-  expect(await ds.transaction((q) => seedLimitedUser(q, 'e2e-seed-limited', 'Other@123'))).toBe(id)
+  const id = await inTenant1(() =>
+    ds.transaction((q) => seedLimitedUser(q, 'e2e-seed-limited', 'Limited@123')),
+  )
+  expect(
+    await inTenant1(() =>
+      ds.transaction((q) => seedLimitedUser(q, 'e2e-seed-limited', 'Other@123')),
+    ),
+  ).toBe(id)
   const user = await one(
     'SELECT u.password_hash, u.password_changed_at, u.enabled, r.code, r.name, r.data_scope FROM iam_user u JOIN iam_user_roles ur ON ur.user_id = u.id JOIN iam_role r ON r.id = ur.role_id WHERE u.id = ?',
     [id],
@@ -2696,12 +2889,14 @@ it.each(['true', 'false', undefined])(
       expect(admin.password_changed_at instanceof Date).toBe(mode === 'true')
       expect(admin.password_changed_at === null).toBe(mode !== 'true')
 
-      const ordinary = await insertRow(ds.manager, 'iam_user', {
-        username: 'test-demo-ordinary',
-        display_name: 'Ordinary',
-        password_hash: 'keep-ordinary',
-        password_changed_at: null,
-      })
+      const ordinary = await inTenant1(() =>
+        insertRow(ds.manager, 'iam_user', {
+          username: 'test-demo-ordinary',
+          display_name: 'Ordinary',
+          password_hash: 'keep-ordinary',
+          password_changed_at: null,
+        }),
+      )
       // Changing mode and reseeding cannot overwrite any existing account's credential or flags.
       vi.stubEnv('APP_DEMO_MODE', mode === 'true' ? 'false' : 'true')
       expect(await runSeeds(ds)).toEqual([])
@@ -2735,4 +2930,293 @@ it('demo admin uses the deployment preset unchanged, with no password notice', a
   } finally {
     vi.unstubAllEnvs()
   }
+})
+
+interface FlagRow {
+  id: number
+  parent_id: number
+  tree_path: string
+  route_name: string | null
+  perms: string | null
+  platform_only: number
+}
+const flagRows = (): Promise<FlagRow[]> =>
+  ds.query(
+    'SELECT id, parent_id, tree_path, route_name, perms, platform_only FROM iam_menu WHERE deleted_at IS NULL ORDER BY id',
+  )
+
+it('platform_only: the menus of PLATFORM_ONLY_ROUTES and everything below them, nothing else; every re-seed puts the flags back', async () => {
+  await runSeeds(ds)
+  const rows = await flagRows()
+  const byId = new Map(rows.map((r) => [Number(r.id), r]))
+  const listed = (r: FlagRow | undefined): boolean =>
+    !!r &&
+    (PLATFORM_ONLY_ROUTES.includes(r.route_name ?? '') || listed(byId.get(Number(r.parent_id))))
+  expect(PLATFORM_ONLY_ROUTES.filter((route) => !rows.some((r) => r.route_name === route))).toEqual(
+    [],
+  )
+  expect(
+    rows
+      .filter((r) => Number(r.platform_only) !== (listed(r) ? 1 : 0))
+      .map((r) => r.route_name ?? r.perms),
+  ).toEqual([])
+  // below a listed page without being listed: the generator's hidden edit page and its action
+  const flag = (where: (r: FlagRow) => boolean) => Number(rows.find(where)?.platform_only)
+  expect(flag((r) => r.route_name === 'codegen-table-edit')).toBe(1)
+  expect(flag((r) => r.perms === codegenPerms.modify)).toBe(1)
+  expect(flag((r) => r.perms === dictPerms.browse)).toBe(1)
+  // the flag is the code's: whatever a database says, the next seed run writes it again
+  const before = rows.map((r) => [r.id, r.platform_only])
+  await ds.query('UPDATE iam_menu SET platform_only = 1 - platform_only')
+  await runSeeds(ds)
+  expect((await flagRows()).map((r) => [r.id, r.platform_only])).toEqual(before)
+})
+
+it('platform_only: the dev tools group itself, the demo, business and workflow groups and every project menu stay open to the tenants; platform and tenant perms never meet', async () => {
+  await runSeeds(ds)
+  const biz = (await one("SELECT id FROM iam_menu WHERE route_name = 'biz'")).id
+  // a project page under 业务管理, as a generated module's seed adds it
+  await insertRow(ds.manager, 'iam_menu', {
+    parent_id: biz,
+    kind: 'page',
+    name: 'project page',
+    route_path: '/biz/platform-only-probe',
+    route_name: 'biz-platform-only-probe',
+    component: 'home/index',
+  })
+  await runSeeds(ds)
+  const rows = await flagRows()
+  const flagged = (route: string, subtree: boolean) => {
+    const top = rows.find((r) => r.route_name === route)!
+    return rows
+      .filter((r) => (subtree ? r.tree_path.startsWith(top.tree_path) : r.id === top.id))
+      .filter((r) => Number(r.platform_only) === 1)
+      .map((r) => r.route_name ?? r.perms)
+  }
+  expect(rows.some((r) => r.route_name === 'biz-platform-only-probe')).toBe(true)
+  for (const group of ['devtools', 'system', 'monitor', 'messaging', 'audit', 'storage'])
+    expect(flagged(group, false)).toEqual([])
+  for (const group of ['home', 'demo', 'biz', 'workflow']) expect(flagged(group, true)).toEqual([])
+  for (const page of ['iam-user', 'iam-role', 'iam-session', 'audit-action-log', 'storage-object'])
+    expect(flagged(page, true)).toEqual([])
+  const perms = (flag: 0 | 1) =>
+    new Set(rows.filter((r) => r.perms && Number(r.platform_only) === flag).map((r) => r.perms!))
+  const platform = perms(1)
+  const tenant = perms(0)
+  expect(platform.size).toBeGreaterThan(0)
+  expect(tenant.size).toBeGreaterThan(0)
+  expect([...platform].filter((p) => tenant.has(p))).toEqual([])
+})
+
+it('tenant pages: system group → tenant and package pages (last) → one action per tenantPerms / tenantPackagePerms, whatever the switch says; platform-only with their actions, so in no package and never a tenant admin perm', async () => {
+  await runSeeds(ds)
+  const group = await one("SELECT id FROM iam_menu WHERE route_name = 'system'")
+  const pages = [
+    ['iam-tenant', 'menu.iam.tenant', '/iam/tenants', 'platform/iam/tenant/index', 'IamTenant'],
+    [
+      'iam-tenant-package',
+      'menu.iam.tenantPackage',
+      '/iam/tenant-packages',
+      'platform/iam/tenant-package/index',
+      'IamTenantPackage',
+    ],
+  ] as const
+  const perms = { 'iam-tenant': tenantPerms, 'iam-tenant-package': tenantPackagePerms }
+  const ids: number[] = []
+  for (const [route, name, path, component, componentName] of pages) {
+    const page = await one(
+      'SELECT id, parent_id, kind, name, route_path, component, component_name, keep_alive, platform_only FROM iam_menu WHERE route_name = ? AND deleted_at IS NULL',
+      [route],
+    )
+    expect(page).toMatchObject({
+      parent_id: group.id,
+      kind: 'page',
+      name,
+      route_path: path,
+      component,
+      component_name: componentName,
+      keep_alive: 1,
+      platform_only: 1,
+    })
+    const actions: { id: number; perms: string; platform_only: number }[] = await ds.query(
+      'SELECT id, perms, platform_only FROM iam_menu WHERE parent_id = ? AND kind = ? AND deleted_at IS NULL ORDER BY sort_no',
+      [page.id, 'action'],
+    )
+    expect(actions.map((a) => a.perms)).toEqual(Object.values(perms[route]))
+    expect(actions.map((a) => Number(a.platform_only))).toEqual(actions.map(() => 1))
+    ids.push(page.id, ...actions.map((a) => a.id))
+  }
+  // a tenant is never deleted
+  expect(Object.keys(tenantPerms)).not.toContain('remove')
+  // a package holds the live menus open to tenants only (its grant tree), the tenant admin their perms
+  const menus: MenuPermRow[] = await ds.query(
+    'SELECT id, parent_id, enabled, perms, platform_only FROM iam_menu WHERE deleted_at IS NULL',
+  )
+  const packageable = menus.filter((m) => Number(m.platform_only) === 0).map((m) => Number(m.id))
+  expect(packageable.length).toBeGreaterThan(0)
+  expect(packageable.filter((id) => ids.includes(id))).toEqual([])
+  const admin = tenantAdminPerms(menus)
+  expect(admin.length).toBeGreaterThan(0)
+  expect(
+    admin.filter((p) => p.startsWith('iam.tenant.') || p.startsWith('iam.tenantPackage.')),
+  ).toEqual([])
+})
+
+describe('demo sample tenants (tenant-demo.seed.ts): only with APP_DEMO_MODE and APP_MULTI_TENANT both on', () => {
+  const codes = DEMO_TENANTS.map((t) => t.code)
+  const packageNames = DEMO_TENANTS.map((t) => t.package.name)
+  const samples = (): Promise<
+    {
+      id: number
+      code: string
+      name: string
+      brand_name: string
+      package_id: number
+      user_quota: number | null
+      enabled: number
+      owner_user_id: number
+    }[]
+  > =>
+    ds.query(
+      `SELECT id, code, name, brand_name, package_id, user_quota, enabled, owner_user_id
+         FROM iam_tenant WHERE code IN (?) ORDER BY id`,
+      [codes],
+    )
+  const tenantTables = async () => ({
+    ...(await snapshot()),
+    iam_tenant: await ds.query('SELECT * FROM iam_tenant ORDER BY id'),
+    iam_tenant_package: await ds.query('SELECT * FROM iam_tenant_package ORDER BY id'),
+    iam_tenant_package_menus: await ds.query(
+      'SELECT * FROM iam_tenant_package_menus ORDER BY 1, 2',
+    ),
+  })
+  const demoNotices = (notices: string[]) =>
+    notices.filter((n) => n.startsWith('seed: demo tenants'))
+  const NOTICE = new RegExp(
+    `^seed: demo tenants ${codes.join(', ')}, owner ${DEMO_TENANT_ADMIN} \\(password shown once\\): ([\\w-]{16})$`,
+  )
+
+  afterAll(async () => {
+    vi.unstubAllEnvs()
+    for (const t of await samples()) await disposeTenant(ds, Number(t.id))
+    await ds.query(
+      'DELETE pm FROM iam_tenant_package_menus pm JOIN iam_tenant_package p ON p.id = pm.package_id WHERE p.name IN (?)',
+      [packageNames],
+    )
+    await ds.query('DELETE FROM iam_tenant_package WHERE name IN (?)', [packageNames])
+  })
+
+  it.each([
+    ['true', 'false'],
+    ['false', 'true'],
+    [undefined, 'true'],
+  ])('APP_DEMO_MODE=%s, APP_MULTI_TENANT=%s: no sample tenant', async (demo, multi) => {
+    vi.stubEnv('APP_DEMO_MODE', demo)
+    vi.stubEnv('APP_MULTI_TENANT', multi)
+    try {
+      expect(demoNotices(await runSeeds(ds))).toEqual([])
+      expect(await one('SELECT COUNT(*) AS n FROM iam_tenant WHERE id <> 1')).toEqual({ n: 0 })
+      expect(await one('SELECT COUNT(*) AS n FROM iam_tenant_package')).toEqual({ n: 0 })
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
+  it('both on: each sample tenant with its own package and brand, its owner in tenant_admin with a changed password, opened once; one an administrator disabled stays disabled', async () => {
+    expect(codes.filter((c) => !newTenantCode.safeParse(c).success)).toEqual([])
+    // tenant and package names are seed keys (the i18n check finds them in both languages)
+    expect(
+      [...DEMO_TENANTS.map((t) => t.name), ...packageNames].filter(
+        (n) => !/^seed\.\w+\.\w+$/.test(n),
+      ),
+    ).toEqual([])
+    vi.stubEnv('APP_DEMO_MODE', 'true')
+    vi.stubEnv('APP_MULTI_TENANT', 'true')
+    try {
+      const notices = demoNotices(await runSeeds(ds))
+      expect(notices).toEqual([expect.stringMatching(NOTICE)])
+      const password = NOTICE.exec(notices[0]!)![1]!
+      const tenants = await samples()
+      expect(tenants.map((t) => [t.code, t.name, t.brand_name, t.user_quota, t.enabled])).toEqual(
+        DEMO_TENANTS.map((t) => [t.code, t.name, t.brandName, t.userQuota, 1]),
+      )
+      expect(new Set(tenants.map((t) => t.brand_name)).size).toBe(tenants.length)
+      expect(new Set(tenants.map((t) => t.package_id)).size).toBe(tenants.length)
+
+      // the packages: live, enabled, the menus open to tenants; the one without workflow lacks its subtree
+      const open: number[] = (
+        await ds.query('SELECT id FROM iam_menu WHERE platform_only = 0 AND deleted_at IS NULL')
+      ).map((m: { id: number }) => Number(m.id))
+      const workflow: number[] = (
+        await ds.query(
+          `SELECT m.id FROM iam_menu m JOIN iam_menu g ON g.route_name = 'workflow'
+            WHERE m.tree_path LIKE CONCAT(g.tree_path, '%') AND m.deleted_at IS NULL`,
+        )
+      ).map((m: { id: number }) => Number(m.id))
+      expect(workflow.length).toBeGreaterThan(0)
+      expect(DEMO_TENANTS.map((t) => t.package.without)).toEqual([null, 'workflow'])
+      const byId = (a: number, b: number) => a - b
+      for (const [i, t] of DEMO_TENANTS.entries()) {
+        const id = tenants[i]!.package_id
+        expect(
+          await one('SELECT name, enabled, deleted_at FROM iam_tenant_package WHERE id = ?', [id]),
+        ).toEqual({ name: t.package.name, enabled: 1, deleted_at: null })
+        const menus: number[] = (
+          await ds.query(
+            'SELECT menu_id FROM iam_tenant_package_menus WHERE package_id = ? AND deleted_at IS NULL',
+            [id],
+          )
+        ).map((m: { menu_id: number }) => Number(m.menu_id))
+        const expected = t.package.without ? open.filter((m) => !workflow.includes(m)) : open
+        expect(menus.sort(byId)).toEqual(expected.sort(byId))
+      }
+
+      // the owner: the tenant's only user, in its root dept, holding the builtin tenant_admin alone
+      for (const t of tenants) {
+        const owner = await one(
+          `SELECT u.username, u.tenant_id, u.enabled, u.password_hash, u.password_changed_at,
+                  d.parent_id AS dept_parent, d.tenant_id AS dept_tenant
+             FROM iam_user u JOIN iam_dept d ON d.id = u.dept_id WHERE u.id = ?`,
+          [t.owner_user_id],
+        )
+        expect(owner).toMatchObject({
+          username: DEMO_TENANT_ADMIN,
+          tenant_id: t.id,
+          enabled: 1,
+          dept_parent: 0,
+          dept_tenant: t.id,
+        })
+        expect(owner.password_changed_at).toBeInstanceOf(Date)
+        expect(await bcrypt.compare(password, owner.password_hash)).toBe(true)
+        expect(
+          await ds.query(
+            `SELECT r.code, r.is_builtin, r.tenant_id FROM iam_user_roles ur JOIN iam_role r ON r.id = ur.role_id
+              WHERE ur.user_id = ? AND ur.deleted_at IS NULL`,
+            [t.owner_user_id],
+          ),
+        ).toEqual([{ code: 'tenant_admin', is_builtin: 1, tenant_id: t.id }])
+        expect(await one('SELECT COUNT(*) AS n FROM iam_user WHERE tenant_id = ?', [t.id])).toEqual(
+          { n: 1 },
+        )
+      }
+
+      // a re-run opens nothing again and changes nothing
+      const first = await tenantTables()
+      expect(demoNotices(await runSeeds(ds))).toEqual([])
+      expect(await tenantTables()).toEqual(first)
+
+      // an administrator disabled one: a re-run neither enables it again nor opens another
+      const disabled = tenants.at(-1)!
+      await ds.query('UPDATE iam_tenant SET enabled = 0 WHERE id = ?', [disabled.id])
+      expect(demoNotices(await runSeeds(ds))).toEqual([])
+      expect((await samples()).map((t) => [t.id, t.enabled])).toEqual(
+        tenants.map((t) => [t.id, t.id === disabled.id ? 0 : 1]),
+      )
+      expect(await one('SELECT COUNT(*) AS n FROM iam_tenant_package')).toEqual({
+        n: DEMO_TENANTS.length,
+      })
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
 })

@@ -30,12 +30,13 @@ const PICKS = { key: 'm_wf_picks', name: 'M-wf expense', copy: 'M-wf copy' }
 const SEED = `
 import { compile } from '@qiwu/shared'
 import { DataSource } from 'typeorm'
+import { withTenant } from './dist/core/context/tenant.js'
 import { dataSourceOptions } from './dist/db/data-source.js'
 import { insertRow } from './dist/db/seeds/upsert.js'
 const { MODEL, NAME, COPY } = process.env
 const ds = await new DataSource(dataSourceOptions()).initialize()
 try {
-  await ds.transaction(async (q) => {
+  await withTenant(1, () => ds.transaction(async (q) => {
     if ((await q.query('SELECT id FROM wf_model WHERE model_key = ?', [MODEL])).length) return
     const r = compile({ id: 'begin', type: 'begin', name: 'Begin', next: {
       id: 'lead', type: 'review', name: 'seed.wf.node.supervisor', assignee: { kind: 'initiatorPicks' },
@@ -50,7 +51,7 @@ try {
       model_id: model, model_key: MODEL, version: 1, tree_json: r.flow.root, form_snapshot: { fields: {} },
     })
     await q.query('UPDATE wf_model SET current_version_id = ? WHERE id = ?', [version, model])
-  })
+  }))
 } finally {
   await ds.destroy()
 }

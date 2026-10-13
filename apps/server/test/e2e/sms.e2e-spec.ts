@@ -23,6 +23,7 @@ import { SmsTemplate } from '../../src/modules/platform/messaging/sms-template/s
 import { OtpService } from '../../src/modules/platform/messaging/sms-otp/sms-otp.service.js'
 import { bearer, signIn } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 const mocks = vi.hoisted(() => ({
   aliLoad: vi.fn<() => void>(),
@@ -138,25 +139,35 @@ beforeAll(async () => {
   lastRecordId = Number(
     (await ds.query('SELECT COALESCE(MAX(id), 0) AS n FROM msg_sms_record'))[0].n,
   )
-  roleId = await insertRow(ds.manager, 'iam_role', {
-    code: `${PREFIX}reader`,
-    name: `${PREFIX}reader`,
-    data_scope: 'all',
-  })
+  roleId = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_role', {
+      code: `${PREFIX}reader`,
+      name: `${PREFIX}reader`,
+      data_scope: 'all',
+    }),
+  )
   const browse = await findId(ds.manager, 'iam_menu', { perms: smsChannelPerms.browse })
-  await ds.query('INSERT INTO iam_role_menus (role_id, menu_id) VALUES (?, ?)', [roleId, browse])
+  await ds.query('INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, 1)', [
+    roleId,
+    browse,
+  ])
   const createTemplate = await findId(ds.manager, 'iam_menu', { perms: smsTemplatePerms.create })
-  await ds.query('INSERT INTO iam_role_menus (role_id, menu_id) VALUES (?, ?)', [
+  await ds.query('INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, 1)', [
     roleId,
     createTemplate,
   ])
-  userId = await insertRow(ds.manager, 'iam_user', {
-    username: `${PREFIX}reader`,
-    display_name: 'Reader',
-    password_hash: 'not-used',
-    password_changed_at: new Date(),
-  })
-  await ds.query('INSERT INTO iam_user_roles (user_id, role_id) VALUES (?, ?)', [userId, roleId])
+  userId = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_user', {
+      username: `${PREFIX}reader`,
+      display_name: 'Reader',
+      password_hash: 'not-used',
+      password_changed_at: new Date(),
+    }),
+  )
+  await ds.query('INSERT INTO iam_user_roles (user_id, role_id, tenant_id) VALUES (?, ?, 1)', [
+    userId,
+    roleId,
+  ])
   admin = (await signIn(app)).accessToken
   reader = (await signIn(app, `${PREFIX}reader`)).accessToken
 })
@@ -427,23 +438,30 @@ describe('receipt', () => {
       params: {},
       values: { code: 'x', name: 'y' },
     }
-    const skippedId = await app.get(TransactionHost).withTransaction(() => notify.write(draft))
+    const skippedId = await app
+      .get(TransactionHost)
+      .withTransaction(() => inTenant1(() => notify.write(draft)))
     expect(await record(skippedId)).toMatchObject({
       status: 'skipped',
       error: 'no_address',
       mobile: null,
     })
-    expect(await notify.due(100)).not.toContain(skippedId)
-    const pendingId = await notify.write({
-      ...draft,
-      recipient: { ...draft.recipient, mobile: '13800138000' },
-    })
-    expect(await notify.due(100)).toContain(pendingId)
+    expect((await inTenant1(() => notify.dueRows(100))).map((r) => r.id)).not.toContain(skippedId)
+    const pendingId = await inTenant1(() =>
+      notify.write({
+        ...draft,
+        recipient: { ...draft.recipient, mobile: '13800138000' },
+      }),
+    )
+    expect((await inTenant1(() => notify.dueRows(100))).map((r) => r.id)).toContain(pendingId)
     const client = await clients.for(channelId)
     const send = vi.spyOn(client, 'send')
     const forClient = vi.spyOn(clients, 'for').mockResolvedValue(client)
     try {
-      await Promise.all([notify.deliver(pendingId), notify.deliver(pendingId)])
+      await Promise.all([
+        inTenant1(() => notify.deliver(pendingId)),
+        inTenant1(() => notify.deliver(pendingId)),
+      ])
       expect(send).toHaveBeenCalledTimes(1)
       expect(send).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -457,7 +475,7 @@ describe('receipt', () => {
         3,
         pendingId,
       ])
-      expect(await notify.due(100)).not.toContain(pendingId)
+      expect((await inTenant1(() => notify.dueRows(100))).map((r) => r.id)).not.toContain(pendingId)
     } finally {
       forClient.mockRestore()
       send.mockRestore()
@@ -472,18 +490,20 @@ describe('receipt', () => {
         'SELECT id FROM msg_sms_channel WHERE enabled = 1 AND deleted_at IS NULL ORDER BY id LIMIT 1',
       )
     )[0].id
-    const id = await notify.write({
-      template,
-      recipient: {
-        userId: null,
-        email: null,
-        mobile: '13800138000',
-        locale: 'en-US',
-        timezone: 'UTC',
-      },
-      params: {},
-      values: {},
-    })
+    const id = await inTenant1(() =>
+      notify.write({
+        template,
+        recipient: {
+          userId: null,
+          email: null,
+          mobile: '13800138000',
+          locale: 'en-US',
+          timezone: 'UTC',
+        },
+        params: {},
+        values: {},
+      }),
+    )
     expect((await record(id)).channel_id).toBe(expected)
   })
 
@@ -506,20 +526,20 @@ describe('receipt', () => {
       params: {},
       values: { code: '42', name: 'Ada' },
     }
-    const sentId = await notify.write(draft)
+    const sentId = await inTenant1(() => notify.write(draft))
     const client = await clients.for(channelId)
     const send = vi.spyOn(client, 'send')
     const forClient = vi.spyOn(clients, 'for').mockResolvedValue(client)
     try {
-      await notify.deliver(sentId)
+      await inTenant1(() => notify.deliver(sentId))
       expect(send).toHaveBeenCalledWith(expect.objectContaining({ paramOrder: ['name', 'code'] }))
-      const failedId = await notify.write(draft)
+      const failedId = await inTenant1(() => notify.write(draft))
       send.mockRejectedValueOnce(new Error('provider PRIVATE message'))
-      await notify.deliver(failedId)
+      await inTenant1(() => notify.deliver(failedId))
       expect(await record(failedId)).toMatchObject({ status: 'failed', error: 'send_failed' })
-      const noChannelId = await notify.write(draft)
+      const noChannelId = await inTenant1(() => notify.write(draft))
       await ds.query('UPDATE msg_sms_channel SET enabled = 0 WHERE id = ?', [channelId])
-      await notify.deliver(noChannelId)
+      await inTenant1(() => notify.deliver(noChannelId))
       expect(await record(noChannelId)).toMatchObject({ status: 'failed', error: 'no_channel' })
     } finally {
       await ds.query('UPDATE msg_sms_channel SET enabled = 1 WHERE id = ?', [channelId])
@@ -576,7 +596,7 @@ describe('receipt', () => {
     const rows = await Promise.all(
       [channelId, other].map((id) =>
         ds.query(
-          'INSERT INTO msg_sms_record (channel_id, template_code, body, provider_msg_id, status) VALUES (?, ?, ?, ?, ?)',
+          'INSERT INTO msg_sms_record (channel_id, template_code, body, provider_msg_id, status, tenant_id) VALUES (?, ?, ?, ?, ?, 1)',
           [id, 'receipt-scope', 'plain', providerMsgId, 'sent'],
         ),
       ),
@@ -624,7 +644,7 @@ describe('receipt', () => {
       [ten, 'ten-sid'],
     ] as const)
       await ds.query(
-        'INSERT INTO msg_sms_record (channel_id, template_code, body, provider_msg_id, status) VALUES (?, ?, ?, ?, ?)',
+        'INSERT INTO msg_sms_record (channel_id, template_code, body, provider_msg_id, status, tenant_id) VALUES (?, ?, ?, ?, ?, 1)',
         [id, 'receipt-provider', 'plain', providerMsgId, 'sent'],
       )
     expect(
@@ -772,13 +792,15 @@ describe('otp', () => {
     ])
     otpUsers = await Promise.all(
       [...mobiles, ...concurrent].map((mobile, i) =>
-        insertRow(ds.manager, 'iam_user', {
-          username: `${PREFIX}otp-${i}`,
-          display_name: `OTP ${i}`,
-          password_hash: 'not-used',
-          mobile,
-          password_changed_at: new Date(),
-        }),
+        inTenant1(() =>
+          insertRow(ds.manager, 'iam_user', {
+            username: `${PREFIX}otp-${i}`,
+            display_name: `OTP ${i}`,
+            password_hash: 'not-used',
+            mobile,
+            password_changed_at: new Date(),
+          }),
+        ),
       ),
     )
   })
@@ -940,7 +962,9 @@ describe('otp', () => {
         otpChannelId,
       ])
       expect(await otp.smsConfigured()).toBe(true)
-      expect(await otp.issue({ mobile, scene: 'signin' }, ip)).toEqual({ cooldownSec: 60 })
+      expect(await inTenant1(() => otp.issue({ mobile, scene: 'signin' }, ip))).toEqual({
+        cooldownSec: 60,
+      })
       await idle()
       expect((await records(mobile))[0]?.channel_id).toBe(otpChannelId)
       expect(client).toHaveBeenCalledWith(otpChannelId)
@@ -960,7 +984,9 @@ describe('otp', () => {
     expect((await send(mobile).expect(429)).body.code).toBe(Err.SMS_TOO_FREQUENT.code)
     // the same number written with dashes shares the cooldown (limits count digits only)
     const dashed = `${mobile.slice(0, 3)}-${mobile.slice(3, 7)}-${mobile.slice(7)}`
-    await expect(otp.issue({ mobile: dashed, scene: 'signin' }, ip)).rejects.toMatchObject({
+    await expect(
+      inTenant1(() => otp.issue({ mobile: dashed, scene: 'signin' }, ip)),
+    ).rejects.toMatchObject({
       err: Err.SMS_TOO_FREQUENT,
     })
     expect(
@@ -969,12 +995,14 @@ describe('otp', () => {
       ),
     ).toBe('1')
     await redis.unlink(redisKey('smsLimit', 'cooldown', mobile))
-    await otp.issue({ mobile, scene: 'signin' }, ip)
+    await inTenant1(() => otp.issue({ mobile, scene: 'signin' }, ip))
     await idle()
     const [newest, older] = await rows(mobile)
     expect(newest?.daily_seq).toBe(2)
     expect(older?.consumed_at).not.toBeNull()
-    expect(await otp.consume({ mobile, scene: 'signin', code: older!.code }, ip)).toBe(false)
+    expect(
+      await inTenant1(() => otp.consume({ mobile, scene: 'signin', code: older!.code }, ip)),
+    ).toBe(false)
   })
 
   it('keeps the newest code when an older delivery commits last', async () => {
@@ -991,17 +1019,21 @@ describe('otp', () => {
       return resolveSender(...args)
     })
     try {
-      await otp.issue({ mobile, scene: 'signin' }, ip)
+      await inTenant1(() => otp.issue({ mobile, scene: 'signin' }, ip))
       await vi.waitFor(() => expect(gate).toHaveBeenCalledTimes(1), { timeout: 5000 })
       await redis.unlink(redisKey('smsLimit', 'cooldown', mobile))
-      await otp.issue({ mobile, scene: 'signin' }, ip)
+      await inTenant1(() => otp.issue({ mobile, scene: 'signin' }, ip))
       await vi.waitFor(async () => expect(await rows(mobile)).toHaveLength(1), { timeout: 5000 })
       release()
       await idle()
       const [late, newest] = await rows(mobile)
       expect([late?.daily_seq, newest?.daily_seq]).toEqual([1, 2]) // the older code got the higher id
-      expect(await otp.consume({ mobile, scene: 'signin', code: newest!.code }, ip)).toBe(true)
-      expect(await otp.consume({ mobile, scene: 'signin', code: late!.code }, ip)).toBe(false)
+      expect(
+        await inTenant1(() => otp.consume({ mobile, scene: 'signin', code: newest!.code }, ip)),
+      ).toBe(true)
+      expect(
+        await inTenant1(() => otp.consume({ mobile, scene: 'signin', code: late!.code }, ip)),
+      ).toBe(false)
     } finally {
       release()
       gate.mockRestore()
@@ -1011,27 +1043,33 @@ describe('otp', () => {
   it('checks mobile, IP and global daily caps atomically', async () => {
     const day = new Date().toISOString().slice(0, 10)
     await setParam('sms.otp.mobile_daily_max', '1')
-    await otp.issue({ mobile: mobiles[0]!, scene: 'signin' }, ip)
+    await inTenant1(() => otp.issue({ mobile: mobiles[0]!, scene: 'signin' }, ip))
     await idle()
     await redis.unlink(redisKey('smsLimit', 'cooldown', mobiles[0]!))
-    await expect(otp.issue({ mobile: mobiles[0]!, scene: 'signin' }, ip)).rejects.toMatchObject({
+    await expect(
+      inTenant1(() => otp.issue({ mobile: mobiles[0]!, scene: 'signin' }, ip)),
+    ).rejects.toMatchObject({
       err: Err.SMS_TOO_FREQUENT,
     })
     expect(await redis.get(redisKey('smsLimit', 'ip', day, ip))).toBe('1')
     await setParam('sms.otp.mobile_daily_max', '10')
     await setParam('sms.otp.ip_daily_max', '2')
-    await otp.issue({ mobile: mobiles[1]!, scene: 'signin' }, ip)
+    await inTenant1(() => otp.issue({ mobile: mobiles[1]!, scene: 'signin' }, ip))
     await idle()
-    await expect(otp.issue({ mobile: mobiles[2]!, scene: 'signin' }, ip)).rejects.toMatchObject({
+    await expect(
+      inTenant1(() => otp.issue({ mobile: mobiles[2]!, scene: 'signin' }, ip)),
+    ).rejects.toMatchObject({
       err: Err.SMS_TOO_FREQUENT,
     })
     expect(await redis.get(redisKey('smsLimit', 'global', day))).toBe('2')
     await clearLimits()
     await setParam('sms.otp.ip_daily_max', '20')
     await setParam('sms.otp.global_daily_max', '1')
-    await otp.issue({ mobile: mobiles[0]!, scene: 'signin' }, ip)
+    await inTenant1(() => otp.issue({ mobile: mobiles[0]!, scene: 'signin' }, ip))
     await idle()
-    await expect(otp.issue({ mobile: mobiles[1]!, scene: 'signin' }, ip)).rejects.toMatchObject({
+    await expect(
+      inTenant1(() => otp.issue({ mobile: mobiles[1]!, scene: 'signin' }, ip)),
+    ).rejects.toMatchObject({
       err: Err.SMS_TOO_FREQUENT,
     })
     expect(await redis.get(redisKey('smsLimit', 'mobile', day, mobiles[1]!))).toBeNull()
@@ -1039,14 +1077,14 @@ describe('otp', () => {
 
   it('shares request IP limits across rotating IPv6 addresses in one /64', async () => {
     await setParam('sms.otp.ip_daily_max', '2')
-    await otp.issue({ mobile: unknowns[0]!, scene: 'signin' }, '2001:db8:a:b::1')
-    await otp.issue({ mobile: unknowns[1]!, scene: 'signin' }, '2001:db8:a:b::2')
+    await inTenant1(() => otp.issue({ mobile: unknowns[0]!, scene: 'signin' }, '2001:db8:a:b::1'))
+    await inTenant1(() => otp.issue({ mobile: unknowns[1]!, scene: 'signin' }, '2001:db8:a:b::2'))
     await expect(
-      otp.issue({ mobile: unknowns[2]!, scene: 'signin' }, '2001:db8:a:b:ffff::3'),
+      inTenant1(() => otp.issue({ mobile: unknowns[2]!, scene: 'signin' }, '2001:db8:a:b:ffff::3')),
     ).rejects.toMatchObject({ err: Err.SMS_TOO_FREQUENT })
     expect(await redis.exists(redisKey('smsLimit', 'cooldown', unknowns[2]!))).toBe(0)
     await expect(
-      otp.issue({ mobile: unknowns[3]!, scene: 'signin' }, '2001:db8:a:c::1'),
+      inTenant1(() => otp.issue({ mobile: unknowns[3]!, scene: 'signin' }, '2001:db8:a:c::1')),
     ).resolves.toEqual({ cooldownSec: 60 })
     await idle()
   })
@@ -1121,14 +1159,18 @@ describe('otp', () => {
         if (mobile === unknown && scene === 'reset_password')
           await redis.unlink(redisKey('smsLimit', 'cooldown', unknown))
         const before = (await records(mobile!)).length
-        const answer = await otp.issue({ mobile: mobile!, scene: scene as 'signin' }, ip)
+        const answer = await inTenant1(() =>
+          otp.issue({ mobile: mobile!, scene: scene as 'signin' }, ip),
+        )
         await idle()
         expect(answer).toEqual(accepted)
         expect((await records(mobile!)).length).toBe(before)
         expect(mobile === unknown ? await rows(mobile!) : []).toEqual([])
       }
       expect(log.mock.calls.filter(([line]) => String(line).includes(unknown))).toEqual([])
-      await expect(otp.issue({ mobile: unknown, scene: 'signin' }, ip)).rejects.toMatchObject({
+      await expect(
+        inTenant1(() => otp.issue({ mobile: unknown, scene: 'signin' }, ip)),
+      ).rejects.toMatchObject({
         err: Err.SMS_TOO_FREQUENT,
       })
     } finally {
@@ -1156,7 +1198,9 @@ describe('otp', () => {
     const errors = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
     try {
       expect(
-        await Promise.all(concurrent.map((mobile) => otp.issue({ mobile, scene: 'signin' }, ip))),
+        await Promise.all(
+          concurrent.map((mobile) => inTenant1(() => otp.issue({ mobile, scene: 'signin' }, ip))),
+        ),
       ).toEqual(concurrent.map(() => ({ cooldownSec: 60 })))
       await idle()
       expect(errors.mock.calls).toEqual([])
@@ -1202,7 +1246,9 @@ describe('otp', () => {
     const mobile = mobiles[2]!
     await ds.query('UPDATE iam_user SET enabled = 0 WHERE id = ?', [otpUsers[2]])
     try {
-      expect(await otp.issue({ mobile, scene: 'signin' }, ip)).toEqual({ cooldownSec: 60 })
+      expect(await inTenant1(() => otp.issue({ mobile, scene: 'signin' }, ip))).toEqual({
+        cooldownSec: 60,
+      })
       await idle()
       expect(await rows(mobile)).toEqual([])
       expect(await records(mobile)).toEqual([])
@@ -1213,16 +1259,18 @@ describe('otp', () => {
 
   it('a deleted account gets no code; revoking it (after the soft delete) still voids its number’s codes', async () => {
     const mobile = mobiles[2]!
-    await otp.issue({ mobile, scene: 'signin' }, ip)
+    await inTenant1(() => otp.issue({ mobile, scene: 'signin' }, ip))
     await idle()
     expect((await rows(mobile)).map((r) => r.consumed_at)).toEqual([null])
     await ds.query('UPDATE iam_user SET deleted_at = NOW(3) WHERE id = ?', [otpUsers[2]])
     try {
       // UserService.remove soft-deletes, then revokes: the number may go to another user at once
-      await app.get(SessionRevoker).revokeUser(otpUsers[2]!, 'user_removed')
+      await inTenant1(() => app.get(SessionRevoker).revokeUser(otpUsers[2]!, 'user_removed'))
       expect((await rows(mobile))[0]!.consumed_at).not.toBeNull()
       await clearLimits()
-      expect(await otp.issue({ mobile, scene: 'signin' }, ip)).toEqual({ cooldownSec: 60 })
+      expect(await inTenant1(() => otp.issue({ mobile, scene: 'signin' }, ip))).toEqual({
+        cooldownSec: 60,
+      })
       await idle()
       expect(await rows(mobile)).toHaveLength(1)
     } finally {
@@ -1242,16 +1290,18 @@ describe('otp', () => {
     const refused = { err: Err.AUTH_CAPTCHA_REQUIRED }
     const signinTicket = await tickets.issue('signin', ip)
     await expect(
-      otp.issue({ mobile, scene: 'signin', captchaTicket: signinTicket }, ip),
+      inTenant1(() => otp.issue({ mobile, scene: 'signin', captchaTicket: signinTicket }, ip)),
     ).rejects.toMatchObject(refused)
     const ticket = await tickets.issue('sms_send', ip)
     await send(mobile, 'signin', ticket).expect(200)
     await clearLimits()
     await expect(
-      otp.issue({ mobile, scene: 'signin', captchaTicket: ticket }, ip),
+      inTenant1(() => otp.issue({ mobile, scene: 'signin', captchaTicket: ticket }, ip)),
     ).rejects.toMatchObject(refused)
     await setParam('captcha.mode', 'unexpected')
-    await expect(otp.issue({ mobile: unknown, scene: 'signin' }, ip)).rejects.toMatchObject({
+    await expect(
+      inTenant1(() => otp.issue({ mobile: unknown, scene: 'signin' }, ip)),
+    ).rejects.toMatchObject({
       err: Err.AUTH_CAPTCHA_REQUIRED,
     })
     expect(await redis.exists(redisKey('smsLimit', 'cooldown', unknown))).toBe(0)
@@ -1284,14 +1334,18 @@ describe('otp', () => {
     const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
     try {
       await ds.query('UPDATE msg_sms_template SET enabled = 0 WHERE code = ?', ['auth.sms_code'])
-      expect(await otp.issue({ mobile, scene: 'signin' }, ip)).toEqual({ cooldownSec: 60 })
+      expect(await inTenant1(() => otp.issue({ mobile, scene: 'signin' }, ip))).toEqual({
+        cooldownSec: 60,
+      })
       await idle()
       expect(await rows(mobile)).toEqual([])
       expect(await records(mobile)).toEqual([])
       await redis.unlink(redisKey('smsLimit', 'cooldown', mobile))
       await ds.query('UPDATE msg_sms_template SET enabled = 1 WHERE code = ?', ['auth.sms_code'])
       await ds.query('UPDATE msg_sms_channel SET enabled = 0')
-      expect(await otp.issue({ mobile, scene: 'signin' }, ip)).toEqual({ cooldownSec: 60 })
+      expect(await inTenant1(() => otp.issue({ mobile, scene: 'signin' }, ip))).toEqual({
+        cooldownSec: 60,
+      })
       await idle()
       expect(await rows(mobile)).toEqual([])
       expect(await records(mobile)).toEqual([])
@@ -1316,7 +1370,9 @@ describe('otp', () => {
     })
     const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
     try {
-      expect(await otp.issue({ mobile, scene: 'signin' }, ip)).toEqual({ cooldownSec: 60 })
+      expect(await inTenant1(() => otp.issue({ mobile, scene: 'signin' }, ip))).toEqual({
+        cooldownSec: 60,
+      })
       await vi.waitFor(() => expect(client).toHaveBeenCalled(), { timeout: 5000 })
       rejectSend(new Error('provider-private-error'))
       await idle()
@@ -1324,9 +1380,13 @@ describe('otp', () => {
       const [record] = await records(mobile)
       expect(record?.body).toContain('******')
       expect(JSON.stringify(record)).not.toContain((await rows(mobile))[0]!.code)
-      expect(await (app.get(NotifyChannels).get('sms') as SmsNotifyChannel).due(100)).not.toContain(
-        record?.id,
-      )
+      expect(
+        (
+          await inTenant1(() =>
+            (app.get(NotifyChannels).get('sms') as SmsNotifyChannel).dueRows(100),
+          )
+        ).map((r) => r.id),
+      ).not.toContain(record?.id)
     } finally {
       client.mockRestore()
       warn.mockRestore()
@@ -1335,32 +1395,46 @@ describe('otp', () => {
 
   it('consumes once, expires after five minutes, voids after five mistakes and limits verification', async () => {
     const mobile = mobiles[0]!
-    await otp.issue({ mobile, scene: 'signin' }, ip)
+    await inTenant1(() => otp.issue({ mobile, scene: 'signin' }, ip))
     await idle()
     let [row] = await rows(mobile)
-    expect(await otp.consume({ mobile, scene: 'reset_password', code: row!.code }, ip)).toBe(false)
-    expect(await otp.consume({ mobile, scene: 'signin', code: row!.code }, ip)).toBe(true)
-    expect(await otp.consume({ mobile, scene: 'signin', code: row!.code }, ip)).toBe(false)
+    expect(
+      await inTenant1(() => otp.consume({ mobile, scene: 'reset_password', code: row!.code }, ip)),
+    ).toBe(false)
+    expect(
+      await inTenant1(() => otp.consume({ mobile, scene: 'signin', code: row!.code }, ip)),
+    ).toBe(true)
+    expect(
+      await inTenant1(() => otp.consume({ mobile, scene: 'signin', code: row!.code }, ip)),
+    ).toBe(false)
     await redis.unlink(redisKey('smsLimit', 'cooldown', mobile))
-    await otp.issue({ mobile, scene: 'signin' }, ip)
+    await inTenant1(() => otp.issue({ mobile, scene: 'signin' }, ip))
     await idle()
     ;[row] = await rows(mobile)
     for (let i = 0; i < 5; i++)
-      expect(await otp.consume({ mobile, scene: 'signin', code: 'xxxxxx' }, ip)).toBe(false)
+      expect(
+        await inTenant1(() => otp.consume({ mobile, scene: 'signin', code: 'xxxxxx' }, ip)),
+      ).toBe(false)
     expect((await rows(mobile))[0]).toMatchObject({ attempts: 5, consumed_at: expect.any(Date) })
-    expect(await otp.consume({ mobile, scene: 'signin', code: row!.code }, ip)).toBe(false)
+    expect(
+      await inTenant1(() => otp.consume({ mobile, scene: 'signin', code: row!.code }, ip)),
+    ).toBe(false)
     await redis.unlink(redisKey('smsLimit', 'cooldown', mobile))
-    await otp.issue({ mobile, scene: 'signin' }, ip)
+    await inTenant1(() => otp.issue({ mobile, scene: 'signin' }, ip))
     await idle()
     ;[row] = await rows(mobile)
     await ds.query(
       'UPDATE msg_sms_otp SET created_at = DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 6 MINUTE) WHERE id = ?',
       [row!.id],
     )
-    expect(await otp.consume({ mobile, scene: 'signin', code: row!.code }, ip)).toBe(false)
-    expect(await otp.consume({ mobile, scene: 'signin', code: row!.code }, ip)).toBe(false)
+    expect(
+      await inTenant1(() => otp.consume({ mobile, scene: 'signin', code: row!.code }, ip)),
+    ).toBe(false)
+    expect(
+      await inTenant1(() => otp.consume({ mobile, scene: 'signin', code: row!.code }, ip)),
+    ).toBe(false)
     await expect(
-      otp.consume({ mobile, scene: 'signin', code: row!.code }, ip),
+      inTenant1(() => otp.consume({ mobile, scene: 'signin', code: row!.code }, ip)),
     ).rejects.toMatchObject({ err: Err.SMS_TOO_FREQUENT })
   })
 
@@ -1368,32 +1442,37 @@ describe('otp', () => {
     const attempts = []
     for (let i = 0; i < 30; i++)
       attempts.push(
-        await otp.consume({ mobile: mobiles[i % 3]!, scene: 'signin', code: '000000' }, ip),
+        await inTenant1(() =>
+          otp.consume({ mobile: mobiles[i % 3]!, scene: 'signin', code: '000000' }, ip),
+        ),
       )
     expect(attempts).toEqual(Array(30).fill(false))
     await expect(
-      otp.consume({ mobile: unknown, scene: 'signin', code: '000000' }, ip),
+      inTenant1(() => otp.consume({ mobile: unknown, scene: 'signin', code: '000000' }, ip)),
     ).rejects.toMatchObject({ err: Err.SMS_TOO_FREQUENT })
   })
 
   it('shares verification IP limits across rotating IPv6 addresses in one /64', async () => {
     for (let i = 0; i < 30; i++)
       expect(
-        await otp.consume(
-          { mobile: unknowns[i % 4]!, scene: 'signin', code: '000000' },
-          `2001:db8:a:b::${i + 1}`,
+        await inTenant1(() =>
+          otp.consume(
+            { mobile: unknowns[i % 4]!, scene: 'signin', code: '000000' },
+            `2001:db8:a:b::${i + 1}`,
+          ),
         ),
       ).toBe(false)
     await expect(
-      otp.consume(
-        { mobile: unknowns[4]!, scene: 'signin', code: '000000' },
-        '2001:db8:a:b:ffff::1',
+      inTenant1(() =>
+        otp.consume(
+          { mobile: unknowns[4]!, scene: 'signin', code: '000000' },
+          '2001:db8:a:b:ffff::1',
+        ),
       ),
     ).rejects.toMatchObject({ err: Err.SMS_TOO_FREQUENT })
     expect(
-      await otp.consume(
-        { mobile: unknowns[4]!, scene: 'signin', code: '000000' },
-        '2001:db8:a:c::1',
+      await inTenant1(() =>
+        otp.consume({ mobile: unknowns[4]!, scene: 'signin', code: '000000' }, '2001:db8:a:c::1'),
       ),
     ).toBe(false)
   })

@@ -14,6 +14,7 @@ import {
   AuditWriter,
   describeFault,
   httpLogsSkipped,
+  httpTracedAlways,
   requestSummary,
 } from '../audit/audit-writer.js'
 import { requestId } from '../context/context.module.js'
@@ -77,7 +78,9 @@ export function classify(e: unknown): Failure {
  * always the translated message of the code (never the exception text: nothing internal leaks);
  * zod failures add translated `errors[]` and use the first one as `msg`. 5xx go, masked, to the process
  * log and to the API error log (`aud_http_fault`; see docs/design-notes.md#audit) with the request (masked like every log),
- * the latter except on `@SkipHttpTrace()` routes.
+ * the latter except on `@SkipHttpTrace()` routes. A request AuthGuard marked to be traced always
+ * (`traceHttpAlways`) that failed before the access log's interceptor (a guard refused it) goes into the
+ * API access log here, without its query and body (see docs/design-notes.md#tenancy).
  */
 @Catch()
 export class HttpErrorFilter implements ExceptionFilter {
@@ -120,6 +123,10 @@ export class HttpErrorFilter implements ExceptionFilter {
       body.msg = body.errors[0]?.msg ?? body.msg
     }
     if (status >= 500) this.logFault(req, exception)
+    const since = httpTracedAlways(req)
+    // the interceptor records the requests it saw (it remembered their `@Sensitive` fields)
+    if (since !== undefined && rememberedSensitive(req) === undefined)
+      this.traceRefused(req, since, status, err)
     // failures before the CLS middleware (e.g. a malformed JSON body) have no echoed id yet
     http.getResponse<Response>().setHeader('X-Request-Id', body.traceId).status(status).json(body)
   }
@@ -142,6 +149,22 @@ export class HttpErrorFilter implements ExceptionFilter {
       if (!httpLogsSkipped(req)) this.audit.fault(requestSummary(req, fields), fault)
     } catch (err) {
       this.logger.error(err, 'http fault log skipped')
+    }
+  }
+
+  /** The access log row of an always-traced request a guard refused; never throws. */
+  private traceRefused(req: Request, since: number, status: number, err: ErrorDef) {
+    try {
+      this.audit.trace({
+        req: requestSummary(req),
+        status,
+        bizCode: err.code,
+        errorKey: err.key,
+        startedAt: new Date(since),
+        costMs: Date.now() - since,
+      })
+    } catch (e) {
+      this.logger.error(e, 'http trace skipped')
     }
   }
 

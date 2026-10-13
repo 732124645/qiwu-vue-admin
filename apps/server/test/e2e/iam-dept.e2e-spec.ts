@@ -20,6 +20,7 @@ import { findId, insertRow } from '../../src/db/seeds/upsert.js'
 import { logOf } from '../setup/audit.js'
 import { bearer, signIn } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 const PREFIX = 'e2e-dept-'
 const URL = '/api/iam/depts'
@@ -81,13 +82,15 @@ const find = (nodes: DeptNode[], id: number): DeptNode | undefined => {
 }
 
 async function addRole(code: string, dataScope: string, perms: string[]) {
-  const id = await insertRow(ds.manager, 'iam_role', {
-    code: PREFIX + code,
-    name: PREFIX + code,
-    data_scope: dataScope,
-  })
+  const id = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_role', {
+      code: PREFIX + code,
+      name: PREFIX + code,
+      data_scope: dataScope,
+    }),
+  )
   for (const p of perms)
-    await ds.query('INSERT INTO iam_role_menus (role_id, menu_id) VALUES (?, ?)', [
+    await ds.query('INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, 1)', [
       id,
       await findId(ds.manager, 'iam_menu', { kind: 'action', perms: p }),
     ])
@@ -97,15 +100,20 @@ async function addRole(code: string, dataScope: string, perms: string[]) {
 
 /** A user inserted directly; `signedIn` also starts a session (token in `tok[name]`). */
 async function user(name: string, deptId: number | null, roles: number[], signedIn = true) {
-  const id = await insertRow(ds.manager, 'iam_user', {
-    username: PREFIX + name,
-    display_name: `${name} display`,
-    dept_id: deptId,
-    password_hash: 'not-used-by-this-spec',
-    password_changed_at: new Date(),
-  })
+  const id = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_user', {
+      username: PREFIX + name,
+      display_name: `${name} display`,
+      dept_id: deptId,
+      password_hash: 'not-used-by-this-spec',
+      password_changed_at: new Date(),
+    }),
+  )
   for (const r of roles)
-    await ds.query('INSERT INTO iam_user_roles (user_id, role_id) VALUES (?, ?)', [id, r])
+    await ds.query('INSERT INTO iam_user_roles (user_id, role_id, tenant_id) VALUES (?, ?, 1)', [
+      id,
+      r,
+    ])
   created.users.push(id)
   uid[name] = id
   if (signedIn) tok[name] = (await signIn(app, PREFIX + name)).accessToken
@@ -132,7 +140,9 @@ beforeAll(async () => {
   await cleanRedis(redis)
   lastId = Number((await ds.query('SELECT COALESCE(MAX(id), 0) AS n FROM iam_dept'))[0].n)
   for (const key of ['hq', 'rd', 'platform', 'product', 'ops', 'support', 'finance'])
-    dept[key] = (await findId(ds.manager, 'iam_dept', { name: `seed.dept.${key}` }))!
+    dept[key] = (await inTenant1(() =>
+      findId(ds.manager, 'iam_dept', { name: `seed.dept.${key}` }),
+    ))!
   tok.admin = (await signIn(app)).accessToken
   // dept admins of the rd dept: exactly it / it and below; users browse to watch scopes follow moves
   await user('own', dept.rd!, [await addRole('own', 'own_dept', ALL)])
@@ -417,7 +427,10 @@ describe('data scope', () => {
     // The root and target are picked, but the live descendant is not; its oversized suffix stays private.
     const role = await addRole('length-picked', 'picked_depts', ALL)
     for (const id of [a.id, x.id])
-      await ds.query('INSERT INTO iam_role_depts (role_id, dept_id) VALUES (?, ?)', [role, id])
+      await ds.query('INSERT INTO iam_role_depts (role_id, dept_id, tenant_id) VALUES (?, ?, 1)', [
+        role,
+        id,
+      ])
     await user('length-picked', null, [role])
     expectErr(
       await call('length-picked', 'put', `/${a.id}`, { parentId: x.id }),
@@ -458,7 +471,10 @@ describe('data scope', () => {
     const inner = await add(out.id, { enabled: false })
     await call('admin', 'put', `/${out.id}/enabled`, { enabled: false }).expect(200)
     const role = await addRole('picked', 'picked_depts', ALL)
-    await ds.query('INSERT INTO iam_role_depts (role_id, dept_id) VALUES (?, ?)', [role, inner.id])
+    await ds.query('INSERT INTO iam_role_depts (role_id, dept_id, tenant_id) VALUES (?, ?, 1)', [
+      role,
+      inner.id,
+    ])
     await user('picked', null, [role])
     expectErr(
       await call('picked', 'put', `/${inner.id}/enabled`, { enabled: true }),

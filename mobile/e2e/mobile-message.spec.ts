@@ -17,19 +17,20 @@ const BODY =
 // no admin sign-in, the sign-in rate limit (20 a minute per IP) is shared by the whole suite
 const SEED = `
 import { DataSource } from 'typeorm'
+import { withTenant } from './dist/core/context/tenant.js'
 import { dataSourceOptions } from './dist/db/data-source.js'
 import { seedLimitedUser } from './dist/db/seeds/iam/iam.seed.js'
 const { USER, TOTAL, READ, STAMP, BODY } = process.env
 const user = JSON.parse(USER)
 const ds = await new DataSource(dataSourceOptions()).initialize()
 try {
-  await ds.transaction(async (q) => {
+  await withTenant(1, () => ds.transaction(async (q) => {
     const userId = await seedLimitedUser(q, user.username, user.password)
     await q.query('DELETE FROM msg_inbox WHERE user_id = ?', [userId])
     const start = Date.UTC(2026, 8, 1, 8, 0)
     for (let i = 1; i <= Number(TOTAL); i++)
       await q.query(
-        'INSERT INTO msg_inbox (user_id, template_code, locale, category, sender_label, title, body, status, read_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO msg_inbox (tenant_id, user_id, template_code, locale, category, sender_label, title, body, status, read_at, created_at) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [userId, 'e2e.mobile', 'zh-CN', i % 2 ? 'business' : 'system', i % 2 ? 'Ops' : null,
           'Message ' + i, 'Line one of ' + i + '\\nLine two', 'delivered',
           i <= Number(READ) ? new Date(start) : null, new Date(start + i * 60000)],
@@ -37,11 +38,11 @@ try {
     const now = Date.now()
     for (const [i, kind] of ['notice', 'announcement', 'draft'].entries())
       await q.query(
-        'INSERT INTO msg_bulletin (title, kind, body, published, published_at) VALUES (?, ?, ?, ?, ?)',
+        'INSERT INTO msg_bulletin (tenant_id, title, kind, body, published, published_at) VALUES (1, ?, ?, ?, ?, ?)',
         [STAMP + ' ' + kind, kind === 'draft' ? 'notice' : kind, BODY, kind === 'draft' ? 0 : 1,
           kind === 'draft' ? null : new Date(now + i * 1000)],
       )
-  })
+  }))
 } finally {
   await ds.destroy()
 }

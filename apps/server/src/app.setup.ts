@@ -53,6 +53,14 @@ export function setupApp(app: NestExpressApplication): NestExpressApplication {
         app,
         new DocumentBuilder()
           .setTitle('Qiwu API')
+          .setDescription(
+            "Tenant: every request runs in the tenant of its session: the signed-in user's own, " +
+              'or the tenant a platform user entered from the web console. ' +
+              "Before sign-in, with multi-tenancy on, it is the tenant bound to the request's host " +
+              "name, else the body's `tenantCode` (blank: the default tenant). No request header " +
+              "selects a tenant; the web console's `X-Tenant-Expect` only fails a request (409 " +
+              '`A1040`) whose session works in another tenant by now.',
+          )
           .addBearerAuth()
           // every route needs the access token unless @Public() (AuthGuard is global)
           .addSecurityRequirements('bearer')

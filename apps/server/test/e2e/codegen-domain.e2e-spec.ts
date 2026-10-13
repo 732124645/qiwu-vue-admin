@@ -143,6 +143,7 @@ beforeAll(async () => {
   saved = true
   await ds.query(`CREATE TABLE ${TABLE} (
     id bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '订单 ID',
+    tenant_id bigint unsigned NOT NULL DEFAULT 1 COMMENT '租户',
     order_no varchar(32) NOT NULL COMMENT '订单号',
     customer_name varchar(100) NOT NULL COMMENT '客户名称',
     amount decimal(12,2) NOT NULL DEFAULT 0 COMMENT '金额',
@@ -153,7 +154,7 @@ beforeAll(async () => {
     deleted_at datetime(3) NULL COMMENT '删除时间',
     alive tinyint AS (IF(deleted_at IS NULL, 1, NULL)) VIRTUAL COMMENT '未删除为 1',
     PRIMARY KEY (id),
-    UNIQUE KEY uk_erp_sale_order_order_no (order_no, alive)
+    UNIQUE KEY uk_erp_sale_order_order_no (tenant_id, order_no, alive)
   ) COMMENT='销售订单'`)
 })
 

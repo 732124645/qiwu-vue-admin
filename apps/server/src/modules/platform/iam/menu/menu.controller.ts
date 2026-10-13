@@ -29,12 +29,14 @@ import {
 import { z } from 'zod'
 import { ActionLog } from '../../../../core/audit/action-log.js'
 import { RequirePerm } from '../../../../core/auth/decorators.js'
+import { PlatformOnly } from '../../../../core/auth/platform-only.js'
 import { Idempotent } from '../../../../core/guard/idempotent.js'
 import { ApiEnvelope } from '../../../../core/http/api-envelope.decorator.js'
 import type { Menu } from './menu.entity.js'
 import { MenuService } from './menu.service.js'
 
 @ApiTags('iam')
+@PlatformOnly()
 @Controller('iam/menus')
 export class MenuController {
   constructor(private readonly menus: MenuService) {}

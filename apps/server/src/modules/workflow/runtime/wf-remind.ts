@@ -4,6 +4,8 @@ import { TransactionHost } from '@nestjs-cls/transactional'
 import type { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm'
 import { compile, Err, type WfFields, type WfReviewNode } from '@qiwu/shared'
 import type { DataSource } from 'typeorm'
+import { AppConfigService } from '../../../core/config/config.module.js'
+import { allTenants, withTenant } from '../../../core/context/tenant.js'
 import { BizError } from '../../../core/http/biz-error.js'
 import { JobHandler, type JobContext } from '../../../core/scheduler/job-handler.js'
 import { emptyChangeSet } from '../engine/advance.js'
@@ -34,6 +36,7 @@ export class WfRemind {
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
     private readonly notify: WfNotify,
     private readonly store: WfStore,
+    private readonly cfg: AppConfigService,
   ) {}
 
   /**
@@ -41,7 +44,12 @@ export class WfRemind {
    * time, each run spends a no-op UPDATE on it; add a "done" marker column if such tasks pile up.
    */
   @JobHandler('wf.task.remind')
-  async remind(_params: object, { signal, log }: JobContext): Promise<string> {
+  remind(_params: object, ctx: JobContext): Promise<string> {
+    // qw:cross-tenant overdue tasks of every tenant are scanned; each is handled in its own tenant
+    return allTenants(() => this.remindAll(ctx))
+  }
+
+  private async remindAll({ signal, log }: JobContext): Promise<string> {
     const now = new Date()
     // candidates: not reminded within the shortest remindEvery (1 hour); `remindOne` decides
     const due = await this.ds.query<
@@ -51,15 +59,21 @@ export class WfRemind {
         versionId: string
         nodeId: string
         remindedAt: Date | null
+        tenantId: number
       }[]
     >(
+      // available tenants only (see docs/design-notes.md#tenancy)
+      // qw:cross-tenant the scan runs in allTenants
       `SELECT t.id, t.instance_id AS instanceId, i.version_id AS versionId, t.node_id AS nodeId,
-              t.reminded_at AS remindedAt
+              t.reminded_at AS remindedAt, t.tenant_id AS tenantId
          FROM wf_task t JOIN wf_instance i ON i.id = t.instance_id AND i.deleted_at IS NULL
         WHERE t.state = 'pending' AND t.due_at <= ? AND t.deleted_at IS NULL
           AND (t.reminded_at IS NULL OR t.reminded_at <= ?)
+          AND t.tenant_id IN (SELECT tt.id FROM iam_tenant tt WHERE tt.enabled = 1
+            AND tt.deleted_at IS NULL AND (tt.expires_at IS NULL OR tt.expires_at > NOW(3))
+            AND (? OR tt.id = 1))
         ORDER BY t.due_at, t.id`,
-      [now, new Date(now.getTime() - HOUR)],
+      [now, new Date(now.getTime() - HOUR), this.cfg.get('APP_MULTI_TENANT')],
     )
     const timeoutOf = await this.timeouts(due)
     const n: Record<Done | 'errors', number> = {
@@ -70,22 +84,25 @@ export class WfRemind {
     }
     for (const t of due) {
       signal.throwIfAborted()
-      const timeout = timeoutOf(t.versionId, t.nodeId)
-      const every = timeout?.remindEvery ?? null
-      if (!timeout?.action || t.remindedAt !== null) {
-        if (await this.remindOne(Number(t.id), every, now)) n.reminded++
-        continue
-      }
-      try {
-        const done = await this.timeoutOne(Number(t.id), Number(t.instanceId), every, now)
-        if (done) n[done]++
-      } catch (e) {
-        // not a BizError (a deadlock, a lost connection, a bug): this one rolled back, the next run retries.
-        // `job_run.output` keeps its head (16 000 chars): a few short lines, so the counts (last) stay
-        const why = e instanceof Error ? e.message : String(e)
-        if (++n.errors <= ERROR_LINES) log(`task ${t.id}: ${why.slice(0, 300)}`)
-        this.logger.error({ err: e, taskId: Number(t.id) }, 'timeout handling failed')
-      }
+      // qw:cross-tenant the task's own tenant
+      await withTenant(Number(t.tenantId), async () => {
+        const timeout = timeoutOf(t.versionId, t.nodeId)
+        const every = timeout?.remindEvery ?? null
+        if (!timeout?.action || t.remindedAt !== null) {
+          if (await this.remindOne(Number(t.id), every, now)) n.reminded++
+          return
+        }
+        try {
+          const done = await this.timeoutOne(Number(t.id), Number(t.instanceId), every, now)
+          if (done) n[done]++
+        } catch (e) {
+          // not a BizError (a deadlock, a lost connection, a bug): this one rolled back, the next run retries.
+          // `job_run.output` keeps its head (16 000 chars): a few short lines, so the counts (last) stay
+          const why = e instanceof Error ? e.message : String(e)
+          if (++n.errors <= ERROR_LINES) log(`task ${t.id}: ${why.slice(0, 300)}`)
+          this.logger.error({ err: e, taskId: Number(t.id) }, 'timeout handling failed')
+        }
+      })
     }
     const counts = Object.entries(n).map(([k, v]) => `${k} ${v}`)
     return `${counts.join(', ')} of ${due.length}`
@@ -184,7 +201,8 @@ export class WfRemind {
     const ids = [...new Set(due.map((t) => Number(t.versionId)))]
     const versions = ids.length
       ? await this.ds.query<{ id: string; tree: unknown; form: { fields: WfFields } }[]>(
-          // qw:include-deleted wf_version: a snapshot keeps running the instances started on it
+          // wf_version: a snapshot keeps running the instances started on it; the scan runs in allTenants
+          // qw:include-deleted qw:cross-tenant the candidates' versions of every tenant, by global id
           'SELECT id, tree_json AS tree, form_snapshot AS form FROM wf_version WHERE id IN (?)',
           [ids],
         )

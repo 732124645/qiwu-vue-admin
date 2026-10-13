@@ -12,6 +12,7 @@ import {
   type WfNewCc,
 } from '@qiwu/shared'
 import type { EntityManager, QueryDeepPartialEntity } from 'typeorm'
+import { tenantId } from '../../../core/context/tenant.js'
 import { BizError } from '../../../core/http/biz-error.js'
 import { start, type WfEngineCtx } from '../engine/advance.js'
 import { WfHandlers } from './wf-handlers.js'
@@ -135,13 +136,15 @@ export class WfStore {
     versionId: number,
     now: Date,
   ): Promise<WfEngineCtx & { modelKey: string }> {
+    const tid = tenantId()
     const [v] = (await tx.query(
       // qw:include-deleted wf_version: a snapshot keeps running the instances started on it
       `SELECT v.model_key AS modelKey, v.tree_json AS tree, v.form_snapshot AS form,
               m.manager_user_ids AS managers
-         FROM wf_version v LEFT JOIN wf_model m ON m.id = v.model_id AND m.deleted_at IS NULL
-        WHERE v.id = ?`,
-      [versionId],
+         FROM wf_version v
+         LEFT JOIN wf_model m ON m.id = v.model_id AND m.tenant_id = ? AND m.deleted_at IS NULL
+        WHERE v.id = ? AND v.tenant_id = ?`,
+      [tid, versionId, tid],
     )) as {
       modelKey: string
       tree: unknown

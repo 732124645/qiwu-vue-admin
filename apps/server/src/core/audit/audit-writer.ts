@@ -4,8 +4,10 @@ import Bowser from 'bowser'
 import type { Request } from 'express'
 import type { DataSource } from 'typeorm'
 import { plainIp } from '../auth/auth-params.js'
+import type { Principal } from '../auth/principal.js'
 import { clsGet } from '../context/cls.js'
 import { requestId } from '../context/context.module.js'
+import { TenantContextMissing, tenantId, tenantIdIfAny } from '../context/tenant.js'
 import { driverMasked, redactedJson, redactedUrl, stackFrames, textRedactor } from '../redact.js'
 import { ipLocator } from './ip-location.js'
 
@@ -20,6 +22,22 @@ export const skipHttpLogs = (req: object): void => void UNLOGGED.add(req)
 
 /** Whether `skipHttpLogs` marked the request. */
 export const httpLogsSkipped = (req: object): boolean => UNLOGGED.has(req)
+
+/** Metadata key of `@SkipHttpTrace()` (core/audit/http-trace.ts). */
+export const SKIP_HTTP_TRACE = 'qw:audit:skip-http-trace'
+
+const ALWAYS_TRACED = new WeakMap<object, number>()
+
+/**
+ * Marks a request the API access log records whatever its mode and excluded paths, a guard's refusal
+ * too (the error filter writes that row; see docs/design-notes.md#tenancy): AuthGuard marks every
+ * request of a platform user working inside another tenant, and the one that ends it, except on
+ * `@SkipHttpTrace()` routes.
+ */
+export const traceHttpAlways = (req: object): void => void ALWAYS_TRACED.set(req, Date.now())
+
+/** When `traceHttpAlways` marked the request (epoch ms); undefined: it did not. */
+export const httpTracedAlways = (req: object): number | undefined => ALWAYS_TRACED.get(req)
 
 /** `aud_signin_log.kind` (see docs/design-notes.md#audit); `wx-mp`: WeChat mini program sign-in and binding. */
 export type SigninKind =
@@ -39,6 +57,12 @@ export interface SigninLogEntry {
   /** server i18n key (`signin.*`), translated when read (see docs/design-notes.md#i18n) */
   msgKey: string
   msgParams?: Record<string, string | number>
+  /**
+   * The row's tenant when the context has none to give (a password sign-in whose tenant did not
+   * resolve: the unavailable tenant its host or code names, null for an unknown code); absent = the
+   * context's tenant.
+   */
+  tenantId?: number | null
 }
 
 /** One `@ActionLog` call (see docs/design-notes.md#audit); the writer adds the caller and trace id from CLS. */
@@ -60,6 +84,17 @@ export interface ActionLogEntry {
   /** i18n key of the error envelope's message (translated when read); absent = success */
   errorKey?: string
   costMs: number
+  /**
+   * The row's tenant (its actor's too) and its actor when not the request context's: a platform user
+   * entering or leaving another tenant, recorded in its own tenant also outside its requests (see
+   * docs/design-notes.md#tenancy)
+   */
+  context?: { tenantId: number; actor: ActionActor }
+}
+
+/** Who an action log row names. */
+export type ActionActor = Pick<Principal, 'userType' | 'username' | 'deptName'> & {
+  userId: number | null
 }
 
 /**
@@ -69,6 +104,8 @@ export interface ActionLogEntry {
  */
 export interface RequestSummary {
   traceId: string
+  /** the data tenant of a signed-in caller; null for an anonymous request (see docs/design-notes.md#tenancy) */
+  tenantId: number | null
   userId: number | null
   username: string | null
   userType: string | null
@@ -115,6 +152,7 @@ export function requestSummary(req: Request, sensitive?: readonly string[]): Req
   const p = clsGet('principal')
   return {
     traceId: clsGet('traceId') ?? requestId(req),
+    tenantId: p ? (tenantIdIfAny() ?? null) : null,
     userId: p?.userId ?? null,
     username: p?.username?.slice(0, 64) ?? null,
     userType: p?.userType?.slice(0, 16) ?? null,
@@ -158,10 +196,10 @@ export function describeFault(
 /** How far the DB clock may lag the app's before a session's own sign-in row counts as an earlier one. */
 const CLOCK_SLACK_MS = 1000
 
-/** `lastSignIn`'s query (params: user id, before); exported for the spec that checks its index. */
+/** `lastSignIn`'s query (params: user id, before, tenant); exported for the spec that checks its index. */
 export const LAST_SIGNIN_SQL = `SELECT created_at AS at FROM aud_signin_log
   WHERE user_id = ? AND ok = 1 AND kind IN ('password', 'sms', 'wx-mp') AND created_at < ?
-    AND deleted_at IS NULL
+    AND deleted_at IS NULL AND tenant_id = ?
   ORDER BY created_at DESC LIMIT 1`
 
 /** "Chrome 131.0.0.0", cut to the column width. */
@@ -169,7 +207,8 @@ const name = (n?: string, v?: string) => (n ? `${n}${v ? ` ${v}` : ''}`.slice(0,
 
 /**
  * Audit rows written without awaiting (see docs/design-notes.md#audit): a failing insert is logged and never fails the
- * request it describes. Sign-in and action rows carry the IP's location (ip2region, empty without it).
+ * request it describes. Sign-in and action rows carry the IP's location (ip2region, empty without it) and
+ * the current tenant (an action row also the acting user's, the same one unless it differs).
  */
 @Injectable()
 export class AuditWriter {
@@ -180,14 +219,19 @@ export class AuditWriter {
   signin(e: SigninLogEntry): void {
     const { browser, os } = parseUa(e.ua)
     const traceId = clsGet('traceId') ?? null
+    const tid = e.tenantId === undefined ? tenantIdIfAny() : e.tenantId
+    if (tid === undefined) {
+      this.logger.error(new TenantContextMissing('no tenant in context'), 'sign-in log skipped')
+      return
+    }
     void ipLocator
       .location(e.ip)
       .then((location) =>
         this.ds.query(
           `INSERT INTO aud_signin_log
              (trace_id, kind, user_id, user_type, username, client_id, ip, location, browser, os, ok, msg_key,
-              msg_params)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              msg_params, tenant_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             traceId,
             e.kind,
@@ -202,6 +246,7 @@ export class AuditWriter {
             e.ok ? 1 : 0,
             e.msgKey,
             e.msgParams ? JSON.stringify(e.msgParams) : null,
+            tid,
           ],
         ),
       )
@@ -214,18 +259,28 @@ export class AuditWriter {
    * session, not on row order: its own row is inserted after `loginAt` and without awaiting (it may not
    * be there yet), and a later sign-in elsewhere must not become this session's "previous" one.
    * `CLOCK_SLACK_MS` keeps the session's own row out when the DB clock runs behind the app's.
-   * Served by idx (user_id, created_at): every /me reads back from loginAt within the user's rows only.
+   * Served by idx (user_id, created_at): every /me reads back from loginAt within the user's rows only,
+   * in the user's own tenant (where its sign-ins are logged, also while it acts in another one).
    */
   async lastSignIn(userId: number, loginAt: number): Promise<string | null> {
     const [row] = await this.ds.query<{ at: Date }[]>(LAST_SIGNIN_SQL, [
       userId,
       new Date(loginAt - CLOCK_SLACK_MS),
+      clsGet('actorTenantId') ?? tenantId(),
     ])
     return row ? row.at.toISOString() : null
   }
 
+  /**
+   * No row without a tenant (`tenant_id` is not nullable): only a public route's request whose sign-in
+   * tenant did not resolve has none, and a row in any tenant would show what it tried (a mobile, a
+   * username) to that tenant's auditors (see docs/design-notes.md#tenancy). The acting tenant is the data
+   * tenant unless a session says otherwise.
+   */
   action(e: ActionLogEntry): void {
-    const p = clsGet('principal')
+    const tid = e.context?.tenantId ?? tenantIdIfAny()
+    if (tid === undefined) return
+    const p = e.context?.actor ?? clsGet('principal')
     const row = [
       clsGet('traceId') ?? null,
       e.domain.slice(0, 64),
@@ -245,15 +300,16 @@ export class AuditWriter {
       e.errorKey?.slice(0, 1000) ?? null,
       e.costMs,
     ]
+    const actor = e.context ? tid : (clsGet('actorTenantId') ?? tid)
     void ipLocator
       .location(e.ip)
       .then((location) =>
         this.ds.query(
           `INSERT INTO aud_action_log
              (trace_id, domain, verb, biz_id, user_id, user_type, username, dept_name, http_method, url, ip,
-              user_agent, params, result, ok, error_msg, cost_ms, location)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [...row, location],
+              user_agent, params, result, ok, error_msg, cost_ms, location, tenant_id, actor_tenant_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [...row, location, tid, actor],
         ),
       )
       .catch((err: unknown) => this.logger.error(err, 'action log insert failed'))
@@ -265,8 +321,8 @@ export class AuditWriter {
       .query(
         `INSERT INTO aud_http_trace
            (trace_id, user_id, username, user_type, client_id, method, url, query, body, status_code,
-            biz_code, msg, ip, user_agent, started_at, cost_ms)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            biz_code, msg, ip, user_agent, started_at, cost_ms, tenant_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           r.traceId,
           r.userId,
@@ -284,6 +340,7 @@ export class AuditWriter {
           r.ua,
           e.startedAt,
           e.costMs,
+          r.tenantId,
         ],
       )
       .catch((err: unknown) => this.logger.error(err, 'http trace insert failed'))
@@ -295,8 +352,8 @@ export class AuditWriter {
       .query(
         `INSERT INTO aud_http_fault
            (trace_id, user_id, username, method, url, query, body, ip, user_agent, error_name,
-            error_message, stack)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            error_message, stack, tenant_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           req.traceId,
           req.userId,
@@ -310,6 +367,7 @@ export class AuditWriter {
           fault.type,
           fault.message,
           fault.stack,
+          req.tenantId,
         ],
       )
       .catch((err: unknown) => this.logger.error(err, 'http fault insert failed'))

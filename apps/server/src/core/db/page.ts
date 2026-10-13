@@ -54,16 +54,16 @@ export async function* exportBatches<E extends ObjectLiteral & { id: number }>(
   if (!keyset)
     ({ ceiling } = (await query()
       .orderBy()
-      // arch-allow: sql-concat the alias the code chose
+      // arch-allow: sql-concat the alias the code chose; tenant: the ORM adds it (query builder)
       .select(`MAX(${id})`, 'ceiling')
       .getRawOne<{ ceiling: unknown }>()) ?? { ceiling: null })
   let last: number | undefined
   for (let skip = 0; ; skip += size) {
     const qb = query()
-    // arch-allow: sql-concat the alias the code chose
+    // arch-allow: sql-concat the alias the code chose; tenant: the ORM adds it (query builder)
     if (!keyset) qb.andWhere(`${id} <= :exportCeiling`, { exportCeiling: ceiling }).skip(skip)
     else if (last !== undefined)
-      // arch-allow: sql-concat the alias the code chose
+      // arch-allow: sql-concat the alias the code chose; tenant: the ORM adds it (query builder)
       qb.andWhere(`${id} ${asc ? '>' : '<'} :exportLast`, { exportLast: last })
     const rows = await qb.take(size).getMany()
     if (rows.length) yield rows

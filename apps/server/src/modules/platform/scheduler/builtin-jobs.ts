@@ -5,6 +5,7 @@ import { AUDIT_RETENTION_PARAM, DEFAULT_AUDIT_RETENTION_DAYS } from '@qiwu/share
 import type { DataSource } from 'typeorm'
 import { z } from 'zod'
 import { sweepOnline } from '../../../core/auth/online-sweep.js'
+import { allTenants, DEFAULT_TENANT_ID, withTenant } from '../../../core/context/tenant.js'
 import { REDIS, type Redis } from '../../../core/redis/redis.module.js'
 import { JobHandler, type JobContext } from '../../../core/scheduler/job-handler.js'
 import { ParamService } from '../../../core/settings/param.service.js'
@@ -57,7 +58,12 @@ export class BuiltinJobs {
    * body and row (StorageService.purgeDeleted).
    */
   @JobHandler('audit.purge')
-  async purge(_params: object, { signal, log }: JobContext) {
+  purge(_params: object, ctx: JobContext) {
+    // qw:cross-tenant the retention applies to every tenant's logs, records and files
+    return allTenants(() => this.purgeAll(ctx))
+  }
+
+  private async purgeAll({ signal, log }: JobContext) {
     const days = await this.params.int(
       AUDIT_RETENTION_PARAM,
       1,
@@ -71,7 +77,7 @@ export class BuiltinJobs {
         signal.throwIfAborted()
         // qw:include-deleted expired rows go whether an administrator deleted them already or not
         const res: { affectedRows: number } = await this.ds.query(
-          // arch-allow: sql-concat table, column and condition are the PURGE constants; the time is bound
+          // arch-allow: sql-concat table, column and condition are the PURGE constants; the time is bound; qw:cross-tenant purge runs under allTenants
           `DELETE FROM ${table} WHERE ${time} < ?${extra} LIMIT ${PURGE_BATCH}`,
           [before],
         )
@@ -86,14 +92,18 @@ export class BuiltinJobs {
 
   /** Drops ended sessions from the online list's indexes (core/auth). */
   @JobHandler('session.sweep')
-  async sweep() {
-    return `removed ${await sweepOnline(this.redis)}`
+  sweep() {
+    // qw:cross-tenant the online list holds every tenant's sessions
+    return allTenants(async () => `removed ${await sweepOnline(this.redis)}`)
   }
 
   /** Echoes its message after `delayMs`: a harmless task to try the pages with. */
   @JobHandler('demo.echo', echoParams)
-  async echo({ message, delayMs }: z.output<typeof echoParams>, { signal }: JobContext) {
-    if (delayMs) await sleep(delayMs, undefined, { signal })
-    return message
+  echo({ message, delayMs }: z.output<typeof echoParams>, { signal }: JobContext) {
+    // qw:cross-tenant a sample task of the platform, run in the default tenant
+    return withTenant(DEFAULT_TENANT_ID, async () => {
+      if (delayMs) await sleep(delayMs, undefined, { signal })
+      return message
+    })
   }
 }

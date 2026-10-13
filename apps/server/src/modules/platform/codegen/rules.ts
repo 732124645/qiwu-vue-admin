@@ -12,13 +12,18 @@ import {
   Err,
   RESERVED_NAMES,
   safeFieldName,
+  TENANT_COLUMN,
 } from '@qiwu/shared'
 import * as shared from '@qiwu/shared'
 import type { ColumnInfo, TableInfo } from '../../../core/db/schema-info.js'
+import { GLOBAL_UNIQUE, isTenantTable, PLATFORM_TABLES } from '../../../core/db/tenant-tables.js'
 import { BizError } from '../../../core/http/biz-error.js'
 
-/** Framework tables, never offered for import: TypeORM's `meta_`, test fixtures, the generator's own. */
-export const EXCLUDED_TABLE = /^(meta|test|cg)_/
+/**
+ * Tables never offered for import: TypeORM's `meta_`, test fixtures, the generator's own, and `wxoa_`
+ * (reserved for the WeChat Official Account module).
+ */
+export const EXCLUDED_TABLE = /^(meta|test|cg|wxoa)_/
 
 /** Built-in table prefixes → code group and domain; stripped to derive the business name. */
 export const TABLE_PREFIXES: Record<
@@ -264,25 +269,52 @@ export function assertDeletedAt(info: Pick<TableInfo, 'name' | 'columns'>): void
 }
 
 /**
- * The rest of the soft-delete convention a table misses: a unique key without the
- * generated `alive` column (a deleted row's value would stay taken). The import goes on: a hint to fix the
- * DDL first.
+ * The rest of the soft-delete and tenant conventions a table misses: a unique key without the
+ * generated `alive` column (a deleted row's value would stay taken); a table that is no platform table
+ * without `tenant_id` (every tenant would share its rows); a unique key of a tenant table not led by
+ * `tenant_id` (one tenant's value would block every other tenant), a global key registered in
+ * `GLOBAL_UNIQUE` aside. The import goes on: a hint to fix the DDL first.
  */
-export function importHints(info: Pick<TableInfo, 'name' | 'uniqueKeys'>): CgImportHint[] {
-  return info.uniqueKeys
-    .filter((k) => !k.columns.includes('alive'))
-    .map((k) => ({ tableName: info.name, missing: 'alive', key: k.name }))
+export function importHints(
+  info: Pick<TableInfo, 'name' | 'uniqueKeys' | 'columns'>,
+): CgImportHint[] {
+  const hint = (missing: CgImportHint['missing'], key: string): CgImportHint => ({
+    tableName: info.name,
+    missing,
+    key,
+  })
+  const tenantColumn = info.columns.some((c) => c.name === TENANT_COLUMN)
+  const tenant = isTenantTable(info.name, tenantColumn)
+  return [
+    ...info.uniqueKeys
+      .filter((k) => !k.columns.includes('alive'))
+      .map((k) => hint('alive', k.name)),
+    ...(!tenantColumn && !PLATFORM_TABLES.includes(info.name)
+      ? [hint('tenant_column', TENANT_COLUMN)]
+      : []),
+    ...info.uniqueKeys
+      .filter(
+        (k) =>
+          tenant && k.columns[0] !== TENANT_COLUMN && GLOBAL_UNIQUE[k.name]?.table !== info.name,
+      )
+      .map((k) => hint('tenant_key', k.name)),
+  ]
 }
 
 /**
  * The rule table's `required` ("NOT NULL 且无默认值"; see docs/design-notes.md#codegen): NOT NULL without a default, never the key
- * (an auto-increment needs none) or an audit column. Sync recomputes it when the stored value still is
+ * (an auto-increment needs none), an audit column or the tenant column. Sync recomputes it when the stored value still is
  * this default of the old DB facts (not edited by hand) and the facts changed.
  */
 export const requiredByRule = (
   c: Pick<ColumnFacts, 'columnName' | 'nullable' | 'columnDefault' | 'isPk' | 'isAutoInc'>,
 ): boolean =>
-  !c.nullable && c.columnDefault === null && !c.isAutoInc && !c.isPk && !AUDIT.has(c.columnName)
+  !c.nullable &&
+  c.columnDefault === null &&
+  !c.isAutoInc &&
+  !c.isPk &&
+  !AUDIT.has(c.columnName) &&
+  c.columnName !== TENANT_COLUMN
 
 /** `name`, or `name2`, `name3` … when another column of the table has it already (added to `used`). */
 export function freeName(name: string, used: Set<string>): string {
@@ -343,6 +375,8 @@ export function initColumn(
   }
   // primary key: read-only, not listed
   if (col.isPk) return { ...c, inList: false, inForm: false }
+  // the tenant column: a system column, set by the server, shown nowhere
+  if (name === TENANT_COLUMN) return { ...c, inList: false, inForm: false }
   // audit columns: never in forms; created_at listed and searched as a range
   if (AUDIT.has(name)) {
     const createdAt = name === 'created_at'

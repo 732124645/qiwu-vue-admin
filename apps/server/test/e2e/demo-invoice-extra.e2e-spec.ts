@@ -15,6 +15,7 @@ import { REDIS, type Redis } from '../../src/core/redis/redis.module.js'
 import { insertRow } from '../../src/db/seeds/upsert.js'
 import { bearer, signIn } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 referencedBy('iam_dept', { table: 'demo_invoice_line', column: 'qty' })
 
@@ -58,7 +59,9 @@ beforeAll(async () => {
   await cleanRedis(redis)
   token = (await signIn(app)).accessToken // root: no data scope to hide behind
   for (const k of ['live', 'gone', 'later'] as const)
-    DEPT[k] = await insertRow(ds.manager, 'iam_dept', { tree_path: '/', name: `${PREFIX}${k}` })
+    DEPT[k] = await inTenant1(() =>
+      insertRow(ds.manager, 'iam_dept', { tree_path: '/', name: `${PREFIX}${k}` }),
+    )
   await ds.query('UPDATE iam_dept SET deleted_at = NOW(3) WHERE id = ?', [DEPT.gone])
   DEPT.missing = DEPT.later + 1000
 })

@@ -22,12 +22,13 @@ const SEED = `
 import bcrypt from 'bcryptjs'
 import { compile } from '@qiwu/shared'
 import { DataSource } from 'typeorm'
+import { withTenant } from './dist/core/context/tenant.js'
 import { dataSourceOptions } from './dist/db/data-source.js'
 import { insertRow } from './dist/db/seeds/upsert.js'
 const { PASSWORD, USERNAMES, MODEL, CHECK } = process.env
 const ds = await new DataSource(dataSourceOptions()).initialize()
 try {
-  await ds.transaction(async (q) => {
+  await withTenant(1, () => ds.transaction(async (q) => {
     const hash = await bcrypt.hash(PASSWORD, 4)
     await q.query('UPDATE iam_user SET password_hash = ?, password_changed_at = NOW(3) WHERE username IN (?)', [
       hash, JSON.parse(USERNAMES),
@@ -46,7 +47,7 @@ try {
       model_id: model, model_key: MODEL, version: 1, tree_json: r.flow.root, form_snapshot: { fields: {} },
     })
     await q.query('UPDATE wf_model SET current_version_id = ? WHERE id = ?', [version, model])
-  })
+  }))
 } finally {
   await ds.destroy()
 }

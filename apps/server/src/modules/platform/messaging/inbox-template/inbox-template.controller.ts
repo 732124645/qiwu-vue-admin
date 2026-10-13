@@ -32,6 +32,7 @@ import {
 } from '@qiwu/shared'
 import { ActionLog } from '../../../../core/audit/action-log.js'
 import { RequirePerm } from '../../../../core/auth/decorators.js'
+import { PlatformOnly } from '../../../../core/auth/platform-only.js'
 import { Idempotent } from '../../../../core/guard/idempotent.js'
 import { ApiEnvelope } from '../../../../core/http/api-envelope.decorator.js'
 import { clsGet } from '../../../../core/context/cls.js'
@@ -40,6 +41,7 @@ import type { InboxTemplate } from './inbox-template.entity.js'
 import { InboxTemplateService } from './inbox-template.service.js'
 
 @ApiTags('messaging')
+@PlatformOnly()
 @Controller('messaging/inbox-templates')
 export class InboxTemplateController {
   constructor(

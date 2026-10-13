@@ -1,6 +1,7 @@
 import type { DataSource, EntityManager } from 'typeorm'
+import { allTenants, DEFAULT_TENANT_ID, withTenant } from '../../core/context/tenant.js'
 import { softDeleteWhere } from '../../core/db/references.js'
-import { seedLeave } from '../../modules/biz/leave/leave.seed.js'
+import { seedLeave, seedTenantLeave } from '../../modules/biz/leave/leave.seed.js'
 import { seedBook } from '../../modules/demo/book/book.seed.js'
 import { seedInvoice } from '../../modules/demo/invoice/invoice.seed.js'
 import { seedDemoRealtime } from '../../modules/demo/realtime/realtime.seed.js'
@@ -12,6 +13,7 @@ import { seedSigninLog } from '../../modules/platform/audit/signin-log/signin-lo
 import { seedDept } from '../../modules/platform/iam/dept/dept.seed.js'
 import { seedGeo } from '../../modules/platform/geo/geo.seed.js'
 import { seedMenu } from '../../modules/platform/iam/menu/menu.seed.js'
+import { syncPlatformOnly } from '../../modules/platform/iam/menu/platform-only.js'
 import { seedPosition } from '../../modules/platform/iam/position/position.seed.js'
 import { seedRole } from '../../modules/platform/iam/role/role.seed.js'
 import { seedSession } from '../../modules/platform/iam/session/session.seed.js'
@@ -39,12 +41,16 @@ import { seedAudit } from './audit/audit.seed.js'
 import { seedCodegen } from './codegen/codegen.seed.js'
 import { seedDemo } from './demo/demo.seed.js'
 import { seedIam } from './iam/iam.seed.js'
+import { seedTenant } from './iam/tenant.seed.js'
+import { seedTenantDemo } from './iam/tenant-demo.seed.js'
+import { seedTenantMenus } from './iam/tenant-menus.seed.js'
 import { seedMessaging } from './messaging/messaging.seed.js'
 import { seedDelivery } from './messaging/delivery.seed.js'
 import { seedMonitorGroup } from './monitor/monitor.seed.js'
 import { seedOauth } from './oauth/oauth.seed.js'
 import { seedProjectActionVerbs } from './project/action-verbs.seed.js'
 import { seedProjectMenuGroups } from './project/menu-groups.seed.js'
+import { PROJECT_TENANT_SEEDS, type TenantSeed } from './project/tenant.seed.js'
 import { seedScheduler } from './scheduler/scheduler.seed.js'
 import { seedSettings } from './settings/settings.seed.js'
 import { seedStorage } from './storage/storage.seed.js'
@@ -57,7 +63,8 @@ type Seed = (q: EntityManager) => Promise<string[]>
 
 /** Domain seeds in run order (each module seeds only its own rows and menus). */
 const SEEDS: Record<string, Seed[]> = {
-  iam: [seedIam, seedUser, seedRole, seedMenu, seedDept, seedPosition],
+  // the tenant management pages close the system group (whatever APP_MULTI_TENANT says)
+  iam: [seedIam, seedUser, seedRole, seedMenu, seedDept, seedPosition, seedTenantMenus],
   settings: [seedSettings, seedDict, seedDictEntry, seedParameter, seedAppVersion],
   // its page sits in the system group
   geo: [seedGeo],
@@ -92,10 +99,53 @@ const SEEDS: Record<string, Seed[]> = {
     seedLeave,
     seedProcessTemplates,
   ],
-  // last: the project's generated modules (the samples stay in demo, the leave sample with
-  // its workflow), after the project menu groups they hang under and the project's action
-  // verbs
+  // the project's generated modules (the samples stay in demo, the leave sample with its
+  // workflow), after the project menu groups they hang under and the project's action verbs
   project: [seedProjectMenuGroups, seedProjectActionVerbs],
+  // last: the other tenants' own seeds (the project's need its menus and verbs)
+  tenant: [seedTenants],
+  // the demo site's sample tenants (APP_DEMO_MODE and APP_MULTI_TENANT both on), opened with their own seeds
+  tenantDemo: [seedTenantDemo],
+}
+
+/**
+ * The seeds of every tenant but the default one (see docs/design-notes.md#tenancy), in order: its root dept
+ * and builtin `tenant_admin` role, the process templates, its leave model, then the project's
+ * (`PROJECT_TENANT_SEEDS`). Run when a tenant is opened and for every existing tenant by SEEDS.tenant; never
+ * for the default tenant, whose people and demo data the seeds above own. Each is insert-only and revives
+ * nothing the tenant deleted.
+ */
+export const TENANT_SEEDS: readonly TenantSeed[] = [
+  seedTenant,
+  seedProcessTemplates,
+  seedTenantLeave,
+  ...PROJECT_TENANT_SEEDS,
+]
+
+/** Runs TENANT_SEEDS in tenant `tid` (not the default tenant) on `q`; returns their notices. */
+export async function runTenantSeeds(q: EntityManager, tid: number): Promise<string[]> {
+  if (tid === DEFAULT_TENANT_ID) throw new Error('runTenantSeeds: not for the default tenant')
+  const notices: string[] = []
+  // qw:cross-tenant a tenant's own seeds run in it
+  await withTenant(tid, async () => {
+    for (const seed of TENANT_SEEDS) notices.push(...(await seed(q, tid)))
+  })
+  return notices
+}
+
+/**
+ * SEEDS.tenant: TENANT_SEEDS for every tenant but the default one, disabled and expired ones too (a tenant
+ * is never deleted: enabled again or renewed, it is usable at once), so a release adding a tenant seed fills
+ * the tenants opened before it. Opening a tenant also makes its administrator; this does not.
+ */
+async function seedTenants(q: EntityManager): Promise<string[]> {
+  const tenants = await q.query<{ id: number }[]>(
+    'SELECT id FROM iam_tenant WHERE id <> ? AND deleted_at IS NULL ORDER BY id',
+    [DEFAULT_TENANT_ID],
+  )
+  const notices: string[] = []
+  for (const t of tenants) notices.push(...(await runTenantSeeds(q, Number(t.id))))
+  return notices
 }
 
 /** Menu groups of the layout before the regroup (系统管理 / 系统监控 / 系统工具) and where their pages went. */
@@ -107,9 +157,9 @@ const OBSOLETE_GROUPS: Record<string, string> = {
 
 /**
  * Existing databases: once the domain seeds have moved their pages, an obsolete group without live
- * children is soft-deleted with its role grants. One that still has children (an --only run that
- * skipped its pages, or an admin's own page) stays. Stored generator configs naming it as parent follow
- * its pages. Nothing to do on a fresh database; safe to repeat.
+ * children is soft-deleted with the role grants of every tenant. One that still has children (an --only
+ * run that skipped its pages, or an admin's own page) stays. Stored generator configs naming it as parent
+ * follow its pages. Nothing to do on a fresh database; safe to repeat.
  */
 async function dropObsoleteGroups(q: EntityManager): Promise<void> {
   for (const [route, target] of Object.entries(OBSOLETE_GROUPS)) {
@@ -124,24 +174,33 @@ async function dropObsoleteGroups(q: EntityManager): Promise<void> {
       [route],
     )
     if (!group) continue
-    await softDeleteWhere(q, 'iam_role_menus', 'menu_id', [group.id])
+    // qw:cross-tenant a platform menu leaves no grant behind in any tenant
+    await allTenants(() => softDeleteWhere(q, 'iam_role_menus', 'menu_id', [group.id]))
     await softDeleteWhere(q, 'iam_menu', 'id', [group.id])
   }
 }
 
 /**
- * Runs the seeds (all, or the `only` domains) in one transaction. Returns one-time notices for the
- * operator, e.g. a generated admin password; the CLI prints them.
+ * Runs the seeds (all, or the `only` domains) in one transaction, in the default tenant (the command
+ * line and the test setup call it outside any request); SEEDS.tenant runs TENANT_SEEDS in each other
+ * tenant (runTenantSeeds). Returns one-time notices for the operator, e.g.
+ * a generated admin password; the CLI prints them.
  */
 export async function runSeeds(ds: DataSource, only?: string[]): Promise<string[]> {
   const unknown = only?.filter((d) => !Object.hasOwn(SEEDS, d)) ?? []
   if (unknown.length)
     throw new Error(`unknown seed domain(s): ${unknown} (known: ${Object.keys(SEEDS)})`)
   const notices: string[] = []
-  await ds.transaction(async (q) => {
-    for (const [domain, seeds] of Object.entries(SEEDS))
-      if (!only || only.includes(domain)) for (const seed of seeds) notices.push(...(await seed(q)))
-    await dropObsoleteGroups(q)
-  })
+  // qw:cross-tenant the seeds are the default tenant's
+  await withTenant(DEFAULT_TENANT_ID, () =>
+    ds.transaction(async (q) => {
+      for (const [domain, seeds] of Object.entries(SEEDS))
+        if (!only || only.includes(domain))
+          for (const seed of seeds) notices.push(...(await seed(q)))
+      await dropObsoleteGroups(q)
+      // the platform-only flags follow the menus as the seeds (and admins) left them
+      await syncPlatformOnly(q)
+    }),
+  )
   return notices
 }

@@ -25,6 +25,7 @@ import type { WfInstanceRow } from '../../src/modules/workflow/runtime/wf-runtim
 import { logOf } from '../setup/audit.js'
 import { bearer, signIn } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 const PREFIX = 'e2e-leave-'
 const URL = '/api/biz/leaves'
@@ -68,16 +69,18 @@ const add = async (who: Who, days = 3) => (await submit(who, body(days)).expect(
 
 /** A row written straight to the table (a draft of alice unless told otherwise). */
 const draft = (extra: object = {}) =>
-  insertRow(ds.manager, 'biz_leave_request', {
-    user_id: u.alice,
-    dept_id: d.sub,
-    leave_kind: 'annual',
-    start_at: new Date('2026-10-08T01:00:00Z'),
-    end_at: new Date('2026-10-10T10:00:00Z'),
-    days: 3,
-    reason: `${PREFIX}${++seq}`,
-    ...extra,
-  })
+  inTenant1(() =>
+    insertRow(ds.manager, 'biz_leave_request', {
+      user_id: u.alice,
+      dept_id: d.sub,
+      leave_kind: 'annual',
+      start_at: new Date('2026-10-08T01:00:00Z'),
+      end_at: new Date('2026-10-10T10:00:00Z'),
+      days: 3,
+      reason: `${PREFIX}${++seq}`,
+      ...extra,
+    }),
+  )
 const leaveRow = async (id: number) =>
   (
     await ds.query<
@@ -109,21 +112,25 @@ const openTasks = (instanceId: number) =>
     [instanceId],
   )
 const addTask = (instanceId: number, nodeId: string, assignee: number, extra: object = {}) =>
-  insertRow(ds.manager, 'wf_task', {
-    instance_id: instanceId,
-    node_id: nodeId,
-    node_name: nodeId,
-    assignee_id: assignee,
-    state: 'pending',
-    ...extra,
-  })
+  inTenant1(() =>
+    insertRow(ds.manager, 'wf_task', {
+      instance_id: instanceId,
+      node_id: nodeId,
+      node_name: nodeId,
+      assignee_id: assignee,
+      state: 'pending',
+      ...extra,
+    }),
+  )
 const addCc = (instanceId: number, userId: number, extra: object = {}) =>
-  insertRow(ds.manager, 'wf_cc', {
-    instance_id: instanceId,
-    node_id: 'long',
-    user_id: userId,
-    ...extra,
-  })
+  inTenant1(() =>
+    insertRow(ds.manager, 'wf_cc', {
+      instance_id: instanceId,
+      node_id: 'long',
+      user_id: userId,
+      ...extra,
+    }),
+  )
 const gone = { deleted_at: new Date() }
 
 const review = (id: string, userId: number) => ({
@@ -158,7 +165,7 @@ const tree = () => ({
 })
 
 async function track(table: keyof typeof made, row: Record<string, unknown>) {
-  const id = await insertRow(ds.manager, table, row)
+  const id = await inTenant1(() => insertRow(ds.manager, table, row))
   made[table].push(id)
   return id
 }
@@ -189,7 +196,10 @@ async function user(name: Exclude<Who, 'admin'>, dept: number, roles: number[]) 
     password_changed_at: new Date(),
   })
   for (const r of roles)
-    await ds.query('INSERT INTO iam_user_roles (user_id, role_id) VALUES (?, ?)', [u[name], r])
+    await ds.query('INSERT INTO iam_user_roles (user_id, role_id, tenant_id) VALUES (?, ?, 1)', [
+      u[name],
+      r,
+    ])
   tokens[name] = (await signIn(app, PREFIX + name)).accessToken
 }
 
@@ -206,14 +216,17 @@ beforeAll(async () => {
   await dept('other', null)
   // staff: the seeded OA role (own_rows, the leave perms); viewer: instance admin over its dept subtree;
   // scoper: every row in scope but no wf.instance.view (its scope must not open an instance)
-  const staff = (await findId(ds.manager, 'iam_role', { code: 'staff' }))!
+  const staff = (await inTenant1(() => findId(ds.manager, 'iam_role', { code: 'staff' })))!
   const viewer = await track('iam_role', {
     code: `${PREFIX}viewer`,
     name: `${PREFIX}viewer`,
     data_scope: 'own_dept_tree',
   })
   const view = await findId(ds.manager, 'iam_menu', { perms: wfPerms.instance.view })
-  await ds.query('INSERT INTO iam_role_menus (role_id, menu_id) VALUES (?, ?)', [viewer, view])
+  await ds.query('INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, 1)', [
+    viewer,
+    view,
+  ])
   const scoper = await track('iam_role', {
     code: `${PREFIX}scoper`,
     name: `${PREFIX}scoper`,
@@ -235,21 +248,25 @@ beforeAll(async () => {
   )
   modelId =
     saved?.id ??
-    (await insertRow(ds.manager, 'wf_model', {
-      model_key: 'leave',
-      name: 'leave',
-      form_kind: 'custom',
-    }))
+    (await inTenant1(() =>
+      insertRow(ds.manager, 'wf_model', {
+        model_key: 'leave',
+        name: 'leave',
+        form_kind: 'custom',
+      }),
+    ))
   const [{ v }] = await ds.query(
     "SELECT COALESCE(MAX(version), 0) + 1 AS v FROM wf_version WHERE model_key = 'leave'",
   )
-  versionId = await insertRow(ds.manager, 'wf_version', {
-    model_id: modelId,
-    model_key: 'leave',
-    version: v,
-    tree_json: JSON.stringify(tree()),
-    form_snapshot: JSON.stringify({ fields: app.get(LeaveWfHandler).fields() }),
-  })
+  versionId = await inTenant1(() =>
+    insertRow(ds.manager, 'wf_version', {
+      model_id: modelId,
+      model_key: 'leave',
+      version: v,
+      tree_json: JSON.stringify(tree()),
+      form_snapshot: JSON.stringify({ fields: app.get(LeaveWfHandler).fields() }),
+    }),
+  )
   await ds.query('UPDATE wf_model SET current_version_id = ?, enabled = 1 WHERE id = ?', [
     versionId,
     modelId,
@@ -417,10 +434,12 @@ describe('WfBusinessHandler leave (a start through /api/wf/instances)', () => {
       await edit.query('SELECT id FROM biz_leave_request WHERE id = ? FOR UPDATE', [id])
       await edit.query('UPDATE biz_leave_request SET days = 10 WHERE id = ?', [id])
       // a resubmit's transaction: its snapshot is taken before the edit commits
-      const read = ds.transaction(async (tx) => {
-        await tx.query('SELECT id FROM wf_model WHERE id = ?', [modelId])
-        return app.get(LeaveWfHandler).loadFormValues(String(id), tx)
-      })
+      const read = inTenant1(() =>
+        ds.transaction(async (tx) => {
+          await tx.query('SELECT id FROM wf_model WHERE id = ?', [modelId])
+          return app.get(LeaveWfHandler).loadFormValues(String(id), tx)
+        }),
+      )
       await sleep(300)
       await edit.commitTransaction()
       expect(await read).toMatchObject({ days: 10 })
@@ -442,7 +461,7 @@ describe('WfBusinessHandler leave (a start through /api/wf/instances)', () => {
     } as const
     for (const [state, leave] of Object.entries(states)) {
       const inst = { id: MISSING, businessKey: String(id), state } as WfInstanceRow
-      await ds.transaction((tx) => handler.onStateChange(inst, tx))
+      await inTenant1(() => ds.transaction((tx) => handler.onStateChange(inst, tx)))
       expect(await leaveRow(id)).toMatchObject({ state: leave, instance_id: MISSING })
     }
   })

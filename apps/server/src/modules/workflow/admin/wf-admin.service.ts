@@ -17,6 +17,7 @@ import {
   type DataScopeColumns,
   defaultScopeRules,
 } from '../../../core/data-scope/data-scope.js'
+import { tenantId } from '../../../core/context/tenant.js'
 import { paginate } from '../../../core/db/page.js'
 import { BizError } from '../../../core/http/biz-error.js'
 import { reassign, terminate } from '../engine/lifecycle.js'
@@ -29,7 +30,11 @@ export const WF_INSTANCE_SCOPE: DataScopeColumns = {
   owner: 'initiator_id',
 }
 
-/** `qb` limited to the instances (alias `i`) the caller's scope for the route's perm covers (root: all). */
+/**
+ * `qb` limited to the instances (alias `i`) the caller's scope for the route's perm covers (root: all of
+ * them); root included, every caller sees its own tenant's only (the ORM adds the tenant, see
+ * docs/design-notes.md#tenancy).
+ */
 export const scopedInstances = <Q extends SelectQueryBuilder<ObjectLiteral>>(qb: Q): Q =>
   applyScopes(qb, 'i', WF_INSTANCE_SCOPE, defaultScopeRules())
 
@@ -146,24 +151,27 @@ export async function instanceView(
   const ids = (list: (number | null)[]) => [0, ...new Set(list.filter((x) => x !== null))]
   const byId = async (rows: Promise<{ id: number; name: string }[]>) =>
     new Map((await rows).map((r) => [Number(r.id), r.name]))
-  // a deleted user, dept or model keeps its name on the instances it took part in
+  // a deleted user, dept or model keeps its name on the instances it took part in; another tenant's
+  // (a form value's user or dept id is not checked against the org) has none
+  const tid = tenantId()
   const userNames = await byId(
     tx.query(
-      'SELECT id, display_name AS name FROM iam_user WHERE id IN (?)', // qw:include-deleted
-      [ids([...insts.map((i) => i.initiatorId), ...users])],
+      'SELECT id, display_name AS name FROM iam_user WHERE id IN (?) AND tenant_id = ?', // qw:include-deleted
+      [ids([...insts.map((i) => i.initiatorId), ...users]), tid],
     ),
   )
   const deptNames = await byId(
     tx.query(
-      'SELECT id, name FROM iam_dept WHERE id IN (?)', // qw:include-deleted
-      [ids([...insts.map((i) => i.initiatorDeptId), ...depts])],
+      'SELECT id, name FROM iam_dept WHERE id IN (?) AND tenant_id = ?', // qw:include-deleted
+      [ids([...insts.map((i) => i.initiatorDeptId), ...depts]), tid],
     ),
   )
   const models = await byId(
     tx.query(
       // qw:include-deleted
-      'SELECT v.id, m.name FROM wf_version v JOIN wf_model m ON m.id = v.model_id WHERE v.id IN (?)',
-      [ids(insts.map((i) => i.versionId))],
+      `SELECT v.id, m.name FROM wf_version v JOIN wf_model m ON m.id = v.model_id AND m.tenant_id = ?
+        WHERE v.id IN (?) AND v.tenant_id = ?`,
+      [tid, ids(insts.map((i) => i.versionId)), tid],
     ),
   )
   const user = (id: number) => ({ id, name: userNames.get(id) ?? null })

@@ -53,23 +53,27 @@ for (const c of [...inBody, ...subs.flatMap(rowIn)].filter(dictValue))
 const short = (c) => (text(c) || (c.dict && c.tsType === 'string' && c.base !== 'boolean')) && (c.length ?? 64) < TAG_MAX
 // the export test's dict label case (the enabled column listed)
 const labelled = m.withExport && m.enabled && col(m.enabled) >= 0
+// a tenant table (crud.ts `tenant`): the tenant isolation cases, the switch on; the other tenant's body
+// names one of its own depts when the dept is a required field (the default tenant's uses dept 1)
+const tenant = m.tenant
+const theirDept = tenant && scope && w && inBody.includes(m.dept)
 _%>
 <%_ if (w) { _%>
 // <%= m.key %> (generated CRUD; see docs/design-notes.md#codegen, #api-envelope): list filters/sort/paging, get, create, update, delete,
 // batch delete<% if (m.enabled) { %>, enabled toggle<% } %><% if (m.withOptions) { %>, options<% } %><% if (m.withExport) { %>, export<% } %><% if (m.withImport) { %>, import<% } %><% if (subs.length) { %>, the sub rows (<%= comment(subs.map((s) => s.prop).join(', ')) %>) diffed<% } %>;
 // 403 per permission, 400 translated<% if (m.uniques.length) { %>, 409 duplicate<% } %>, 404 unknown ids, @Idempotent, @ActionLog rows,
-// Swagger. Only the standard cases: module-specific ones go into a hand-written
+// Swagger<% if (tenant) { %>, tenant isolation (the switch on)<% } %>. Only the standard cases: module-specific ones go into a hand-written
 // <%= m.domain %>-<%= m.business %>-extra.e2e-spec.ts.
 <%_ } else { _%>
 // <%= m.key %> (generated CRUD; see docs/design-notes.md#codegen, #api-envelope), read-only: list filters/sort/paging, get<% if (m.withOptions) { %>, options<% } %><% if (m.withExport) { %>, export<% } %>,
-// no write routes; 403 per permission, 400, 404 unknown ids<% if (m.withExport) { %>, @ActionLog export rows<% } %>, Swagger. Rows go straight into the
+// no write routes; 403 per permission, 400, 404 unknown ids<% if (m.withExport) { %>, @ActionLog export rows<% } %>, Swagger<% if (tenant) { %>, tenant isolation (the switch on)<% } %>. Rows go straight into the
 // table. Only the standard cases: module-specific ones go into a hand-written
 // <%= m.domain %>-<%= m.business %>-extra.e2e-spec.ts.
 <%_ } _%>
 import type { NestExpressApplication } from '@nestjs/platform-express'
 import { Test } from '@nestjs/testing'
 import { getDataSourceToken } from '@nestjs/typeorm'
-import { <%= names(['Err', b + 'Perms']) %> } from '@qiwu/shared'
+import { <%= names(['DEFAULT_TENANT_ID', 'Err', b + 'Perms']) %> } from '@qiwu/shared'
 <%_ if (m.withExport || m.withImport) { _%>
 import ExcelJS from 'exceljs'
 <%_ } _%>
@@ -80,6 +84,9 @@ import request from 'supertest'
 import type { DataSource } from 'typeorm'
 import { AppModule } from '../../src/app.module.js'
 import { setupApp } from '../../src/app.setup.js'
+<%_ if (tenant && !w) { _%>
+import { withTenant } from '../../src/core/context/tenant.js'
+<%_ } _%>
 <%_ if (secrets.length && w) { _%>
 import { SecretBox } from '../../src/core/crypto/secret-box.js'
 <%_ } _%>
@@ -93,6 +100,7 @@ import { logOf } from '../setup/audit.js'
 <%_ } _%>
 import { bearer, signIn } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
+import { <%= names(['inTenant1', tenant && 'bootApp', tenant && 'createTenant', tenant && 'signInDirect', tenant && 'type TestTenant']) %> } from '../setup/tenants.js'
 
 const PREFIX = '<%= PREFIX %>'
 const URL = '/api/<%= m.url %>'
@@ -153,7 +161,7 @@ const add = async (body: object) => (await create(body).expect(201)).body.data
 /** A row added straight to the table (the module takes no writes), as GET answers it. */
 async function add(body: object) {
   const repo = ds.getRepository(<%= m.Biz %>)
-  const { id } = await repo.save(repo.create(body))
+  const { id } = await inTenant1(() => repo.save(repo.create(body)))
   return (await call('admin', 'get', `/${id}`).expect(200)).body.data
 }
 <%_ } _%>
@@ -275,7 +283,7 @@ async function user(name: string, roles: number[], deptId: number | null = null)
 <%_ } else { _%>
 async function user(name: string, roles: number[]) {
 <%_ } _%>
-  const id = await insertRow(ds.manager, 'iam_user', {
+  const id = await inTenant1(() => insertRow(ds.manager, 'iam_user', {
     username: PREFIX + name,
     display_name: name,
     password_hash: 'not-used-by-this-spec',
@@ -283,9 +291,9 @@ async function user(name: string, roles: number[]) {
 <%_ if (scope) { _%>
     dept_id: deptId,
 <%_ } _%>
-  })
+  }))
   for (const r of roles)
-    await ds.query('INSERT INTO iam_user_roles (user_id, role_id) VALUES (?, ?)', [id, r])
+    await ds.query('INSERT INTO iam_user_roles (user_id, role_id, tenant_id) VALUES (?, ?, ?)', [id, r, DEFAULT_TENANT_ID])
   userIds.push(id)
   return (await signIn(app, PREFIX + name)).accessToken
 }
@@ -310,31 +318,34 @@ beforeAll(async () => {
     DICT_VALUES[code] = entry?.value ?? 'x'
   }
 <%_ } _%>
-  roleId = await insertRow(ds.manager, 'iam_role', {
+  roleId = await inTenant1(() => insertRow(ds.manager, 'iam_role', {
     code: `${PREFIX}reader`,
     name: `${PREFIX}reader`,
     data_scope: 'all',
-  })
+  }))
   const browse = await findId(ds.manager, 'iam_menu', { perms: <%= b %>Perms.browse })
-  await ds.query('INSERT INTO iam_role_menus (role_id, menu_id) VALUES (?, ?)', [roleId, browse])
+  await ds.query('INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, ?)', [roleId, browse, DEFAULT_TENANT_ID])
   tokens.admin = (await signIn(app)).accessToken
   tokens.reader = await user('reader', [roleId])
   tokens.plain = await user('plain', [])
 <%_ if (scope) { _%>
   // two top-level depts of this spec (tree_path is their own id); the operator sits in `mine`
   for (const k of ['mine', 'other'] as const) {
-    DEPT[k] = await insertRow(ds.manager, 'iam_dept', { tree_path: '/', name: `${PREFIX}${k}` })
+    DEPT[k] = await inTenant1(() =>
+      insertRow(ds.manager, 'iam_dept', { tree_path: '/', name: `${PREFIX}${k}` }),
+    )
     await ds.query('UPDATE iam_dept SET tree_path = ? WHERE id = ?', [`/${DEPT[k]}/`, DEPT[k]])
   }
-  ownRoleId = await insertRow(ds.manager, 'iam_role', {
+  ownRoleId = await inTenant1(() => insertRow(ds.manager, 'iam_role', {
     code: `${PREFIX}own`,
     name: `${PREFIX}own`,
     data_scope: 'own_dept',
-  })
+  }))
   for (const perms of Object.values(<%= b %>Perms))
-    await ds.query('INSERT INTO iam_role_menus (role_id, menu_id) VALUES (?, ?)', [
+    await ds.query('INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, ?)', [
       ownRoleId,
       await findId(ds.manager, 'iam_menu', { perms }),
+      DEFAULT_TENANT_ID,
     ])
   tokens.own = await user('own', [ownRoleId], DEPT.mine)
 <%_ } _%>
@@ -841,6 +852,16 @@ async function sheet(body: unknown) {
 const cells = (ws: ExcelJS.Worksheet, row: number, length: number) =>
   Array.from({ length }, (_, i) => ws.getRow(row).getCell(i + 1).value ?? null)
 <%_ } _%>
+<%_ if (m.withImport) { _%>
+/** An .xlsx with the import headers (zh-CN labels) and `rows` (cells by field). */
+async function xlsx(rows: Record<string, unknown>[]) {
+  const wb = new ExcelJS.Workbook()
+  const ws = wb.addWorksheet('import')
+  ws.addRow(IMPORT.map(([, key]) => t('zh-CN', key)))
+  for (const r of rows) ws.addRow(IMPORT.map(([field]) => r[field] ?? null))
+  return Buffer.from(await wb.xlsx.writeBuffer())
+}
+<%_ } _%>
 <%_ if (m.withExport) { _%>
 
 describe('export', () => {
@@ -911,14 +932,6 @@ describe('export', () => {
 <%_ if (m.withImport) { _%>
 
 describe('import', () => {
-  /** An .xlsx with the import headers (zh-CN labels) and `rows` (cells by field). */
-  async function xlsx(rows: Record<string, unknown>[]) {
-    const wb = new ExcelJS.Workbook()
-    const ws = wb.addWorksheet('import')
-    ws.addRow(IMPORT.map(([, key]) => t('zh-CN', key)))
-    for (const r of rows) ws.addRow(IMPORT.map(([field]) => r[field] ?? null))
-    return Buffer.from(await wb.xlsx.writeBuffer())
-  }
   const upload = (who: keyof typeof tokens, file: Buffer, mode = 'insert', traceId = unique()) =>
     request(app.getHttpServer())
       .post(`${URL}/import`)
@@ -1045,3 +1058,149 @@ it('Swagger documents every route', async () => {
   })
 <%_ } _%>
 })
+<%_ if (tenant) { _%>
+
+describe('tenant isolation (see docs/design-notes.md#tenancy): the switch on, the rows of another tenant', () => {
+  let on: NestExpressApplication
+  let other: TestTenant
+  /** on `on`: the default tenant's admin, the other tenant's administrator (tenant_admin) */
+  const as = { mine: '', theirs: '' }
+<%_ if (theirDept) { _%>
+  /** the other tenant's root dept */
+  let otherDept = 0
+<%_ } _%>
+  const http = (
+    who: keyof typeof as,
+    method: 'get' | 'post' | 'put' | 'delete',
+    path = '',
+    body?: object,
+  ) => {
+    const req = request(on.getHttpServer())[method](`${URL}${path}`).set(bearer(as[who]))
+    return body ? req.send(body) : req
+  }
+  const denied = (res: request.Response) => {
+    expect(res.status).toBe(404)
+    expect(res.body.code).toBe(Err.NOT_FOUND.code)
+  }
+<%_ if (w) { _%>
+  /** A row the other tenant adds through the API, as POST answers it. */
+  const theirs = async (tag = unique(), over: object = {}) =>
+    (await http('theirs', 'post', '', body(tag, <% if (theirDept) { %>{ <%= deptField %>: otherDept, ...over }<% } else { %>over<% } %>)).expect(201)).body.data
+<%_ } else { _%>
+  /** A row of the other tenant, written through the ORM in that tenant. */
+  async function theirs(tag = unique()) {
+    const repo = ds.getRepository(<%= m.Biz %>)
+    return withTenant(other.id, () => repo.save(repo.create(body(tag))))
+  }
+<%_ } _%>
+
+  beforeAll(async () => {
+    on = await bootApp({ multiTenant: true })
+    other = await createTenant(on)
+    as.mine = (await signIn(on)).accessToken
+    as.theirs = (await signInDirect(on, other.ownerId))!.accessToken
+<%_ if (theirDept) { _%>
+    otherDept = (await ds.query('SELECT id FROM iam_dept WHERE tenant_id = ? AND parent_id = 0', [other.id]))[0].id
+<%_ } _%>
+  })
+
+  afterAll(async () => {
+    await other?.dispose()
+    await on?.close()
+  })
+
+<%_ if (w) { _%>
+  it('their rows are in no list<% if (m.withOptions) { %> or options<% } %>; get, update<% if (toggle) { %>, enabled<% } %>, delete and a batch holding one → 404, nothing written<% if (subs.length) { %>; their sub rows are none of the caller’s (404)<% } %>', async () => {
+    const tag = unique()
+    const their = await theirs(tag<% if (subs.length) { %>, { <% for (const sub of subs) { %><%= sub.prop %>: [<%= sub.biz %>(`${tag}-x`)], <% } %>}<% } %>)
+    const mine = (await http('mine', 'post', '', body(unique())).expect(201)).body.data
+    const listed = idsOf(await http('mine', 'get').query({ sort: '-id', pageSize: 100 }).expect(200))
+    expect(listed).toContain(mine.id)
+    expect(listed).not.toContain(their.id)
+  <%_ if (m.withOptions) { _%>
+    const options = (await http('mine', 'get', '/options').expect(200)).body.data.map((r: { id: number }) => r.id)
+    expect(options).toContain(mine.id)
+    expect(options).not.toContain(their.id)
+  <%_ } _%>
+    denied(await http('mine', 'get', `/${their.id}`))
+    denied(await http('mine', 'put', `/${their.id}`, body(unique())))
+  <%_ if (toggle) { _%>
+    denied(await http('mine', 'put', `/${their.id}/enabled`, { enabled: false }))
+  <%_ } _%>
+    denied(await http('mine', 'delete', `/${their.id}`))
+    // one id of another tenant: the whole batch is refused
+    denied(await http('mine', 'post', '/batch-delete', { ids: [mine.id, their.id] }))
+  <%_ for (const sub of subs) { _%>
+    denied(await http('mine', 'put', `/${mine.id}`, { <%= sub.prop %>: [{ ...<%= sub.biz %>(`${tag}-y`), id: their.<%= sub.prop %>[0].id }] }))
+  <%_ } _%>
+    expect((await http('theirs', 'get', `/${their.id}`).expect(200)).body.data).toEqual(their)
+    expect((await http('mine', 'get', `/${mine.id}`).expect(200)).body.data).toEqual(mine)
+  })
+
+  it('create: the row is the caller’s tenant’s, a tenantId in the body changes nothing<% if (m.uniques.length) { %>; a unique value of another tenant is free<% } %>', async () => {
+    const tag = unique()
+    const their = await theirs(tag)
+    const mine = (await http('mine', 'post', '', { ...body(tag), tenantId: other.id }).expect(201)).body.data
+    expect(
+      await ds.query('SELECT id, tenant_id AS tenantId FROM <%= T %> WHERE id IN (?) ORDER BY id', [[their.id, mine.id]]),
+    ).toEqual([
+      { id: their.id, tenantId: other.id },
+      { id: mine.id, tenantId: DEFAULT_TENANT_ID },
+    ])
+  })
+<%_ } else { _%>
+  it('their rows are in no list<% if (m.withOptions) { %> or options<% } %>; get → 404', async () => {
+    const their = await theirs()
+    const mine = await add(body(unique()))
+    const listed = idsOf(await http('mine', 'get').query({ sort: '-id', pageSize: 100 }).expect(200))
+    expect(listed).toContain(mine.id)
+    expect(listed).not.toContain(their.id)
+  <%_ if (m.withOptions) { _%>
+    const options = (await http('mine', 'get', '/options').expect(200)).body.data.map((r: { id: number }) => r.id)
+    expect(options).toContain(mine.id)
+    expect(options).not.toContain(their.id)
+  <%_ } _%>
+    denied(await http('mine', 'get', `/${their.id}`))
+    await http('theirs', 'get', `/${their.id}`).expect(200)
+  })
+<%_ } _%>
+<%_ if (m.withExport) { _%>
+
+  it('export: the caller’s tenant’s rows only', async () => {
+    // a row of theirs: counted<% if (key && col(key) >= 0) { %> and looked for<% } %> below
+    <% if (key && col(key) >= 0) { %>const their = <% } %>await theirs()
+    const res = await http('mine', 'get', '/export').query({ sort: '-id' }).buffer(true).parse(binary).expect(200)
+    const ws = (await sheet(res.body))!
+    const [{ n }] = await ds.query(
+      'SELECT COUNT(*) AS n FROM <%= T %> WHERE tenant_id = ? AND deleted_at IS NULL',
+      [DEFAULT_TENANT_ID],
+    )
+    expect(ws.actualRowCount).toBe(Number(n) + 1)
+  <%_ if (key && col(key) >= 0) { _%>
+    expect(ws.getColumn(<%= col(key) + 1 %>).values).not.toContain(their.<%= key.field %>)
+  <%_ } _%>
+  })
+<%_ } _%>
+<%_ if (w && m.withImport && m.importKey) { _%>
+
+  it('import upsert never matches a row of another tenant by <%= m.importKey.field %>: a new row of the caller’s tenant, theirs unchanged', async () => {
+    const tag = unique()
+    const their = await theirs(tag)
+    const res = await request(on.getHttpServer())
+      .post(`${URL}/import`)
+      .set(bearer(as.mine))
+      .field('mode', 'upsert')
+      .attach('file', await xlsx([body(tag)]), 'import.xlsx')
+      .expect(200)
+    expect(res.body.data).toMatchObject({ inserted: 1, updated: 0, failed: 0 })
+    expect((await http('theirs', 'get', `/${their.id}`).expect(200)).body.data).toEqual(their)
+    expect(
+      await ds.query(
+        'SELECT tenant_id AS tenantId FROM <%= T %> WHERE <%= m.importKey.column %> = ? AND deleted_at IS NULL ORDER BY id',
+        [their.<%= m.importKey.field %>],
+      ),
+    ).toEqual([{ tenantId: other.id }, { tenantId: DEFAULT_TENANT_ID }])
+  })
+<%_ } _%>
+})
+<%_ } _%>

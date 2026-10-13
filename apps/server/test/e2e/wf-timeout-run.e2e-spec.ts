@@ -25,6 +25,7 @@ import { WfRemind } from '../../src/modules/workflow/runtime/wf-remind.js'
 import { WfStore } from '../../src/modules/workflow/runtime/wf-store.js'
 import { chain, fields, HOUR, review, users } from '../fixtures/wf/flow.js'
 import { bearer, signIn } from '../setup/auth.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 const PREFIX = 'e2e-wft-'
 const MINUTE = 60_000
@@ -60,11 +61,11 @@ async function start(steps: WfStep[], ago = 2 * HOUR, managers = [u.m2, u.m1]): 
   const key = `${PREFIX}m${++seq}`
   const tree = { id: 'begin', type: 'begin', name: 'Begin', next: chain(...steps) }
   const m = await ds.query(
-    "INSERT INTO wf_model (model_key, name, form_kind, manager_user_ids) VALUES (?, ?, 'dynamic', ?)",
+    "INSERT INTO wf_model (model_key, name, form_kind, manager_user_ids, tenant_id) VALUES (?, ?, 'dynamic', ?, 1)",
     [key, key, JSON.stringify(managers)],
   )
   const v = await ds.query(
-    'INSERT INTO wf_version (model_id, model_key, version, tree_json, form_snapshot) VALUES (?, ?, 1, ?, ?)',
+    'INSERT INTO wf_version (model_id, model_key, version, tree_json, form_snapshot, tenant_id) VALUES (?, ?, 1, ?, ?, 1)',
     [m.insertId, key, JSON.stringify(tree), JSON.stringify({ fields })],
   )
   const input = {
@@ -76,14 +77,18 @@ async function start(steps: WfStep[], ago = 2 * HOUR, managers = [u.m2, u.m1]): 
     initiatorPicks: {},
     initiatorCtx: { deptTreePath: null, roleIds: [] },
   }
-  const { inst } = await cls.run(() => app.get(WfStore).start(input, new Date(Date.now() - ago)))
+  const { inst } = await inTenant1(() =>
+    cls.run(() => app.get(WfStore).start(input, new Date(Date.now() - ago))),
+  )
   return inst.id
 }
 
 /** one run of the job; its output */
 const runJob = () =>
-  cls.run(() =>
-    app.get(WfRemind).remind({}, { signal: new AbortController().signal, log: () => {} }),
+  inTenant1(() =>
+    cls.run(() =>
+      app.get(WfRemind).remind({}, { signal: new AbortController().signal, log: () => {} }),
+    ),
   ) as Promise<string>
 const decide = () => app.get(WfDecideService)
 const routing = () => app.get(WfRoutingService)
@@ -193,11 +198,13 @@ beforeAll(async () => {
   let path = '/'
   for (const name of DEPTS) {
     const parent = name === 'P' ? d.R : name === 'D' ? d.P : 0
-    d[name] = await insertRow(ds.manager, 'iam_dept', {
-      parent_id: parent,
-      name: PREFIX + name,
-      tree_path: '/',
-    })
+    d[name] = await inTenant1(() =>
+      insertRow(ds.manager, 'iam_dept', {
+        parent_id: parent,
+        name: PREFIX + name,
+        tree_path: '/',
+      }),
+    )
     path = name === 'X' ? `/${d.X}/` : `${path}${d[name]}/`
     await ds.query('UPDATE iam_dept SET tree_path = ? WHERE id = ?', [path, d[name]])
   }
@@ -211,16 +218,18 @@ beforeAll(async () => {
   }
   for (const who of WHO) {
     const en = who === 'm1' || who === 'ben'
-    u[who] = await insertRow(ds.manager, 'iam_user', {
-      username: PREFIX + who,
-      display_name: who,
-      dept_id: deptOf[who] ?? null,
-      enabled: who === 'm2' || who === 'zed' ? 0 : 1,
-      password_hash: 'not-used-by-this-spec',
-      password_changed_at: new Date(),
-      locale: en ? 'en-US' : 'zh-CN',
-      timezone: 'UTC',
-    })
+    u[who] = await inTenant1(() =>
+      insertRow(ds.manager, 'iam_user', {
+        username: PREFIX + who,
+        display_name: who,
+        dept_id: deptOf[who] ?? null,
+        enabled: who === 'm2' || who === 'zed' ? 0 : 1,
+        password_hash: 'not-used-by-this-spec',
+        password_changed_at: new Date(),
+        locale: en ? 'en-US' : 'zh-CN',
+        timezone: 'UTC',
+      }),
+    )
   }
   for (const [dept, head] of [
     ['R', 'r'],
@@ -284,12 +293,16 @@ it('autoPass: approved for the assignee, said on the timeline, told to all but t
   expect(en).toContain('Not handled in time; approved automatically')
   // an auto-passed approval is not taken back: no withdraw on the detail, 409 on the action
   expect((await get('ann', `/wf/instances/${id}`)).withdrawable).toBeNull()
-  await expect(cls.run(() => routing().withdraw(a.id, u.ann, {}))).rejects.toMatchObject({
+  await expect(
+    inTenant1(() => cls.run(() => routing().withdraw(a.id, u.ann, {}))),
+  ).rejects.toMatchObject({
     err: { status: 409 },
   })
   // a user's comment that reads like the system's key stays as written
   const b = await pendingOf(id, 'ben')
-  await cls.run(() => decide().approve(b.id, u.ben, { comment: 'seed.wf.timeout.autoPass' }))
+  await inTenant1(() =>
+    cls.run(() => decide().approve(b.id, u.ben, { comment: 'seed.wf.timeout.autoPass' })),
+  )
   expect(await stateOf(id)).toBe('approved')
   const said = async (lang: string) =>
     (
@@ -312,8 +325,8 @@ it('autoPass: approved for the assignee, said on the timeline, told to all but t
   ])
   // only a timeout key is said so: another actorless event of the task (none written today) stays as is
   await ds.query(
-    `INSERT INTO wf_event (instance_id, task_id, node_id, action, actor_id, comment, created_at)
-     VALUES (?, ?, 'a', 'comment', NULL, 'hello', NOW())`,
+    `INSERT INTO wf_event (instance_id, task_id, node_id, action, actor_id, comment, created_at, tenant_id)
+     VALUES (?, ?, 'a', 'comment', NULL, 'hello', NOW(), 1)`,
     [id, a.id],
   )
   const timeline = (await get('init', `/wf/instances/${id}`)).timeline as { comment: string }[]
@@ -387,7 +400,7 @@ it('toManager: up the dept chain to the root head, then a process manager, then 
   expect(await sent()).toEqual(['init wf.task.timeout', 'm1 wf.task.overdue'])
   expect((await bodies('init', 'wf.task.timeout'))[0]).toContain('没有可以转交的人')
   // after a remind-only record the task is still m1's: approved, it is in m1's done list
-  await cls.run(() => decide().approve(last.id, u.m1, {}))
+  await inTenant1(() => cls.run(() => decide().approve(last.id, u.m1, {})))
   expect(await stateOf(id)).toBe('approved')
   expect(await doneOf('m1')).toEqual([last.id])
   for (const who of ['ann', 'h', 'p', 'r'] as const) expect(await doneOf(who)).toEqual([])
@@ -457,15 +470,17 @@ it('a failed handling is recorded and told once; fixed and reassigned, it is han
   await ds.query('UPDATE iam_user SET enabled = 1 WHERE id = ?', [u.zed])
   try {
     const before = Date.now()
-    await cls.run(() =>
-      app.get(WfStore).act(id, (run) => {
-        const task = run.tasks.find((t) => t.id === a.id)!
-        return reassign(run.ctx, run.inst, run.tasks, task, {
-          actorId: u.m1,
-          to: u.ben,
-          comment: null,
-        })
-      }),
+    await inTenant1(() =>
+      cls.run(() =>
+        app.get(WfStore).act(id, (run) => {
+          const task = run.tasks.find((t) => t.id === a.id)!
+          return reassign(run.ctx, run.inst, run.tasks, task, {
+            actorId: u.m1,
+            to: u.ben,
+            comment: null,
+          })
+        }),
+      ),
     )
     const moved = await pendingOf(id, 'ben')
     expect(moved.id).toBe(a.id)
@@ -491,10 +506,10 @@ it('a failed handling is recorded and told once; fixed and reassigned, it is han
 it('withdrawn after its due time, an approval is due again from now: not handled at the next run', async () => {
   const id = await start([step('a', 'ann', 'autoPass'), step('b', 'ben')], 0)
   const a = await pendingOf(id, 'ann')
-  await cls.run(() => decide().approve(a.id, u.ann, {}))
+  await inTenant1(() => cls.run(() => decide().approve(a.id, u.ann, {})))
   await expire(a.id)
   const before = Date.now()
-  await cls.run(() => routing().withdraw(a.id, u.ann, {}))
+  await inTenant1(() => cls.run(() => routing().withdraw(a.id, u.ann, {})))
   const back = await pendingOf(id, 'ann')
   expect(back.id).toBe(a.id)
   expect(back.dueAt!.getTime()).toBeGreaterThanOrEqual(before + HOUR - 1000)
@@ -506,7 +521,7 @@ it('withdrawn after its due time, an approval is due again from now: not handled
 it('a manual transfer gives the new holder a fresh due time: not handled at the next run', async () => {
   const id = await start([step('a', 'ann', 'autoPass')])
   const a = await pendingOf(id, 'ann')
-  await cls.run(() => routing().transfer(a.id, u.ann, { userId: u.ben }))
+  await inTenant1(() => cls.run(() => routing().transfer(a.id, u.ann, { userId: u.ben })))
   await runJob()
   expect(await timeouts(id)).toEqual([])
   expect((await pendingOf(id, 'ben')).dueAt!.getTime()).toBeGreaterThan(Date.now())
@@ -517,14 +532,18 @@ it('a delegated or before-signed task and the child tasks are only reminded, as 
   const signed = await start([step('a', 'ben', 'autoPass')])
   const a = await pendingOf(delegated, 'ann')
   const b = await pendingOf(signed, 'ben')
-  await cls.run(() => routing().delegate(a.id, u.ann, { userId: u.h }))
-  await cls.run(() => routing().addSign(b.id, u.ben, { kind: 'before', userIds: [u.p] }))
+  await inTenant1(() => cls.run(() => routing().delegate(a.id, u.ann, { userId: u.h })))
+  await inTenant1(() =>
+    cls.run(() => routing().addSign(b.id, u.ben, { kind: 'before', userIds: [u.p] })),
+  )
   await expire((await pendingOf(signed, 'p')).id)
   await markNow()
   await runJob()
   expect(await sent()).toEqual(['h wf.task.overdue', 'p wf.task.overdue'])
   // the delegate approves: the owner's task is pending again, past due, but it had a child
-  await cls.run(async () => decide().approve((await pendingOf(delegated, 'h')).id, u.h, {}))
+  await inTenant1(async () =>
+    cls.run(async () => decide().approve((await pendingOf(delegated, 'h')).id, u.h, {})),
+  )
   await markNow()
   await runJob()
   expect(await sent()).toEqual(['ann wf.task.overdue'])
@@ -537,12 +556,14 @@ describe('races', () => {
     const id = await start([step('a', 'ann', 'autoPass')])
     const a = await pendingOf(id, 'ann')
     const [user] = await Promise.all([
-      cls
-        .run(() => decide().approve(a.id, u.ann, {}))
-        .then(
-          () => 'ok',
-          (e: { err?: { status: number } }) => e.err?.status,
-        ),
+      inTenant1(() =>
+        cls
+          .run(() => decide().approve(a.id, u.ann, {}))
+          .then(
+            () => 'ok',
+            (e: { err?: { status: number } }) => e.err?.status,
+          ),
+      ),
       runJob(),
     ])
     const won = await ds.query<{ action: string }[]>(
@@ -560,7 +581,7 @@ describe('races', () => {
     const remind = app.get(WfRemind) as unknown as { handle: () => Promise<unknown> }
     // the user's approval commits between the handling's read and its write
     vi.spyOn(remind, 'handle').mockImplementationOnce(async () => {
-      await cls.run(() => decide().approve(a.id, u.ann, {}))
+      await inTenant1(() => cls.run(() => decide().approve(a.id, u.ann, {})))
       throw new BizError(Err.CONFLICT)
     })
     expect(await runJob()).toMatch(/timed out 0, timeout failed 0, errors 0 of/)
@@ -573,15 +594,17 @@ describe('races', () => {
     const a = await pendingOf(id, 'ann')
     const remind = app.get(WfRemind) as unknown as { handle: () => Promise<unknown> }
     vi.spyOn(remind, 'handle').mockImplementationOnce(async () => {
-      await cls.run(() =>
-        app.get(WfStore).act(id, (run) => {
-          const task = run.tasks.find((t) => t.id === a.id)!
-          return reassign(run.ctx, run.inst, run.tasks, task, {
-            actorId: u.m1,
-            to: u.ben,
-            comment: null,
-          })
-        }),
+      await inTenant1(() =>
+        cls.run(() =>
+          app.get(WfStore).act(id, (run) => {
+            const task = run.tasks.find((t) => t.id === a.id)!
+            return reassign(run.ctx, run.inst, run.tasks, task, {
+              actorId: u.m1,
+              to: u.ben,
+              comment: null,
+            })
+          }),
+        ),
       )
       throw new BizError(Err.CONFLICT)
     })
@@ -629,10 +652,12 @@ it('an error that is no BizError rolls that one back, the others go on, the next
     k.startsWith(PREFIX) && k !== key ? (down as unknown as ReturnType<typeof real>) : real(k),
   )
   const lines: string[] = []
-  const out = await cls.run(() =>
-    app
-      .get(WfRemind)
-      .remind({}, { signal: new AbortController().signal, log: (l) => lines.push(l) }),
+  const out = await inTenant1(() =>
+    cls.run(() =>
+      app
+        .get(WfRemind)
+        .remind({}, { signal: new AbortController().signal, log: (l) => lines.push(l) }),
+    ),
   )
   expect(out).toMatch(/timed out 1, timeout failed 0, errors 11 of/)
   expect(lines).toHaveLength(10)

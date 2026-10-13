@@ -27,6 +27,7 @@ import {
 } from '@qiwu/shared'
 import { ActionLog } from '../../../../core/audit/action-log.js'
 import { RequirePerm } from '../../../../core/auth/decorators.js'
+import { PlatformOnly } from '../../../../core/auth/platform-only.js'
 import { ExcelService, XLSX_TYPE } from '../../../../core/excel/excel.service.js'
 import { Idempotent } from '../../../../core/guard/idempotent.js'
 import { ApiEnvelope } from '../../../../core/http/api-envelope.decorator.js'
@@ -37,6 +38,7 @@ import { paramColumns, ParameterService } from './param.service.js'
 @ApiTags('settings')
 // a value may be a secret one: never in a request log (the stored flag is unknown there)
 @Sensitive('paramValue')
+@PlatformOnly()
 @Controller('settings/params')
 export class ParameterController {
   constructor(

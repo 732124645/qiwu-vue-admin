@@ -32,6 +32,7 @@ import {
 } from '@qiwu/shared'
 import { ActionLog } from '../../../../core/audit/action-log.js'
 import { Public, RequirePerm } from '../../../../core/auth/decorators.js'
+import { PlatformOnly } from '../../../../core/auth/platform-only.js'
 import { Idempotent } from '../../../../core/guard/idempotent.js'
 import { RateLimit } from '../../../../core/guard/rate-limit.decorator.js'
 import { ApiEnvelope } from '../../../../core/http/api-envelope.decorator.js'
@@ -45,6 +46,7 @@ export class AppVersionController {
 
   @Get()
   @RequirePerm(appVersionPerms.browse)
+  @PlatformOnly()
   @ApiOperation({ summary: 'Page of app versions' })
   @ApiEnvelope(pageVo(appVersionVo))
   page(@Query({ schema: appVersionQuery }) query: AppVersionQuery) {
@@ -63,6 +65,7 @@ export class AppVersionController {
 
   @Get(':id')
   @RequirePerm(appVersionPerms.view)
+  @PlatformOnly()
   @ApiOperation({ summary: 'One app version' })
   @ApiEnvelope(appVersionVo)
   get(@Param('id', ParseIntPipe) id: number) {
@@ -71,6 +74,7 @@ export class AppVersionController {
 
   @Post()
   @RequirePerm(appVersionPerms.create)
+  @PlatformOnly()
   @Idempotent()
   @ActionLog({
     domain: 'settings.appVersion',
@@ -85,6 +89,7 @@ export class AppVersionController {
 
   @Put(':id')
   @RequirePerm(appVersionPerms.modify)
+  @PlatformOnly()
   @ActionLog({ domain: 'settings.appVersion', verb: 'modify' })
   @ApiOperation({ summary: 'Change an app version' })
   @ApiEnvelope()
@@ -97,6 +102,7 @@ export class AppVersionController {
 
   @Put(':id/enabled')
   @RequirePerm(appVersionPerms.modify)
+  @PlatformOnly()
   @ActionLog({ domain: 'settings.appVersion', verb: 'modify' })
   @ApiOperation({ summary: 'Enable or disable an app version' })
   @ApiEnvelope()
@@ -109,6 +115,7 @@ export class AppVersionController {
 
   @Delete(':id')
   @RequirePerm(appVersionPerms.remove)
+  @PlatformOnly()
   @ActionLog({ domain: 'settings.appVersion', verb: 'remove' })
   @ApiOperation({ summary: 'Delete an app version' })
   @ApiEnvelope()
@@ -119,6 +126,7 @@ export class AppVersionController {
   @Post('batch-delete')
   @HttpCode(200)
   @RequirePerm(appVersionPerms.remove)
+  @PlatformOnly()
   @ActionLog({ domain: 'settings.appVersion', verb: 'remove' })
   @ApiOperation({ summary: 'Delete app versions: all or none' })
   @ApiEnvelope()

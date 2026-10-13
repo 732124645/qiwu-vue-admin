@@ -4,6 +4,7 @@ import type { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adap
 import { Err, type DeptQuery, type DeptTreeNode } from '@qiwu/shared'
 import type { DeepPartial, SelectQueryBuilder } from 'typeorm'
 import { PermVersion } from '../../../../core/auth/perm-version.js'
+import { tenantId } from '../../../../core/context/tenant.js'
 import { applyScopes, dataScopeOf } from '../../../../core/data-scope/data-scope.js'
 import { BaseTreeService, forest, type TreeNode } from '../../../../core/db/base-tree.service.js'
 import { contains } from '../../../../core/db/page.js'
@@ -87,8 +88,8 @@ export class DeptService extends BaseTreeService<Dept> {
   /** Users still in one of the depts (409); a locking read, so none moves in before the delete commits. */
   protected override async beforeRemove(ids: number[]): Promise<void> {
     const [user] = await this.txHost.tx.query<unknown[]>(
-      'SELECT id FROM iam_user WHERE dept_id IN (?) AND deleted_at IS NULL LIMIT 1 FOR SHARE',
-      [ids],
+      'SELECT id FROM iam_user WHERE dept_id IN (?) AND tenant_id = ? AND deleted_at IS NULL LIMIT 1 FOR SHARE',
+      [ids, tenantId()],
     )
     if (user) throw new BizError(Err.IAM_DEPT_HAS_USERS)
   }
@@ -99,8 +100,8 @@ export class DeptService extends BaseTreeService<Dept> {
    */
   protected override async afterMove(ids: number[]): Promise<void> {
     const users = await this.txHost.tx.query<{ id: number }[]>(
-      'SELECT id FROM iam_user WHERE dept_id IN (?) AND deleted_at IS NULL',
-      [ids],
+      'SELECT id FROM iam_user WHERE dept_id IN (?) AND tenant_id = ? AND deleted_at IS NULL',
+      [ids, tenantId()],
     )
     await this.permVersion.bumpUsers(users.map((u) => Number(u.id)))
   }

@@ -7,6 +7,7 @@ import {
   type BulletinFeedItem,
 } from '@qiwu/shared'
 import type { DataSource } from 'typeorm'
+import { tenantId } from '../../../../core/context/tenant.js'
 
 interface FeedRow {
   id: number
@@ -27,8 +28,9 @@ const item = ({ body, ...r }: FeedRow): BulletinFeedItem & { body?: string } => 
 
 /**
  * The readers' side of bulletins (`bulletin-feed.schema.ts`): every signed-in user, published bulletins
- * only (a draft, a deleted or an unknown id → 404 alike), receipts only ever for the caller. The body was
- * sanitized when saved (core/sanitize.ts), so it goes out as stored.
+ * of the caller's tenant only (a draft, a deleted, another tenant's or an unknown id → 404 alike),
+ * receipts only ever for the caller. The body was sanitized when saved (core/sanitize.ts), so it goes out
+ * as stored.
  */
 @Injectable()
 export class BulletinFeedService {
@@ -38,10 +40,11 @@ export class BulletinFeedService {
   async feed(userId: number): Promise<BulletinFeed> {
     const rows: FeedRow[] = await this.ds.query(
       `SELECT b.id, b.title, b.kind, b.published_at AS publishedAt,
-         EXISTS (SELECT 1 FROM msg_bulletin_receipt r WHERE r.bulletin_id = b.id AND r.user_id = ? AND r.deleted_at IS NULL) AS \`read\`
-       FROM msg_bulletin b WHERE b.published = 1 AND b.deleted_at IS NULL
+         EXISTS (SELECT 1 FROM msg_bulletin_receipt r WHERE r.bulletin_id = b.id AND r.user_id = ?
+           AND r.deleted_at IS NULL AND r.tenant_id = ?) AS \`read\`
+       FROM msg_bulletin b WHERE b.published = 1 AND b.deleted_at IS NULL AND b.tenant_id = ?
        ORDER BY b.published_at DESC, b.id DESC LIMIT ?`,
-      [userId, BULLETIN_FEED_SIZE],
+      [userId, tenantId(), tenantId(), BULLETIN_FEED_SIZE],
     )
     return { items: rows.map(item), unread: await this.unread(userId) }
   }
@@ -50,9 +53,10 @@ export class BulletinFeedService {
   async detail(id: number, userId: number): Promise<BulletinFeedDetail> {
     const [row]: FeedRow[] = await this.ds.query(
       `SELECT b.id, b.title, b.kind, b.published_at AS publishedAt, b.body,
-         EXISTS (SELECT 1 FROM msg_bulletin_receipt r WHERE r.bulletin_id = b.id AND r.user_id = ? AND r.deleted_at IS NULL) AS \`read\`
-       FROM msg_bulletin b WHERE b.id = ? AND b.published = 1 AND b.deleted_at IS NULL`,
-      [userId, id],
+         EXISTS (SELECT 1 FROM msg_bulletin_receipt r WHERE r.bulletin_id = b.id AND r.user_id = ?
+           AND r.deleted_at IS NULL AND r.tenant_id = ?) AS \`read\`
+       FROM msg_bulletin b WHERE b.id = ? AND b.published = 1 AND b.deleted_at IS NULL AND b.tenant_id = ?`,
+      [userId, tenantId(), id, tenantId()],
     )
     if (!row) throw new NotFoundException()
     return item(row) as BulletinFeedDetail
@@ -65,17 +69,18 @@ export class BulletinFeedService {
    */
   async read(id: number, userId: number): Promise<number> {
     const { affectedRows } = await this.ds.query(
-      `INSERT INTO msg_bulletin_receipt (bulletin_id, user_id)
-         SELECT id, ? FROM msg_bulletin WHERE id = ? AND published = 1 AND deleted_at IS NULL
+      `INSERT INTO msg_bulletin_receipt (bulletin_id, user_id, tenant_id)
+         SELECT id, ?, tenant_id FROM msg_bulletin
+          WHERE id = ? AND published = 1 AND deleted_at IS NULL AND tenant_id = ?
          ON DUPLICATE KEY UPDATE read_at = IF(msg_bulletin_receipt.deleted_at IS NULL,
            msg_bulletin_receipt.read_at, CURRENT_TIMESTAMP(3)), msg_bulletin_receipt.deleted_at = NULL`,
-      [userId, id],
+      [userId, id, tenantId()],
     )
     // 0 rows: not published (or unknown), or read before (a no-op update); only the first is a 404
     if (!affectedRows) {
       const [known] = await this.ds.query(
-        'SELECT 1 FROM msg_bulletin WHERE id = ? AND published = 1 AND deleted_at IS NULL',
-        [id],
+        'SELECT 1 FROM msg_bulletin WHERE id = ? AND published = 1 AND deleted_at IS NULL AND tenant_id = ?',
+        [id, tenantId()],
       )
       if (!known) throw new NotFoundException()
     }
@@ -85,20 +90,23 @@ export class BulletinFeedService {
   /** Receipts for every published bulletin the caller has not read (revived like `read`); unread (0). */
   async readAll(userId: number): Promise<number> {
     await this.ds.query(
-      `INSERT INTO msg_bulletin_receipt (bulletin_id, user_id)
-         SELECT b.id, ? FROM msg_bulletin b WHERE b.published = 1 AND b.deleted_at IS NULL
+      `INSERT INTO msg_bulletin_receipt (bulletin_id, user_id, tenant_id)
+         SELECT b.id, ?, b.tenant_id FROM msg_bulletin b
+          WHERE b.published = 1 AND b.deleted_at IS NULL AND b.tenant_id = ?
          ON DUPLICATE KEY UPDATE read_at = IF(msg_bulletin_receipt.deleted_at IS NULL,
            msg_bulletin_receipt.read_at, CURRENT_TIMESTAMP(3)), msg_bulletin_receipt.deleted_at = NULL`,
-      [userId],
+      [userId, tenantId()],
     )
     return this.unread(userId)
   }
 
   async unread(userId: number): Promise<number> {
     const [{ n }] = await this.ds.query(
-      `SELECT COUNT(*) AS n FROM msg_bulletin b WHERE b.published = 1 AND b.deleted_at IS NULL AND NOT EXISTS
-         (SELECT 1 FROM msg_bulletin_receipt r WHERE r.bulletin_id = b.id AND r.user_id = ? AND r.deleted_at IS NULL)`,
-      [userId],
+      `SELECT COUNT(*) AS n FROM msg_bulletin b
+        WHERE b.published = 1 AND b.deleted_at IS NULL AND b.tenant_id = ? AND NOT EXISTS
+         (SELECT 1 FROM msg_bulletin_receipt r
+           WHERE r.bulletin_id = b.id AND r.user_id = ? AND r.deleted_at IS NULL AND r.tenant_id = ?)`,
+      [tenantId(), userId, tenantId()],
     )
     return Number(n)
   }

@@ -61,6 +61,27 @@ describe('sign-up page', () => {
     },
   )
 
+  it('keeps the form closed on a host bound to a tenant other than the default one', async () => {
+    const bound = (code: string) =>
+      ok({ enabled: true, tenant: { code, name: code, brandName: null, logoUrl: null } })
+    mockApi({
+      'GET /settings/params/public/auth.signup.enabled': setting('true'),
+      'GET /auth/tenancy': bound('acme'),
+    })
+    const closed = await page()
+    expect(closed.wrapper.find('form').exists()).toBe(false)
+    expect(closed.wrapper.text()).toContain('Sign-up is not open')
+    closed.wrapper.unmount()
+
+    mockApi({
+      'GET /settings/params/public/auth.signup.enabled': setting('true'),
+      'GET /auth/tenancy': bound('default'),
+    })
+    const open = await page()
+    expect(open.wrapper.find('form').exists()).toBe(true)
+    open.wrapper.unmount()
+  })
+
   it('rejects invalid fields and sends only the contract body in off mode', async () => {
     const calls = mockApi({
       'GET /settings/params/public/auth.signup.enabled': setting('true'),

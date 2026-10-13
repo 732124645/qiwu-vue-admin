@@ -11,6 +11,7 @@ import {
 } from '@qiwu/shared'
 import { z } from 'zod'
 import { ActionLog } from '../../../core/audit/action-log.js'
+import { HomeTenant, RequireFeature } from '../../../core/auth/tenant-scope.js'
 import { clsGet } from '../../../core/context/cls.js'
 import { ApiEnvelope } from '../../../core/http/api-envelope.decorator.js'
 import { WfDecideService } from './wf-decide.service.js'
@@ -19,10 +20,13 @@ const me = () => clsGet('principal')!.userId
 
 /**
  * Task actions of the approval center (see docs/design-notes.md#workflow): sign-in only; the task must be the caller's
- * (else 404), one no longer pending is 409.
+ * (else 404), one no longer pending is 409. They run in the caller's own tenant, as the to-do lists do
+ * (see docs/design-notes.md#tenancy).
  */
 @ApiTags('wf')
 @Controller('wf/tasks')
+@RequireFeature('workflow')
+@HomeTenant()
 export class WfTaskController {
   constructor(private readonly decide: WfDecideService) {}
 

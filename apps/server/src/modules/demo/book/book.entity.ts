@@ -2,6 +2,7 @@
 import { Column, Entity } from 'typeorm'
 import { DataScoped } from '../../../core/data-scope/data-scope.js'
 import { BaseEntity, decimalNumber } from '../../../core/db/base.entity.js'
+import { TenantColumn } from '../../../core/db/tenant-filter.js'
 
 /** `demo_book`: 图书（生成器示例）, data-scoped (see docs/design-notes.md#data-scope) */
 @Entity('demo_book')
@@ -42,4 +43,7 @@ export class Book extends BaseEntity {
   /** 是否启用 */
   @Column({ type: 'boolean', default: true })
   enabled: boolean
+
+  @TenantColumn()
+  tenantId: number
 }

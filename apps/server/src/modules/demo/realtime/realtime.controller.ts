@@ -26,7 +26,7 @@ export class DemoRealtimeController {
   @ActionLog({ domain: 'demo.realtime', verb: 'send' })
   @ApiOperation({
     summary:
-      'Push plain text as `demo:message` to users, roles (enabled users in scope) or everyone (`demo.realtime.broadcast`)',
+      'Push plain text as `demo:message` to users, roles (enabled users in scope) or everyone in the tenant (`demo.realtime.broadcast`)',
   })
   @ApiEnvelope(demoRealtimeSendVo)
   send(@Body({ schema: demoRealtimeSendBody }) body: DemoRealtimeSendBody) {

@@ -36,6 +36,7 @@ import {
 import { z } from 'zod'
 import { ActionLog } from '../../../../core/audit/action-log.js'
 import { RequirePerm } from '../../../../core/auth/decorators.js'
+import { PlatformOnly } from '../../../../core/auth/platform-only.js'
 import { ExcelService, XLSX_TYPE } from '../../../../core/excel/excel.service.js'
 import { Idempotent } from '../../../../core/guard/idempotent.js'
 import { ApiEnvelope } from '../../../../core/http/api-envelope.decorator.js'
@@ -44,6 +45,7 @@ import type { Task } from './task.entity.js'
 import { taskColumns, TaskService } from './task.service.js'
 
 @ApiTags('scheduler')
+@PlatformOnly()
 @Controller('scheduler/tasks')
 export class TaskController {
   constructor(

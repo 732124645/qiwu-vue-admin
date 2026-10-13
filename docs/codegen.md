@@ -7,20 +7,23 @@
 项目业务直接放在自己的领域目录，领域通常来自表名的第一段。例如 `erp_sale_order` 得到领域 `erp`、业务 `sale-order`，不再套一层 `biz/` 目录。菜单分组由管理员建立，生成配置保存父分组路由名，种子负责在新库重建分组与页面。
 
 1. **建立菜单分组。** 在菜单管理中建立 `kind=group` 的目录，如 `erp` 下的 `erp-sale`。`MENU_GROUP_ROUTE_NAME` 要求小写字母、数字和连字符；表单按路由路径派生初值（`/erp/sale` → `erp-sale`），保存后路由名只读。修改已有效的路由名返回 422 `B1012`；缺失或不合格式的旧路由名允许一次修正。没有独立领域的表可直接挂到内置 `biz` 分组。
-2. **建表并迁移。** 在 `apps/server/src/db/migrations/` 写迁移，遵守下文审计、软删除、唯一键和引用约定，然后执行 `pnpm db:migrate`。新项目环境准备见[入门文档](getting-started.md)，不要用重置已有开发库代替迁移。
+2. **建表并迁移。** 在 `apps/server/src/db/migrations/` 写迁移，遵守下文审计、软删除、租户、唯一键和引用约定，然后执行 `pnpm db:migrate`。新项目环境准备见[入门文档](getting-started.md)，不要用重置已有开发库代替迁移。
 3. **导入。** 用 `pnpm gen import <table>` 或代码生成页面导入，检查默认配置、提示、字段标签与控件。名称推导规则见下一节。
 4. **编辑并生成。** 调整生成配置后预览、下载 zip，或执行 `pnpm gen render <table> --out <dir>` / `pnpm gen write <table>`。生成器不创建业务表；同步表结构只同步配置。
-5. **按打印内容手工注册。** CLI 的 render/write 和页面预览提供注册提示：模块、种子、shared 导出、父项目菜单分组链；有移动端生成物时再注册 pages.json 和入口，位置见下表。
-6. **执行种子。** `pnpm db:seed` 中 `SEEDS.project` 最后执行，先运行 `seedProjectMenuGroups` 和 `seedProjectActionVerbs`，再运行项目页面种子。
+5. **按打印内容手工注册。** CLI 的 render/write 和页面预览提供注册提示：模块、种子、shared 导出、父项目菜单分组链；平台表（`PLATFORM_TABLES`）的页面另提示登记平台专属路由；有移动端生成物时再注册 pages.json 和入口，位置见下表。
+6. **执行种子。** `pnpm db:seed` 中 `SEEDS.project` 在默认租户运行，先运行 `seedProjectMenuGroups` 和 `seedProjectActionVerbs`，再运行项目页面种子；最后 `SEEDS.tenant` 对每个非默认租户运行租户级种子，其中包括项目的 `PROJECT_TENANT_SEEDS`。
 7. **授予页面权限。** 在角色管理中用 `iam.role.grant` 授权。生成页面不会自动授予普通角色，root 可以立即访问。
+8. **加进租户套餐。** 启用多租户后，非默认租户只能使用其套餐包含的页面：在租户套餐中勾选新页面，否则这些租户看不到它。
 
-| 注册内容                                           | 文件与操作                                                                                                                                              |
-| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 项目服务模块                                       | `apps/server/src/modules/project.module.ts`：导入模块并加入 `imports`                                                                                   |
-| 项目模块种子                                       | `apps/server/src/db/seeds/index.ts`：导入 seed 函数，放到 `SEEDS.project` 的分组和动作种子之后；内置样例走 `SEEDS.demo`                                 |
-| 项目父菜单链                                       | `apps/server/src/db/seeds/project/menu-groups.seed.ts` 的 `PROJECT_MENU_GROUPS`：按父先子后补缺少的项目分组，直到内置父分组；缺少英文名称的派生值需校对 |
-| 共享 schema 导出                                   | `packages/shared/src/index.ts`：追加生成 schema 的 export                                                                                               |
-| 移动页面（开启 `options.withMobile` 且客户端存在） | `mobile/src/pages.json` 的 `pages-biz` 分包追加 index/detail/form（只读无 form）；入口由项目自行添加，如工作台 `SHORTCUTS`                              |
+| 注册内容                                           | 文件与操作                                                                                                                                                                                                            |
+| -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 项目服务模块                                       | `apps/server/src/modules/project.module.ts`：导入模块并加入 `imports`                                                                                                                                                 |
+| 项目模块种子                                       | `apps/server/src/db/seeds/index.ts`：导入 seed 函数，放到 `SEEDS.project` 的分组和动作种子之后；内置样例走 `SEEDS.demo`                                                                                               |
+| 项目父菜单链                                       | `apps/server/src/db/seeds/project/menu-groups.seed.ts` 的 `PROJECT_MENU_GROUPS`：按父先子后补缺少的项目分组，直到内置父分组；缺少英文名称的派生值需校对                                                               |
+| 项目的租户级种子                                   | `apps/server/src/db/seeds/project/tenant.seed.ts` 的 `PROJECT_TENANT_SEEDS`：每个租户都要的基础数据；开通租户时与每次 `pnpm db:seed` 对各非默认租户运行，只补缺少的行（`SEEDS.project` 只在默认租户运行）             |
+| 共享 schema 导出                                   | `packages/shared/src/index.ts`：追加生成 schema 的 export                                                                                                                                                             |
+| 平台专属页面（表在 `PLATFORM_TABLES` 里）          | `packages/shared/src/common/tenancy.ts` 的 `PLATFORM_ONLY_ROUTES`：加入页面的 `route_name`。生成的控制器已在每个带权限点的路由上加 `@PlatformOnly()`；漏登记时页面挂在普通分组下，其他租户会拿到一个点开即 403 的页面 |
+| 移动页面（开启 `options.withMobile` 且客户端存在） | `mobile/src/pages.json` 的 `pages-biz` 分包追加 index/detail/form（只读无 form）；入口由项目自行添加，如工作台 `SHORTCUTS`                                                                                            |
 
 桌面端不需要手动注册页面路由和 locale 文件：页面从菜单加载，视图和词条通过 glob 查找、合并。平台与流程模块仍注册到所在领域模块及对应的 `SEEDS` 项。
 
@@ -36,7 +39,7 @@
 - 同名业务跨领域、导出名与 shared 手写模块冲突时，类名加领域前缀，如 `ErpCustomer` / `erpCustomerPerms`；仍冲突则 422 `C3011`，指出另一张表。编辑领域或业务时，仍等于旧派生值的类名与字典码会跟随重新派生。
 - 项目父菜单按表名的前导段从长到短匹配分组，排除整张表名：`erp_sale_order` 先找 `erp-sale`，再找 `erp`，否则回落 `biz` 并给 `parent_menu` 提示。生成页可选任意层级的分组；自身或祖先路由名不合法的分组不可选，保存返回 422 `C3008`。
 - 页面路由名 `<domain>-<business>` 与已有目录/动作路由名（包含软删除记录）或父链冲突时返回 422 `C3012`，需要修改领域或业务名。
-- `meta_` / `test_` / `cg_` 表由 `EXCLUDED_TABLE` 排除。没有 `deleted_at` 的表不可导入或生成，整批导入失败，返回 422 `C3010`；唯一键缺少 `alive` 仅提示，不替数据库补约束。
+- `meta_` / `test_` / `cg_` / `wxoa_` 表由 `EXCLUDED_TABLE` 排除。没有 `deleted_at` 的表不可导入或生成，整批导入失败，返回 422 `C3010`；唯一键缺少 `alive`、非平台表缺少 `tenant_id`、租户表的唯一键不以 `tenant_id` 开头，都只提示，不替数据库补约束。
 
 内置父菜单为：`iam_/cfg_/oauth_/im_` → `system`；`msg_` → `messaging`；`aud_` → `audit`；`fs_` → `storage`；`job_` → `monitor`；`wf_` → `wf-admin`。领域、URL、权限来自表名与生成配置，不能由父菜单决定。
 
@@ -55,6 +58,8 @@
 
 平台/流程在 modules、views、api、shared 路径中继续带 `platform/` 或 `workflow/` 层。移动端 `<home>` 同样随模块位置变化。
 
+租户表（有 `tenant_id`、不在 `PLATFORM_TABLES` 里）生成的回归 spec 末尾带租户隔离分组（开关打开，另起一个应用与另一租户）。它有两处不适用的情形要在 `-extra` 用例里自己处理，见[黄金样板](codegen-golden.md)：树表必填 `dept_id` 且登记了 `referencedBy` 时，以及唯一键登记在 `GLOBAL_UNIQUE` 的租户表。
+
 ## 菜单种子的重放
 
 项目页面的 `parent_id`、`icon`、`sort_no` 只在首次插入时写入；管理员移动、换图标、重排后，再跑种子会保留这些修改。页面名称、路径、component 和动作仍按自然键更新；平台页面继续更新全部配置字段。
@@ -63,7 +68,7 @@
 
 模块种子按父路由名找 `kind=group` 的记录：父分组已删除则跳过该模块页面/动作并提示，其他种子继续；父分组不存在则报错，项目分组错误提示指向 `menu-groups.seed.ts`。需要恢复页面时由管理员重新建立有效分组，不能指望 seed 撤销删除。
 
-例如，在菜单管理建立 `erp` → `erp-sale`，迁移创建含 `order_no`、`customer_name`、`amount decimal(12,2)`、审计列、`deleted_at`、`alive` 和 `UNIQUE(order_no, alive)` 的 `erp_sale_order`。导入后检查标签和字段配置，默认类名未冲突时为 `SaleOrder`，父菜单 `erp-sale`。生成后按提示注册 `SaleOrderModule`、`seedSaleOrder`、shared 导出与分组链，再 seed 和授予 `erp.saleOrder.*`。模板不附带 ERP 业务表。
+例如，在菜单管理建立 `erp` → `erp-sale`，迁移创建含 `order_no`、`customer_name`、`amount decimal(12,2)`、审计列、`deleted_at`、`alive`、`tenant_id` 和 `UNIQUE(tenant_id, order_no, alive)` 的 `erp_sale_order`。导入后检查标签和字段配置，默认类名未冲突时为 `SaleOrder`，父菜单 `erp-sale`。生成后按提示注册 `SaleOrderModule`、`seedSaleOrder`、shared 导出与分组链，再 seed 和授予 `erp.saleOrder.*`。模板不附带 ERP 业务表。
 
 ## Windows 命令（PowerShell 5.1）
 
@@ -115,20 +120,23 @@ G0 样板使用独立命令 `pnpm gen:check-golden`：默认只比较，差异�
 
 ## 建表、软删除与引用约定（New tables）
 
-普通可写业务表有主键、审计列、`deleted_at datetime(3) NULL`。唯一键使用生成列：
+普通可写业务表有主键、审计列、`deleted_at datetime(3) NULL` 和 `tenant_id`。唯一键使用生成列，并以 `tenant_id` 开头：
 
 ```sql
 alive tinyint AS (IF(deleted_at IS NULL, 1, NULL)) VIRTUAL,
-UNIQUE (order_no, alive)
+tenant_id bigint unsigned NOT NULL COMMENT '租户 ID',
+UNIQUE (tenant_id, order_no, alive)
 ```
 
 `alive` 不映射到实体；软删除释放原唯一值。生成实体继承 `BaseEntity` 等基类，常规查询排除软删除行，删除经 `softDeleteRows()` 写删除时间和适用的审计信息。
+
+新表默认是租户表：有 `tenant_id` 且不在 [tenant-tables.ts](../apps/server/src/core/db/tenant-tables.ts) 的 `PLATFORM_TABLES` 里。生成实体用 `@TenantColumn()` 映射这一列，ORM 层对它的读写自动加当前租户的条件，插入时由服务端写入当前租户；`tenant_id` 按系统列处理，不进列表、表单、查询、DTO 与 Excel。唯一键以 `tenant_id` 开头，不同租户可以有相同的值；没有唯一键的表另加 `KEY idx_<表名>_tenant (tenant_id)`。没有 `tenant_id` 的项目表会被所有租户共享：任何租户都能读写它的全部行。只有确实由平台统一维护的表才登记进 `PLATFORM_TABLES`；平台表即使带 `tenant_id`，生成实体也不映射它。设计见[多租户设计说明](design-notes.md#tenancy)。
 
 项目不用数据库外键。引用列保留普通索引，被引用表的 `options.referencedBy` 配置列出 `[{ table, column, label }]`，生成实体调用 `referencedBy()` 登记。配置页和 `PUT /api/codegen/tables/:id` 校验引用表/列以及该表的 `deleted_at`，无效配置返回 422 `C3009`。写入新的引用经 `assertReferencesLive()` 读父行 `FOR SHARE`：不存在或已删除返回 404；删除父行发现有效限制引用则 409 `in_use`。
 
 主子表模板把子表 fk 登记为 `cascade: true`，删除主表时同事务软删除子行；编辑省略整组子行会保留，提交新数组则删除数组中遗漏的旧行。子表自身被其他记录引用时，主表删除同样受限制。手写模块的引用需要在其注册位置手工登记，例如 `project.module.ts` 中 `demo_book.dept_id` → `iam_dept` 的引用。
 
-没有 `deleted_at` 的表在 import、默认 render、preview/download/write 和 sync 入口被拒绝，CLI 退出非零，配置不会因失败 sync 而被替换。导入列表用 `noDeletedAt` 标记。唯一键没有 `alive` 只给提示，数据库仍可能占用软删除行的旧值；生成器不会自动修 DDL。提交为 G0 的表由 `seedCgConfig()` 强制检查这些约定，缺失会使种子与 golden 检查失败。
+没有 `deleted_at` 的表在 import、默认 render、preview/download/write 和 sync 入口被拒绝，CLI 退出非零，配置不会因失败 sync 而被替换。导入列表用 `noDeletedAt` 标记。唯一键没有 `alive` 只给提示，数据库仍可能占用软删除行的旧值；非平台表缺少 `tenant_id`、租户表的唯一键不以它开头（`GLOBAL_UNIQUE` 登记的全局唯一键除外）同样只提示；生成器不会自动修 DDL。提交为 G0 的表由 `seedCgConfig()` 强制检查这些约定，缺失会使种子与 golden 检查失败。
 
 ## 数值精度边界
 

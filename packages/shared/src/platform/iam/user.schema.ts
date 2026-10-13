@@ -115,6 +115,12 @@ export const userVo = z.object({
   enabled: z.boolean(),
   /** holds the built-in root role: cannot be disabled, deleted or given other roles */
   root: z.boolean(),
+  /**
+   * true when the caller may not edit this user, reset its password or change its roles: a root user for
+   * a caller other than root, the tenant's owner for anyone but root, a holder of the builtin
+   * `tenant_admin` role for a caller holding neither root nor that role
+   */
+  protected: z.boolean(),
   lastLoginAt: z.iso.datetime().nullable(),
   note: z.string().nullable(),
   createdBy: z.number().int().nullable(),

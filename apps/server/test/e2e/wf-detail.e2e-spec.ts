@@ -20,6 +20,7 @@ import type { WfTaskRow } from '../../src/modules/workflow/runtime/wf-runtime.en
 import { type WfRun, WfStore } from '../../src/modules/workflow/runtime/wf-store.js'
 import { bearer, signIn } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 const PREFIX = 'e2e-wfd-'
 
@@ -56,12 +57,12 @@ const tree = (next: object) => ({ id: 'begin', type: 'begin', name: 'Begin', nex
 async function model(root: object, name: string, fields: object = {}): Promise<string> {
   const key = `${PREFIX}m${++seq}`
   const m = await ds.query(
-    'INSERT INTO wf_model (model_key, name, form_kind, enabled) VALUES (?, ?, ?, 1)',
+    'INSERT INTO wf_model (model_key, name, form_kind, enabled, tenant_id) VALUES (?, ?, ?, 1, 1)',
     [key, name, 'dynamic'],
   )
   const v = await ds.query(
-    `INSERT INTO wf_version (model_id, model_key, version, tree_json, form_snapshot)
-     VALUES (?, ?, 1, ?, ?)`,
+    `INSERT INTO wf_version (model_id, model_key, version, tree_json, form_snapshot, tenant_id)
+     VALUES (?, ?, 1, ?, ?, 1)`,
     [m.insertId, key, JSON.stringify(root), JSON.stringify({ fields })],
   )
   await ds.query('UPDATE wf_model SET current_version_id = ? WHERE id = ?', [
@@ -83,17 +84,19 @@ async function startAsAlice(key: string): Promise<number> {
 
 /** Runs an engine action on the pending task of `userId` (its own CLS context, no caller). */
 const act = (id: number, userId: number, fn: (r: WfRun, task: WfTaskRow) => Promise<WfChangeSet>) =>
-  app.get(ClsService).run(() =>
-    app.get(WfStore).act(id, (r) =>
-      fn(
-        r,
-        r.tasks.find((t) => t.assigneeId === userId && t.state === 'pending')!,
+  inTenant1(() =>
+    app.get(ClsService).run(() =>
+      app.get(WfStore).act(id, (r) =>
+        fn(
+          r,
+          r.tasks.find((t) => t.assigneeId === userId && t.state === 'pending')!,
+        ),
       ),
     ),
   )
 
 async function add(table: keyof typeof made, row: Record<string, unknown>) {
-  const id = await insertRow(ds.manager, table, row)
+  const id = await inTenant1(() => insertRow(ds.manager, table, row))
   made[table].push(id)
   return id
 }
@@ -123,7 +126,7 @@ async function role(name: string, dataScope: string, view: boolean) {
     data_scope: dataScope,
   })
   if (view)
-    await ds.query('INSERT INTO iam_role_menus (role_id, menu_id) VALUES (?, ?)', [
+    await ds.query('INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, 1)', [
       id,
       await findId(ds.manager, 'iam_menu', { perms: wfPerms.instance.view }),
     ])
@@ -139,7 +142,10 @@ async function user(name: string, deptName: string, roleIds: number[] = []) {
     password_changed_at: new Date(),
   })
   for (const r of roleIds)
-    await ds.query('INSERT INTO iam_user_roles (user_id, role_id) VALUES (?, ?)', [u[name], r])
+    await ds.query('INSERT INTO iam_user_roles (user_id, role_id, tenant_id) VALUES (?, ?, 1)', [
+      u[name],
+      r,
+    ])
   tokens[name] = (await signIn(app, PREFIX + name)).accessToken
 }
 
@@ -232,12 +238,12 @@ describe('access (IDOR)', () => {
 
   it('a deleted task or copy grants nothing, a deleted instance is gone', async () => {
     await ds.query(
-      `INSERT INTO wf_task (instance_id, node_id, node_name, assignee_id, state, deleted_at)
-       VALUES (?, 'only', 'only step', ?, 'canceled', NOW(3))`,
+      `INSERT INTO wf_task (instance_id, node_id, node_name, assignee_id, state, deleted_at, tenant_id)
+       VALUES (?, 'only', 'only step', ?, 'canceled', NOW(3), 1)`,
       [inst.other, u.mallory],
     )
     await ds.query(
-      'INSERT INTO wf_cc (instance_id, node_id, user_id, deleted_at) VALUES (?, ?, ?, NOW(3))',
+      'INSERT INTO wf_cc (instance_id, node_id, user_id, deleted_at, tenant_id) VALUES (?, ?, ?, NOW(3), 1)',
       [inst.other, 'only', u.mallory],
     )
     await get('mallory', inst.other).expect(404)
@@ -252,14 +258,16 @@ describe('access (IDOR)', () => {
 
   it('the owner of a delegated task sees it (a past assignee); a deleted such task grants nothing', async () => {
     // the delegate's task alone: mallory's own (owner) row is not needed for her to see it
-    const task = await insertRow(ds.manager, 'wf_task', {
-      instance_id: inst.other,
-      node_id: 'only',
-      node_name: 'only step',
-      assignee_id: u.frank,
-      owner_id: u.mallory,
-      state: 'pending',
-    })
+    const task = await inTenant1(() =>
+      insertRow(ds.manager, 'wf_task', {
+        instance_id: inst.other,
+        node_id: 'only',
+        node_name: 'only step',
+        assignee_id: u.frank,
+        owner_id: u.mallory,
+        state: 'pending',
+      }),
+    )
     try {
       await get('mallory', inst.other).expect(200)
       await ds.query('UPDATE wf_task SET deleted_at = NOW(3) WHERE id = ?', [task])

@@ -24,6 +24,7 @@ import { ParamService } from '../../src/core/settings/param.service.js'
 import { insertRow } from '../../src/db/seeds/upsert.js'
 import { bearer, signIn } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 const USER = 'settings-e2e-plain'
 const GENDER = '/api/settings/dicts/iam.gender/entries'
@@ -49,12 +50,14 @@ beforeAll(async () => {
   params = app.get(ParamService)
   await cleanRedis(redis)
   // no roles, no perms: dict entries need only a session
-  userId = await insertRow(ds.manager, 'iam_user', {
-    username: USER,
-    display_name: USER,
-    password_hash: 'not-used-by-this-spec',
-    password_changed_at: new Date(),
-  })
+  userId = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_user', {
+      username: USER,
+      display_name: USER,
+      password_hash: 'not-used-by-this-spec',
+      password_changed_at: new Date(),
+    }),
+  )
   token = (await signIn(app, USER)).accessToken
 })
 

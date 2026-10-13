@@ -28,6 +28,7 @@ import { OtpService } from '../../src/modules/platform/messaging/sms-otp/sms-otp
 import { logOf } from '../setup/audit.js'
 import { bearer, signIn } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 const PREFIX = 'sec-audit-'
 const PW = 'Audit#Pass2026'
@@ -46,13 +47,15 @@ const client = () => ({ ip: `198.51.100.${++seq}`, ua: UA })
 
 async function user(userType = 'member') {
   const username = unique()
-  const id = await insertRow(ds.manager, 'iam_user', {
-    username,
-    display_name: username,
-    user_type: userType,
-    password_hash: pwHash,
-    password_changed_at: new Date(),
-  })
+  const id = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_user', {
+      username,
+      display_name: username,
+      user_type: userType,
+      password_hash: pwHash,
+      password_changed_at: new Date(),
+    }),
+  )
   userIds.push(id)
   return { id, username }
 }
@@ -219,10 +222,12 @@ it.each(['sms', 'wx-mp'] as const)(
     const auth = app.get(AuthService)
     const opts = { kind, label: 'verified', timezone: null, clientId: 'mobile' as const }
     const traceId = unique()
-    const issued = await cls.run(() => {
-      clsSet('traceId', traceId)
-      return auth.signInVerified(u.id, opts, client())
-    })
+    const issued = await inTenant1(() =>
+      cls.run(() => {
+        clsSet('traceId', traceId)
+        return auth.signInVerified(u.id, opts, client())
+      }),
+    )
     expect((await tokens.authenticate(issued.accessToken))?.userType).toBe('member')
     expect(await signin(traceId)).toMatchObject({
       user_type: 'member',
@@ -233,10 +238,12 @@ it.each(['sms', 'wx-mp'] as const)(
     await ds.query('UPDATE iam_user SET enabled = 0 WHERE id = ?', [u.id])
     const refused = unique()
     await expect(
-      cls.run(() => {
-        clsSet('traceId', refused)
-        return auth.signInVerified(u.id, opts, client())
-      }),
+      inTenant1(() =>
+        cls.run(() => {
+          clsSet('traceId', refused)
+          return auth.signInVerified(u.id, opts, client())
+        }),
+      ),
     ).rejects.toBeDefined()
     expect(await signin(refused)).toMatchObject({ user_type: 'member', kind, ok: 0 })
   },
@@ -255,16 +262,18 @@ it.each(['sms', 'wx-mp'] as const)(
     })
     const traceId = unique()
     try {
-      const issued = await app.get(ClsService).run(() => {
-        clsSet('traceId', traceId)
-        return app
-          .get(AuthService)
-          .signInVerified(
-            u.id,
-            { kind, label: 'verified', timezone: null, clientId: 'mobile' },
-            client(),
-          )
-      })
+      const issued = await inTenant1(() =>
+        app.get(ClsService).run(() => {
+          clsSet('traceId', traceId)
+          return app
+            .get(AuthService)
+            .signInVerified(
+              u.id,
+              { kind, label: 'verified', timezone: null, clientId: 'mobile' },
+              client(),
+            )
+        }),
+      )
       expect((await tokens.authenticate(issued.accessToken))?.userType).toBe('member')
       expect(await signin(traceId)).toMatchObject({ user_type: 'member', kind, ok: 1 })
     } finally {
@@ -300,7 +309,8 @@ it.each(['signout', 'locked', 'refresh_reuse', 'kicked'])(
     const issued = await signIn(app, u.username, { clientId: 'mobile', ua: UA })
     await ds.query('UPDATE iam_user SET user_type = ? WHERE id = ?', ['admin', u.id])
     expect(
-      (await app.get<UserLookup>(USER_LOOKUP).findCredentials({ userId: u.id }))?.userType,
+      (await inTenant1(() => app.get<UserLookup>(USER_LOOKUP).findCredentials({ userId: u.id })))
+        ?.userType,
     ).toBe('admin')
     const traceId = unique()
     if (kind === 'signout') {
@@ -377,7 +387,7 @@ const action: ActionLogEntry = {
 
 it('action snapshots CLS before async location; no principal defaults to admin with null user id', async () => {
   const u = await user()
-  const principal = { ...(await app.get(PermVersion).load(u.id))!, userId: u.id }
+  const principal = { ...(await inTenant1(() => app.get(PermVersion).load(u.id)))!, userId: u.id }
   const traceId = unique()
   let release!: (location: string | null) => void
   const location = vi.spyOn(ipLocator, 'location').mockReturnValue(
@@ -386,13 +396,15 @@ it('action snapshots CLS before async location; no principal defaults to admin w
     }),
   )
   try {
-    app.get(ClsService).run(() => {
-      clsSet('traceId', traceId)
-      clsSet('principal', principal)
-      app.get(AuditWriter).action(action)
-      principal.userType = 'admin'
-      clsSet('principal', undefined)
-    })
+    inTenant1(() =>
+      app.get(ClsService).run(() => {
+        clsSet('traceId', traceId)
+        clsSet('principal', principal)
+        app.get(AuditWriter).action(action)
+        principal.userType = 'admin'
+        clsSet('principal', undefined)
+      }),
+    )
     release(null)
     const row = await logOf(ds, traceId)
     expect(row).toMatchObject({ user_id: u.id, user_type: 'member' })
@@ -401,10 +413,12 @@ it('action snapshots CLS before async location; no principal defaults to admin w
     location.mockRestore()
   }
   const anonymous = unique()
-  app.get(ClsService).run(() => {
-    clsSet('traceId', anonymous)
-    app.get(AuditWriter).action(action)
-  })
+  inTenant1(() =>
+    app.get(ClsService).run(() => {
+      clsSet('traceId', anonymous)
+      app.get(AuditWriter).action(action)
+    }),
+  )
   expect(await logOf(ds, anonymous)).toMatchObject({ user_id: null, user_type: 'admin' })
 })
 

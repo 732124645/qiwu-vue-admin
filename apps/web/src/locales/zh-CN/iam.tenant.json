@@ -1,0 +1,60 @@
+{
+  "iam": {
+    "tenant": {
+      "entity": "租户",
+      "defaultTag": "默认租户",
+      "permanent": "永久",
+      "unlimited": "不限",
+      "usage": "{used} / {quota}",
+      "noDomains": "未绑定",
+      "sections": {
+        "basic": "基本信息",
+        "brand": "品牌",
+        "admin": "租户管理员"
+      },
+      "hints": {
+        "code": "小写字母开头，3–32 位小写字母、数字或连字符；开通后不能修改",
+        "package": "租户只能使用套餐里的功能",
+        "expiresAt": "留空即永久有效；到期后租户停用，数据保留",
+        "userQuota": "留空即不限，含租户管理员",
+        "domains": "回车添加；在这些域名上登录即进入该租户，不含协议与端口，最多 20 个",
+        "brandName": "留空则使用系统名称",
+        "logo": "留空则使用系统图标",
+        "admin": "开通时创建，持有租户管理员角色，首次登录须修改初始密码",
+        "defaultFixed": "默认租户不能停用，也不能设置到期时间或套餐"
+      },
+      "created": {
+        "title": "租户已开通",
+        "hint": "初始密码只显示这一次，请立即保存并告知租户管理员；丢失后只能重置",
+        "username": "管理员用户名",
+        "password": "初始密码"
+      },
+      "resetPassword": {
+        "action": "重置初始密码",
+        "confirm": "确定重置租户 {name} 的初始密码？",
+        "title": "新的初始密码",
+        "hint": "初始密码只显示这一次，请立即保存"
+      },
+      "copy": "复制",
+      "copied": "已复制",
+      "copyFailed": "复制失败，请手动选中复制",
+      "saved": "我已保存",
+      "disableConfirm": "停用后租户 {name} 的用户立即下线且无法登录，数据保留。确定停用？",
+      "enableConfirm": "确定启用租户 {name}？",
+      "enable": "启用",
+      "disable": "停用",
+      "enter": {
+        "action": "进入",
+        "title": "进入租户：{name}",
+        "reasonPlaceholder": "说明为何需要进入该租户，例如排查的问题编号",
+        "hint": "进入后以你本人的权限操作该租户的数据（不含平台功能），全部操作记入审计，2 小时后自动退出。",
+        "submit": "进入租户"
+      }
+    }
+  },
+  "menu": {
+    "iam": {
+      "tenant": "租户管理"
+    }
+  }
+}

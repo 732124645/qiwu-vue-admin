@@ -14,6 +14,10 @@ import { useAuthStore } from '@/core/stores/auth'
  * like after a password sign-in.
  */
 defineOptions({ name: 'SmsLoginForm' })
+const { tenant } = defineProps<{
+  /** the page's tenant code field: checked before each request, its code sent along */
+  tenant?: { code: string | undefined; validate: () => Promise<boolean> }
+}>()
 const emit = defineEmits<{ done: [] }>()
 const i18n = useI18n()
 const { t } = i18n
@@ -33,8 +37,9 @@ async function sendCode() {
   checkingMobile.value = true
   try {
     if (!(await formRef.value?.validateField('mobile').catch(() => false))) return
+    if ((await tenant?.validate()) === false) return
     error.value = ''
-    sent.value = (await send(form.mobile.trim())) || sent.value
+    sent.value = (await send(form.mobile.trim(), tenant?.code)) || sent.value
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : t('common.error.network')
   } finally {
@@ -47,11 +52,13 @@ async function submit() {
   loading.value = true
   try {
     if (!(await formRef.value?.validate().catch(() => false))) return
+    if ((await tenant?.validate()) === false) return
     error.value = ''
     await auth.smsLogin({
       mobile: form.mobile.trim(),
       code: form.code,
       keepSignedIn: form.keepSignedIn,
+      tenantCode: tenant?.code,
     })
     emit('done')
   } catch (e) {

@@ -7,6 +7,11 @@
     "hint": "{name}, enter your password to unlock",
     "unlock": "Unlock"
   },
+  "tenant": {
+    "banner": "You are working inside tenant {name} as platform staff; everything you do is audited",
+    "leave": "Leave tenant",
+    "lockHint": "Working inside tenant {name}"
+  },
   "search": {
     "placeholder": "Search menu"
   },

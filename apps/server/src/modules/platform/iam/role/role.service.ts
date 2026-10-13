@@ -11,9 +11,12 @@ import {
   type RoleQuery,
 } from '@qiwu/shared'
 import type { DeepPartial, QueryDeepPartialEntity, SelectQueryBuilder } from 'typeorm'
+import { switchedOff } from '../../../../core/auth/menu-features.js'
 import { PermVersion } from '../../../../core/auth/perm-version.js'
-import { type DataScope, ROOT_ROLE } from '../../../../core/auth/principal.js'
+import { type DataScope, ROOT_ROLE, TENANT_ADMIN_ROLE } from '../../../../core/auth/principal.js'
+import { AppConfigService } from '../../../../core/config/config.module.js'
 import { clsGet } from '../../../../core/context/cls.js'
+import { DEFAULT_TENANT_ID, tenantId } from '../../../../core/context/tenant.js'
 import { BaseCrudService } from '../../../../core/db/base-crud.service.js'
 import { forest } from '../../../../core/db/base-tree.service.js'
 import { type LinkTable, replaceLinks } from '../../../../core/db/links.js'
@@ -22,6 +25,7 @@ import type { ExcelColumn } from '../../../../core/excel/excel.service.js'
 import { BizError } from '../../../../core/http/biz-error.js'
 import { seedKeysLike } from '../../../../core/i18n/seed-names.js'
 import { ROLE_DEPTS, ROLE_MENUS } from '../iam-links.js'
+import { TenantPackageService } from '../tenant-package/tenant-package.service.js'
 import { GrantPolicy } from './grant-policy.js'
 import { Role } from './role.entity.js'
 
@@ -47,24 +51,34 @@ export const roleColumns: ExcelColumn[] = [
 const NEW_ROLE_SCOPE = 'own_dept'
 
 const isRootRole = (r: Pick<Role, 'code' | 'isBuiltin'>) => r.isBuiltin && r.code === ROOT_ROLE
+/** The builtin `tenant_admin` role: kept like the root role (never disabled, its grant fixed). */
+const isTenantAdminRole = (r: Pick<Role, 'code' | 'isBuiltin'>) =>
+  r.isBuiltin && r.code === TENANT_ADMIN_ROLE
 
 /**
- * A role's link tables: its menus, its picked depts. `live` reads the targets FOR SHARE, `select` the
- * live links (a deleted dept reaches nothing, so its picks are left out).
+ * A role's link tables: its menus, its picked depts. `live` reads the targets FOR SHARE (`args`: its
+ * parameters for the ids), `select` the live links of a role (a deleted dept reaches nothing, so its
+ * picks are left out). Links and depts are the data tenant's; menus are the platform's (which ones a
+ * tenant grants: `grantableMenus`).
  */
-const LINKS: Record<'menus' | 'depts', { table: LinkTable; live: string; select: string }> = {
+const LINKS: Record<
+  'menus' | 'depts',
+  { table: LinkTable; live: string; args: (ids: number[]) => unknown[]; select: string }
+> = {
   menus: {
     table: ROLE_MENUS,
     live: 'SELECT id FROM iam_menu WHERE id IN (?) AND deleted_at IS NULL FOR SHARE',
+    args: (ids) => [ids],
     select:
-      'SELECT menu_id AS id FROM iam_role_menus WHERE role_id = ? AND deleted_at IS NULL ORDER BY menu_id',
+      'SELECT menu_id AS id FROM iam_role_menus WHERE role_id = ? AND tenant_id = ? AND deleted_at IS NULL ORDER BY menu_id',
   },
   depts: {
     table: ROLE_DEPTS,
-    live: 'SELECT id FROM iam_dept WHERE id IN (?) AND deleted_at IS NULL FOR SHARE',
+    live: 'SELECT id FROM iam_dept WHERE id IN (?) AND tenant_id = ? AND deleted_at IS NULL FOR SHARE',
+    args: (ids) => [ids, tenantId()],
     select: `SELECT rd.dept_id AS id FROM iam_role_depts rd
-               JOIN iam_dept d ON d.id = rd.dept_id AND d.deleted_at IS NULL
-              WHERE rd.role_id = ? AND rd.deleted_at IS NULL ORDER BY rd.dept_id`,
+               JOIN iam_dept d ON d.id = rd.dept_id AND d.tenant_id = rd.tenant_id AND d.deleted_at IS NULL
+              WHERE rd.role_id = ? AND rd.tenant_id = ? AND rd.deleted_at IS NULL ORDER BY rd.dept_id`,
   },
 }
 type Link = (typeof LINKS)[keyof typeof LINKS]
@@ -77,13 +91,17 @@ interface MenuNodeRow {
   name_i18n: RoleMenuNode['nameI18n']
   perms: string | null
   enabled: number
+  route_name: string | null
+  tree_path: string
+  platform_only: number
 }
 
 /**
  * Roles over BaseCrudService, not data-scoped (roles belong to no dept; `iam.role.*` perms and
  * GrantPolicy guard them; see docs/design-notes.md#data-scope). Uniqueness of name and code is a DB index (errno 1062 → 409 `duplicate`).
  * Hand-written on top: builtin roles (`is_builtin`, seeds only) keep their code and are never deleted, the
- * root role is never disabled and only a root caller edits it (422 `iam.role_builtin`); a role users hold
+ * root role is never disabled and only a root caller edits it, the builtin `tenant_admin` role is never
+ * disabled, and neither takes a menu grant or data scope (422 `iam.role_builtin`); a role users hold
  * is not deleted (409 `iam.role_has_users`). Grants (`iam.role.grant`): the menus and the data scope, each
  * replaced whole and passed through GrantPolicy. Sessions carry each enabled role's code, perms and data
  * scope (see docs/design-notes.md#permissions): a change of `enabled` or `code`, a menu grant and a data scope reload its holders
@@ -95,6 +113,8 @@ export class RoleService extends BaseCrudService<Role> {
     txHost: TransactionHost<TransactionalAdapterTypeOrm>,
     private readonly permVersion: PermVersion,
     private readonly grants: GrantPolicy,
+    private readonly cfg: AppConfigService,
+    private readonly packages: TenantPackageService,
   ) {
     super(txHost, Role)
   }
@@ -134,7 +154,7 @@ export class RoleService extends BaseCrudService<Role> {
 
   /**
    * PUT /:id and /:id/enabled: a builtin role keeps its code; the root role stays enabled and only a root
-   * caller changes it (422). The sign-up role is root-managed (403). Enabling hands the holders the role's
+   * caller changes it, the builtin `tenant_admin` role stays enabled (422). The sign-up role is root-managed (403). Enabling hands the holders the role's
    * whole grant again, so a non-root caller must be able to grant all of it (`GrantPolicy.assertEnabling`, 403). A
    * new `enabled` or `code` reloads the holders' sessions after the commit.
    */
@@ -147,6 +167,8 @@ export class RoleService extends BaseCrudService<Role> {
       const toggled = dto.enabled !== undefined && dto.enabled !== stored.enabled
       if (stored.isBuiltin && recoded) throw new BizError(Err.IAM_ROLE_BUILTIN)
       if (isRootRole(stored) && (!clsGet('principal')?.root || dto.enabled === false))
+        throw new BizError(Err.IAM_ROLE_BUILTIN)
+      if (isTenantAdminRole(stored) && dto.enabled === false)
         throw new BizError(Err.IAM_ROLE_BUILTIN)
       if (toggled && dto.enabled === true) await this.grants.assertEnabling(id)
       await super.update(id, dto)
@@ -167,28 +189,54 @@ export class RoleService extends BaseCrudService<Role> {
       if (!byId.length) return
       await this.grants.assertNotSignupRole(byId)
       const tx = this.txHost.tx
+      const tid = tenantId()
       const [builtin] = await tx.query<unknown[]>(
-        'SELECT id FROM iam_role WHERE id IN (?) AND is_builtin = 1 AND deleted_at IS NULL LIMIT 1',
-        [byId],
+        'SELECT id FROM iam_role WHERE id IN (?) AND tenant_id = ? AND is_builtin = 1 AND deleted_at IS NULL LIMIT 1',
+        [byId, tid],
       )
       if (builtin) throw new BizError(Err.IAM_ROLE_BUILTIN)
       const [held] = await tx.query<unknown[]>(
         `SELECT ur.user_id FROM iam_user_roles ur
-           JOIN iam_user u ON u.id = ur.user_id AND u.deleted_at IS NULL
-          WHERE ur.role_id IN (?) AND ur.deleted_at IS NULL LIMIT 1 FOR SHARE`,
-        [byId],
+           JOIN iam_user u ON u.id = ur.user_id AND u.tenant_id = ur.tenant_id AND u.deleted_at IS NULL
+          WHERE ur.role_id IN (?) AND ur.tenant_id = ? AND ur.deleted_at IS NULL LIMIT 1 FOR SHARE`,
+        [byId, tid],
       )
       if (held) throw new BizError(Err.IAM_ROLE_HAS_USERS)
       await super.remove(byId)
     })
   }
 
-  /** GET /menu-tree: every menu (disabled ones too) as a forest by `sort_no, id`, for the grant tree. */
-  async menuTree(): Promise<RoleMenuNode[]> {
-    const rows = await this.txHost.tx.query<MenuNodeRow[]>(
-      `SELECT id, parent_id, kind, name, name_i18n, perms, enabled
+  /**
+   * The menus of the grant tree: every menu (disabled ones too) by `sort_no, id`, except while
+   * multi-tenancy is off its pages and what is under them, and in a data tenant other than the default
+   * one the platform-only menus (the flag covers their subtrees) and every menu outside its package (see
+   * docs/design-notes.md#tenancy). Only that switch hides menus here: the API docs page stays grantable
+   * while SWAGGER_ENABLED is off (as the menu management lists every menu). `live`: the ids of every live
+   * menu, the hidden ones too.
+   */
+  private async grantableMenus(): Promise<{ rows: MenuNodeRow[]; live: number[] }> {
+    const all = await this.txHost.tx.query<MenuNodeRow[]>(
+      `SELECT id, parent_id, kind, name, name_i18n, perms, enabled, route_name, tree_path, platform_only
          FROM iam_menu WHERE deleted_at IS NULL ORDER BY sort_no, id`,
     )
+    const on = (s: string) => s !== 'APP_MULTI_TENANT' || this.cfg.get('APP_MULTI_TENANT')
+    const hidden = all.filter((r) => switchedOff(r.route_name, on)).map((r) => `/${r.id}/`)
+    const tenantOnly = tenantId() !== DEFAULT_TENANT_ID
+    const inPackage = await this.packages.menusOf(tenantId())
+    return {
+      rows: all.filter(
+        (r) =>
+          !hidden.some((path) => r.tree_path.includes(path)) &&
+          !(tenantOnly && Number(r.platform_only) === 1) &&
+          (!inPackage || inPackage.has(Number(r.id))),
+      ),
+      live: all.map((r) => Number(r.id)),
+    }
+  }
+
+  /** GET /menu-tree: the grantable menus (`grantableMenus`) as a forest, for the grant tree. */
+  async menuTree(): Promise<RoleMenuNode[]> {
+    const { rows } = await this.grantableMenus()
     return forest(
       rows.map((r) => ({
         id: Number(r.id),
@@ -202,22 +250,35 @@ export class RoleService extends BaseCrudService<Role> {
     )
   }
 
-  /** GET /:id/menus: the menus the role grants and its grant tree's link switch. */
+  /**
+   * GET /:id/menus: the menus of the grant tree (`grantableMenus`) the role grants and the tree's link
+   * switch; what PUT takes back as it is.
+   */
   async menus(id: number): Promise<RoleMenusBody> {
     const { menuLink } = await this.get(id)
-    return { menuLink, menuIds: await this.linked(LINKS.menus, id) }
+    const grantable = new Set((await this.grantableMenus()).rows.map((r) => Number(r.id)))
+    const menuIds = (await this.linked(LINKS.menus, id)).filter((m) => grantable.has(m))
+    return { menuLink, menuIds }
   }
 
   /**
-   * PUT /:id/menus: replaces the role's menus (each must exist: 404; read FOR SHARE, so a menu deleted
-   * meanwhile cannot leave a stray grant: MenuService's delete check reads the grants FOR SHARE too) and
-   * keeps the link switch. Not for the root role (422). The added menus pass `GrantPolicy.assertMenus`.
+   * PUT /:id/menus: replaces the role's menus among the grant tree's (`grantableMenus`; each must be one
+   * of them: 404; read FOR SHARE, so a menu deleted meanwhile cannot leave a stray grant: MenuService's
+   * delete check reads the grants FOR SHARE too) and keeps the link switch. Grants of live menus the tree
+   * hides stay as they are (outside the tenant's package too, so they count again once the package
+   * holds them again): the caller neither saw nor sent them; those of deleted menus go. Not for the
+   * root or `tenant_admin` role (422). The added menus pass `GrantPolicy.assertMenus`.
    */
   async setMenus(id: number, { menuLink, menuIds }: RoleMenusBody): Promise<void> {
     await this.txHost.withTransaction(async () => {
       await this.lockGrantable(id)
       const ids = [...new Set(menuIds)]
-      const held = new Set(await this.relink(LINKS.menus, id, ids))
+      const { rows, live } = await this.grantableMenus()
+      const grantable = new Set(rows.map((r) => Number(r.id)))
+      if (ids.some((m) => !grantable.has(m))) throw new NotFoundException()
+      const hidden = new Set(live.filter((m) => !grantable.has(m)))
+      const kept = (await this.linked(LINKS.menus, id)).filter((m) => hidden.has(m))
+      const held = new Set(await this.relink(LINKS.menus, id, [...ids, ...kept]))
       await this.grants.assertMenus(
         id,
         ids.filter((m) => !held.has(m)),
@@ -239,8 +300,8 @@ export class RoleService extends BaseCrudService<Role> {
 
   /**
    * PUT /:id/data-scope: the data scope; its picked depts only for `picked_depts` (live depts: 404),
-   * none otherwise. Not for the root role (422). Passes `GrantPolicy.assertDataScope` (the scope before
-   * and after: only what it adds is judged).
+   * none otherwise. Not for the root or `tenant_admin` role (422). Passes `GrantPolicy.assertDataScope`
+   * (the scope before and after: only what it adds is judged).
    */
   async setDataScope(
     id: number,
@@ -261,21 +322,21 @@ export class RoleService extends BaseCrudService<Role> {
   }
 
   /**
-   * Locks role `id` for a grant (404 unknown) and returns it; the root role holds `*` and `all` anyway
-   * (422).
+   * Locks role `id` for a grant (404 unknown) and returns it; the root role holds `*` and `all` anyway,
+   * the builtin `tenant_admin` role every menu open to tenants and `all` (422).
    */
   private async lockGrantable(id: number): Promise<Role> {
     await this.lockScopedIds([id])
     await this.grants.assertNotSignupRole([id])
     const role = await this.repo.findOneByOrFail({ id })
-    if (isRootRole(role)) throw new BizError(Err.IAM_ROLE_BUILTIN)
+    if (isRootRole(role) || isTenantAdminRole(role)) throw new BizError(Err.IAM_ROLE_BUILTIN)
     return role
   }
 
   /** The ids role `id` links to (its menus or picked depts), ascending. */
   private async linked(link: Link, id: number): Promise<number[]> {
-    // arch-allow: sql-concat the fixed literal statements of LINKS, values as ? params
-    const rows = await this.txHost.tx.query<{ id: number }[]>(link.select, [id])
+    // arch-allow: sql-concat the fixed literal statements of LINKS, values as ? params; tenant: those literals are checked where LINKS writes them
+    const rows = await this.txHost.tx.query<{ id: number }[]>(link.select, [id, tenantId()])
     return rows.map((r) => Number(r.id))
   }
 
@@ -286,8 +347,8 @@ export class RoleService extends BaseCrudService<Role> {
    */
   private async relink(link: Link, id: number, ids: number[]): Promise<number[]> {
     const tx = this.txHost.tx
-    // arch-allow: sql-concat the fixed literal statement of LINKS, values as ? params
-    const live = ids.length ? await tx.query<unknown[]>(link.live, [ids]) : []
+    // arch-allow: sql-concat the fixed literal statement of LINKS, values as ? params; tenant: that literal is checked where LINKS writes it
+    const live = ids.length ? await tx.query<unknown[]>(link.live, link.args(ids)) : []
     if (live.length !== ids.length) throw new NotFoundException()
     const before = await this.linked(link, id)
     await replaceLinks(tx, link.table, id, ids)

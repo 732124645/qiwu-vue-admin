@@ -17,6 +17,7 @@ import { WfStartService } from '../../src/modules/workflow/center/wf-start.servi
 import { chain, review } from '../fixtures/wf/flow.js'
 import { bearer, signIn } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 const PREFIX = 'e2e-wfr-'
 
@@ -56,13 +57,13 @@ async function model(
   const key = `${PREFIX}m${++seq}`
   const root = { id: 'begin', type: 'begin', name: 'Begin', next: chain(...steps) }
   const m = await ds.query(
-    `INSERT INTO wf_model (model_key, name, form_kind, allow_cancel, allow_withdraw)
-     VALUES (?, ?, 'dynamic', ?, ?)`,
+    `INSERT INTO wf_model (model_key, name, form_kind, allow_cancel, allow_withdraw, tenant_id)
+     VALUES (?, ?, 'dynamic', ?, ?, 1)`,
     [key, key, opts.allowCancel ?? true, opts.allowWithdraw ?? true],
   )
   const v = await ds.query(
-    `INSERT INTO wf_version (model_id, model_key, version, tree_json, form_snapshot)
-     VALUES (?, ?, 1, ?, ?)`,
+    `INSERT INTO wf_version (model_id, model_key, version, tree_json, form_snapshot, tenant_id)
+     VALUES (?, ?, 1, ?, ?, 1)`,
     [m.insertId, key, JSON.stringify(root), JSON.stringify({ fields: {} })],
   )
   await ds.query('UPDATE wf_model SET current_version_id = ? WHERE id = ?', [
@@ -74,8 +75,8 @@ async function model(
 
 /** alice starts `modelKey` through the start service; the instance id */
 async function begin(modelKey: string) {
-  const { inst } = await cls.run(() =>
-    starts.start(u.alice!, { formValues: {}, initiatorPicks: {}, modelKey }),
+  const { inst } = await inTenant1(() =>
+    cls.run(() => starts.start(u.alice!, { formValues: {}, initiatorPicks: {}, modelKey })),
   )
   return inst.id
 }
@@ -119,13 +120,15 @@ const events = async (id: number, action: string) =>
   ).map((e) => [nameOf(e.actor_id), e.target_ids?.map(nameOf) ?? null, e.comment])
 
 async function user(name: string, dept: number) {
-  u[name] = await insertRow(ds.manager, 'iam_user', {
-    username: PREFIX + name,
-    display_name: name,
-    dept_id: dept,
-    password_hash: 'not-used-by-this-spec',
-    password_changed_at: new Date(),
-  })
+  u[name] = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_user', {
+      username: PREFIX + name,
+      display_name: name,
+      dept_id: dept,
+      password_hash: 'not-used-by-this-spec',
+      password_changed_at: new Date(),
+    }),
+  )
   made.iam_user.push(u[name])
 }
 
@@ -147,11 +150,13 @@ beforeAll(async () => {
   starts = app.get(WfStartService)
   await cleanRedis(redis)
   await cleanup()
-  const dept = await insertRow(ds.manager, 'iam_dept', {
-    parent_id: 0,
-    name: `${PREFIX}dept`,
-    tree_path: '/',
-  })
+  const dept = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_dept', {
+      parent_id: 0,
+      name: `${PREFIX}dept`,
+      tree_path: '/',
+    }),
+  )
   made.iam_dept.push(dept)
   await ds.query('UPDATE iam_dept SET tree_path = ? WHERE id = ?', [`/${dept}/`, dept])
   for (const name of ['alice', 'bob', 'carol', 'erin', 'frank']) await user(name, dept)

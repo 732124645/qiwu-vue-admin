@@ -14,6 +14,7 @@ import { REDIS, type Redis } from '../../src/core/redis/redis.module.js'
 import { insertRow } from '../../src/db/seeds/upsert.js'
 import { bearer, signIn } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 const PREFIX = 'pref-e2e-'
 const URL = '/api/iam/profile/prefs'
@@ -43,12 +44,14 @@ const cols = (...props: string[]): TableColumnsPref => ({
 
 /** A user without any role: the routes need a session, not a permission. */
 async function user(name: string) {
-  const id = await insertRow(ds.manager, 'iam_user', {
-    username: PREFIX + name,
-    display_name: name,
-    password_hash: 'not-used-by-this-spec',
-    password_changed_at: new Date(),
-  })
+  const id = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_user', {
+      username: PREFIX + name,
+      display_name: name,
+      password_hash: 'not-used-by-this-spec',
+      password_changed_at: new Date(),
+    }),
+  )
   userIds.push(id)
   return { id, token: (await signIn(app, PREFIX + name)).accessToken }
 }
@@ -183,7 +186,7 @@ it('a deleted user takes its preferences along (soft: the reference registry cas
     .set(bearer(token))
     .send({ value: cols('code') })
     .expect(200)
-  await ds.transaction((q) => softDeleteRows(q, 'iam_user', [id]))
+  await inTenant1(() => ds.transaction((q) => softDeleteRows(q, 'iam_user', [id])))
   expect(
     await ds.query('SELECT 1 FROM iam_user_pref WHERE user_id = ? AND deleted_at IS NULL', [id]),
   ).toEqual([])

@@ -18,6 +18,7 @@ import { OtpService } from '../../src/modules/platform/messaging/sms-otp/sms-otp
 import { redisKey } from '../../src/core/redis/cache-namespaces.js'
 import { bearer, signIn } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 const PREFIX = 'auth-extra-signup-'
 const PASSWORD = 'Signup#Pass2026'
@@ -268,25 +269,32 @@ describe('signup', () => {
 
   it('first password change lifts the /iam/users gate in the same session', async () => {
     await setParam('iam.password_min_length', original.get('iam.password_min_length') ?? '8')
-    const roleId = await insertRow(ds.manager, 'iam_role', {
-      code: name('browse-role'),
-      name: name('browse-role'),
-      data_scope: 'own_rows',
-    })
+    const roleId = await inTenant1(() =>
+      insertRow(ds.manager, 'iam_role', {
+        code: name('browse-role'),
+        name: name('browse-role'),
+        data_scope: 'own_rows',
+      }),
+    )
     const [menu] = await ds.query<{ id: number }[]>('SELECT id FROM iam_menu WHERE perms = ?', [
       userPerms.browse,
     ])
-    await ds.query('INSERT INTO iam_role_menus (role_id, menu_id) VALUES (?, ?)', [
+    await ds.query('INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, 1)', [
       roleId,
       menu!.id,
     ])
-    const id = await insertRow(ds.manager, 'iam_user', {
-      username: name('fresh'),
-      display_name: 'Fresh',
-      password_hash: await bcrypt.hash(PASSWORD, 4),
-      password_changed_at: null,
-    })
-    await ds.query('INSERT INTO iam_user_roles (user_id, role_id) VALUES (?, ?)', [id, roleId])
+    const id = await inTenant1(async () =>
+      insertRow(ds.manager, 'iam_user', {
+        username: name('fresh'),
+        display_name: 'Fresh',
+        password_hash: await bcrypt.hash(PASSWORD, 4),
+        password_changed_at: null,
+      }),
+    )
+    await ds.query('INSERT INTO iam_user_roles (user_id, role_id, tenant_id) VALUES (?, ?, 1)', [
+      id,
+      roleId,
+    ])
     const login = await http()
       .post('/api/auth/login')
       .send({ username: name('fresh'), password: PASSWORD })
@@ -321,7 +329,7 @@ describe('sms', () => {
   const code = async (who: Who, scene: 'signin' | 'reset_password') => {
     const mobile = mobiles[who]
     await redis.unlink(redisKey('smsLimit', 'cooldown', mobile))
-    await otp.issue({ mobile, scene }, '127.0.0.1')
+    await inTenant1(() => otp.issue({ mobile, scene }, '127.0.0.1'))
     await app.get(NotifyDispatcher).idle()
     const [row] = await ds.query<Array<{ code: string }>>(
       'SELECT code FROM msg_sms_otp WHERE mobile = ? AND scene = ? ORDER BY id DESC LIMIT 1',
@@ -362,29 +370,36 @@ describe('sms', () => {
       'UPDATE msg_sms_template SET channel_id = ? WHERE code = ? AND locale IN (?, ?)',
       [channelId, 'auth.sms_code', 'en-US', 'zh-CN'],
     )
-    roleId = await insertRow(ds.manager, 'iam_role', {
-      code: name('sms-browse-role'),
-      name: name('sms-browse-role'),
-      data_scope: 'own_rows',
-    })
+    roleId = await inTenant1(() =>
+      insertRow(ds.manager, 'iam_role', {
+        code: name('sms-browse-role'),
+        name: name('sms-browse-role'),
+        data_scope: 'own_rows',
+      }),
+    )
     const [menu] = await ds.query<Array<{ id: number }>>(
       'SELECT id FROM iam_menu WHERE perms = ?',
       [userPerms.browse],
     )
-    await ds.query('INSERT INTO iam_role_menus (role_id, menu_id) VALUES (?, ?)', [
+    await ds.query('INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, 1)', [
       roleId,
       menu!.id,
     ])
     for (const who of ['login', 'disabled', 'fresh', 'reset', 'other'] as const) {
-      const id = await insertRow(ds.manager, 'iam_user', {
-        username: name(`sms-${who}`),
-        display_name: `SMS ${who}`,
-        mobile: mobiles[who],
-        password_hash: await bcrypt.hash(PASSWORD, 4),
-        password_changed_at: who === 'fresh' ? null : new Date(),
-      })
+      const id = await inTenant1(async () =>
+        insertRow(ds.manager, 'iam_user', {
+          username: name(`sms-${who}`),
+          display_name: `SMS ${who}`,
+          mobile: mobiles[who],
+          password_hash: await bcrypt.hash(PASSWORD, 4),
+          password_changed_at: who === 'fresh' ? null : new Date(),
+        }),
+      )
       users.set(who, id)
-      await ds.query('INSERT INTO iam_user_roles (user_id, role_id) VALUES (?, ?)', [id, roleId])
+      await ds.query('INSERT INTO iam_user_roles (user_id, role_id, tenant_id) VALUES (?, ?, 1)', [
+        id,
+        roleId,
+      ])
     }
   })
 
@@ -482,8 +497,8 @@ describe('sms', () => {
     const disabled = await badCode(await smsLogin('disabled', valid))
     expect(disabled).toEqual(wrong)
     await ds.query(
-      `INSERT INTO msg_sms_otp (mobile, scene, code, attempts, daily_seq, request_ip)
-       VALUES (?, 'signin', ?, 0, 1, ?)`,
+      `INSERT INTO msg_sms_otp (tenant_id, mobile, scene, code, attempts, daily_seq, request_ip)
+       VALUES (1, ?, 'signin', ?, 0, 1, ?)`,
       [mobiles.unknown, '123456', '127.0.0.1'],
     )
     const unknown = await badCode(await smsLogin('unknown', '123456'))

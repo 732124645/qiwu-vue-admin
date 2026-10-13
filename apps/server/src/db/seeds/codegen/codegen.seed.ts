@@ -46,7 +46,7 @@ const row = (config: object) =>
 export async function seedCgConfig(q: EntityManager, seed: CgSeed): Promise<number> {
   const info = await readTableInfo(q, seed.tableName)
   if (!info) throw new Error(`codegen seed: no table ${seed.tableName}`)
-  // a G0 table follows the soft-delete convention: what import only hints at is an error here
+  // a G0 table follows the soft-delete and tenant conventions: what import only hints at is an error here
   const missing = [
     ...(hasDeletedAt(info) ? [] : ['deleted_at']),
     ...importHints(info).map((h) => h.key),

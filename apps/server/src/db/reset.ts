@@ -1,9 +1,11 @@
 // `node dist/db/reset.js` (server script `db:reset`, cwd apps/server, env like db:migrate): drops every
-// table of DB_NAME, runs the compiled migrations and the seeds. Only for local dev/test/e2e
-// databases.
+// table of DB_NAME, runs the compiled migrations, drops the tenant columns' defaults (whatever the
+// multi-tenancy switch, so an insert that leaves out `tenant_id` fails here first) and runs the seeds.
+// Only for local dev/test/e2e databases.
 import { DataSource } from 'typeorm'
 import { dataSourceOptions } from './data-source.js'
 import { runSeeds } from './seeds/index.js'
+import { hardenTenancy } from './tenancy-harden.js'
 
 async function main(): Promise<void> {
   const { NODE_ENV = 'development', DB_NAME = '' } = process.env
@@ -16,6 +18,7 @@ async function main(): Promise<void> {
   try {
     await ds.dropDatabase() // every table and view of DB_NAME; the database itself stays
     await ds.runMigrations({ transaction: 'each' })
+    await hardenTenancy(ds)
     for (const notice of await runSeeds(ds)) console.log(notice)
   } finally {
     await ds.destroy()

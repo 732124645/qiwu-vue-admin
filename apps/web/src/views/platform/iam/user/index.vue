@@ -126,12 +126,11 @@ const canView = computed(() => perm.has(userPerms.view))
 const canEdit = computed(() => perm.all([userPerms.modify, userPerms.view]))
 const canReset = computed(() => perm.has(userPerms['reset-password']))
 const canAssign = computed(() => perm.all([userPerms['assign-roles'], userPerms.view]))
-const isRoot = computed(() => auth.roles.includes('root'))
 const myId = computed(() => auth.me?.user.id)
-// the server refuses these anyway (see docs/design-notes.md#auth-sessions): root users only change through a root caller, and
-// nobody disables, deletes or re-roles a root user or their own account
-const locked = (row: UserVo) => row.root || row.id === myId.value
-const rootOnly = (row: UserVo) => row.root && !isRoot.value
+// the server refuses these anyway (see docs/design-notes.md#auth-sessions): nobody disables, deletes or
+// re-roles a root user or their own account, and a protected user (root, the tenant's owner, a
+// tenant_admin holder) is edited only by whom the server lets (`row.protected` false)
+const locked = (row: UserVo) => row.root || row.protected || row.id === myId.value
 const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm') : '')
 
 async function openForm(id?: number) {
@@ -316,7 +315,7 @@ function openImport() {
               v-if="canEdit"
               link
               type="primary"
-              :disabled="rootOnly(row)"
+              :disabled="row.protected"
               @click="openForm(row.id)"
             >
               {{ t('crud.action.edit') }}
@@ -345,12 +344,16 @@ function openImport() {
                   <el-dropdown-item
                     v-if="canReset"
                     command="reset-password"
-                    :disabled="rootOnly(row)"
+                    :disabled="row.protected"
                   >
                     <el-icon><Icon icon="lucide:key-round" /></el-icon>
                     {{ t('menu.action.resetPassword') }}
                   </el-dropdown-item>
-                  <el-dropdown-item v-if="canAssign" command="assign-roles" :disabled="row.root">
+                  <el-dropdown-item
+                    v-if="canAssign"
+                    command="assign-roles"
+                    :disabled="row.root || row.protected"
+                  >
                     <el-icon><Icon icon="lucide:user-cog" /></el-icon>
                     {{ t('menu.action.assignRoles') }}
                   </el-dropdown-item>

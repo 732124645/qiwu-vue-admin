@@ -20,6 +20,20 @@ async function closeSettings(page: Page) {
   await page.keyboard.press('Escape')
   await expect(drawer(page)).toBeHidden()
 }
+/**
+ * A top-level entry of the horizontal menu. Entries that do not fit the bar fold into its overflow
+ * entry, which is hovered open first. Retried because the bar re-splits its entries shortly after
+ * its width changes.
+ */
+async function topEntry(page: Page, name: string) {
+  const entry = page.getByRole('menuitem', { name, exact: true })
+  await expect(async () => {
+    if (!(await entry.isVisible()))
+      await topMenu(page).locator('.el-sub-menu__hide-arrow').hover({ timeout: 2_000 })
+    await expect(entry).toBeVisible({ timeout: 2_000 })
+  }).toPass({ timeout: 15_000 })
+  return entry
+}
 async function pickLayout(page: Page, layout: 'side' | 'top' | 'mix') {
   await openSettings(page)
   await drawer(page)
@@ -34,7 +48,6 @@ test.beforeEach(async ({ page }) => {
 
 test('side, top and mix layouts; the choice survives a reload', async ({ page }) => {
   const HOME = msg('menu.home')
-  // the first group: later top-level entries may fold into the horizontal menu's overflow
   const GROUP = msg('menu.system.title')
   const PAGE = msg('menu.iam.position')
   // side (default): vertical menu with the logo, breadcrumb in the header
@@ -46,8 +59,8 @@ test('side, top and mix layouts; the choice survives a reload', async ({ page })
   await pickLayout(page, 'top')
   await expect(sideMenu(page)).toHaveCount(0)
   await expect(page.getByRole('button', { name: msg('common.layout.collapse') })).toHaveCount(0)
-  await topMenu(page).getByText(GROUP).hover()
-  await page.getByRole('menuitem', { name: PAGE }).click()
+  await (await topEntry(page, GROUP)).hover()
+  await page.getByRole('menuitem', { name: PAGE, exact: true }).click()
   await expect(page).toHaveURL(/\/iam\/positions$/)
   await page.reload()
   await expect(topMenu(page).getByRole('menuitem', { name: HOME })).toBeVisible()
@@ -59,7 +72,7 @@ test('side, top and mix layouts; the choice survives a reload', async ({ page })
   await topMenu(page).getByRole('menuitem', { name: HOME }).click()
   await expect(page).toHaveURL(/\/home$/)
   await expect(sideMenu(page)).toHaveCount(0) // a top-level page has nothing to list
-  await topMenu(page).getByRole('menuitem', { name: GROUP }).click()
+  await (await topEntry(page, GROUP)).click()
   await expect(page).toHaveURL(/\/iam\/users$/) // its first page
   await expect(sideMenu(page).getByRole('menuitem', { name: PAGE })).toBeVisible()
   await expect(sideMenu(page).getByText(HOME)).toHaveCount(0)

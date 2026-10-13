@@ -4,12 +4,19 @@ import type { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adap
 import { Err } from '@qiwu/shared'
 import { AuthParams } from '../../../../core/auth/auth-params.js'
 import type { PermRequirement } from '../../../../core/auth/decorators.js'
-import { type DataScope, type Principal, ROOT_ROLE } from '../../../../core/auth/principal.js'
+import {
+  type DataScope,
+  type Principal,
+  ROOT_ROLE,
+  TENANT_ADMIN_ROLE,
+} from '../../../../core/auth/principal.js'
 import { clsGet } from '../../../../core/context/cls.js'
+import { DEFAULT_TENANT_ID, tenantId } from '../../../../core/context/tenant.js'
 import { withCheckedPerm } from '../../../../core/data-scope/data-scope.js'
 import { BizError } from '../../../../core/http/biz-error.js'
 import { DeptService } from '../dept/dept.service.js'
-import { countedMenus } from '../menu-tree.js'
+import { countedMenus, type MenuPermRow, platformPerms, tenantAdminPerms } from '../menu-tree.js'
+import { packageMenuIds } from '../tenant-package/package-menus.js'
 
 interface RoleRow {
   id: number
@@ -25,6 +32,8 @@ export interface ScopeGrant {
 }
 
 const exceeds = () => new BizError(Err.IAM_GRANT_EXCEEDS_OWN)
+const isTenantAdmin = (r: Pick<RoleRow, 'code' | 'is_builtin'>) =>
+  r.code === TENANT_ADMIN_ROLE && Number(r.is_builtin) === 1
 const RELATIVE: ReadonlySet<DataScope> = new Set(['own_dept', 'own_dept_tree'])
 
 /** The non-root caller; null = root (exempt). No caller → 403. */
@@ -66,6 +75,10 @@ function reach(
  * again hands out its whole grant (① + ②). Reads of roles, their menus and picked depts are locking reads
  * (FOR SHARE): a concurrent grant on the same role (which locks the role FOR UPDATE first) is either seen
  * or waits for this commit. The current sign-up role is root-managed at every role write entry.
+ * A holder of the builtin `tenant_admin` role is its tenant's root for the data scope (see
+ * docs/design-notes.md#tenancy): it may give the scope `all` and roles of that scope (its own role too);
+ * perms still only those it holds. That role's perms are what the session load gives it
+ * (`tenantAdminPerms`), never its menu rows.
  */
 @Injectable()
 export class GrantPolicy {
@@ -83,8 +96,9 @@ export class GrantPolicy {
   }
 
   /**
-   * ③ May the caller give the roles `added` to a user of dept `deptId`? Each must exist (else 404). For a
-   * non-root caller each must also not be root nor `all`, hold only perms the caller holds, and reach
+   * ③ May the caller give the roles `added` to a user of dept `deptId`? Each must exist in the data
+   * tenant (else 404). For a non-root caller each must also not be root nor `all` (a tenant admin may
+   * give `all`), hold only perms the caller holds, and reach
    * (at `deptId`) only depts that `fits` every perm point it carries. Keeping or removing a role grants
    * nothing, so pass only the added ones; `kept` = the roles a user keeps while moving to `deptId`: their
    * relative scopes (`own_dept*`) follow the user and are judged the same way (a leaf-dept
@@ -100,7 +114,11 @@ export class GrantPolicy {
     if (roles.length !== ids.length) throw new NotFoundException()
     const p = caller()
     if (!p) return
-    if (roles.some((r) => r.data_scope === 'all' || (r.code === ROOT_ROLE && r.is_builtin)))
+    if (
+      roles.some(
+        (r) => (r.data_scope === 'all' && !p.tenantAdmin) || (r.code === ROOT_ROLE && r.is_builtin),
+      )
+    )
       throw exceeds()
     // kept roles: only the relative scopes move with the user (`all`/picked ones stay where they were)
     const keptIds = kept.filter((id) => !ids.includes(id))
@@ -118,9 +136,13 @@ export class GrantPolicy {
     const tree = judged.some((r) => r.data_scope === 'own_dept_tree') && deptId !== null
     const subtrees = await this.subtrees(tree ? [deptId] : [])
     for (const r of judged) {
-      const scope = { scope: r.data_scope, depts: picked.get(r.id) ?? [] }
-      // never `all` here: refused above, and kept roles are relative ones
-      await this.fits(p, reach(scope, deptId, subtrees) as number[], perms.get(r.id) ?? [])
+      const reached = reach(
+        { scope: r.data_scope, depts: picked.get(r.id) ?? [] },
+        deptId,
+        subtrees,
+      )
+      // `all` only from a tenant admin (refused above otherwise): its own scope, the whole tenant
+      if (reached !== 'all') await this.fits(p, reached, perms.get(r.id) ?? [])
     }
   }
 
@@ -157,6 +179,9 @@ export class GrantPolicy {
    * role changes under the judgement (member changes read the role FOR SHARE first; of this
    * fix), and menu edits judged this way run one at a time and never miss each other's changes. Root
    * callers are exempt and lock nothing more. Disabled roles are judged when enabled (`assertEnabling`).
+   * Menus are the platform's, so the roles of every tenant count; the caller's scope is its data
+   * tenant's and reaches nothing in another one, so a role of another tenant gaining a perm is refused
+   * outright (see docs/design-notes.md#tenancy).
    * Locks every role and reads every menu and grant twice per edit; fine for admin-sized
    * tables, narrow it to the roles granted the edited subtree if menu writes ever get hot.
    */
@@ -164,13 +189,16 @@ export class GrantPolicy {
     const p = caller()
     if (!p) return write()
     await this.txHost.tx.query(
+      // qw:cross-tenant menus are the platform's: an edit judges the roles of every tenant, locked first
       'SELECT id FROM iam_role WHERE deleted_at IS NULL ORDER BY id FOR UPDATE',
     )
     const before = await this.effective()
     await write()
-    for (const [roleId, perms] of await this.effective()) {
-      const added = [...perms].filter((x) => !before.get(roleId)?.has(x))
+    const tid = tenantId()
+    for (const [roleId, { tenant, perms }] of await this.effective()) {
+      const added = [...perms].filter((x) => !before.get(roleId)?.perms.has(x))
       if (!added.length) continue
+      if (tenant !== tid) throw exceeds()
       await this.assertNotSignupRole([roleId])
       if (added.some((x) => !p.perms.includes(x))) throw exceeds()
       await this.judge(p, roleId, await this.scopeOf(roleId), added)
@@ -193,7 +221,8 @@ export class GrantPolicy {
 
   /**
    * ② The role data scope, called after role `roleId`'s picked depts were replaced (the role locked): a
-   * non-root caller never sets `all`, and what the change adds must `fits` every perm of the role: for
+   * non-root caller never sets `all` (a tenant admin may), and what the change adds must `fits` every
+   * perm of the role: for
    * each current holder, what `next` reaches beyond what `prev` reached for it (its dept or subtree for
    * the relative scopes, the picked depts); for a role nobody holds yet, the picked depts not reached
    * before (②: picked depts inside the caller's scope; see docs/design-notes.md#permissions). Narrowing adds nothing, so it passes.
@@ -201,7 +230,10 @@ export class GrantPolicy {
   async assertDataScope(roleId: number, next: ScopeGrant, prev: ScopeGrant): Promise<void> {
     const p = caller()
     if (!p) return
-    if (next.scope === 'all') throw exceeds()
+    if (next.scope === 'all') {
+      if (p.tenantAdmin) return
+      throw exceeds()
+    }
     if (next.scope === 'own_rows') return
     const holders = await this.holderDepts(roleId)
     const tree = next.scope === 'own_dept_tree' || prev.scope === 'own_dept_tree'
@@ -216,12 +248,15 @@ export class GrantPolicy {
   }
 
   /**
-   * Role `roleId` of scope `role` getting `perms` (the caller holds them): never scope `all`, and what the
-   * role reaches must `fits` them — the picked depts whoever holds it, each holder's dept or subtree for
-   * the relative scopes.
+   * Role `roleId` of scope `role` getting `perms` (the caller holds them): never scope `all` (but from a
+   * tenant admin, whose scope it is), and what the role reaches must `fits` them — the picked depts
+   * whoever holds it, each holder's dept or subtree for the relative scopes.
    */
   private async judge(p: Principal, roleId: number, role: ScopeGrant, perms: readonly string[]) {
-    if (role.scope === 'all') throw exceeds()
+    if (role.scope === 'all') {
+      if (p.tenantAdmin) return
+      throw exceeds()
+    }
     const holders = RELATIVE.has(role.scope) ? await this.holderDepts(roleId) : [null]
     const subtrees = await this.subtrees(role.scope === 'own_dept_tree' ? holders : [])
     await this.fits(
@@ -232,31 +267,72 @@ export class GrantPolicy {
   }
 
   /**
-   * Role id → the perms its menus give it now (`countedMenus`, the rule the sessions load by), for every
-   * enabled role but the builtin root (which holds `*` anyway). Locks every menu FOR UPDATE.
+   * Role id → its tenant and the perms its menus give it now, by the rule the sessions load by
+   * (`IamUserLookup.load`), for every enabled role of every tenant but the builtin root (which holds `*`
+   * anyway): its grants within its tenant's package that count (`countedMenus`), never a platform-only
+   * menu's perm in a tenant other than the default one; the builtin tenant_admin roles by
+   * `tenantAdminPerms` over their tenant's package. Locks every menu FOR UPDATE.
    */
-  private async effective(): Promise<Map<number, Set<string>>> {
+  private async effective(): Promise<Map<number, { tenant: number; perms: Set<string> }>> {
     const tx = this.txHost.tx
-    const menus = await tx.query<
-      { id: number; parent_id: number; enabled: number; perms: string }[]
-    >('SELECT id, parent_id, enabled, perms FROM iam_menu WHERE deleted_at IS NULL FOR UPDATE')
-    const grants = await tx.query<{ role_id: number; menu_id: number }[]>(
-      `SELECT rm.role_id, rm.menu_id FROM iam_role_menus rm
-         JOIN iam_role r ON r.id = rm.role_id AND r.enabled = 1 AND r.deleted_at IS NULL
-        WHERE rm.deleted_at IS NULL AND NOT (r.code = ? AND r.is_builtin = 1)`,
-      [ROOT_ROLE],
+    const menus = await this.menus('FOR UPDATE')
+    const grants = await tx.query<{ role_id: number; tenant_id: number; menu_id: number }[]>(
+      // qw:cross-tenant menus are the platform's: a menu edit gives perms to the roles of every tenant
+      `SELECT rm.role_id, r.tenant_id, rm.menu_id FROM iam_role_menus rm
+         JOIN iam_role r ON r.id = rm.role_id AND r.tenant_id = rm.tenant_id AND r.enabled = 1
+              AND r.deleted_at IS NULL
+        WHERE rm.deleted_at IS NULL AND NOT (r.is_builtin = 1 AND r.code IN (?, ?))`,
+      [ROOT_ROLE, TENANT_ADMIN_ROLE],
     )
+    const admins = await tx.query<{ id: number; tenant_id: number }[]>(
+      // qw:cross-tenant as above: the admin role of every tenant holds the menus open to tenants
+      `SELECT id, tenant_id FROM iam_role
+        WHERE code = ? AND is_builtin = 1 AND enabled = 1 AND deleted_at IS NULL`,
+      [TENANT_ADMIN_ROLE],
+    )
+    // each tenant's package read once (null: the default tenant, unrestricted)
+    const packages = new Map<number, Set<number> | null>()
+    const packageOf = async (tenant: number) => {
+      let within = packages.get(tenant)
+      if (within === undefined) packages.set(tenant, (within = await packageMenuIds(tx, tenant)))
+      return within
+    }
+    const platform = platformPerms(menus)
     const permsOf = new Map(menus.map((m) => [Number(m.id), m.perms]))
-    const byRole = new Map<number, number[]>()
-    for (const g of grants)
-      byRole.set(Number(g.role_id), [...(byRole.get(Number(g.role_id)) ?? []), Number(g.menu_id)])
-    const out = new Map<number, Set<string>>()
-    for (const [roleId, ids] of byRole) {
-      const counted = countedMenus(menus, ids)
-      const live = ids.filter((id) => counted.has(id) && permsOf.get(id))
-      out.set(roleId, new Set(live.map((id) => permsOf.get(id)!)))
+    const byRole = new Map<number, { tenant: number; ids: number[] }>()
+    for (const g of grants) {
+      const role = byRole.get(Number(g.role_id)) ?? { tenant: Number(g.tenant_id), ids: [] }
+      role.ids.push(Number(g.menu_id))
+      byRole.set(Number(g.role_id), role)
+    }
+    const out = new Map<number, { tenant: number; perms: Set<string> }>()
+    for (const [roleId, { tenant, ids }] of byRole) {
+      const within = await packageOf(tenant)
+      const held = within ? ids.filter((id) => within.has(id)) : ids
+      const counted = countedMenus(menus, held)
+      const perms = held.flatMap((id) => {
+        const perm = permsOf.get(id)
+        return perm && counted.has(id) && (tenant === DEFAULT_TENANT_ID || !platform.has(perm))
+          ? [perm]
+          : []
+      })
+      out.set(roleId, { tenant, perms: new Set(perms) })
+    }
+    for (const r of admins) {
+      const tenant = Number(r.tenant_id)
+      const perms = tenantAdminPerms(menus, await packageOf(tenant))
+      out.set(Number(r.id), { tenant, perms: new Set(perms) })
     }
     return out
+  }
+
+  /** Every live menu with what the perms it gives depend on, locked `lock`. */
+  private menus(lock: 'FOR SHARE' | 'FOR UPDATE'): Promise<MenuPermRow[]> {
+    return this.txHost.tx.query<MenuPermRow[]>(
+      lock === 'FOR UPDATE'
+        ? 'SELECT id, parent_id, enabled, perms, platform_only FROM iam_menu WHERE deleted_at IS NULL FOR UPDATE'
+        : 'SELECT id, parent_id, enabled, perms, platform_only FROM iam_menu WHERE deleted_at IS NULL FOR SHARE',
+    )
   }
 
   /**
@@ -285,27 +361,42 @@ export class GrantPolicy {
     }
   }
 
-  /** Perms of the menus of each role in `ids` (enabled or not). */
+  /**
+   * Perms of the menus of each role in `ids` (enabled or not); the builtin tenant_admin role's are what
+   * the session load gives it (`tenantAdminPerms`), never its menu rows.
+   */
   private async perms(ids: readonly number[]): Promise<Map<number, string[]>> {
     const rows = await this.txHost.tx.query<{ role_id: number; perms: string }[]>(
       `SELECT DISTINCT rm.role_id, m.perms
          FROM iam_role_menus rm
          JOIN iam_menu m ON m.id = rm.menu_id AND m.deleted_at IS NULL
-        WHERE rm.role_id IN (?) AND rm.deleted_at IS NULL AND m.perms IS NOT NULL AND m.perms <> ''
+        WHERE rm.role_id IN (?) AND rm.tenant_id = ? AND rm.deleted_at IS NULL
+          AND m.perms IS NOT NULL AND m.perms <> ''
         FOR SHARE`,
-      [ids],
+      [ids, tenantId()],
     )
     const out = new Map<number, string[]>()
     for (const r of rows)
       out.set(Number(r.role_id), [...(out.get(Number(r.role_id)) ?? []), r.perms])
+    const admins = (await this.roles(ids)).filter(isTenantAdmin)
+    if (admins.length) {
+      const perms = tenantAdminPerms(
+        await this.menus('FOR SHARE'),
+        await packageMenuIds(this.txHost.tx, tenantId()),
+      )
+      for (const r of admins) out.set(Number(r.id), perms)
+    }
     return out
   }
 
-  /** Live roles among `ids`. */
+  /**
+   * Live roles among `ids` of the data tenant (a role is given and judged in its own tenant, so another
+   * tenant's is unknown here). Every read below keeps to the data tenant too.
+   */
   private roles(ids: readonly number[]): Promise<RoleRow[]> {
     return this.txHost.tx.query<RoleRow[]>(
-      'SELECT id, code, is_builtin, data_scope FROM iam_role WHERE id IN (?) AND deleted_at IS NULL FOR SHARE',
-      [ids],
+      'SELECT id, code, is_builtin, data_scope FROM iam_role WHERE id IN (?) AND tenant_id = ? AND deleted_at IS NULL FOR SHARE',
+      [ids, tenantId()],
     )
   }
 
@@ -314,9 +405,9 @@ export class GrantPolicy {
     const rows = ids.length
       ? await this.txHost.tx.query<{ role_id: number; id: number }[]>(
           `SELECT rd.role_id, d.id FROM iam_role_depts rd
-             JOIN iam_dept d ON d.id = rd.dept_id AND d.deleted_at IS NULL
-            WHERE rd.role_id IN (?) AND rd.deleted_at IS NULL FOR SHARE`,
-          [ids],
+             JOIN iam_dept d ON d.id = rd.dept_id AND d.tenant_id = rd.tenant_id AND d.deleted_at IS NULL
+            WHERE rd.role_id IN (?) AND rd.tenant_id = ? AND rd.deleted_at IS NULL FOR SHARE`,
+          [ids, tenantId()],
         )
       : []
     const out = new Map<number, number[]>()
@@ -339,9 +430,9 @@ export class GrantPolicy {
   private async holderDepts(id: number): Promise<(number | null)[]> {
     const rows = await this.txHost.tx.query<{ dept_id: number | null }[]>(
       `SELECT DISTINCT u.dept_id FROM iam_user_roles ur
-         JOIN iam_user u ON u.id = ur.user_id AND u.deleted_at IS NULL
-        WHERE ur.role_id = ? AND ur.deleted_at IS NULL`,
-      [id],
+         JOIN iam_user u ON u.id = ur.user_id AND u.tenant_id = ur.tenant_id AND u.deleted_at IS NULL
+        WHERE ur.role_id = ? AND ur.tenant_id = ? AND ur.deleted_at IS NULL`,
+      [id, tenantId()],
     )
     return rows.map((r) => (r.dept_id === null ? null : Number(r.dept_id)))
   }
@@ -353,9 +444,10 @@ export class GrantPolicy {
       ? await this.txHost.tx.query<{ root: number; id: number }[]>(
           // tree paths end with '/', so the prefix never matches a sibling like /1/23/ for /1/2/
           `SELECT p.id AS root, c.id FROM iam_dept p
-             JOIN iam_dept c ON c.tree_path LIKE CONCAT(p.tree_path, '%') AND c.deleted_at IS NULL
-            WHERE p.id IN (?) AND p.deleted_at IS NULL`,
-          [roots],
+             JOIN iam_dept c ON c.tree_path LIKE CONCAT(p.tree_path, '%') AND c.tenant_id = p.tenant_id
+                  AND c.deleted_at IS NULL
+            WHERE p.id IN (?) AND p.tenant_id = ? AND p.deleted_at IS NULL`,
+          [roots, tenantId()],
         )
       : []
     const out = new Map<number, number[]>()

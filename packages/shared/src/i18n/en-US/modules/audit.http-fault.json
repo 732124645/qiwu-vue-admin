@@ -16,7 +16,8 @@
         "stack": "Stack",
         "state": "State",
         "handledBy": "Handler ID",
-        "handledAt": "Handled at"
+        "handledAt": "Handled at",
+        "tenantId": "Tenant"
       }
     }
   }

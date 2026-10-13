@@ -1,0 +1,60 @@
+{
+  "iam": {
+    "tenant": {
+      "entity": "Tenant",
+      "defaultTag": "Default tenant",
+      "permanent": "Never",
+      "unlimited": "Unlimited",
+      "usage": "{used} / {quota}",
+      "noDomains": "None",
+      "sections": {
+        "basic": "Basics",
+        "brand": "Brand",
+        "admin": "Tenant administrator"
+      },
+      "hints": {
+        "code": "A lower-case letter, then 3–32 lower-case letters, digits or hyphens in all; fixed once the tenant is opened",
+        "package": "The tenant may use only what its package holds",
+        "expiresAt": "Leave empty for no end; once it ends the tenant is disabled and its data kept",
+        "userQuota": "Leave empty for no limit; the administrator counts",
+        "domains": "Press Enter to add; signing in on these domains enters this tenant. No scheme or port, at most 20",
+        "brandName": "Leave empty to use the system name",
+        "logo": "Leave empty to use the system logo",
+        "admin": "Created with the tenant, holding the tenant administrator role; the initial password must be changed at the first sign-in",
+        "defaultFixed": "The default tenant cannot be disabled or given an expiry or a package"
+      },
+      "created": {
+        "title": "Tenant opened",
+        "hint": "The initial password is shown this once only. Save it now and pass it to the tenant administrator; if it is lost, reset it",
+        "username": "Administrator username",
+        "password": "Initial password"
+      },
+      "resetPassword": {
+        "action": "Reset initial password",
+        "confirm": "Reset the initial password of tenant {name}?",
+        "title": "New initial password",
+        "hint": "The initial password is shown this once only. Save it now"
+      },
+      "copy": "Copy",
+      "copied": "Copied",
+      "copyFailed": "Copying failed. Please select and copy it by hand",
+      "saved": "I have saved it",
+      "disableConfirm": "The users of tenant {name} are signed out at once and cannot sign in; its data is kept. Disable it?",
+      "enableConfirm": "Enable tenant {name}?",
+      "enable": "Enable",
+      "disable": "Disable",
+      "enter": {
+        "action": "Enter",
+        "title": "Enter tenant: {name}",
+        "reasonPlaceholder": "Why you need to enter this tenant, e.g. the ticket you are looking into",
+        "hint": "Inside it you work on the tenant's data with your own permissions (no platform features); everything you do is audited, and you leave it automatically after 2 hours.",
+        "submit": "Enter tenant"
+      }
+    }
+  },
+  "menu": {
+    "iam": {
+      "tenant": "Tenants"
+    }
+  }
+}

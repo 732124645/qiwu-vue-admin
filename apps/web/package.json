@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "typecheck": "vue-tsc --build",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "e2e:tenant": "playwright test -c playwright.tenant.config.ts"
   },
   "dependencies": {
     "@form-create/designer": "3.5.0",

@@ -7,6 +7,7 @@ import type {
 } from '@qiwu/shared'
 import { Column, Entity } from 'typeorm'
 import { BaseEntity, CreatedEntity } from '../../../core/db/base.entity.js'
+import { TenantColumn } from '../../../core/db/tenant-filter.js'
 
 // The runtime tables of a process: an instance, its tasks, ccs and timeline. The rows are the
 // engine's own views (`WfInstance`, `WfTask`, the events withdraw reads), so the engine takes them as they
@@ -57,6 +58,9 @@ export class WfInstanceRow extends BaseEntity {
 
   @Column({ name: 'ended_at', type: 'datetime', precision: 3, nullable: true })
   endedAt: Date | null
+
+  @TenantColumn()
+  tenantId: number
 }
 
 /** `wf_task`: one person's work on a node; `created_at` is the action time that made it. */
@@ -103,6 +107,9 @@ export class WfTaskRow extends BaseEntity {
 
   @Column({ name: 'handled_at', type: 'datetime', precision: 3, nullable: true })
   handledAt: Date | null
+
+  @TenantColumn()
+  tenantId: number
 }
 
 /** `wf_cc`: a copy sent to a user by a notify node (`fromUserId` null) or a reviewer. */
@@ -128,6 +135,9 @@ export class WfCcRow extends CreatedEntity {
 
   @Column({ name: 'read_at', type: 'datetime', precision: 3, nullable: true })
   readAt: Date | null
+
+  @TenantColumn()
+  tenantId: number
 }
 
 /** `wf_event`: the timeline and audit of an instance. */
@@ -155,6 +165,9 @@ export class WfEventRow extends CreatedEntity {
 
   @Column({ type: 'varchar', length: 1000, nullable: true })
   comment: string | null
+
+  @TenantColumn()
+  tenantId: number
 }
 
 /** `TypeOrmModule.forFeature` list of the module that provides WfStore. */

@@ -1,7 +1,8 @@
 // @vitest-environment node
 // Playwright server env (e2e/env.ts): `.env.local`, `.env.e2e`, then an optional git-ignored
-// `.env.e2e.local` (a parallel checkout's own database, Redis db and ports); the run refuses a DB_NAME
-// without the `_e2e` suffix, since the server command drops and reseeds it.
+// `.env.e2e.local` (a parallel checkout's own database, Redis db and ports; the multi-tenancy channel
+// has defaults and a `.env.e2e-tenant.local` of its own); the run refuses a DB_NAME without the `_e2e`
+// suffix, since the server command drops and reseeds it.
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -44,5 +45,37 @@ describe('e2e server env', () => {
   it.each(['qiwu_dev', 'qiwu_test', 'qiwu_e2e_old', ''])('refuses DB_NAME %j', (name) => {
     write('.env.e2e.local', `DB_NAME=${name}\n`)
     expect(() => e2eServerEnv(dir)).toThrow(/_e2e/)
+  })
+
+  it('the tenant channel: its own database, Redis db and ports, multi-tenancy on; .env.e2e.local ignored', () => {
+    write('.env.e2e.local', 'DB_NAME=qiwu_alt_e2e\nREDIS_DB=8\nPORT=3202\nE2E_WEB_PORT=4174\n')
+    expect(e2eServerEnv(dir, true)).toEqual({
+      DB_USER: 'u',
+      DB_NAME: 'qiwu_tenant_e2e',
+      REDIS_DB: '1',
+      PORT: '3203',
+      E2E_WEB_PORT: '4176',
+      APP_MULTI_TENANT: 'true',
+      ENV_FILE: '.env.e2e',
+    })
+  })
+
+  it('the tenant channel layers .env.e2e-tenant.local last, but multi-tenancy stays on', () => {
+    write(
+      '.env.e2e-tenant.local',
+      'DB_NAME=qiwu_alt_tenant_e2e\nREDIS_DB=2\nPORT=3204\nAPP_MULTI_TENANT=false\n',
+    )
+    expect(e2eServerEnv(dir, true)).toMatchObject({
+      DB_NAME: 'qiwu_alt_tenant_e2e',
+      REDIS_DB: '2',
+      PORT: '3204',
+      E2E_WEB_PORT: '4176',
+      APP_MULTI_TENANT: 'true',
+    })
+  })
+
+  it.each(['qiwu_test', 'qiwu_tenant_e2e_old'])('the tenant channel refuses DB_NAME %j', (name) => {
+    write('.env.e2e-tenant.local', `DB_NAME=${name}\n`)
+    expect(() => e2eServerEnv(dir, true)).toThrow(/_e2e/)
   })
 })

@@ -52,7 +52,7 @@ inbox、mail、sms 的 `deliver(id)` 先按主键条件更新：有效记录、`
 
 当前常量：`NOTIFY_MAX_ATTEMPTS = 3`，指总共最多三次尝试；`NOTIFY_CLAIM_TIMEOUT_MS = 10 * 60_000`，指 `sending` 超过十分钟后可以回收，不是每条失败消息固定等十分钟。发送成功后 inbox 标为 `delivered`，mail / sms 标为 `sent`；异常标为 `failed`。最终更新同时比较本次 `claimed_at` 与 `sending` 状态，避免旧派发者覆盖接手者状态。
 
-`NotifyDispatcher.dispatch()` 的 `notify.dispatch` 作业先调用各渠道 `expire()`，再按创建时间和 id 查询 `due(100)` 并派发。种子默认每分钟扫描一次（`0 * * * * *`）；测试环境首次插入该作业时禁用，测试主动调用。实际恢复依赖调度器运行、作业启用与配置，不能把一分钟当交付 SLA。
+`NotifyDispatcher.dispatch()` 的 `notify.dispatch` 作业先调用各渠道 `expire()`，再按创建时间和 id 查询 `dueRows(100)` 并派发：扫描覆盖所有租户，每条记录在它所属的租户里投递。种子默认每分钟扫描一次（`0 * * * * *`）；测试环境首次插入该作业时禁用，测试主动调用。实际恢复依赖调度器运行、作业启用与配置，不能把一分钟当交付 SLA。
 
 `pending/failed` 或超时 claim 且仍有尝试次数的记录可重试。超时且已耗尽次数的 `sending` 由 `expireClaims()` 标为 `failed`，邮件/短信同时写 `interrupted`；耗尽次数的失败记录不会被普通扫描继续发送。
 
@@ -68,7 +68,7 @@ App 离线推送规划采用个推（Getui），目前计划中；当前三渠�
 
 ## 短信验证码的独立路径
 
-登录、找回、绑定手机号的 OTP 不走 `Notifier` 普通 outbox。`SmsOtpService` 使用 `SmsNotifyChannel.writeClaimed()` / `sendClaimed()`：普通短信记录里的 code 被遮蔽为 `******`，记录直接占用全部尝试数，真实 code 只放在临时发送消息中；普通 `due()` 不会把它作为可重试验证码发送。发码限额、验证码消费与认证逻辑由 OTP 服务负责，不应通过业务通知示例绕过。
+登录、找回、绑定手机号的 OTP 不走 `Notifier` 普通 outbox。`SmsOtpService` 使用 `SmsNotifyChannel.writeClaimed()` / `sendClaimed()`：普通短信记录里的 code 被遮蔽为 `******`，记录直接占用全部尝试数，真实 code 只放在临时发送消息中；普通 `dueRows()` 扫描不会把它作为可重试验证码发送。发码限额、验证码消费与认证逻辑由 OTP 服务负责，不应通过业务通知示例绕过。
 
 ## 源码与观察清单
 

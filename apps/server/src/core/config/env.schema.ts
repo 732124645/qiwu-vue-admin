@@ -76,6 +76,11 @@ export const EnvSchema = z.preprocess(
       OUTBOUND_SMTP_PORTS: portList.default([]),
       CODEGEN_WRITE: flag.default(false),
       APP_DEMO_MODE: flag.default(false),
+      /**
+       * Multi-tenancy (see docs/design-notes.md#tenancy): read at startup only, every instance restarts
+       * to switch it; off = the single default tenant
+       */
+      APP_MULTI_TENANT: flag.default(false),
       STORAGE_LOCAL_ROOT: z.string().default(DEFAULT_UPLOAD_ROOT),
       /**
        * WeChat mini program sign-in (also param `auth.wx_mp.enabled`): the AppID and its

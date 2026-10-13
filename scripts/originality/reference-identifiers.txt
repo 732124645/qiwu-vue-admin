@@ -15,6 +15,8 @@ sys_oper_log
 sys_logininfor
 sys_job
 sys_job_log
+sys_tenant
+sys_tenant_package
 gen_table
 gen_table_column
 system_users
@@ -24,6 +26,8 @@ system_dept
 system_dict_type
 system_dict_data
 system_notify_message
+system_tenant
+system_tenant_package
 infra_config
 infra_file
 infra_job

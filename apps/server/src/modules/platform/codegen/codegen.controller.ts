@@ -41,6 +41,7 @@ import {
 import { z } from 'zod'
 import { ActionLog } from '../../../core/audit/action-log.js'
 import { RequirePerm } from '../../../core/auth/decorators.js'
+import { PlatformOnly } from '../../../core/auth/platform-only.js'
 import { Idempotent } from '../../../core/guard/idempotent.js'
 import { ApiEnvelope } from '../../../core/http/api-envelope.decorator.js'
 import { BizError } from '../../../core/http/biz-error.js'
@@ -57,6 +58,7 @@ const ZIP_TYPE = 'application/zip'
  * roots, never over an existing file: if one differs, nothing is written and the diffs come back.
  */
 @ApiTags('codegen')
+@PlatformOnly()
 @Controller('codegen/tables')
 export class CodegenController {
   constructor(private readonly codegen: CodegenService) {}
@@ -72,7 +74,8 @@ export class CodegenController {
   @Get('importable')
   @RequirePerm(codegenPerms.import)
   @ApiOperation({
-    summary: 'Base tables of this database not imported yet (no meta_ / test_ / cg_ tables)',
+    summary:
+      'Base tables of this database not imported yet (no meta_ / test_ / cg_ / wxoa_ tables)',
   })
   @ApiEnvelope(z.array(cgImportableVo))
   importable() {

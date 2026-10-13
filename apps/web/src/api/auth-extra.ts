@@ -1,4 +1,5 @@
 import {
+  DEFAULT_TENANT_CODE,
   passwordPolicyOf,
   passwordPolicyParams,
   signupParams,
@@ -11,17 +12,40 @@ import {
   type SmsCodeBody,
   type SmsCodeVo,
   type SmsResetPasswordBody,
+  type TenancyVo,
 } from '@qiwu/shared'
+import { hostBrand } from '@/core/composables/use-brand'
 import { api } from '@/core/request/http'
 import { publicParamApi } from '@/api/platform/settings/public-param'
 
-/** Whether sign-up is open: only the value `true`; anything else or an unreadable param → closed. */
+/**
+ * Whether sign-up is open: only the value `true`; anything else or an unreadable param → closed. Sign-up
+ * serves the default tenant alone, so a host bound to another tenant is closed too.
+ */
 export async function signupEnabled(): Promise<boolean> {
   try {
-    return (await publicParamApi.get(signupParams.enabled)).value === 'true'
+    if ((await publicParamApi.get(signupParams.enabled)).value !== 'true') return false
   } catch {
     return false
   }
+  const { enabled, tenant } = await tenancy()
+  return !(enabled && tenant && tenant.code !== DEFAULT_TENANT_CODE)
+}
+
+/**
+ * Whether multi-tenancy is on and the tenant this host is bound to; rejects with the request's error when
+ * unanswered (never taken for "off": the tenant code field would vanish and the sign-in go to the default
+ * tenant). The sign-in pages show that tenant's brand (`useBrand`).
+ */
+export async function readTenancy(): Promise<TenancyVo> {
+  const vo = await api.get<TenancyVo>('/auth/tenancy', { silent: true })
+  hostBrand.value = vo.tenant ?? null
+  return vo
+}
+
+/** `readTenancy`, unanswered → off: for what only offers more while on (sign-up). */
+export function tenancy(): Promise<TenancyVo> {
+  return readTenancy().catch(() => ({ enabled: false }))
 }
 
 /** Public password settings; unreadable fields use the shared defaults. */

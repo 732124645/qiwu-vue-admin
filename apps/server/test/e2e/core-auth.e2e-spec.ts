@@ -24,6 +24,7 @@ import { ParamService } from '../../src/core/settings/param.service.js'
 import { insertRow } from '../../src/db/seeds/upsert.js'
 import { bearer } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 const PREFIX = 'auth-e2e-'
 const PW = 'Auth-e2e#2026'
@@ -59,13 +60,15 @@ const login = (username: string, password = PW, o: LoginOpts = {}) =>
 
 /** Creates a user (cheap bcrypt cost: these specs never measure timing). */
 async function user(name: string, extra: Record<string, unknown> = {}, password = PW) {
-  return insertRow(ds.manager, 'iam_user', {
-    username: PREFIX + name,
-    display_name: name,
-    password_hash: bcrypt.hashSync(password, 4),
-    password_changed_at: new Date(),
-    ...extra,
-  })
+  return inTenant1(() =>
+    insertRow(ds.manager, 'iam_user', {
+      username: PREFIX + name,
+      display_name: name,
+      password_hash: bcrypt.hashSync(password, 4),
+      password_changed_at: new Date(),
+      ...extra,
+    }),
+  )
 }
 
 const cookieOf = (res: request.Response) =>
@@ -777,7 +780,7 @@ describe('mobile client', () => {
 
   it('token isolation: mobile and console sessions pass AuthGuard, a third-party (OAuth2) session still gets 401', async () => {
     const id = await user('third')
-    const u = (await app.get(PermVersion).load(id))!
+    const u = (await inTenant1(() => app.get(PermVersion).load(id)))!
     const opts = { keepSignedIn: false, ip: '127.0.0.1', ua: 'probe' }
     const other = await tokens.issue(u, { ...opts, clientId: 'probe-app', scopes: ['user.read'] })
     expect((await http().get('/api/auth/me').set(bearer(other.accessToken))).status).toBe(401)
@@ -804,23 +807,31 @@ describe('me', () => {
     })
 
   async function role(code: string, menuIds: number[], extra: Record<string, unknown> = {}) {
-    const id = await insertRow(ds.manager, 'iam_role', {
-      code: PREFIX + code,
-      name: PREFIX + code,
-      data_scope: 'own_dept',
-      sort_no: roles.length,
-      ...extra,
-    })
+    const id = await inTenant1(() =>
+      insertRow(ds.manager, 'iam_role', {
+        code: PREFIX + code,
+        name: PREFIX + code,
+        data_scope: 'own_dept',
+        sort_no: roles.length,
+        ...extra,
+      }),
+    )
     roles.push(id)
     for (const menuId of menuIds)
-      await ds.query('INSERT INTO iam_role_menus (role_id, menu_id) VALUES (?, ?)', [id, menuId])
+      await ds.query('INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, 1)', [
+        id,
+        menuId,
+      ])
     return id
   }
 
   async function userWithRoles(name: string, roleIds: number[]) {
     const id = await user(name)
     for (const roleId of roleIds)
-      await ds.query('INSERT INTO iam_user_roles (user_id, role_id) VALUES (?, ?)', [id, roleId])
+      await ds.query('INSERT INTO iam_user_roles (user_id, role_id, tenant_id) VALUES (?, ?, 1)', [
+        id,
+        roleId,
+      ])
     return id
   }
 
@@ -892,16 +903,18 @@ describe('me', () => {
       userId = id,
       deletedAt: Date | null = null,
     ) =>
-      insertRow(ds.manager, 'aud_signin_log', {
-        kind,
-        user_id: userId,
-        username: name,
-        client_id: 'console',
-        ok,
-        msg_key: 'signin.ok',
-        created_at: new Date(at),
-        deleted_at: deletedAt,
-      })
+      inTenant1(() =>
+        insertRow(ds.manager, 'aud_signin_log', {
+          kind,
+          user_id: userId,
+          username: name,
+          client_id: 'console',
+          ok,
+          msg_key: 'signin.ok',
+          created_at: new Date(at),
+          deleted_at: deletedAt,
+        }),
+      )
     // the app clock 0.5 s ahead of the DB's: the session's own row still is no earlier sign-in
     freezeAt(Date.now() + 500)
     const first = await signedIn('last')
@@ -932,7 +945,7 @@ describe('me', () => {
     // one lookup in the user's rows (idx user_id + created_at), not a walk back along created_at
     const [plan] = await ds.query<{ key: string | null }[]>(
       `EXPLAIN FORMAT=TRADITIONAL ${LAST_SIGNIN_SQL}`,
-      [id, new Date()],
+      [id, new Date(), 1],
     )
     expect(plan!.key).toBe('idx_aud_signin_log_user_created')
   })
@@ -1063,17 +1076,19 @@ describe('deleted rows grant nothing', () => {
     const action: Record<string, number> = {}
     for (const key of cases) {
       action[key] = await menu(key, page, 'action')
-      role[key] = await insertRow(ds.manager, 'iam_role', {
-        code: PREFIX + key,
-        name: PREFIX + key,
-        data_scope: 'own_dept',
-      })
+      role[key] = await inTenant1(() =>
+        insertRow(ds.manager, 'iam_role', {
+          code: PREFIX + key,
+          name: PREFIX + key,
+          data_scope: 'own_dept',
+        }),
+      )
       made.roles.push(role[key])
-      await ds.query('INSERT INTO iam_role_menus (role_id, menu_id) VALUES (?, ?)', [
+      await ds.query('INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, 1)', [
         role[key],
         action[key],
       ])
-      await ds.query('INSERT INTO iam_user_roles (user_id, role_id) VALUES (?, ?)', [
+      await ds.query('INSERT INTO iam_user_roles (user_id, role_id, tenant_id) VALUES (?, ?, 1)', [
         userId,
         role[key],
       ])
@@ -1229,6 +1244,7 @@ describe('password', () => {
     const doc = (await http().get('/api/docs-json').expect(200)).body
     for (const path of ['login', 'refresh', 'logout', 'verify-password', 'me', 'menus'])
       expect(doc.paths).toHaveProperty([`/api/auth/${path}`])
+    expect(doc.info.description).toContain('No request header selects a tenant')
     const put = doc.paths['/api/iam/profile/password'].put
     expect(put.requestBody.content['application/json'].schema.properties).toHaveProperty(
       'newPassword',

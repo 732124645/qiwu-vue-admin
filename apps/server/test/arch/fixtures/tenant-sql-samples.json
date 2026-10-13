@@ -1,0 +1,260 @@
+{
+  "migration": [
+    "export class M {",
+    "  async up(q) {",
+    "    await q.query(`CREATE TABLE t_user (id bigint, tenant_id bigint)`)",
+    "    await q.query('CREATE TABLE IF NOT EXISTS t_link (user_id bigint, menu_id bigint, tenant_id bigint)')",
+    "    await q.query('CREATE TABLE t_menu (id bigint)')",
+    "    await q.query('UPDATE t_user SET tenant_id = 1') // migrations: no SQL rule",
+    "    // arch-allow: sql-concat a migration's own constants",
+    "    await q.query(`ALTER TABLE ${'t_link'} ADD COLUMN x int`)",
+    "  }",
+    "}"
+  ],
+  "migrationExpect": ["7 sql-concat"],
+  "platformTables": ["meta_migrations", "t_menu"],
+  "samples": [
+    {
+      "name": "a single table: a bare condition, a qualified one or IN; none fails",
+      "code": [
+        "await q.query('SELECT id FROM t_user WHERE id = ?', [id])",
+        "await q.query('SELECT id FROM t_user WHERE id = ? AND tenant_id = ?', [id, tid])",
+        "await q.query('SELECT u.id FROM t_user u WHERE u.id = ? AND u.tenant_id = ?', [id, tid])",
+        "await q.query('SELECT u.id FROM t_user AS u WHERE u.id = ? AND tenant_id = ?', [id, tid])",
+        "await q.query('SELECT id FROM t_user WHERE tenant_id IN (?) AND id = ?', [tids, id])",
+        "await q.query('SELECT u.id FROM t_user u WHERE x.tenant_id = ?', [tid])",
+        "await q.query('SELECT id FROM t_user WHERE tenant_id <=> ?', [tid])",
+        "await q.query('SELECT tenant_id FROM t_user WHERE id = ?', [id])",
+        "await q.query('SELECT id FROM t_user WHERE tenant_id <> ?', [tid])",
+        "await q.query('SELECT id FROM t_user WHERE tenant_id > 0')"
+      ],
+      "expect": ["1 t_user", "6 t_user", "8 t_user", "9 t_user", "10 t_user"]
+    },
+    {
+      "name": "UPDATE and DELETE need the condition; a SET is none",
+      "code": [
+        "await q.query('UPDATE t_user SET tenant_id = ? WHERE id = ?', [tid, id])",
+        "await q.query('UPDATE t_user SET name = ? WHERE id = ? AND tenant_id = ?', [n, id, tid])",
+        "await q.query('DELETE FROM t_user WHERE id = ?', [id])",
+        "await q.query('DELETE FROM t_link WHERE user_id = ? AND tenant_id = ?', [id, tid])",
+        "await q.query('SELECT id FROM t_user WHERE id = ? AND tenant_id = ? FOR UPDATE', [id, tid])"
+      ],
+      "expect": ["1 t_user", "3 t_user"]
+    },
+    {
+      "name": "a joined tenant table needs its own condition, whatever the main table",
+      "code": [
+        "await q.query(`SELECT u.id FROM t_user u",
+        "  JOIN t_link l ON l.user_id = u.id",
+        "  WHERE u.tenant_id = ?`)",
+        "await q.query(`SELECT u.id FROM t_user u",
+        "  JOIN t_link l ON l.user_id = u.id AND l.tenant_id = ?",
+        "  WHERE u.tenant_id = ?`)",
+        "await q.query('SELECT m.id FROM t_menu m JOIN t_link l ON l.menu_id = m.id WHERE m.id = ?')",
+        "await q.query('SELECT m.id FROM t_menu m LEFT JOIN t_link l ON l.menu_id = m.id AND l.tenant_id = ?')",
+        "await q.query('SELECT u.id FROM t_user u JOIN t_link l ON l.user_id = u.id WHERE tenant_id = ?')",
+        "await q.query('SELECT t_user.id FROM t_user JOIN t_link ON t_link.user_id = t_user.id AND t_link.tenant_id = ? WHERE t_user.tenant_id = ?')",
+        "await q.query('SELECT u.id FROM t_user u, t_link l WHERE l.user_id = u.id AND u.tenant_id = ?')"
+      ],
+      "expect": ["1 t_link", "7 t_link", "9 t_user", "9 t_link", "11 t_link"]
+    },
+    {
+      "name": "a second tenant table in a subquery needs its own condition",
+      "code": [
+        "await q.query('SELECT u.id FROM t_user u WHERE u.tenant_id = ? AND u.id IN (SELECT l.user_id FROM t_link l WHERE l.menu_id = ?)')",
+        "await q.query('SELECT u.id FROM t_user u WHERE u.tenant_id = ? AND u.id IN (SELECT l.user_id FROM t_link l WHERE l.menu_id = ? AND l.tenant_id = ?)')",
+        "await q.query('SELECT id FROM t_user WHERE tenant_id = ? AND id IN (SELECT user_id FROM t_link WHERE menu_id = ?)')",
+        "await q.query('SELECT u.id, (SELECT COUNT(*) FROM t_link l WHERE l.user_id = u.id) AS n FROM t_user u WHERE u.tenant_id = ?')",
+        "qb.where('t.id IN (SELECT l.user_id FROM t_link l WHERE l.tenant_id = :tid)')",
+        "qb.where('t.id IN (SELECT l.user_id FROM t_link l WHERE l.user_id = :id)')"
+      ],
+      "expect": ["1 t_link", "3 t_user", "3 t_link", "4 t_link", "6 t_link"]
+    },
+    {
+      "name": "the tenant condition is ANDed at every level: an OR beside it fails",
+      "code": [
+        "await q.query('SELECT i.id FROM t_user i WHERE i.a = ? OR i.b = ? AND i.tenant_id = ?')",
+        "await q.query('SELECT i.id FROM t_user i WHERE (i.a = ? OR i.b = ?) AND i.tenant_id = ?')",
+        "await q.query('SELECT i.id FROM t_user i WHERE (i.a = ? OR i.tenant_id = ?)')",
+        "await q.query('SELECT i.id FROM t_user i WHERE ((i.a = ? OR i.b = ?) AND i.tenant_id = ?)')",
+        "await q.query('SELECT u.id FROM t_user u JOIN t_link x ON x.user_id = u.id OR x.menu_id = ? AND x.tenant_id = ? WHERE u.tenant_id = ?')",
+        "await q.query('SELECT u.id FROM t_user u JOIN t_link x ON (x.user_id = u.id OR x.menu_id = ?) AND x.tenant_id = ? WHERE u.tenant_id = ?')",
+        "await q.query('SELECT i.id FROM t_user i WHERE i.a = ? || i.b = ? AND i.tenant_id = ?')",
+        "await q.query('SELECT i.id FROM t_user i WHERE i.tenant_id = ? AND (i.a = ? OR i.b = ?) ORDER BY i.id')"
+      ],
+      "expect": ["1 t_user", "3 t_user", "5 t_link", "7 t_user"]
+    },
+    {
+      "name": "a condition filters its own table in its own query: ON counts for the table the JOIN brings in, never for a RIGHT JOIN's",
+      "code": [
+        "await q.query('SELECT u.id FROM t_user u LEFT JOIN t_link l ON l.id = u.id AND u.tenant_id = ? AND l.tenant_id = ?')",
+        "await q.query('SELECT u.id FROM t_user u LEFT JOIN t_link l ON l.id = u.id AND l.tenant_id = ? WHERE u.tenant_id = ?')",
+        "await q.query('SELECT u.id FROM t_user u RIGHT JOIN t_link l ON l.id = u.id AND u.tenant_id = ? AND l.tenant_id = ?')",
+        "await q.query('SELECT u.id FROM t_user u RIGHT OUTER JOIN t_link l ON l.id = u.id WHERE u.tenant_id = ? AND l.tenant_id = ?')",
+        "await q.query('SELECT u.id FROM t_user u JOIN t_link l ON l.id = u.id AND u.tenant_id = ? AND l.tenant_id = ?')",
+        "await q.query('SELECT u.id FROM t_user u WHERE u.a = ? OR EXISTS (SELECT 1 FROM t_link l WHERE l.user_id = u.id AND l.tenant_id = ? AND u.tenant_id = ?)')",
+        "await q.query('SELECT u.id FROM t_user u WHERE u.id NOT IN (SELECT l.user_id FROM t_link l WHERE l.tenant_id = ? AND u.tenant_id = ?)')",
+        "await q.query('SELECT x.id FROM (SELECT id FROM t_user WHERE tenant_id = ?) x WHERE x.id = ?')"
+      ],
+      "expect": ["1 t_user", "3 t_user", "3 t_link", "5 t_user", "6 t_user", "7 t_user"]
+    },
+    {
+      "name": "INSERT [INTO] / REPLACE [INTO] a tenant table lists tenant_id (INSERT … SELECT, ON DUPLICATE KEY UPDATE)",
+      "code": [
+        "await q.query('INSERT INTO t_link (user_id, menu_id) VALUES (?, ?)', [u, m])",
+        "await q.query('INSERT INTO t_link (user_id, menu_id, tenant_id) VALUES (?, ?, ?)', [u, m, tid])",
+        "await q.query('INSERT INTO t_link (user_id, tenant_id) SELECT id, tenant_id FROM t_user WHERE id = ?', [u])",
+        "await q.query('INSERT INTO t_link (user_id, tenant_id) SELECT id, tenant_id FROM t_user WHERE id = ? AND tenant_id = ?', [u, tid])",
+        "await q.query('INSERT INTO t_link (user_id) VALUES ? ON DUPLICATE KEY UPDATE deleted_at = NULL', [rows])",
+        "await q.query('INSERT INTO t_link (user_id, tenant_id) VALUES ? AS n ON DUPLICATE KEY UPDATE deleted_at = NULL', [rows])",
+        "await q.query('INSERT IGNORE INTO t_link VALUES (?, ?, ?)', [u, m, tid])",
+        "await q.query('INSERT INTO t_menu (id) VALUES (?)', [m])",
+        "await q.query('INSERT t_link (user_id) VALUES (?)', [u])",
+        "await q.query('REPLACE INTO t_link (user_id) VALUES (?)', [u])",
+        "await q.query('INSERT LOW_PRIORITY t_link (user_id, tenant_id) VALUES (?, ?)', [u, tid])",
+        "await q.query('SELECT REPLACE(name, ?, ?) FROM t_user WHERE tenant_id = ?', [a, b, tid])"
+      ],
+      "expect": ["1 t_link", "3 t_user", "5 t_link", "7 t_link", "9 t_link", "10 t_link"]
+    },
+    {
+      "name": "qw:cross-tenant with a reason on a line of the statement or a comment line right above",
+      "code": [
+        "await q.query('SELECT id FROM t_user') // qw:cross-tenant every tenant's rows on purpose",
+        "// qw:cross-tenant every tenant's rows on purpose",
+        "await q.query('DELETE FROM t_link WHERE user_id = ?', [id])",
+        "await q.query('SELECT id FROM t_user') // qw:cross-tenant",
+        "// qw:cross-tenant two lines above is too far",
+        "",
+        "await q.query('SELECT id FROM t_user')",
+        "await q.query(`SELECT id FROM t_user",
+        "  WHERE id = ?`) // qw:cross-tenant the whole statement is marked",
+        "await q.query('DELETE FROM t_link WHERE user_id < ?', [x]) // qw:cross-tenant a purge of every tenant",
+        "await q.query('SELECT id FROM t_user WHERE id = ?', [id])",
+        "/* qw:cross-tenant a block comment right above counts */",
+        "await q.query('SELECT id FROM t_user')"
+      ],
+      "expect": ["4 t_user", "7 t_user", "11 t_user"]
+    },
+    {
+      "name": "withTenant( and allTenants( carry a reason",
+      "code": [
+        "await allTenants(() => purge())",
+        "// qw:cross-tenant retention covers every tenant",
+        "await allTenants(() => purge())",
+        "await withTenant(row.tenantId, () => handle(row))",
+        "await allTenants(() => purge()) // qw:cross-tenant",
+        "await ctx.withTenant(dto.tenantId, () => handle(dto))",
+        "await withTenant(row.tenantId, () => handle(row)) // qw:cross-tenant the row's own tenant",
+        "await allTenants(() => purge())"
+      ],
+      "expect": ["1 allTenants", "4 withTenant", "5 allTenants", "6 withTenant", "8 allTenants"]
+    },
+    {
+      "name": "core/context itself calls the primitives without a reason",
+      "file": "apps/server/src/core/context/entry.ts",
+      "code": [
+        "export const one = <T>(fn: () => T) => withTenant(1, fn)",
+        "export const all = <T>(fn: () => T) => allTenants(fn)"
+      ],
+      "expect": []
+    },
+    {
+      "name": "the tenant keys of the context are written by core/context and core/auth only",
+      "code": [
+        "cls.set('tenantId', 2)",
+        "clsSet('allTenants', true)",
+        "this.cls.set('actorTenantId', 1)",
+        "cls.setIfUndefined('tenantId', 1)",
+        "cls.set('traceId', id)",
+        "clsSet('principal', p)",
+        "cls.get('tenantId')",
+        "cls.set('tenantId', 1) // qw:cross-tenant no way out for a context key",
+        "cls.runWith({ tenantId: 2 }, fn)",
+        "cls.enterWith({ tenantId, allTenants: true })",
+        "cls.get().tenantId = 2",
+        "store['actorTenantId'] ??= 1",
+        "cls.runWith({ traceId }, fn)",
+        "row.name = n"
+      ],
+      "expect": [
+        "1 tenantId",
+        "2 allTenants",
+        "3 actorTenantId",
+        "4 tenantId",
+        "8 tenantId",
+        "9 tenantId",
+        "10 tenantId",
+        "10 allTenants",
+        "11 tenantId",
+        "12 actorTenantId"
+      ]
+    },
+    {
+      "name": "core/auth writes the tenant keys",
+      "file": "apps/server/src/core/auth/guard.ts",
+      "code": ["cls.set('tenantId', session.tenantId)", "cls.set('actorTenantId', session.actor)"],
+      "expect": []
+    },
+    {
+      "name": "core/auth calls withTenant( with a reason too",
+      "file": "apps/server/src/core/auth/cross.ts",
+      "code": ["await withTenant(row.tenantId, () => handle(row))"],
+      "expect": ["1 withTenant"]
+    },
+    {
+      "name": "the rest of core does not write the tenant keys",
+      "file": "apps/server/src/core/db/write.ts",
+      "code": ["cls.set('tenantId', 2)"],
+      "expect": ["1 tenantId"]
+    },
+    {
+      "name": "core/context writes the tenant keys",
+      "file": "apps/server/src/core/context/setup.ts",
+      "code": [
+        "cls.set('tenantId', 1)",
+        "cls.set('allTenants', undefined)",
+        "cls.enterWith({ tenantId: 1 })",
+        "store.allTenants = undefined"
+      ],
+      "expect": []
+    },
+    {
+      "name": "arch-allow: sql-concat says how it stays in its tenant",
+      "code": [
+        "// arch-allow: sql-concat table names are constants",
+        "await q.query(`SELECT 1 FROM ${table} WHERE id = ?`, [id])",
+        "// arch-allow: sql-concat table names are constants; tenant: the caller locked the ids in its tenant",
+        "await q.query(`SELECT 1 FROM ${table} WHERE id = ?`, [id])",
+        "// arch-allow: sql-concat table names are constants; qw:cross-tenant a purge of every tenant",
+        "await q.query(`DELETE FROM ${table} WHERE at < ?`, [at])",
+        "qb.andWhere(`${alias}.x = :x`) // arch-allow: sql-concat alias identifier",
+        "qb.andWhere(`${alias}.x = :x`) // arch-allow: sql-concat alias identifier; tenant: the ORM adds it",
+        "// arch-allow: sql-concat table names are constants; tenant:"
+      ],
+      "expect": ["1 sql-concat", "7 sql-concat", "9 sql-concat"]
+    },
+    {
+      "name": "platform tables, other tables and comments are not checked",
+      "code": [
+        "await q.query('SELECT id FROM t_menu WHERE id = ?', [id])",
+        "await q.query('UPDATE t_menu SET name = ? WHERE id = ?', [n, id])",
+        "await q.query('SELECT id FROM information_schema.TABLES WHERE TABLE_NAME = ?', [t])",
+        "await q.query('SELECT id FROM t_other WHERE id = ?', [id])",
+        "// SELECT id FROM t_user in a comment is not code",
+        "/* DELETE FROM t_link WHERE user_id = ? */",
+        "const label = 'moved from t_menu'",
+        "qb.innerJoin('t_link', 'l', 'l.user_id = t.id')"
+      ],
+      "expect": []
+    },
+    {
+      "name": "template literals: an interpolation hides nothing else of the statement",
+      "code": [
+        "await q.query(`SELECT id FROM t_user WHERE id IN (${ids.join()})`) // arch-allow: sql-concat ids; tenant: missing on purpose",
+        "await q.query(`SELECT id FROM t_user WHERE id = ? AND tenant_id = ?${extra}`, args) // arch-allow: sql-concat extra; tenant: has it",
+        "await q.query(`UPDATE ${table} SET x = 1${ids.length ? ` WHERE id IN (SELECT user_id FROM t_link WHERE menu_id = ?)` : ''}`) // arch-allow: sql-concat t; tenant: x"
+      ],
+      "expect": ["1 t_user", "3 t_link"]
+    }
+  ]
+}

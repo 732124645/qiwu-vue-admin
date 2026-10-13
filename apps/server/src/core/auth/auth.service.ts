@@ -1,5 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common'
 import {
+  DEFAULT_TENANT_CODE,
+  DEFAULT_TENANT_ID,
   Err,
   type ErrorDef,
   type FirstPartyClient,
@@ -7,6 +9,8 @@ import {
   type MenuNode,
   type MePayload,
   type PasswordPolicy,
+  ROOT_ONLY_ROUTES,
+  type TenancyVo,
 } from '@qiwu/shared'
 import bcrypt from 'bcryptjs'
 import { AuditWriter, type SigninLogEntry } from '../audit/audit-writer.js'
@@ -14,15 +18,19 @@ import { CaptchaTicketVerifier } from '../captcha/captcha-ticket.js'
 import { CaptchaService } from '../captcha/captcha.service.js'
 import { AppConfigService } from '../config/config.module.js'
 import { demoMode } from '../config/demo-mode.js'
+import { tenantId, withTenant } from '../context/tenant.js'
 import { BizError } from '../http/biz-error.js'
 import { redisKey } from '../redis/cache-namespaces.js'
 import { REDIS, type Redis } from '../redis/redis.module.js'
 import { AuthParams, isBlocked, smsIpBucket } from './auth-params.js'
 import { withFeatures } from './menu-features.js'
+import { type LoginTenant, LoginTenantResolver } from './login-tenant.js'
 import { FAKE_HASH } from './password-hash.js'
 import { PermVersion } from './perm-version.js'
 import type { Principal } from './principal.js'
+import { SessionCurrent } from './session-current.js'
 import { SessionRevoker } from './session-revoker.js'
+import { TENANT_LOOKUP, type TenantLookup } from './tenant-lookup.js'
 import {
   CONSOLE_CLIENT,
   type IssuedTokens,
@@ -37,10 +45,12 @@ const DAY_MS = 86_400_000
 /** Lock-screen checks per minute, per user and per client IP (IPv6 by /64, as the SMS limits). */
 const VERIFY_PER_MINUTE = { user: 20, ip: 60 }
 
-/** The caller as the sign-in endpoints see it (`ip` after `trust proxy`). */
+/** The caller as the sign-in endpoints see it (`ip` and `host` after `trust proxy`). */
 export interface Client {
   ip: string
   ua: string
+  /** the request's host name (`req.hostname`): a host bound to a tenant names the sign-in's tenant */
+  host?: string
 }
 
 /**
@@ -86,15 +96,29 @@ export function passwordFlags(
  * (others, and the same user elsewhere, can still sign in), `user` counts across IPs per hour (at
  * `auth.cross_ip_threshold` the username needs a captcha ticket, even with captcha.mode off), `ip`
  * counts per IP per hour. The pair key has its own `p` segment so no username (`u`, `ip`) can alias
- * the other two shapes.
+ * the other two shapes. Usernames are unique within a tenant only: the pair and user counters of a
+ * tenant code (`LoginTenant.code`; unknown codes too, so counting tells no code apart) other than the
+ * default one have segments of their own, `tp:{code}:` / `tu:{code}:` (see docs/design-notes.md#tenancy),
+ * never `p:`/`u:` plus one: an unlock scans `p:{username}:*`, which a code spelled like a username
+ * would reach.
  */
-const failKeys = (username: string, ip: string) => {
+const failKeys = (code: string, username: string, ip: string) => {
   const u = username.toLowerCase()
+  const own = code === DEFAULT_TENANT_CODE
   return {
-    pair: redisKey('authFail', 'p', u, ip),
-    user: redisKey('authFail', 'u', u),
+    pair: own ? redisKey('authFail', 'p', u, ip) : redisKey('authFail', 'tp', code, u, ip),
+    user: own ? redisKey('authFail', 'u', u) : redisKey('authFail', 'tu', code, u),
     ip: redisKey('authFail', 'ip', ip),
   }
+}
+
+/**
+ * A failed password sign-in on a host bound to no tenant (multi-tenancy on): the sign-in page asks for
+ * a code, blank included; the message names the code too (same error code).
+ */
+const BAD_CREDENTIALS_TENANT: ErrorDef = {
+  ...Err.AUTH_BAD_CREDENTIALS,
+  key: 'error.auth.bad_credentials_tenant',
 }
 type FailKeys = ReturnType<typeof failKeys>
 
@@ -112,14 +136,19 @@ export class AuthService {
     private readonly captchaTickets: CaptchaTicketVerifier,
     private readonly revoker: SessionRevoker,
     private readonly cfg: AppConfigService,
+    private readonly sessions: SessionCurrent,
+    @Inject(TENANT_LOOKUP) private readonly tenants: TenantLookup,
+    private readonly loginTenants: LoginTenantResolver,
   ) {}
 
   /**
-   * Look up the stored username for counter keys → ticket gate (mode or cross-IP failures) → IP
-   * blacklist → username+IP lock → bcrypt (fake hash for unknown, disabled or deleted users) →
-   * failure counters or, on success, reset + session + `last_login_*` + sign-in log. A required
-   * ticket is spent before the password check; a refused ticket changes no failure counters.
-   * Every credential failure answers the same `bad_credentials`. `via`: a sign-in that also binds.
+   * The sign-in's tenant (resolveLoginTenant: the host's, else `tenantCode`) → look up the stored
+   * username for counter keys → ticket gate (mode or cross-IP failures) → IP blacklist → username+IP
+   * lock → bcrypt (fake hash for unknown, disabled or deleted users, and for anyone while the tenant did
+   * not resolve) → failure counters or, on success, reset + session + `last_login_*` + sign-in log. A
+   * required ticket is spent before the password check; a refused ticket changes no failure counters.
+   * Every credential failure answers the same `bad_credentials` (naming the tenant code where one is
+   * typed). `via`: a sign-in that also binds.
    */
   async login(
     body: LoginBody,
@@ -129,6 +158,11 @@ export class AuthService {
   ): Promise<IssuedTokens> {
     const { username, password } = body
     const clientId = body.clientId ?? CONSOLE_CLIENT
+    const at: LoginTenant = await this.loginTenants.resolveLoginTenant(
+      { hostname: client.host },
+      body.tenantCode,
+    )
+    const badCredentials = at.byCode ? BAD_CREDENTIALS_TENANT : Err.AUTH_BAD_CREDENTIALS
     const log = (
       e: Pick<SigninLogEntry, 'userId' | 'ok' | 'msgKey' | 'msgParams'> & { userType?: string },
       kind: SigninLogEntry['kind'] = via?.kind ?? 'password',
@@ -139,13 +173,20 @@ export class AuthService {
         kind,
         username,
         clientId,
-        ...client,
+        ip: client.ip,
+        ua: client.ua,
+        // an unknown code's attempts belong to no tenant, an unavailable tenant's to that tenant
+        tenantId: at.logTenantId,
       })
 
     const { security, policy, blocked } = await this.params.load()
-    // Look up before the gates so every spelling of an existing account shares its counters.
-    const cred = await this.lookup.findCredentials({ username })
-    const keys = failKeys(cred?.username ?? username, client.ip)
+    // Look up before the gates so every spelling of an existing account shares its counters; nobody is
+    // looked up while the tenant did not resolve.
+    const cred =
+      at.tenantId === null
+        ? null
+        : await this.lookup.findCredentials({ tenantId: at.tenantId, username })
+    const keys = failKeys(at.code, cred?.username ?? username, client.ip)
     if (
       ((await this.captcha.mode()) !== 'off' ||
         Number(await this.redis.get(keys.user)) >= security.crossIpThreshold) &&
@@ -173,13 +214,20 @@ export class AuthService {
     const match = await bcrypt.compare(password, live?.passwordHash ?? FAKE_HASH)
     const user = match && live ? await this.permVersion.load(live.userId) : null
     if (!live || !user) {
-      const reason = !cred ? 'unknown_user' : !cred.enabled ? 'disabled' : 'bad_password'
+      const reason =
+        at.tenantId === null
+          ? 'tenant_unavailable'
+          : !cred
+            ? 'unknown_user'
+            : !cred.enabled
+              ? 'disabled'
+              : 'bad_password'
       log({ userId: cred?.userId ?? null, ok: false, msgKey: `signin.${reason}` })
       if ((await this.countFailure(keys, security.lockMinutes)) >= security.lockThreshold) {
         log(locked, 'locked')
         throw new BizError(Err.AUTH_LOCKED)
       }
-      throw new BizError(Err.AUTH_BAD_CREDENTIALS)
+      throw new BizError(badCredentials)
     }
 
     // A password change/reset or disable racing this sign-in commits first, then
@@ -209,7 +257,7 @@ export class AuthService {
       : null
     if (!issued) {
       log({ userId: live.userId, ok: false, msgKey: 'signin.credentials_changed' })
-      throw new BizError(Err.AUTH_BAD_CREDENTIALS)
+      throw new BizError(badCredentials)
     }
     await this.redis.del([keys.pair, keys.user, redisKey('authFail', 'cur', live.userId)])
     await this.lookup.recordSignIn(live.userId, { ip: client.ip, at: now, timezone })
@@ -307,23 +355,35 @@ export class AuthService {
   /**
    * Rotates the refresh token (grace for the same sid + UA, replay revokes the chain, never
    * past `absoluteExpAt`; see docs/design-notes.md#auth-sessions). A replay is logged as `refresh_reuse`. `clientId` is the channel the token
-   * came in (cookie = console, body = mobile): a token of another client's session is refused.
+   * came in (cookie = console, body = mobile): a token of another client's session is refused. The
+   * session is reloaded like a request's (SessionCurrent); on a host bound to a tenant (`host`,
+   * multi-tenancy on) a session of another tenant is refused untouched. The work runs in the session's
+   * tenant (see docs/design-notes.md#tenancy).
    */
   async refresh(
     refreshToken: string,
     client: Client,
     clientId: FirstPartyClient,
   ): Promise<RefreshOutcome> {
-    const out = await this.tokens.refresh(refreshToken, client.ua, clientId)
-    if (out.kind === 'reused')
-      await this.logSession(
-        out.session?.userId ?? null,
-        out.session?.userType ?? 'admin',
-        { ...client, clientId: out.session?.clientId ?? clientId },
-        'refresh_reuse',
-        'signin.refresh_reuse',
-        false,
-      )
+    const out = await this.tokens.refresh(refreshToken, client.ua, clientId, {
+      // asked only for a live session: a made-up token on any host costs no lookup
+      expectTenant: async () => (client.host ? this.tenants.byHost(client.host) : null),
+      reload: (s) => this.sessions.current(s),
+    })
+    if (out.kind === 'reused') {
+      const log = () =>
+        this.logSession(
+          out.session?.userId ?? null,
+          out.session?.userType ?? 'admin',
+          { ip: client.ip, ua: client.ua, clientId: out.session?.clientId ?? clientId },
+          'refresh_reuse',
+          'signin.refresh_reuse',
+          false,
+        )
+      const tid = out.session?.tenantId
+      // qw:cross-tenant the replayed session's own tenant (reloaded, so it names it)
+      await (tid === undefined ? log() : withTenant(tid, log))
+    }
     return out
   }
 
@@ -418,7 +478,9 @@ export class AuthService {
 
   /**
    * GET /me (see docs/design-notes.md#auth-sessions): profile, role codes, perms, the session's password flags, the policy and the
-   * previous sign-in's time.
+   * previous sign-in's time; while multi-tenancy is on also the session's data tenant (the one a platform
+   * user entered, else the user's own) and its feature set (every top-level group when unrestricted; see
+   * docs/design-notes.md#tenancy). Runs in the user's own tenant (`@HomeTenant()`).
    */
   async me(p: Principal): Promise<MePayload> {
     const [user, session, { policy }] = await Promise.all([
@@ -427,7 +489,7 @@ export class AuthService {
       this.params.load(),
     ])
     if (!user || !session) throw new BizError(Err.UNAUTHENTICATED)
-    return {
+    const me: MePayload = {
       user,
       roles: p.roles.map((r) => r.code),
       perms: p.perms,
@@ -435,11 +497,43 @@ export class AuthService {
       policy,
       lastSignInAt: await this.audit.lastSignIn(p.userId, session.loginAt),
     }
+    if (!this.cfg.get('APP_MULTI_TENANT')) return me
+    const id = p.actingTenantId ?? p.tenantId ?? DEFAULT_TENANT_ID
+    const brand = await this.tenants.brand(id)
+    if (!brand) throw new BizError(Err.UNAUTHENTICATED)
+    me.tenant = { id, ...brand, acting: p.actingTenantId !== undefined }
+    me.features = p.features ?? (await this.lookup.featureGroups())
+    return me
   }
 
-  /** GET /menus: root sees every enabled menu; menus of switched-off features never (menu-features.ts). */
+  /**
+   * GET /tenancy: whether multi-tenancy is on and, on a host bound to a tenant, that tenant's code and
+   * brand (never by code: codes cannot be probed).
+   */
+  async tenancy(host: string): Promise<TenancyVo> {
+    if (!this.cfg.get('APP_MULTI_TENANT')) return { enabled: false }
+    const bound = host ? await this.tenants.byHost(host) : null
+    const tenant = bound === null ? null : await this.tenants.brand(bound)
+    return tenant ? { enabled: true, tenant } : { enabled: true }
+  }
+
+  /**
+   * GET /menus: root sees every enabled menu, a tenant admin every one open to tenants; menus of
+   * switched-off features never (menu-features.ts), platform-only ones not while working inside another
+   * tenant (root excepted: `*` stays whole; see docs/design-notes.md#tenancy). While multi-tenancy is on
+   * the root-only pages (`ROOT_ONLY_ROUTES`, their routes 403 for anyone else) are root's alone.
+   */
   async menus(p: Principal): Promise<MenuNode[]> {
-    return withFeatures(await this.lookup.menus(p.userId, p.root === true), (s) => this.cfg.get(s))
+    return withFeatures(
+      await this.lookup.menus(
+        p.userId,
+        p.root === true,
+        p.tenantAdmin === true,
+        p.actingTenantId !== undefined,
+      ),
+      (s) => this.cfg.get(s),
+      p.root !== true && this.cfg.get('APP_MULTI_TENANT') ? ROOT_ONLY_ROUTES : [],
+    )
   }
 
   /** Sign-in log row for an existing session's user (username from the user store). */
@@ -464,18 +558,23 @@ export class AuthService {
   }
 
   /**
-   * Unlocks `username` (the sign-in log page's "unlock", 登录日志): its username+IP pair
-   * counters on every IP and its cross-IP counter are deleted, keyed like `failKeys` (an account's stored
-   * spelling, lower-cased), so its locks end at once. The per-IP counters stay: they belong to the IP.
+   * Unlocks `username` (the sign-in log page's "unlock", 登录日志) of the caller's data tenant: its
+   * username+IP pair counters on every IP and its cross-IP counter are deleted, keyed like `failKeys`
+   * (the tenant's code, an account's stored spelling, lower-cased), so its locks end at once. Other
+   * tenants' counters of the same username stay, and so do the per-IP ones: they belong to the IP.
    */
   async unlock(username: string): Promise<void> {
-    const cred = await this.lookup.findCredentials({ username })
-    const u = (cred?.username ?? username).toLowerCase()
-    // `p:<user>:` + any IP; the key's own glob characters escaped (URI-encoding leaves `*` as it is)
-    const pairs = `${redisKey('authFail', 'p', u, '').replace(/[*?[\]\\]/g, '\\$&')}*`
-    for await (const keys of this.redis.scanIterator({ MATCH: pairs, COUNT: 500 }))
-      if (keys.length) await this.redis.unlink(keys)
-    await this.redis.unlink(failKeys(u, '').user)
+    const tid = tenantId()
+    const code =
+      tid === DEFAULT_TENANT_ID ? DEFAULT_TENANT_CODE : (await this.tenants.brand(tid))?.code
+    if (code === undefined) return
+    const cred = await this.lookup.findCredentials({ tenantId: tid, username })
+    const keys = failKeys(code, cred?.username ?? username, '')
+    // the pair key + any IP; the key's own glob characters escaped (URI-encoding leaves `*` as it is)
+    const pairs = `${keys.pair.replace(/[*?[\]\\]/g, '\\$&')}*`
+    for await (const found of this.redis.scanIterator({ MATCH: pairs, COUNT: 500 }))
+      if (found.length) await this.redis.unlink(found)
+    await this.redis.unlink(keys.user)
   }
 
   /** One more failure on every counter; returns the username+IP pair's count. */

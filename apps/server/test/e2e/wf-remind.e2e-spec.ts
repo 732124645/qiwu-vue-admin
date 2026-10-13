@@ -18,6 +18,7 @@ import { WfNotify } from '../../src/modules/workflow/runtime/wf-notify.js'
 import { WfRemind } from '../../src/modules/workflow/runtime/wf-remind.js'
 import { WfStore } from '../../src/modules/workflow/runtime/wf-store.js'
 import { chain, fields, HOUR, review, users } from '../fixtures/wf/flow.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 const PREFIX = 'e2e-wfr-'
 const MINUTE = 60_000
@@ -39,11 +40,11 @@ async function startTask(timeout: WfReviewNode['timeout'], ago = 0, who = u.ann)
     next: chain(review('r', { ...users(who), timeout })),
   }
   const m = await ds.query(
-    "INSERT INTO wf_model (model_key, name, form_kind) VALUES (?, ?, 'dynamic')",
+    "INSERT INTO wf_model (model_key, name, form_kind, tenant_id) VALUES (?, ?, 'dynamic', 1)",
     [key, key],
   )
   const v = await ds.query(
-    'INSERT INTO wf_version (model_id, model_key, version, tree_json, form_snapshot) VALUES (?, ?, 1, ?, ?)',
+    'INSERT INTO wf_version (model_id, model_key, version, tree_json, form_snapshot, tenant_id) VALUES (?, ?, 1, ?, ?, 1)',
     [m.insertId, key, JSON.stringify(tree), JSON.stringify({ fields })],
   )
   const input = {
@@ -55,7 +56,9 @@ async function startTask(timeout: WfReviewNode['timeout'], ago = 0, who = u.ann)
     initiatorPicks: {},
     initiatorCtx: { deptTreePath: null, roleIds: [] },
   }
-  const { taskIds } = await cls.run(() => app.get(WfStore).start(input, new Date(Date.now() - ago)))
+  const { taskIds } = await inTenant1(() =>
+    cls.run(() => app.get(WfStore).start(input, new Date(Date.now() - ago))),
+  )
   return taskIds[0]!
 }
 
@@ -101,12 +104,14 @@ beforeAll(async () => {
   cls = app.get(ClsService)
   await ds.query('DELETE FROM iam_user WHERE username LIKE ?', [`${PREFIX}%`])
   for (const who of ['init', 'ann', 'ben'] as const)
-    u[who] = await insertRow(ds.manager, 'iam_user', {
-      username: PREFIX + who,
-      display_name: who,
-      password_hash: 'not-used-by-this-spec',
-      password_changed_at: new Date(),
-    })
+    u[who] = await inTenant1(() =>
+      insertRow(ds.manager, 'iam_user', {
+        username: PREFIX + who,
+        display_name: who,
+        password_hash: 'not-used-by-this-spec',
+        password_changed_at: new Date(),
+      }),
+    )
   await cleanup()
 })
 
@@ -179,15 +184,17 @@ it('a reminded task reassigned (改派) reminds its new holder, on the same due 
     'SELECT instance_id, due_at FROM wf_task WHERE id = ?',
     [id],
   )
-  await cls.run(() =>
-    app.get(WfStore).act(Number(inst), async (run) => {
-      const task = run.tasks.find((t) => t.id === id)!
-      return reassign(run.ctx, run.inst, run.tasks, task, {
-        actorId: u.init,
-        to: u.ben,
-        comment: null,
-      })
-    }),
+  await inTenant1(() =>
+    cls.run(() =>
+      app.get(WfStore).act(Number(inst), async (run) => {
+        const task = run.tasks.find((t) => t.id === id)!
+        return reassign(run.ctx, run.inst, run.tasks, task, {
+          actorId: u.init,
+          to: u.ben,
+          comment: null,
+        })
+      }),
+    ),
   )
   expect(await remindedAt(id)).toBeNull()
   await runJob()
@@ -204,10 +211,10 @@ describe('the claim (conditional UPDATE of reminded_at)', () => {
     const once = await startTask({ hours: 1 }, 2 * HOUR)
     const again = await startTask({ hours: 1, remindEvery: 1 }, 2 * HOUR, u.ben)
     const races = await Promise.all([
-      cls.run(() => remindOne(once, null)),
-      cls.run(() => remindOne(once, null)),
-      cls.run(() => remindOne(again, 1)),
-      cls.run(() => remindOne(again, 1)),
+      inTenant1(() => cls.run(() => remindOne(once, null))),
+      inTenant1(() => cls.run(() => remindOne(once, null))),
+      inTenant1(() => cls.run(() => remindOne(again, 1))),
+      inTenant1(() => cls.run(() => remindOne(again, 1))),
     ])
     expect(races.filter(Boolean)).toHaveLength(2)
     expect((await reminded()).sort()).toEqual([u.ann, u.ben].sort())
@@ -221,8 +228,8 @@ describe('the claim (conditional UPDATE of reminded_at)', () => {
       new Date(Date.now() + HOUR),
       later,
     ])
-    expect(await cls.run(() => remindOne(handled, null))).toBe(false)
-    expect(await cls.run(() => remindOne(later, null))).toBe(false)
+    expect(await inTenant1(() => cls.run(() => remindOne(handled, null)))).toBe(false)
+    expect(await inTenant1(() => cls.run(() => remindOne(later, null)))).toBe(false)
     expect(await reminded()).toEqual([])
   })
 

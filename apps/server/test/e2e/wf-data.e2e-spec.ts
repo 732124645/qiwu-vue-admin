@@ -19,6 +19,7 @@ import { REDIS, type Redis } from '../../src/core/redis/redis.module.js'
 import { findId, insertRow } from '../../src/db/seeds/upsert.js'
 import { bearer, signIn } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 const PREFIX = 'e2e-wfd-'
 const KEY = `${PREFIX}m`
@@ -62,7 +63,7 @@ async function exported(who: string, query: object = {}) {
 }
 
 async function add(table: keyof typeof made, row: Record<string, unknown>) {
-  const id = await insertRow(ds.manager, table, row)
+  const id = await inTenant1(() => insertRow(ds.manager, table, row))
   made[table].push(id)
   return id
 }
@@ -73,7 +74,7 @@ async function role(name: string, dataScope: string, perms: string[]) {
     data_scope: dataScope,
   })
   for (const p of perms)
-    await ds.query('INSERT INTO iam_role_menus (role_id, menu_id) VALUES (?, ?)', [
+    await ds.query('INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, 1)', [
       id,
       await findId(ds.manager, 'iam_menu', { perms: p }),
     ])
@@ -88,7 +89,10 @@ async function user(name: string, dept: string, roles: number[] = []) {
     password_changed_at: new Date(),
   })
   for (const r of roles)
-    await ds.query('INSERT INTO iam_user_roles (user_id, role_id) VALUES (?, ?)', [u[name], r])
+    await ds.query('INSERT INTO iam_user_roles (user_id, role_id, tenant_id) VALUES (?, ?, 1)', [
+      u[name],
+      r,
+    ])
   tokens[name] = (await signIn(app, PREFIX + name)).accessToken
 }
 
@@ -101,8 +105,8 @@ async function version(
   tree: object = { id: 'begin', type: 'begin', name: 'Begin' },
 ) {
   const res = await ds.query(
-    `INSERT INTO wf_version (model_id, model_key, version, tree_json, form_snapshot)
-     VALUES (?, ?, ?, ?, ?)`,
+    `INSERT INTO wf_version (model_id, model_key, version, tree_json, form_snapshot, tenant_id)
+     VALUES (?, ?, ?, ?, ?, 1)`,
     [modelId, key, n, JSON.stringify(tree), JSON.stringify(form)],
   )
   return Number(res.insertId)
@@ -120,8 +124,8 @@ async function instance(
 ) {
   const res = await ds.query(
     `INSERT INTO wf_instance (version_id, model_key, initiator_id, initiator_dept_id, state, form_values,
-       initiator_picks, initiator_ctx, active_node_ids, started_at, ended_at)
-     VALUES (?, ?, ?, ?, ?, ?, '{}', '{"deptTreePath":null,"roleIds":[]}', '[]', ?, ?)`,
+       initiator_picks, initiator_ctx, active_node_ids, started_at, ended_at, tenant_id)
+     VALUES (?, ?, ?, ?, ?, ?, '{}', '{"deptTreePath":null,"roleIds":[]}', '[]', ?, ?, 1)`,
     [
       versionId,
       key,
@@ -169,7 +173,7 @@ beforeAll(async () => {
   const { browse, export: exp } = wfPerms.data
   const narrow = await role('narrow', 'own_dept_tree', [browse, exp])
   const reader = await role('reader', 'all', [browse])
-  const staff = (await findId(ds.manager, 'iam_role', { code: 'staff' }))!
+  const staff = (await inTenant1(() => findId(ds.manager, 'iam_role', { code: 'staff' })))!
   await user('alice', 'sub')
   await user('bob', 'other')
   await user('lead', 'top', [narrow])
@@ -180,7 +184,7 @@ beforeAll(async () => {
   tokens.admin = (await signIn(app)).accessToken
 
   const m = await ds.query(
-    'INSERT INTO wf_model (model_key, name, form_kind, manager_user_ids) VALUES (?, ?, ?, ?)',
+    'INSERT INTO wf_model (model_key, name, form_kind, manager_user_ids, tenant_id) VALUES (?, ?, ?, ?, 1)',
     [KEY, `${PREFIX}name`, 'dynamic', JSON.stringify([u.boss])],
   )
   const v1 = await version(m.insertId, KEY, 1, { fields: { days: 'number', reason: 'string' } })
@@ -633,11 +637,10 @@ describe('field access', () => {
 
   it('a version whose tree no longer compiles withholds every field (its access is unknown)', async () => {
     const key = `${PREFIX}y`
-    const m = await ds.query('INSERT INTO wf_model (model_key, name, form_kind) VALUES (?, ?, ?)', [
-      key,
-      key,
-      'dynamic',
-    ])
+    const m = await ds.query(
+      'INSERT INTO wf_model (model_key, name, form_kind, tenant_id) VALUES (?, ?, ?, 1)',
+      [key, key, 'dynamic'],
+    )
     const v = await version(m.insertId, key, 1, { fields: { days: 'number' } }, { type: 'nope' })
     await ds.query('UPDATE wf_model SET current_version_id = ? WHERE id = ?', [v, m.insertId])
     const lead = (await data('lead', {}, key).expect(200)).body
@@ -670,11 +673,10 @@ describe('field access', () => {
 
   it("a row on a version not the model's own withholds every value (its access is unknown)", async () => {
     const key = `${PREFIX}z`
-    const m = await ds.query('INSERT INTO wf_model (model_key, name, form_kind) VALUES (?, ?, ?)', [
-      key,
-      key,
-      'dynamic',
-    ])
+    const m = await ds.query(
+      'INSERT INTO wf_model (model_key, name, form_kind, tenant_id) VALUES (?, ?, ?, 1)',
+      [key, key, 'dynamic'],
+    )
     const v = await version(m.insertId, key, 1, { fields: { reason: 'string' } })
     await ds.query('UPDATE wf_model SET current_version_id = ? WHERE id = ?', [v, m.insertId])
     // a version id of the other model (KEY's version 1, which hides nothing)

@@ -1,6 +1,17 @@
 // Single-flight refresh with the refresh token in the body, replay, 401 → sign-in, toasts.
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { LOGIN_PAGE, PASSWORD_PAGE, api, hasSession, setSession, upload } from '@/core/request'
+import { createPinia, setActivePinia } from 'pinia'
+import {
+  LOGIN_PAGE,
+  PASSWORD_PAGE,
+  SESSION_END_TEXT,
+  api,
+  hasSession,
+  sessionEnd,
+  setSession,
+  upload,
+} from '@/core/request'
+import { useAuthStore } from '@/core/stores/auth'
 
 type Answer = { statusCode: number; data: unknown }
 const ok = (data: unknown): Answer => ({ statusCode: 200, data: { code: 0, msg: 'ok', data } })
@@ -102,6 +113,32 @@ describe('401 → sign-in', () => {
     expect(hasSession()).toBe(false)
     expect(uni.reLaunch).toHaveBeenCalledTimes(1)
     expect(uni.reLaunch).toHaveBeenCalledWith(expect.objectContaining({ url: LOGIN_PAGE }))
+  })
+
+  it('a 401 A1042 (the tenant is gone) keeps why for the sign-in page; a plain rejection does not; sign-in and out clear it', async () => {
+    const gone = { statusCode: 401, data: { code: 'A1042', msg: 'tenant unavailable' } }
+    backend((o) => (o.url === '/api/auth/refresh' ? gone : expired))
+    await expect(api.get('/a')).rejects.toMatchObject({ status: 401 })
+    expect(hasSession()).toBe(false)
+    expect(uni.reLaunch).toHaveBeenCalledWith(expect.objectContaining({ url: LOGIN_PAGE }))
+    expect(sessionEnd.value).toBe('tenant_unavailable')
+    expect(SESSION_END_TEXT[sessionEnd.value!]).toBe('common.error.tenantUnavailable')
+    // the next sign-in clears it
+    setSession(tokens(2))
+    expect(sessionEnd.value).toBeNull()
+
+    await new Promise((r) => setTimeout(r))
+    backend((o) => (o.url === '/api/auth/refresh' ? { ...expired, data: { code: 'A1006' } } : expired))
+    await expect(api.get('/b')).rejects.toMatchObject({ status: 401 })
+    expect(hasSession()).toBe(false)
+    expect(sessionEnd.value).toBeNull()
+
+    // signing out clears it too
+    sessionEnd.value = 'tenant_unavailable'
+    setActivePinia(createPinia())
+    backend(() => ok(null))
+    await useAuthStore().logout()
+    expect(sessionEnd.value).toBeNull()
   })
 
   it('without a stored refresh token goes straight to sign-in', async () => {

@@ -1,4 +1,4 @@
-// Shared by playwright.config.ts, the global setup and the fixtures: e2e server env and test users.
+// Shared by the Playwright configs, the global setups and the fixtures: e2e server env and test users.
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -10,16 +10,31 @@ const envFile = (dir: string, name: string) =>
   existsSync(join(dir, name)) ? parseEnv(readFileSync(join(dir, name), 'utf8')) : {}
 
 /**
+ * The multi-tenancy channel (playwright.tenant.config.ts, specs in e2e-tenant/): the server with
+ * `APP_MULTI_TENANT` on, on a database, Redis db and ports of its own.
+ */
+export const TENANT_CHANNEL = {
+  DB_NAME: 'qiwu_tenant_e2e',
+  REDIS_DB: '1',
+  PORT: '3203',
+  E2E_WEB_PORT: '4176',
+}
+
+/**
  * Server env: git-ignored `.env.local` credentials, the committed `.env.e2e` mode file, then the
  * optional git-ignored `.env.e2e.local` (a parallel checkout's own DB_NAME, REDIS_DB, PORT and E2E_WEB_PORT, so
- * two Playwright runs can share the machine). The server command drops and reseeds DB_NAME and the
- * global setup clears REDIS_DB: a DB_NAME without the `_e2e` suffix stops the run.
+ * two Playwright runs can share the machine). The `tenant` channel takes TENANT_CHANNEL and the optional
+ * git-ignored `.env.e2e-tenant.local` instead (the same four keys), with multi-tenancy on whatever that
+ * file says. The server command drops and reseeds DB_NAME and the global setup clears REDIS_DB: a DB_NAME
+ * without the `_e2e` suffix stops the run.
  */
-export function e2eServerEnv(dir = serverDir): Record<string, string> {
+export function e2eServerEnv(dir = serverDir, tenant = false): Record<string, string> {
   const env: Record<string, string> = {
     ...envFile(dir, '.env.local'),
     ...envFile(dir, '.env.e2e'),
-    ...envFile(dir, '.env.e2e.local'),
+    ...(tenant
+      ? { ...TENANT_CHANNEL, ...envFile(dir, '.env.e2e-tenant.local'), APP_MULTI_TENANT: 'true' }
+      : envFile(dir, '.env.e2e.local')),
     ENV_FILE: '.env.e2e',
   }
   if (!env.DB_NAME?.endsWith('_e2e'))
@@ -73,3 +88,14 @@ export const USERS = {
 /** the seeded OA demo users (global setup sets their password) */
 export const OA_USERS = ['oaEmployee', 'oaSupervisor', 'oaDeputy', 'oaDirector', 'oaHr'] as const
 export type E2eUser = keyof typeof USERS
+
+/**
+ * The tenant channel's second tenant (e2e-tenant/global-setup.ts) and its owner, holding the builtin
+ * `tenant_admin` role with `password_changed_at = NULL` (forced to change the password first). Same
+ * username as the default tenant's `admin`, another password.
+ */
+export const TENANT_B = {
+  code: 'e2e-b',
+  name: 'E2E B',
+  admin: { username: 'admin', password: E2E_PASSWORD },
+} as const

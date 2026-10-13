@@ -20,15 +20,27 @@ import { from, switchMap, tap } from 'rxjs'
 import { classify } from '../http/http-error.filter.js'
 import { rememberSensitive, sensitiveFields } from '../redact.js'
 import { ParamService } from '../settings/param.service.js'
-import { AuditWriter, requestSummary, skipHttpLogs } from './audit-writer.js'
+import {
+  AuditWriter,
+  httpTracedAlways,
+  requestSummary,
+  SKIP_HTTP_TRACE,
+  skipHttpLogs,
+} from './audit-writer.js'
 
-const SKIP_HTTP_TRACE = 'qw:audit:skip-http-trace'
+const TRACE_ALWAYS = 'qw:audit:trace-always'
 
 /**
  * A route (or controller) the API logs never record: no access log row whatever the mode, and no error
  * log row for its 5xx either (health probes…).
  */
 export const SkipHttpTrace = () => SetMetadata(SKIP_HTTP_TRACE, true)
+
+/**
+ * A route the API access log records whatever its mode and excluded paths, failed calls past the guards too (entering
+ * and leaving a tenant; see docs/design-notes.md#tenancy).
+ */
+export const TraceAlways = () => SetMetadata(TRACE_ALWAYS, true)
 
 const READS = new Set(['GET', 'HEAD'])
 
@@ -53,10 +65,12 @@ export function traceExcluded(entries: string, method: string, path: string): bo
  * The API access log (global; see docs/design-notes.md#audit): one `aud_http_trace` row per request the param
  * `audit.http_trace.mode` selects when it arrives (`off` / `write` = non-GET, the default / `all`),
  * except `@SkipHttpTrace()` routes and the paths of `audit.http_trace.exclude_paths` (both params read
- * through ParamService: cached, an edit applies at once): caller, path, masked query and body (secret key names and
+ * through ParamService: cached, an edit applies at once); `@TraceAlways()` routes and the requests
+ * AuthGuard marks (`traceHttpAlways`) whatever the params: caller, path, masked query and body (secret key names and
  * `@Sensitive` fields), status, result code, error key, cost. The row is written without awaiting: the
- * log never fails a request. Runs after the guards, so their refusals (401/403/429) are not recorded;
- * validation (400) and handler errors are. Also hands the error filter, which only gets the request,
+ * log never fails a request. Runs after the guards, so their refusals (401/403/429) are not recorded
+ * (but those of the requests AuthGuard marks: the error filter writes them); validation (400) and
+ * handler errors are. Also hands the error filter, which only gets the request,
  * the route's `@Sensitive` fields (`rememberSensitive`) and its `@SkipHttpTrace` (`skipHttpLogs`).
  */
 @Injectable()
@@ -99,7 +113,10 @@ export class HttpTraceInterceptor implements NestInterceptor {
         this.logger.error(err, 'http trace skipped')
       }
     }
-    return from(this.traced(req.method, summary.url)).pipe(
+    const always =
+      httpTracedAlways(req) !== undefined ||
+      this.reflector.getAllAndOverride<boolean>(TRACE_ALWAYS, targets)
+    return from(always ? Promise.resolve(true) : this.traced(req.method, summary.url)).pipe(
       switchMap((traced) =>
         traced
           ? next.handle().pipe(tap({ next: () => log(), error: (e: unknown) => log(e) }))

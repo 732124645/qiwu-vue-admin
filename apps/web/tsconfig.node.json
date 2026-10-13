@@ -6,8 +6,10 @@
     "vitest.config.*",
     "cypress.config.*",
     "playwright.config.*",
+    "playwright.tenant.config.ts",
     "csp.ts",
     "e2e/**/*",
+    "e2e-tenant/**/*",
     "eslint.config.*"
   ],
   "compilerOptions": {

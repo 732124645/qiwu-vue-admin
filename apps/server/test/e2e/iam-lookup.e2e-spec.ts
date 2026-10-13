@@ -13,6 +13,7 @@ import { REDIS, type Redis } from '../../src/core/redis/redis.module.js'
 import { findId, insertRow } from '../../src/db/seeds/upsert.js'
 import { bearer, signIn } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 const PREFIX = 'lookup-e2e-'
 
@@ -37,28 +38,38 @@ const shape = (nodes: DeptTreeNode[]): Shape[] =>
   nodes.map((n) => (n.children.length ? [n.name, shape(n.children)] : n.name))
 
 async function role(code: string, dataScope: string, pickedDepts: number[] = [], extra = {}) {
-  const id = await insertRow(ds.manager, 'iam_role', {
-    code: PREFIX + code,
-    name: PREFIX + code,
-    data_scope: dataScope,
-    ...extra,
-  })
+  const id = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_role', {
+      code: PREFIX + code,
+      name: PREFIX + code,
+      data_scope: dataScope,
+      ...extra,
+    }),
+  )
   for (const d of pickedDepts)
-    await ds.query('INSERT INTO iam_role_depts (role_id, dept_id) VALUES (?, ?)', [id, d])
+    await ds.query('INSERT INTO iam_role_depts (role_id, dept_id, tenant_id) VALUES (?, ?, 1)', [
+      id,
+      d,
+    ])
   created.roles.push(id)
   return id
 }
 
 async function user(name: string, deptId: number | null, roles: number[]) {
-  const id = await insertRow(ds.manager, 'iam_user', {
-    username: PREFIX + name,
-    display_name: name,
-    dept_id: deptId,
-    password_hash: 'not-used-by-this-spec',
-    password_changed_at: new Date(),
-  })
+  const id = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_user', {
+      username: PREFIX + name,
+      display_name: name,
+      dept_id: deptId,
+      password_hash: 'not-used-by-this-spec',
+      password_changed_at: new Date(),
+    }),
+  )
   for (const r of roles)
-    await ds.query('INSERT INTO iam_user_roles (user_id, role_id) VALUES (?, ?)', [id, r])
+    await ds.query('INSERT INTO iam_user_roles (user_id, role_id, tenant_id) VALUES (?, ?, 1)', [
+      id,
+      r,
+    ])
   created.users.push(id)
   return (await signIn(app, PREFIX + name)).accessToken
 }
@@ -69,13 +80,15 @@ async function addDept(name: string, parent: number, extra = {}) {
     'SELECT tree_path FROM iam_dept WHERE id = ?',
     [parent],
   )
-  const id = await insertRow(ds.manager, 'iam_dept', {
-    parent_id: parent,
-    name: PREFIX + name,
-    tree_path: parentPath,
-    sort_no: 90,
-    ...extra,
-  })
+  const id = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_dept', {
+      parent_id: parent,
+      name: PREFIX + name,
+      tree_path: parentPath,
+      sort_no: 90,
+      ...extra,
+    }),
+  )
   await ds.query('UPDATE iam_dept SET tree_path = ? WHERE id = ?', [`${parentPath}${id}/`, id])
   created.depts.push(id)
   return id
@@ -89,7 +102,9 @@ beforeAll(async () => {
   redis = app.get(REDIS)
   await cleanRedis(redis)
   for (const key of ['hq', 'rd', 'platform', 'product', 'ops', 'support', 'finance'])
-    dept[key] = (await findId(ds.manager, 'iam_dept', { name: `seed.dept.${key}` }))!
+    dept[key] = (await inTenant1(() =>
+      findId(ds.manager, 'iam_dept', { name: `seed.dept.${key}` }),
+    ))!
 })
 
 afterAll(async () => {

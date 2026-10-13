@@ -48,6 +48,17 @@ pnpm -C mobile dev:app         # 用 HBuilderX 导入 mobile/dist/dev/app，运�
   - `<QwDictSelect v-model="kind" code="biz.leave_kind" [multiple]>`：字典条目上的 `wd-select-picker`，值为条目编码（未选为 `null`），标签按 `labelI18n[当前语言]` → 种子 key → 编码；字典在一次运行内只取一次（v1 不按 `version` 失效，改字典后重启应用生效）。
   - `<QwUpload v-model="files" [biz-tag] [limit] [max-size]>`：`v-model` 为已存对象（`FsObjectVo[]`，提交时取 `id`）；先在本地检查个数与大小，再逐个经 `uni.uploadFile` 走后端 `POST /api/storage/objects`（`bizTag` 在文件之前，默认私有 `attachment`；公开标签只收图片，因此只让选图片），失败由请求层提示、列表不变；移除只从列表去掉。选文件：微信小程序从聊天记录选（`chooseMessageFile`），H5 用浏览器文件框，App 只能选图片（无原生插件时 uni 没有通用文件选择）。v1 只显示文件名与大小，不打开文件。
 
+## 多租户（租户编码）
+
+服务端的多租户开关（`APP_MULTI_TENANT`，见 [multi-tenancy.md](multi-tenancy.md)）关闭时，移动端与原来完全一样。打开时（逻辑在 `core/tenancy.ts` 与 `core/features.ts`，`mobile-tenancy.spec.ts` 覆盖）：
+
+- **租户编码**：App 与小程序的 API 地址在构建时固定，没法按域名识别租户，只能用编码登录：登录页的账号密码与短信两种方式都多一个租户编码（留空即默认租户），请求体带 `tenantCode`；按“记住用户名”的同一规则记在 `qw.login.tenant`。H5 部署在已绑定租户的域名上时，同 Web 一样按 `GET /api/auth/tenancy` 隐藏编码。
+- **小程序**：静默登录不需要编码（一个微信号只绑定一个租户里的一个账号，按绑定找到用户所在的租户）；绑定页需要编码。
+- **套餐**：按 `/me.features` 隐藏不在套餐里的功能：没有流程时隐藏审批 tab、首页的“发起”快捷入口与待办、审批中计数并停止它们的轮询；没有公告所在的系统分组时隐藏首页的“公告”快捷入口。`features` 缺省（开关关闭）时全部显示；服务端照样拒绝套餐外的接口。
+- **品牌**：首页顶栏与“我的”页显示租户的品牌名（未设时为租户名，默认租户为应用名）与 logo（经 `assetUrl`）；`manifest.json`、`pages.json` 与 App 图标保持静态（商店里只有一个 App）。
+- **下线原因**：租户被停用或到期时，`session:kicked` 的 `reason` 与 refresh 的 `A1042` 都显示真实原因，不当作普通的会话过期。
+- 移动端不提供进入租户；平台人员在 Web 后台进入。
+
 ## 生成器的移动端页面
 
 - 在代码生成的编辑页「生成」标签里打开「移动端页面」（`cg_table.options.withMobile`，按表开启，默认关闭）。预览、下载、`pnpm gen render|write` 会多出这些文件：
@@ -332,7 +343,7 @@ if ($LASTEXITCODE -ne 0) { throw "Verify failed" }
 
 ## Windows 命令（PowerShell 5.1）
 
-原生 Windows 11 + Windows PowerShell 5.1（含 cmd 入口）已验证用于开发与完整本地闸门（`pnpm ci:local --serial`）；无文件 symlink 权限时，符号链接防护测试跳过；Windows 服务器部署及 App / 小程序发布未验证。MySQL / Redis ≥ 7 服务、浏览器和测试库由用户准备，见[入门清单](getting-started.md#windows原生-powershell-51)。
+原生 Windows 11 + Windows PowerShell 5.1（含 cmd 入口）已验证用于开发与完整本地闸门（`pnpm ci:local --serial`）；无文件 symlink 权限时，符号链接防护测试跳过；Windows 服务器部署及 App / 小程序发布未验证。MySQL（推荐 8.4，最低 8.0.17）与 Redis ≥ 7.0 服务（见[入门指南](getting-started.md#1-准备运行环境)）、浏览器和测试库由用户准备，见[入门清单](getting-started.md#windows原生-powershell-51)。
 
 `pnpm.cmd` 仅随 npm / Corepack 安装提供，避免 `.ps1` 执行策略且不改执行策略；独立 `pnpm.exe`（winget / get.pnpm.io）使用 plain `pnpm`，将下列 `pnpm.cmd` 换成 `pnpm`。 根 workspace 与 mobile 依赖独立；在仓库根逐行安装与检查，每步失败停止：
 

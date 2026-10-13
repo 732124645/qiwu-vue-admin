@@ -3,6 +3,7 @@ import type { FormSchema } from '@qiwu/shared'
 import { Column, Entity } from 'typeorm'
 import { BaseEntity } from '../../../core/db/base.entity.js'
 import { referencedBy } from '../../../core/db/references.js'
+import { TenantColumn } from '../../../core/db/tenant-filter.js'
 
 // other tables' rows holding these ids, checked on delete (no foreign keys: core/db/references.ts)
 // process model
@@ -26,4 +27,7 @@ export class WfForm extends BaseEntity {
   /** 备注 */
   @Column({ type: 'varchar', length: 500, nullable: true })
   note: string | null
+
+  @TenantColumn()
+  tenantId: number
 }

@@ -1,5 +1,6 @@
 import { Column, Entity } from 'typeorm'
 import { CreatedEntity } from '../../../../core/db/base.entity.js'
+import { TenantColumn } from '../../../../core/db/tenant-filter.js'
 
 @Entity('msg_sms_otp')
 export class SmsOtp extends CreatedEntity {
@@ -29,4 +30,7 @@ export class SmsOtp extends CreatedEntity {
 
   @Column({ name: 'consumed_ip', type: 'varchar', length: 64, nullable: true })
   consumedIp: string | null
+
+  @TenantColumn()
+  tenantId: number
 }

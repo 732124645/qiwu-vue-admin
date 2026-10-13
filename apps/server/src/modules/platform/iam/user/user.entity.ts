@@ -2,6 +2,7 @@ import { Column, Entity, JoinColumn, ManyToOne, type Relation } from 'typeorm'
 import { DataScoped } from '../../../../core/data-scope/data-scope.js'
 import { BaseEntity } from '../../../../core/db/base.entity.js'
 import { Dept } from '../dept/dept.entity.js'
+import { TenantColumn } from '../../../../core/db/tenant-filter.js'
 
 /**
  * `iam_user`, data-scoped by its dept and, for `own_rows`, by its own id (a user
@@ -52,4 +53,7 @@ export class User extends BaseEntity {
 
   @Column({ type: 'varchar', length: 500, nullable: true })
   note: string | null
+
+  @TenantColumn()
+  tenantId: number
 }

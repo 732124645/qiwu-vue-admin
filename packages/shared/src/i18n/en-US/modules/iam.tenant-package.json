@@ -1,0 +1,13 @@
+{
+  "field": {
+    "iam": {
+      "tenantPackage": {
+        "name": "Package name",
+        "enabled": "Enabled",
+        "note": "Note",
+        "menuIds": "Menus",
+        "tenantCount": "Tenants"
+      }
+    }
+  }
+}

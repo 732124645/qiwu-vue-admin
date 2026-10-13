@@ -19,7 +19,8 @@
         "startedAt": "Requested at",
         "startedAtFrom": "Requested at (from)",
         "startedAtTo": "Requested at (to)",
-        "costMs": "Duration (ms)"
+        "costMs": "Duration (ms)",
+        "tenantId": "Tenant"
       }
     }
   }

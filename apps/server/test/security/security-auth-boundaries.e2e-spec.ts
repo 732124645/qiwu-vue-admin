@@ -22,6 +22,7 @@ import { secretDigest } from '../../src/modules/platform/oauth/provider/provider
 import { bearer, signIn } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
 import { closeSockets, connect, socketOf } from '../setup/socket.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 const PREFIX = 'sec-auth-'
 const PW = 'Security#Pass1'
@@ -66,39 +67,54 @@ const oauthToken = (body: Record<string, string>) =>
 
 async function user(extra: Record<string, unknown> = {}, roleIds: number[] = []) {
   const username = unique()
-  const id = await insertRow(ds.manager, 'iam_user', {
-    username,
-    display_name: username,
-    password_hash: pwHash,
-    password_changed_at: new Date(),
-    ...extra,
-  })
+  const id = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_user', {
+      username,
+      display_name: username,
+      password_hash: pwHash,
+      password_changed_at: new Date(),
+      ...extra,
+    }),
+  )
   created.users.push(id)
   for (const roleId of roleIds)
-    await ds.query('INSERT INTO iam_user_roles (user_id, role_id) VALUES (?, ?)', [id, roleId])
+    await ds.query('INSERT INTO iam_user_roles (user_id, role_id, tenant_id) VALUES (?, ?, 1)', [
+      id,
+      roleId,
+    ])
   return { id, username }
 }
 
 async function role(scope: DataScope, perms: string[], picked: number[] = []) {
   const code = unique()
-  const id = await insertRow(ds.manager, 'iam_role', { code, name: code, data_scope: scope })
+  const id = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_role', { code, name: code, data_scope: scope }),
+  )
   created.roles.push(id)
   for (const perm of perms) {
     const menuId = await findId(ds.manager, 'iam_menu', { perms: perm })
     if (!menuId) throw new Error(`Missing seeded permission: ${perm}`)
-    await ds.query('INSERT INTO iam_role_menus (role_id, menu_id) VALUES (?, ?)', [id, menuId])
+    await ds.query('INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, 1)', [
+      id,
+      menuId,
+    ])
   }
   for (const deptId of picked)
-    await ds.query('INSERT INTO iam_role_depts (role_id, dept_id) VALUES (?, ?)', [id, deptId])
+    await ds.query('INSERT INTO iam_role_depts (role_id, dept_id, tenant_id) VALUES (?, ?, 1)', [
+      id,
+      deptId,
+    ])
   return id
 }
 
 async function dept(parentId = 0) {
-  const id = await insertRow(ds.manager, 'iam_dept', {
-    name: unique(),
-    parent_id: parentId,
-    tree_path: '/',
-  })
+  const id = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_dept', {
+      name: unique(),
+      parent_id: parentId,
+      tree_path: '/',
+    }),
+  )
   created.depts.push(id)
   const parent = parentId
     ? (await ds.query('SELECT tree_path FROM iam_dept WHERE id = ?', [parentId]))[0].tree_path
@@ -179,7 +195,7 @@ beforeAll(async () => {
   await cleanRedis(redis)
   pwHash = await bcrypt.hash(PW, 4)
   admin = await signIn(app, 'admin', { ua: UA })
-  rootRole = (await findId(ds.manager, 'iam_role', { code: 'root' }))!
+  rootRole = (await inTenant1(() => findId(ds.manager, 'iam_role', { code: 'root' })))!
   clientId = await insertRow(ds.manager, 'oauth_client', {
     client_id: CLIENT,
     secret_hash: secretDigest(SECRET),
@@ -640,14 +656,16 @@ describe('Security auth matrix', () => {
     expect(protectedRoot.body.code).toBe(Err.IAM_USER_PROTECTED.code)
     for (const session of [mateSession, bossSession, farSession])
       await me(session.accessToken).expect(200)
-    const id = await insertRow(ds.manager, 'msg_inbox', {
-      user_id: mate.id,
-      template_code: unique(),
-      locale: 'en-US',
-      category: 'system',
-      title: 'private',
-      body: 'private',
-    })
+    const id = await inTenant1(() =>
+      insertRow(ds.manager, 'msg_inbox', {
+        user_id: mate.id,
+        template_code: unique(),
+        locale: 'en-US',
+        category: 'system',
+        title: 'private',
+        body: 'private',
+      }),
+    )
     const path = `/api/messaging/inboxes/mine/${id}`
     await http().get(path).set(bearer(at)).expect(404)
     await http().post(`${path}/read`).set(bearer(at)).expect(404)

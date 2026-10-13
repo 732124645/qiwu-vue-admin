@@ -11,6 +11,7 @@ import { BaseCrudService } from '../../../../core/db/base-crud.service.js'
 import { contains, type PageParams } from '../../../../core/db/page.js'
 import type { ExcelColumn } from '../../../../core/excel/excel.service.js'
 import { currentLocale } from '../../../../core/i18n/locale.js'
+import { platformRowsOnly } from '../platform-rows.js'
 import { HttpTrace } from './http-trace.entity.js'
 
 /** Excel columns in list order (headers: the field labels; dict columns as their labels). */
@@ -36,6 +37,11 @@ export class HttpTraceService extends BaseCrudService<HttpTrace> {
     private readonly i18n: I18nService,
   ) {
     super(txHost, HttpTrace)
+  }
+
+  /** Root reads every row; anyone else the default tenant's and the anonymous ones (`platformRowsOnly`). */
+  override scopedQb(alias: string): SelectQueryBuilder<HttpTrace> {
+    return platformRowsOnly(super.scopedQb(alias), alias)
   }
 
   override async page<F extends string>(
@@ -80,6 +86,7 @@ export class HttpTraceService extends BaseCrudService<HttpTrace> {
       ip,
       startedAtFrom,
       startedAtTo,
+      tenantId,
     }: HttpTraceQuery,
   ): SelectQueryBuilder<HttpTrace> {
     if (url) qb.andWhere('t.url LIKE :url', { url: contains(url) })
@@ -93,6 +100,7 @@ export class HttpTraceService extends BaseCrudService<HttpTrace> {
       qb.andWhere('t.started_at >= :startedAtFrom', { startedAtFrom: new Date(startedAtFrom) })
     if (startedAtTo)
       qb.andWhere('t.started_at <= :startedAtTo', { startedAtTo: new Date(startedAtTo) })
+    if (tenantId !== undefined) qb.andWhere('t.tenant_id = :tenantId', { tenantId })
     return qb
   }
 }

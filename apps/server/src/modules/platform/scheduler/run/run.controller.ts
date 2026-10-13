@@ -22,11 +22,13 @@ import {
 } from '@qiwu/shared'
 import { ActionLog } from '../../../../core/audit/action-log.js'
 import { RequirePerm } from '../../../../core/auth/decorators.js'
+import { PlatformOnly } from '../../../../core/auth/platform-only.js'
 import { ExcelService, XLSX_TYPE } from '../../../../core/excel/excel.service.js'
 import { ApiEnvelope } from '../../../../core/http/api-envelope.decorator.js'
 import { runColumns, RunService } from './run.service.js'
 
 @ApiTags('scheduler')
+@PlatformOnly()
 @Controller('scheduler/runs')
 export class RunController {
   constructor(

@@ -41,9 +41,10 @@ const credentials = [
   'WX_MP_APPID',
   'WX_MP_SECRET',
 ]
-// template dev 13, e2e 14, test 15, mobile e2e 9; an optional private file adds more
+// template dev 13, e2e 14, test 15, mobile e2e 9, multi-tenancy e2e 1; an optional private file adds more
 const lanesFile = join(root, 'scripts/test-lanes.private.json')
 const reservedRedis = new Set([
+  1,
   9,
   13,
   14,

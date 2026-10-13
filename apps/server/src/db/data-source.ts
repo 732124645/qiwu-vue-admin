@@ -1,7 +1,12 @@
 import mysql, { type PoolOptions } from 'mysql2'
 import type { DataSourceOptions } from 'typeorm'
 import { AuditSubscriber } from '../core/db/audit.subscriber.js'
+import { installTenantFilter } from '../core/db/tenant-filter.js'
+import { TenantSubscriber } from '../core/db/tenant.subscriber.js'
 import { migrationsGlob } from '../core/paths.js'
+
+// every DataSource of the process gets the tenant condition (see docs/design-notes.md#tenancy)
+installTenantFilter()
 
 /**
  * mysql2 with every pooled connection pinned to `time_zone = '+00:00'`. `timezone: 'Z'` only makes
@@ -42,6 +47,6 @@ export function dataSourceOptions(
     synchronize: false,
     migrationsTableName: 'meta_migrations',
     migrations: [migrationsGlob()],
-    subscribers: [AuditSubscriber],
+    subscribers: [AuditSubscriber, TenantSubscriber],
   }
 }

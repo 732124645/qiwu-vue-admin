@@ -4,7 +4,7 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import dayjs from 'dayjs'
-import { rolePerms, type RoleVo } from '@qiwu/shared'
+import { rolePerms, TENANT_ADMIN_ROLE, type RoleVo } from '@qiwu/shared'
 import { roleApi } from '@/api/platform/iam/role'
 import DictSelect from '@/core/components/DictSelect.vue'
 import DictTag from '@/core/components/DictTag.vue'
@@ -83,10 +83,13 @@ const canModify = computed(() => perm.has(rolePerms.modify))
 // the edit form loads GET /:id, which needs `view` too
 const canEdit = computed(() => perm.all([rolePerms.modify, rolePerms.view]))
 // the server refuses these anyway (422 iam.role_builtin): builtin roles are never deleted, the root role
-// is never disabled and only a root caller edits it
+// is edited only by a root caller; it and the builtin tenant_admin role are never disabled and hold fixed
+// grants (root everything, tenant_admin every menu of its tenant's package), so no menu grant or data scope
 const auth = useAuthStore()
 const callerRoot = computed(() => auth.roles.includes('root'))
 const isRoot = (row: RoleVo) => row.isBuiltin && row.code === 'root'
+const fixedGrants = (row: RoleVo) =>
+  row.isBuiltin && (row.code === 'root' || row.code === TENANT_ADMIN_ROLE)
 const canGrant = computed(() => perm.has(rolePerms.grant))
 // the members page loads GET /:id, which needs `view` too
 const canAssign = computed(() => perm.all([rolePerms['assign-users'], rolePerms.view]))
@@ -212,7 +215,7 @@ async function setEnabled(row: RoleVo, enabled: boolean) {
             v-if="canModify"
             size="small"
             :model-value="row.enabled"
-            :disabled="isRoot(row)"
+            :disabled="fixedGrants(row)"
             :aria-label="`${t('field.iam.role.enabled')} ${tx(row.name)}`"
             @change="setEnabled(row, $event as boolean)"
           />
@@ -252,11 +255,11 @@ async function setEnabled(row: RoleVo, enabled: boolean) {
             </el-button>
             <template #dropdown>
               <el-dropdown-menu>
-                <el-dropdown-item v-if="canGrant" command="grant" :disabled="isRoot(row)">
+                <el-dropdown-item v-if="canGrant" command="grant" :disabled="fixedGrants(row)">
                   <el-icon><Icon icon="lucide:list-checks" /></el-icon>
                   {{ t('iam.role.grant.action') }}
                 </el-dropdown-item>
-                <el-dropdown-item v-if="canGrant" command="data-scope" :disabled="isRoot(row)">
+                <el-dropdown-item v-if="canGrant" command="data-scope" :disabled="fixedGrants(row)">
                   <el-icon><Icon icon="lucide:database" /></el-icon>
                   {{ t('iam.role.dataScope.action') }}
                 </el-dropdown-item>

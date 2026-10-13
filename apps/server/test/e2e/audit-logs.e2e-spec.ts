@@ -17,6 +17,7 @@ import { findId, insertRow, type Row } from '../../src/db/seeds/upsert.js'
 import { logOf } from '../setup/audit.js'
 import { bearer, signIn } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 const PREFIX = 'e2e-logs-'
 const MISSING = 999_999_999
@@ -54,6 +55,7 @@ const LOGS: LogPage[] = [
       url: `/api/${tag}`,
       ok: 1,
       cost_ms: 1,
+      actor_tenant_id: 1,
       ...over,
     }),
     filter: 'domain',
@@ -97,29 +99,36 @@ beforeAll(async () => {
   redis = app.get(REDIS)
   await cleanRedis(redis)
   // browse + view of both logs: no remove, no unlock
-  roleId = await insertRow(ds.manager, 'iam_role', {
-    code: `${PREFIX}viewer`,
-    name: `${PREFIX}viewer`,
-    data_scope: 'all',
-  })
+  roleId = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_role', {
+      code: `${PREFIX}viewer`,
+      name: `${PREFIX}viewer`,
+      data_scope: 'all',
+    }),
+  )
   for (const perm of [
     actionLogPerms.browse,
     actionLogPerms.view,
     signinLogPerms.browse,
     signinLogPerms.view,
   ])
-    await ds.query('INSERT INTO iam_role_menus (role_id, menu_id) VALUES (?, ?)', [
+    await ds.query('INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, 1)', [
       roleId,
       await findId(ds.manager, 'iam_menu', { perms: perm }),
     ])
-  const viewer = await insertRow(ds.manager, 'iam_user', {
-    username: `${PREFIX}viewer`,
-    display_name: 'viewer',
-    password_hash: 'not-used-by-this-spec',
-    password_changed_at: new Date(),
-  })
+  const viewer = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_user', {
+      username: `${PREFIX}viewer`,
+      display_name: 'viewer',
+      password_hash: 'not-used-by-this-spec',
+      password_changed_at: new Date(),
+    }),
+  )
   userIds.push(viewer)
-  await ds.query('INSERT INTO iam_user_roles (user_id, role_id) VALUES (?, ?)', [viewer, roleId])
+  await ds.query('INSERT INTO iam_user_roles (user_id, role_id, tenant_id) VALUES (?, ?, 1)', [
+    viewer,
+    roleId,
+  ])
   tokens.admin = (await signIn(app)).accessToken
   tokens.viewer = (await signIn(app, `${PREFIX}viewer`)).accessToken
 })
@@ -138,7 +147,8 @@ afterAll(async () => {
 })
 
 describe.each(LOGS)('delete: $name', (log) => {
-  const add = (tag: string, over?: Row) => insertRow(ds.manager, log.table, log.row(tag, over))
+  const add = (tag: string, over?: Row) =>
+    inTenant1(() => insertRow(ds.manager, log.table, log.row(tag, over)))
   // live (deleting is soft: the row stays, marked deleted)
   const exists = async (id: number) =>
     // arch-allow: sql-concat table name from the spec's constants
@@ -187,11 +197,17 @@ describe.each(LOGS)('delete: $name', (log) => {
 
   it('delete: clean deletes every entry (soft: the rows stay until the purge); it is action-logged', async () => {
     for (let i = 0; i < 3; i++) await add(unique())
+    // the default tenant's deletable rows only: specs running beside this one write other tenants'
+    // rows and entering/leaving rows, which a clean keeps by design
+    const kept =
+      log === ACTION
+        ? " AND actor_tenant_id = tenant_id AND NOT (domain = 'iam.tenant' AND verb IN ('enter', 'leave'))"
+        : ''
     const ids = async (where = '') =>
       (
         await ds.query(
-          // arch-allow: sql-concat table name and condition from the spec's constants
-          `SELECT id FROM ${log.table}${where} ORDER BY id`,
+          // arch-allow: sql-concat table name and conditions from the spec's constants; tenant: the default tenant's rows only
+          `SELECT id FROM ${log.table} WHERE tenant_id = 1${kept}${where} ORDER BY id`,
         )
       ).map((r: { id: number }) => Number(r.id))
     const before = await ids()
@@ -201,12 +217,19 @@ describe.each(LOGS)('delete: $name', (log) => {
     const logged = await logOf(ds, trace)
     expect(logged).toMatchObject({ domain: log.domain, verb: 'clean', ok: 1 })
     // the action log keeps only what came after the clean: the clean's own row
-    expect(await ids(' WHERE deleted_at IS NULL')).toEqual(
-      log === ACTION ? [Number(logged.id)] : [],
+    expect(await ids(' AND deleted_at IS NULL')).toEqual(log === ACTION ? [Number(logged.id)] : [])
+    expect(await ids(' AND deleted_at IS NOT NULL')).toEqual(expect.arrayContaining(before))
+    // the list shows the clean's own row plus the kept rows earlier tenant specs left behind
+    const keptAlive = Number(
+      (
+        await ds.query(
+          // arch-allow: sql-concat table name and condition from the spec's constants; tenant: the default tenant's rows only
+          `SELECT COUNT(*) AS n FROM ${log.table} WHERE tenant_id = 1 AND deleted_at IS NULL AND NOT (1${kept})`,
+        )
+      )[0].n,
     )
-    expect(await ids(' WHERE deleted_at IS NOT NULL')).toEqual(expect.arrayContaining(before))
     expect((await call('admin', 'get', log.url).expect(200)).body.data.total).toBe(
-      log === ACTION ? 1 : 0,
+      (log === ACTION ? 1 : 0) + keptAlive,
     )
   })
 })
@@ -217,20 +240,14 @@ describe('sort: the whitelist', () => {
   it('sort: action log by costMs and createdAt, both directions; anything else → 400', async () => {
     const tag = unique()
     const at = (s: number) => new Date(Date.UTC(2026, 0, 1, 0, 0, s))
-    const slow = await insertRow(
-      ds.manager,
-      ACTION.table,
-      ACTION.row(tag, { cost_ms: 900, created_at: at(1) }),
+    const slow = await inTenant1(() =>
+      insertRow(ds.manager, ACTION.table, ACTION.row(tag, { cost_ms: 900, created_at: at(1) })),
     )
-    const fast = await insertRow(
-      ds.manager,
-      ACTION.table,
-      ACTION.row(tag, { cost_ms: 5, created_at: at(3) }),
+    const fast = await inTenant1(() =>
+      insertRow(ds.manager, ACTION.table, ACTION.row(tag, { cost_ms: 5, created_at: at(3) })),
     )
-    const mid = await insertRow(
-      ds.manager,
-      ACTION.table,
-      ACTION.row(tag, { cost_ms: 40, created_at: at(2) }),
+    const mid = await inTenant1(() =>
+      insertRow(ds.manager, ACTION.table, ACTION.row(tag, { cost_ms: 40, created_at: at(2) })),
     )
     const by = async (sort: string) => ids(await list(ACTION, { domain: tag, sort }).expect(200))
     expect(await by('costMs')).toEqual([fast, mid, slow])
@@ -246,8 +263,12 @@ describe('sort: the whitelist', () => {
   it('sort: sign-in log by createdAt, both directions; anything else → 400', async () => {
     const tag = unique()
     const at = (s: number) => new Date(Date.UTC(2026, 0, 1, 0, 0, s))
-    const late = await insertRow(ds.manager, SIGNIN.table, SIGNIN.row(tag, { created_at: at(2) }))
-    const early = await insertRow(ds.manager, SIGNIN.table, SIGNIN.row(tag, { created_at: at(1) }))
+    const late = await inTenant1(() =>
+      insertRow(ds.manager, SIGNIN.table, SIGNIN.row(tag, { created_at: at(2) })),
+    )
+    const early = await inTenant1(() =>
+      insertRow(ds.manager, SIGNIN.table, SIGNIN.row(tag, { created_at: at(1) })),
+    )
     const by = async (sort: string) => ids(await list(SIGNIN, { username: tag, sort }).expect(200))
     expect(await by('createdAt')).toEqual([early, late])
     expect(await by('-createdAt')).toEqual([late, early])
@@ -318,15 +339,17 @@ describe('unlock: a username locked by failed sign-ins', () => {
 describe('msg: the sign-in log message in the reader’s language', () => {
   it('msg: msg_key + msg_params translated in list, detail and export (zh-CN, en-US)', async () => {
     const tag = unique()
-    const id = await insertRow(
-      ds.manager,
-      SIGNIN.table,
-      SIGNIN.row(tag, {
-        kind: 'locked',
-        ok: 0,
-        msg_key: 'signin.locked',
-        msg_params: { minutes: 7 },
-      }),
+    const id = await inTenant1(() =>
+      insertRow(
+        ds.manager,
+        SIGNIN.table,
+        SIGNIN.row(tag, {
+          kind: 'locked',
+          ok: 0,
+          msg_key: 'signin.locked',
+          msg_params: { minutes: 7 },
+        }),
+      ),
     )
     const zh = '登录失败次数过多，该用户名在此 IP 锁定 7 分钟'
     const en = 'Too many failed attempts: this username is locked on this IP for 7 minutes'
@@ -356,7 +379,9 @@ describe('msg: the sign-in log message in the reader’s language', () => {
     const values = wb.worksheets[0]!.getRow(2).values as unknown[]
     expect(values).toContain(en)
     // a row without a key has no message
-    const bare = await insertRow(ds.manager, SIGNIN.table, SIGNIN.row(unique(), { msg_key: null }))
+    const bare = await inTenant1(() =>
+      insertRow(ds.manager, SIGNIN.table, SIGNIN.row(unique(), { msg_key: null })),
+    )
     expect((await call('admin', 'get', `${SIGNIN.url}/${bare}`).expect(200)).body.data.msg).toBe(
       null,
     )
@@ -367,10 +392,12 @@ describe('msg: the sign-in log message in the reader’s language', () => {
 describe('msg: the action log failure reason in the reader’s language', () => {
   it('msg: error_msg (an error key) translated in list and detail (zh-CN, en-US); none stays null', async () => {
     const tag = unique()
-    const id = await insertRow(
-      ds.manager,
-      ACTION.table,
-      ACTION.row(tag, { ok: 0, error_msg: Err.IAM_USER_PROTECTED.key }),
+    const id = await inTenant1(() =>
+      insertRow(
+        ds.manager,
+        ACTION.table,
+        ACTION.row(tag, { ok: 0, error_msg: Err.IAM_USER_PROTECTED.key }),
+      ),
     )
     const zh = '超级管理员账号受保护，不能执行此操作'
     const en = 'The super administrator account is protected against this action'
@@ -380,7 +407,7 @@ describe('msg: the action log failure reason in the reader’s language', () => 
       .set('Accept-Language', 'en-US')
       .expect(200)
     expect(got.body.data.errorMsg).toBe(en)
-    const bare = await insertRow(ds.manager, ACTION.table, ACTION.row(unique()))
+    const bare = await inTenant1(() => insertRow(ds.manager, ACTION.table, ACTION.row(unique())))
     expect(
       (await call('admin', 'get', `${ACTION.url}/${bare}`).expect(200)).body.data.errorMsg,
     ).toBe(null)

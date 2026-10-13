@@ -1,5 +1,5 @@
 // scripts/ci-local.mjs: `--parallel` runs server test → golden beside
-// Playwright (web, then mobile), each step in its own process group logging to its own file; the
+// Playwright (web, web with multi-tenancy on, then mobile), each step in its own process group logging to its own file; the
 // first failure stops the other lane's whole group. Serial stays the default and `--serial` wins over
 // `--parallel`.
 import { spawnSync } from 'node:child_process'
@@ -94,7 +94,7 @@ describe.skipIf(process.platform === 'win32')('POSIX parallel lanes', () => {
     expect(log('boom')).toBe('boom\n')
   }, 20_000)
 
-  it('serial by default; --parallel plans the two lanes after the non-server tests; --serial wins; mobile e2e follows the web Playwright', () => {
+  it('serial by default; --parallel plans the two lanes after the non-server tests; --serial wins; the multi-tenancy Playwright, then mobile e2e follow the web Playwright', () => {
     const plan = (...args: string[]) => {
       const r = spawnSync(process.execPath, [PATH, '--dry', ...args], { encoding: 'utf8' })
       expect(r.status).toBe(0)
@@ -104,6 +104,7 @@ describe.skipIf(process.platform === 'win32')('POSIX parallel lanes', () => {
       'test server + coverage: RUN  pnpm --filter @qiwu/server exec vitest run --coverage',
       'gen:check-golden: RUN  pnpm gen:check-golden --skip-build  (parallel lane 1)',
       'playwright: RUN  pnpm --filter @qiwu/web e2e  (parallel lane 2)',
+      'playwright tenant: RUN  pnpm --filter @qiwu/web e2e:tenant  (parallel lane 2)',
     ]
     expect(plan()).not.toContain('parallel')
     expect(plan('--parallel', '--serial')).not.toContain('parallel')
@@ -118,7 +119,8 @@ describe.skipIf(process.platform === 'win32')('POSIX parallel lanes', () => {
       'test (non-server)',
       'test server',
       'gen:check-golden',
-      'playwright',
+      'playwright:',
+      'playwright tenant:',
       'mobile e2e',
       'smoke:boot',
     ]

@@ -1,14 +1,21 @@
 // Source guards ("源码守卫"): runs every other scripts/arch/*.mjs.
 // A check is a module whose default export is `(ctx) => string[] | Promise<string[]>` (violations).
 // New checks (scoped-access, action-log, …) are just new files here.
-// Usage: node scripts/arch/run.mjs [--root <dir>] [--only name1,name2]
+// Usage: node scripts/arch/run.mjs [--root <dir>] [--only name1,name2] [--update-baseline]
+// (--update-baseline: a check with a per-file baseline lowers it to what it found, e.g. tenant-sql)
 import { globSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { parseArgs } from 'node:util'
 
 const here = dirname(fileURLToPath(import.meta.url))
-const { values } = parseArgs({ options: { root: { type: 'string' }, only: { type: 'string' } } })
+const { values } = parseArgs({
+  options: {
+    root: { type: 'string' },
+    only: { type: 'string' },
+    'update-baseline': { type: 'boolean' },
+  },
+})
 const root = resolve(values.root ?? join(here, '../..'))
 const only = values.only?.split(',')
 
@@ -26,7 +33,7 @@ function* lines(pattern) {
     }
   }
 }
-const ctx = { root, files, read, lines, only }
+const ctx = { root, files, read, lines, only, updateBaseline: !!values['update-baseline'] }
 
 const names = readdirSync(here)
   .filter((f) => f.endsWith('.mjs') && f !== 'run.mjs')

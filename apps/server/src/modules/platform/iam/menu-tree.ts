@@ -1,4 +1,4 @@
-import type { I18nText, MenuLinkType, MenuNode } from '@qiwu/shared'
+import { type I18nText, type MenuLinkType, type MenuNode, PERM_CODE } from '@qiwu/shared'
 
 /** One `iam_menu` row as read for the menu tree. */
 export interface MenuRow {
@@ -70,6 +70,69 @@ export function countedMenus(
     }
   }
   return keep
+}
+
+/** One `iam_menu` row as read for the perms its menus give. */
+export interface MenuPermRow {
+  id: number
+  parent_id: number
+  enabled: number
+  perms: string | null
+  platform_only: number
+}
+
+/** The perms of the platform-only menus (enabled or not): no tenant but the default one holds them. */
+export function platformPerms(menus: readonly MenuPermRow[]): Set<string> {
+  return new Set(menus.flatMap((m) => (Number(m.platform_only) === 1 && m.perms ? [m.perms] : [])))
+}
+
+/**
+ * The perms of the builtin `tenant_admin` role (see docs/design-notes.md#tenancy): those of every menu
+ * of its tenant's package (`within`; null = every menu) that counts (`countedMenus`), well-formed, never
+ * one a platform-only menu carries (`platformPerms`), read from the menus rather than role grants. The
+ * one rule for the session load and the grant policy.
+ */
+export function tenantAdminPerms(
+  menus: MenuPermRow[],
+  within: ReadonlySet<number> | null = null,
+): string[] {
+  const platform = platformPerms(menus)
+  const held = (id: number) => !within || within.has(id)
+  const counted = countedMenus(menus, menus.map((m) => Number(m.id)).filter(held))
+  return [
+    ...new Set(
+      menus.flatMap((m) =>
+        counted.has(Number(m.id)) &&
+        held(Number(m.id)) &&
+        m.perms &&
+        PERM_CODE.test(m.perms) &&
+        !platform.has(m.perms)
+          ? [m.perms]
+          : [],
+      ),
+    ),
+  ]
+}
+
+/**
+ * The route names of the top-level groups the menus `within` reach (themselves or an ancestor, as
+ * `countedMenus` counts them), never a platform-only one, in the order of `menus`: a tenant's feature
+ * set (see docs/design-notes.md#tenancy).
+ */
+export function featuresOf(
+  menus: (MenuPermRow & { kind: string; route_name: string | null })[],
+  within: ReadonlySet<number>,
+): string[] {
+  const counted = countedMenus(menus, within)
+  return menus.flatMap((m) =>
+    counted.has(Number(m.id)) &&
+    Number(m.parent_id) === 0 &&
+    m.kind === 'group' &&
+    m.route_name &&
+    Number(m.platform_only) === 0
+      ? [m.route_name]
+      : [],
+  )
 }
 
 /**

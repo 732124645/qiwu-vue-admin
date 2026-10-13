@@ -2,14 +2,17 @@
 import { Injectable } from '@nestjs/common'
 import { TransactionHost } from '@nestjs-cls/transactional'
 import type { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm'
-import type { Page, SigninLogQuery } from '@qiwu/shared'
+import { DEFAULT_TENANT_ID, Err, type Page, type SigninLogQuery } from '@qiwu/shared'
 import { I18nService } from 'nestjs-i18n'
 import type { SelectQueryBuilder } from 'typeorm'
 import { demoNetwork } from '../../../../core/audit/demo-network.js'
 import { demoMode } from '../../../../core/config/demo-mode.js'
+import { clsGet } from '../../../../core/context/cls.js'
+import { allTenants } from '../../../../core/context/tenant.js'
 import { BaseCrudService } from '../../../../core/db/base-crud.service.js'
 import { contains, type PageParams } from '../../../../core/db/page.js'
 import type { ExcelColumn } from '../../../../core/excel/excel.service.js'
+import { BizError } from '../../../../core/http/biz-error.js'
 import { currentLocale } from '../../../../core/i18n/locale.js'
 import { SigninLog } from './signin-log.entity.js'
 
@@ -29,9 +32,13 @@ export const signinLogColumns: ExcelColumn[] = [
   { prop: 'createdAt', label: 'field.common.createdAt', type: 'datetime', only: 'export' },
 ]
 
+/** The list's and the export's `unresolved` filter. */
+type Unresolved = Pick<SigninLogQuery, 'unresolved'>
+
 /**
  * Sign-in logs over BaseCrudService: read (each row's message translated), export and delete (the base
- * `remove`, or `clean` everything). Rows are only ever inserted by core/auth (AuditWriter).
+ * `remove`, or `clean` everything). Rows are only ever inserted by core/auth (AuditWriter). The list and
+ * the export read the caller's tenant, or with `unresolved` the rows of no tenant (`across`).
  */
 @Injectable()
 export class SigninLogService extends BaseCrudService<SigninLog> {
@@ -43,10 +50,10 @@ export class SigninLogService extends BaseCrudService<SigninLog> {
   }
 
   override async page<F extends string>(
-    query: PageParams<F>,
+    query: PageParams<F> & Unresolved,
     columns?: Partial<Record<F, string>>,
   ): Promise<Page<SigninLogRow>> {
-    const { items, total } = await super.page(query, columns)
+    const { items, total } = await this.across(query)(() => super.page(query, columns))
     return { items: items.map((r) => this.withMsg(r)), total }
   }
 
@@ -54,12 +61,38 @@ export class SigninLogService extends BaseCrudService<SigninLog> {
     return this.withMsg(await super.get(id))
   }
 
-  override async *exportRows<F extends string>(
-    query: Pick<PageParams<F>, 'sort'>,
+  /** Checks `unresolved` at once (a 403 before the sheet starts), then reads batch by batch. */
+  override exportRows<F extends string>(
+    query: Pick<PageParams<F>, 'sort'> & Unresolved,
     columns?: Partial<Record<F, string>>,
   ): AsyncGenerator<SigninLogRow[]> {
-    for await (const rows of super.exportRows(query, columns))
-      yield rows.map((r) => this.withMsg(r))
+    return this.translated(super.exportRows(query, columns), this.across(query))
+  }
+
+  /** Each batch read in `run` (a batch's query runs when it is asked for), its messages translated. */
+  private async *translated(
+    batches: AsyncGenerator<SigninLog[]>,
+    run: <T>(fn: () => T) => T,
+  ): AsyncGenerator<SigninLogRow[]> {
+    for (;;) {
+      const batch = await run(() => batches.next())
+      if (batch.done) return
+      yield batch.value.map((r) => this.withMsg(r))
+    }
+  }
+
+  /**
+   * How the list and the export read: in the caller's tenant; with `unresolved`, the rows of no tenant
+   * (sign-in attempts naming an unknown tenant code, `filter` keeps only them) across tenants, for the
+   * platform root alone (in the default tenant and root), 403 for anyone else (see
+   * docs/design-notes.md#tenancy).
+   */
+  private across({ unresolved }: Unresolved): <T>(fn: () => T) => T {
+    if (!unresolved) return (fn) => fn()
+    const p = clsGet('principal')
+    if (p?.root !== true || p.tenantId !== DEFAULT_TENANT_ID) throw new BizError(Err.FORBIDDEN)
+    // qw:cross-tenant the rows of no tenant belong to none: the platform root reads them, nothing else
+    return (fn) => allTenants(fn)
   }
 
   /** Soft-deletes every live row (`audit.purge` drops them for good past `audit.retention_days`). */
@@ -75,8 +108,9 @@ export class SigninLogService extends BaseCrudService<SigninLog> {
 
   protected override filter(
     qb: SelectQueryBuilder<SigninLog>,
-    { kind, username, ip, ok, createdAtFrom, createdAtTo }: SigninLogQuery,
+    { kind, username, ip, ok, createdAtFrom, createdAtTo, unresolved }: SigninLogQuery,
   ): SelectQueryBuilder<SigninLog> {
+    if (unresolved) qb.andWhere('t.tenant_id IS NULL')
     if (kind) qb.andWhere('t.kind = :kind', { kind })
     if (username) qb.andWhere('t.username LIKE :username', { username: contains(username) })
     if (ip && !demoMode()) qb.andWhere('t.ip LIKE :ip', { ip: contains(ip) })

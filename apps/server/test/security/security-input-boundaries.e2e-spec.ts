@@ -40,6 +40,7 @@ import { StorageService } from '../../src/modules/platform/storage/storage.servi
 import { cfg, fixture } from '../fixtures/wf/bpmn-fixture.js'
 import { bearer, signIn } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 const PREFIX = 'sec-input-'
 const CONFIGS = '/api/storage/configs'
@@ -192,12 +193,14 @@ beforeAll(async () => {
     )
   admin = (await signIn(app)).accessToken
   for (const who of ['owner', 'other']) {
-    await insertRow(ds.manager, 'iam_user', {
-      username: PREFIX + who,
-      display_name: who,
-      password_hash: 'not-used',
-      password_changed_at: new Date(),
-    })
+    await inTenant1(() =>
+      insertRow(ds.manager, 'iam_user', {
+        username: PREFIX + who,
+        display_name: who,
+        password_hash: 'not-used',
+        password_changed_at: new Date(),
+      }),
+    )
     const token = (await signIn(app, PREFIX + who)).accessToken
     if (who === 'owner') owner = token
     else other = token
@@ -532,11 +535,13 @@ describe('upload/download: bytes, ownership and one-time direct-upload grants', 
 describe('Excel: real export/import safety', () => {
   it('export emits text, never a formula, for every dangerous prefix', async () => {
     for (const [i, name] of FORMULAS.entries())
-      await insertRow(ds.manager, 'iam_user', {
-        username: `${PREFIX}formula${i}`,
-        display_name: name,
-        password_hash: 'not-used',
-      })
+      await inTenant1(() =>
+        insertRow(ds.manager, 'iam_user', {
+          username: `${PREFIX}formula${i}`,
+          display_name: name,
+          password_hash: 'not-used',
+        }),
+      )
     const response = await api('get', '/api/iam/users/export')
       .query({ username: PREFIX + 'formula' })
       .buffer(true)
@@ -591,8 +596,11 @@ describe('Excel: real export/import safety', () => {
 
 describe('BPMN XML: byte/preparse limits and server-derived publication', () => {
   it('malicious XML cannot replace a saved draft or create a version; the valid XML derives its own tree', async () => {
+    const [{ id: adminId }] = await ds.query(
+      "SELECT id FROM iam_user WHERE username = 'admin' AND tenant_id = 1",
+    )
     const settings = {
-      assignee: { kind: 'users', ids: [1] },
+      assignee: { kind: 'users', ids: [adminId] },
       sign: 'any',
       whenNobody: 'autoPass',
       whenInitiatorIsReviewer: 'self',

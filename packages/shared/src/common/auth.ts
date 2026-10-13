@@ -3,6 +3,7 @@ import type { I18nText, Locale } from './locale.js'
 import { passwordSchema, type PasswordPolicy } from './password-policy.js'
 import { fieldDomains } from '../validation/zod-i18n.js'
 import { captchaTicket } from './captcha.js'
+import { type MeTenant, tenantCode } from '../platform/iam/tenant.schema.js'
 
 /**
  * Auth contract between server and web (see docs/design-notes.md#auth-sessions). Endpoints under /api/auth:
@@ -30,6 +31,8 @@ export const loginBody = z
     keepSignedIn: z.boolean().optional(),
     captchaTicket: captchaTicket.optional(),
     clientId: firstPartyClient,
+    /** the tenant to sign in to on a host bound to none; blank = the default tenant (multi-tenancy only) */
+    tenantCode: tenantCode.optional(),
   })
   .register(fieldDomains, { domain: 'auth' })
 export type LoginBody = z.infer<typeof loginBody>
@@ -64,6 +67,7 @@ export const smsCodeBody = z
     mobile: authMobile,
     scene: z.enum(SMS_OTP_SCENES).exclude(['bind_mobile']),
     captchaTicket: captchaTicket.optional(),
+    tenantCode: tenantCode.optional(),
   })
   .register(fieldDomains, { domain: 'auth' })
 export type SmsCodeBody = z.infer<typeof smsCodeBody>
@@ -77,6 +81,7 @@ export const smsLoginBody = z
     code: smsOtpCode,
     keepSignedIn: z.boolean().optional(),
     clientId: firstPartyClient,
+    tenantCode: tenantCode.optional(),
   })
   .register(fieldDomains, { domain: 'auth' })
 export type SmsLoginBody = z.infer<typeof smsLoginBody>
@@ -84,7 +89,12 @@ export type SmsLoginBody = z.infer<typeof smsLoginBody>
 /** POST /api/auth/password/reset-by-sms → no data; success calls SessionRevoker.revokeUser (old tokens → 401). */
 export function smsResetPasswordBody(policy: PasswordPolicy) {
   return z
-    .object({ mobile: authMobile, code: smsOtpCode, newPassword: passwordSchema(policy) })
+    .object({
+      mobile: authMobile,
+      code: smsOtpCode,
+      newPassword: passwordSchema(policy),
+      tenantCode: tenantCode.optional(),
+    })
     .register(fieldDomains, { domain: 'auth' })
 }
 export type SmsResetPasswordBody = z.infer<ReturnType<typeof smsResetPasswordBody>>
@@ -92,7 +102,8 @@ export type SmsResetPasswordBody = z.infer<ReturnType<typeof smsResetPasswordBod
 /**
  * POST /api/auth/signup → no data (sign in afterwards). `captchaTicket` uses scene `signup`;
  * displayName defaults to username on the server. Switch, default role and dept are `auth.signup.*`
- * params, never request fields.
+ * params, never request fields. Only the default tenant takes sign-ups: with multi-tenancy on, a host
+ * bound to another tenant or a `tenantCode` naming one (or no tenant) answers like sign-up off.
  */
 export function signupBody(policy: PasswordPolicy) {
   return z
@@ -101,6 +112,7 @@ export function signupBody(policy: PasswordPolicy) {
       password: passwordSchema(policy),
       displayName: z.string().trim().min(1).max(64).optional(),
       captchaTicket: captchaTicket.optional(),
+      tenantCode: tenantCode.optional(),
     })
     .register(fieldDomains, { domain: 'auth' })
 }
@@ -123,12 +135,17 @@ export type WxMpLoginVo = { tokens: TokenPayload } | { bindTicket: string }
 const wxMpTicket = z.string().regex(/^[\w-]{20,64}$/)
 /** Bind with the account's password: the same captcha (scene `signin`) and lockout rules as /login. */
 export const wxMpBindPasswordBody = loginBody
-  .pick({ username: true, password: true, captchaTicket: true })
+  .pick({ username: true, password: true, captchaTicket: true, tenantCode: true })
   .extend({ ticket: wxMpTicket })
   .register(fieldDomains, { domain: 'auth' })
 /** Bind with an SMS code of scene `signin` (POST /api/auth/sms/code) sent to the account's mobile. */
 export const wxMpBindSmsBody = z
-  .object({ ticket: wxMpTicket, mobile: authMobile, code: smsOtpCode })
+  .object({
+    ticket: wxMpTicket,
+    mobile: authMobile,
+    code: smsOtpCode,
+    tenantCode: tenantCode.optional(),
+  })
   .register(fieldDomains, { domain: 'auth' })
 /** POST /api/auth/wx-mp/bind: the ticket plus the password or the SMS proof. */
 export const wxMpBindBody = z.union([wxMpBindPasswordBody, wxMpBindSmsBody])
@@ -215,6 +232,14 @@ export interface MePayload {
    * sign-in log row before this session's own; null when there is none.
    */
   lastSignInAt: string | null
+  /** only while multi-tenancy is on (absent: the default tenant) */
+  tenant?: MeTenant
+  /**
+   * Only while multi-tenancy is on (absent: everything is available): the route names of the top-level
+   * menu groups the session may use (its tenant's package; every group when unrestricted). Clients hide
+   * what is missing, e.g. the approval tab without `workflow`; the server enforces it itself.
+   */
+  features?: string[]
 }
 
 export type MenuLinkType = 'route' | 'iframe' | 'external'

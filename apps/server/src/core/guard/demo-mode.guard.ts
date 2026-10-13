@@ -18,6 +18,9 @@ const DEMO_WRITES: ReadonlySet<string> = new Set([
   'POST /api/messaging/inboxes/mine/read-all',
   'POST /api/messaging/inboxes/mine/:id/read',
   'POST /api/wf/ccs/:id/read',
+  // entering and leaving a tenant change only the session (audited)
+  'POST /api/iam/tenants/:id/enter',
+  'POST /api/iam/tenants/leave',
 ])
 
 /** Runs before authentication: public routes and root users obey the same demo restrictions. */

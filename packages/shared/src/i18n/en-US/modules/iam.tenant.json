@@ -1,0 +1,29 @@
+{
+  "field": {
+    "iam": {
+      "tenant": {
+        "code": "Tenant code",
+        "name": "Tenant name",
+        "packageId": "Package",
+        "packageName": "Package",
+        "enabled": "Enabled",
+        "expiresAt": "Expires at",
+        "userQuota": "User quota",
+        "userCount": "Used / limit",
+        "domains": "Domains",
+        "brandName": "Brand name",
+        "logoObjectId": "Brand logo",
+        "logoUrl": "Brand logo",
+        "ownerUserId": "Tenant administrator",
+        "note": "Note",
+        "admin": "Tenant administrator",
+        "username": "Administrator username",
+        "displayName": "Administrator display name",
+        "mobile": "Administrator mobile",
+        "email": "Administrator email",
+        "initialPassword": "Initial password",
+        "reason": "Reason"
+      }
+    }
+  }
+}

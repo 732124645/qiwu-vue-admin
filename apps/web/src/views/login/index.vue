@@ -11,7 +11,8 @@ import PasswordToggle from '@/core/components/PasswordToggle.vue'
 import { revalidateOnLocale, zodRules } from '@/core/form/zod-rules'
 import { Icon } from '@/core/icons'
 import AuthPage from '@/core/layout/AuthPage.vue'
-import { ApiError } from '@/core/request/http'
+import TenantCodeField from '@/core/components/TenantCodeField.vue'
+import { ApiError, SESSION_END_TEXT, sessionEnd } from '@/core/request/http'
 import { safeRedirect } from '@/core/router'
 import { useAuthStore } from '@/core/stores/auth'
 import SmsLoginForm from './SmsLoginForm.vue'
@@ -31,6 +32,7 @@ const form = reactive({ username: savedUsername.value ?? '', password: '', keepS
 const rules = zodRules(loginBody, i18n)
 const formRef = ref<FormInstance>()
 revalidateOnLocale(formRef)
+const tenantField = ref<InstanceType<typeof TenantCodeField>>()
 const loading = ref(false)
 const error = ref('')
 const tab = ref('password')
@@ -39,18 +41,28 @@ onMounted(async () => {
   canSignup.value = await signupEnabled()
 })
 
-const goHome = () => router.replace(safeRedirect(route.query.redirect))
+/** Signed in (either tab): `keep` the tenant code for the next sign-in; on to the page asked for. */
+function signedIn(keep: boolean) {
+  tenantField.value?.remember(keep)
+  return router.replace(safeRedirect(route.query.redirect))
+}
 
 async function submit() {
   if (loading.value) return
-  if (!(await formRef.value?.validate().catch(() => false))) return
+  // loading already: the tenant field may still wait for `/auth/tenancy`
   loading.value = true
-  error.value = ''
   try {
+    if (!(await formRef.value?.validate().catch(() => false))) return
+    if ((await tenantField.value?.validate()) === false) return
+    error.value = ''
     const done = await withCaptcha(
       'signin',
       async (captchaTicket) => {
-        await auth.login({ ...form, ...(captchaTicket ? { captchaTicket } : {}) })
+        await auth.login({
+          ...form,
+          tenantCode: tenantField.value?.code,
+          ...(captchaTicket ? { captchaTicket } : {}),
+        })
         return true
       },
       (e) => e instanceof ApiError && e.code === Err.AUTH_CAPTCHA_REQUIRED.code,
@@ -58,7 +70,7 @@ async function submit() {
     if (!done) return
     savedUsername.value = remember.value ? form.username.trim() : null
     // the router guard loads /me and sends a must-change-password user to /password-change
-    await goHome()
+    await signedIn(remember.value)
   } catch (e) {
     // the server's message is already translated (Accept-Language)
     error.value = e instanceof ApiError ? e.message : t('common.error.network')
@@ -70,6 +82,15 @@ async function submit() {
 
 <template>
   <AuthPage :title="t('common.login.title')" :subtitle="t('common.login.subtitle')">
+    <el-alert
+      v-if="sessionEnd"
+      :title="t(SESSION_END_TEXT[sessionEnd])"
+      type="warning"
+      show-icon
+      :closable="false"
+      class="login__ended"
+    />
+    <TenantCodeField ref="tenantField" />
     <el-tabs v-model="tab" class="login__tabs">
       <el-tab-pane name="password" :label="t('auth.entry.passwordTab')">
         <el-form
@@ -129,7 +150,8 @@ async function submit() {
         </el-form>
       </el-tab-pane>
       <el-tab-pane name="sms" :label="t('auth.entry.smsTab')" lazy>
-        <SmsLoginForm @done="goHome" />
+        <!-- no "remember" box on this tab: it keeps the tenant code -->
+        <SmsLoginForm :tenant="tenantField" @done="signedIn(true)" />
       </el-tab-pane>
     </el-tabs>
     <router-link v-if="canSignup" to="/register" class="login__signup">{{
@@ -168,7 +190,8 @@ async function submit() {
 .login__options .el-checkbox {
   margin-right: 0;
 }
-.login__error {
+.login__error,
+.login__ended {
   margin-bottom: 16px;
 }
 .login__submit {

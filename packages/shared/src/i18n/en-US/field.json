@@ -37,7 +37,8 @@
     "ticket": "Account linking ticket",
     "wxMp": {
       "code": "WeChat sign-in code"
-    }
+    },
+    "tenantCode": "Tenant code"
   },
   "messaging": {
     "inboxMine": {

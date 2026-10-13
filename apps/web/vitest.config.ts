@@ -7,7 +7,7 @@ export default mergeConfig(
   defineConfig({
     test: {
       environment: 'happy-dom',
-      exclude: [...configDefaults.exclude, 'e2e/**'],
+      exclude: [...configDefaults.exclude, 'e2e/**', 'e2e-tenant/**'],
       setupFiles: ['src/__tests__/setup.ts'],
       // mounting Element Plus widgets (cron-editor) takes seconds on a loaded machine: room over the 5 s default
       testTimeout: 20_000,

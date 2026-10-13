@@ -64,4 +64,8 @@ export class HttpFault extends CreatedEntity {
   /** 处理时间（UTC） */
   @Column({ name: 'handled_at', type: 'datetime', precision: 3, nullable: true })
   handledAt: Date | null
+
+  /** 租户 ID（匿名或未解析出租户时为空；平台表，只供平台按租户筛选） */
+  @Column({ name: 'tenant_id', type: 'bigint', unsigned: true, nullable: true })
+  tenantId: number | null
 }

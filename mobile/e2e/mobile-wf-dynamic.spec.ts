@@ -93,12 +93,13 @@ const SCHEMA = {
 const SEED = `
 import { compile, fieldsFromFormSchema, sanitizeFormSchema } from '@qiwu/shared'
 import { DataSource } from 'typeorm'
+import { withTenant } from './dist/core/context/tenant.js'
 import { dataSourceOptions } from './dist/db/data-source.js'
 import { insertRow } from './dist/db/seeds/upsert.js'
 const { MODEL, NAME, SCHEMA } = process.env
 const ds = await new DataSource(dataSourceOptions()).initialize()
 try {
-  await ds.transaction(async (q) => {
+  await withTenant(1, () => ds.transaction(async (q) => {
     if ((await q.query('SELECT id FROM wf_model WHERE model_key = ?', [MODEL])).length) return
     const s = sanitizeFormSchema(JSON.parse(SCHEMA))
     if (!s.ok) throw new Error(JSON.stringify(s.errors))
@@ -119,7 +120,7 @@ try {
       form_snapshot: { fields: f.fields, schema: s.schema },
     })
     await q.query('UPDATE wf_model SET current_version_id = ? WHERE id = ?', [version, model])
-  })
+  }))
 } finally {
   await ds.destroy()
 }

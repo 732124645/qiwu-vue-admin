@@ -113,6 +113,14 @@ export type MonitorRedisVo = z.infer<typeof monitorRedisVo>
 /** Most keys one `GET /cache/keys` returns (SCAN stops there, `truncated` = more exist). */
 export const CACHE_SCAN_MAX = 1000
 
+/**
+ * What a namespace's keys are built from (see docs/design-notes.md#tenancy): `tenant` = natural keys
+ * unique within a tenant only (the key builder adds the tenant segment `t:{tenantId}:`), `global-id` =
+ * values unique across tenants (or a dimension shared on purpose), `platform` = data every tenant shares.
+ */
+export const CACHE_KEY_TENANCIES = ['tenant', 'global-id', 'platform'] as const
+export type CacheKeyTenancy = (typeof CACHE_KEY_TENANCIES)[number]
+
 export const cacheNamespaceVo = z.object({
   /** registry name, e.g. `dict` (page label `monitor.cache.ns.<name>`) */
   name: z.string(),
@@ -120,6 +128,7 @@ export const cacheNamespaceVo = z.object({
   prefix: z.string(),
   clearable: z.boolean(),
   masked: z.boolean(),
+  tenancy: z.enum(CACHE_KEY_TENANCIES),
 })
 export type CacheNamespaceVo = z.infer<typeof cacheNamespaceVo>
 

@@ -5,8 +5,15 @@
 ## 1. 准备运行环境
 
 - 使用 Node **22，≥ 22.22.1** 与 pnpm **11.28.3**，与 `.nvmrc` 和根 `package.json` 的 `packageManager` 一致。
-- MySQL 与 Redis；Socket.IO 分片适配器要求 **Redis ≥ 7**。macOS 本地使用 Homebrew 服务；已有服务可直接使用，不要重复启动或重置。
+- MySQL 推荐 8.4 LTS（CI 测试版本）；按代码推定最低 8.0.17，未测试。Redis **≥ 7.0**。原因见下表。macOS 本地使用 Homebrew 服务；已有服务可直接使用，不要重复启动或重置。
 - 本地模板仓库，默认 Web 地址 `http://localhost:5173`；API 绑定 `127.0.0.1:3000`，由 Vite 代理访问。
+
+| 服务  | 最低版本       | 原因                                                                                                                                                                                       | CI 测试版本       |
+| ----- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------- |
+| MySQL | 8.0.17（推定） | 迁移使用 `utf8mb4_0900_ai_ci` 排序规则、递归 CTE、窗口函数和 CHECK 约束（8.0.16 起才生效）；查询使用 `utf8mb4_0900_bin` 排序规则（8.0.17 起）与 `FOR SHARE`                                | 8.4；8.0.x 未测试 |
+| Redis | 7.0            | 登录签发（会话索引）、登录失败与锁屏校验计数、访问令牌续期、授权码索引使用 `PEXPIRE` 的 `NX` / `GT` / `XX` 选项；实时推送的 Socket.IO 分片适配器使用分片发布订阅 `SSUBSCRIBE` / `SPUBLISH` | 8.0               |
+
+代码不检查版本号：Redis 低于 7.0 时分片适配器订阅失败，服务拒绝启动；MySQL 低于 8.0 时迁移失败，低于 8.0.16 时 CHECK 约束不生效，低于 8.0.17 时用到 `utf8mb4_0900_bin` 的查询报错。
 
 ```sh
 node --version
@@ -33,6 +40,7 @@ brew services start redis
 | 模板开发                            | `qiwu_dev`        | 13       | 3000     | 5173          |
 | 服务端测试                          | `qiwu_test`       | 15       | 3100     | —             |
 | Web Playwright                      | `qiwu_e2e`        | 14       | 3200     | 4173          |
+| Web Playwright（多租户开关打开）    | `qiwu_tenant_e2e` | 1        | 3203     | 4176          |
 | 移动端 Playwright（保留 mobile 时） | `qiwu_mobile_e2e` | 9        | 3201     | 4175          |
 
 Redis 的配置须提供这些数据库号。已有满足隔离要求的 `qiwu` ACL 用户可复用；首次安装由管理员在**持久 ACL 配置**中建立该用户，键仅允许 `~qw:*`、频道仅允许 `&qw:*`，不允许 `FLUSHDB`、`KEYS`、`CONFIG` 等管理或危险命令。业务需要普通读写、过期、事务、`SCAN` / `UNLINK`、Lua 等命令；分片适配器还需要 `SSUBSCRIBE`、`SPUBLISH`、`PUBSUB SHARDNUMSUB`，共享限流需要 `EVAL`、`TIME` 及 ZSET / hash 命令。测试用的 ACL 用户还需要只读 `INFO` 权限（`monitor.e2e` 读取 Redis 监控信息），由管理员审核并加入持久 ACL；这不放开 `FLUSHDB` / `KEYS` / `CONFIG`。其余监控所需的只读权限由管理员单独审核。参考 [Redis ACL 官方说明](https://redis.io/docs/latest/operate/oss_and_stack/management/security/acl/) 与 [多实例部署前置条件](scale-out.md)，不要给应用账号 `+@all` 或用它修改 ACL。
@@ -120,7 +128,7 @@ pnpm verify
 
 ### 服务、工具与环境文件
 
-- 准备 MySQL 与 Redis **≥ 7** 服务；按第 2 节准备空库、隔离库号、账号和持久 ACL，核对 `SSUBSCRIBE` / `SPUBLISH` / `PUBSUB SHARDNUMSUB` 以及限流需要的命令。
+- 准备 MySQL 与 Redis 服务（版本见第 1 节）；按第 2 节准备空库、隔离库号、账号和持久 ACL，核对 `SSUBSCRIBE` / `SPUBLISH` / `PUBSUB SHARDNUMSUB` 以及限流需要的命令。
 - 使用 Node 22 与固定的 pnpm 版本，并按 Web / mobile 的 Playwright 配置安装所需浏览器。
 - 项目路径可含中文或空格。保存 `.env` / `.env.local` 为 UTF-8、LF；用编辑器创建秘密文件，限制 Windows 文件访问权限，不用 PowerShell 5.1 的重定向或 `Set-Content` 生成它们。
 

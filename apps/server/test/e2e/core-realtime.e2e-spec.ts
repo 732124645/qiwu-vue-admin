@@ -1,7 +1,7 @@
 // core/realtime (see docs/design-notes.md#layering): the Socket.IO handshake accepts only a live console session's access
-// token (every connection, reconnects included), sockets join user:{id} / sid:{sid} / type:{userType},
-// RealtimeService.toUser/toUsers/toUserType/broadcast deliver {type, payload} envelopes to exactly those
-// rooms, and SessionRevoker ends the sockets of the sessions it revokes (and only those).
+// token (every connection, reconnects included), sockets join user:{id} / sid:{sid} / tenant:{tid} /
+// type:{tid}:{userType}, RealtimeService.toUser/toUsers/toUserType/toTenant deliver {type, payload}
+// envelopes to exactly those rooms, and SessionRevoker ends the sockets of the sessions it revokes (and only those).
 import {
   connect as tcpConnect,
   createServer as createTcpServer,
@@ -36,6 +36,7 @@ import { insertRow } from '../../src/db/seeds/upsert.js'
 import { signIn } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
 import { closeSockets, connect, disconnected, inbox, socketOf } from '../setup/socket.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 const PREFIX = 'rt-e2e-'
 
@@ -52,13 +53,15 @@ const msg = (id: number): RealtimeMessage => ({
 })
 
 async function user(name: string, extra: Record<string, unknown> = {}) {
-  const id = await insertRow(ds.manager, 'iam_user', {
-    username: PREFIX + name,
-    display_name: name,
-    password_hash: 'not-used-by-this-spec',
-    password_changed_at: new Date(),
-    ...extra,
-  })
+  const id = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_user', {
+      username: PREFIX + name,
+      display_name: name,
+      password_hash: 'not-used-by-this-spec',
+      password_changed_at: new Date(),
+      ...extra,
+    }),
+  )
   userIds.push(id)
   return id
 }
@@ -333,7 +336,7 @@ describe('session end', () => {
     const ready = vi.spyOn(app.get(RedisIoAdapter), 'ready').mockRejectedValue(new Error('NOPERM'))
     const load = vi.spyOn(app.get(TokenService), 'load')
     const socket = {
-      data: { userId: 7, sid: 'subscription-failure', userType: 'admin' },
+      data: { userId: 7, sid: 'subscription-failure', userType: 'admin', tenantId: 1 },
       join: vi.fn(async () => {}),
       disconnect: vi.fn(),
     }
@@ -374,7 +377,7 @@ describe('session end', () => {
       .mockImplementation((rooms) => adapter.ready(rooms))
     const load = vi.spyOn(app.get(TokenService), 'load')
     const socket = {
-      data: { userId: 7, sid: 'held-subscription', userType: 'admin' },
+      data: { userId: 7, sid: 'held-subscription', userType: 'admin', tenantId: 1 },
       join: async (rooms: string[]) => server.of('/').adapter.addAll('held-socket', new Set(rooms)),
       disconnect: vi.fn(),
     }
@@ -424,14 +427,14 @@ describe('RealtimeService', () => {
     expect(b.got.at(-1)).toEqual(msg(4))
   })
 
-  it('toUserType reaches that user type only; broadcast reaches everyone', async () => {
+  it('toUserType reaches that user type only; toTenant reaches everyone in the tenant', async () => {
     const a = await online(`${PREFIX}a`)
     const m = await online(`${PREFIX}m`)
-    realtime.toUserType('member', msg(5))
+    realtime.toUserType(1, 'member', msg(5))
     await settle()
     expect(m.got).toEqual([msg(5)])
     expect(a.got).toEqual([])
-    realtime.broadcast(msg(6))
+    realtime.toTenant(1, msg(6))
     await settle()
     expect(m.got.at(-1)).toEqual(msg(6))
     expect(a.got).toEqual([msg(6)])
@@ -455,9 +458,11 @@ describe('SessionRevoker ends sockets', () => {
     const k1 = await online(`${PREFIX}c`)
     const k2 = await online(`${PREFIX}c`)
     const gone = [disconnected(k1.socket), disconnected(k2.socket)]
-    const ended = await revoker.revokeUser(keep.session.userId!, 'kicked', {
-      exceptSid: keep.session.sid,
-    })
+    const ended = await inTenant1(() =>
+      revoker.revokeUser(keep.session.userId!, 'kicked', {
+        exceptSid: keep.session.sid,
+      }),
+    )
     expect(ended.map((s) => s.sid).sort()).toEqual([k1.session.sid, k2.session.sid].sort())
     expect(await Promise.all(gone)).toEqual(['io server disconnect', 'io server disconnect'])
     expect(k1.got).toEqual([{ type: RT.sessionKicked, payload: { sid: k1.session.sid } }])

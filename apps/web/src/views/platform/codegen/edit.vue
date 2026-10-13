@@ -18,6 +18,7 @@ import {
   codegenPerms,
   LOCALES,
   PAGE_SIZE_MAX,
+  TENANT_COLUMN,
   validationMessage,
   type CgColumnVo,
   type CgImportableVo,
@@ -147,9 +148,9 @@ if (perm.has(codegenPerms.import))
 const columnNames = computed(() => form.value?.columns.map((c) => c.columnName) ?? [])
 const hasDeptId = computed(() => columnNames.value.includes('dept_id'))
 const isTree = computed(() => form.value?.template === 'tree')
-/** a column holding another row's id: an integer column, not the key */
-const idColumn = (c: Pick<CgColumnVo, 'isPk' | 'columnType'>) =>
-  !c.isPk && /^(big|medium|small)?int\b/.test(c.columnType)
+/** a column holding another row's id: an integer column, not the key nor the row's tenant */
+const idColumn = (c: Pick<CgColumnVo, 'isPk' | 'columnType' | 'columnName'>) =>
+  !c.isPk && c.columnName !== TENANT_COLUMN && /^(big|medium|small)?int\b/.test(c.columnType)
 /** a sub table's column holding the master row's id */
 const fkColumns = computed(
   () => form.value?.columns.filter(idColumn).map((c) => c.columnName) ?? [],
@@ -200,8 +201,8 @@ const refTables = computed(
     ),
 )
 /**
- * Columns of a referencing table that may hold this table's ids (integer, not the key nor the audit
- * user ids), fetched once when its column picker opens: known for configs only.
+ * Columns of a referencing table that may hold this table's ids (integer, not the key, the tenant nor the
+ * audit user ids), fetched once when its column picker opens: known for configs only.
  */
 const refColumns = reactive(new Map<string, string[]>())
 function loadRefColumns(table: string | undefined) {

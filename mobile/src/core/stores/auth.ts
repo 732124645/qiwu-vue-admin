@@ -8,7 +8,7 @@ import type {
   WxMpLoginVo,
 } from '@qiwu/shared'
 import { stopRealtime } from '@/core/realtime'
-import { api, setSession, toPasswordChange, type MobileTokens } from '@/core/request'
+import { api, sessionEnd, setSession, toPasswordChange, type MobileTokens } from '@/core/request'
 import { useCountsStore } from './counts'
 
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never
@@ -92,6 +92,7 @@ export const useAuthStore = defineStore('auth', () => {
     useCountsStore().reset()
     stopRealtime()
     setSession(null)
+    sessionEnd.value = null
     wxOnLaunch = false
   }
 

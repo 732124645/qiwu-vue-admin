@@ -18,6 +18,7 @@ import { logOf } from '../setup/audit.js'
 import { bearer, signIn } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
 import { closeSockets, connect, inbox, socketOf } from '../setup/socket.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 const PREFIX = 'e2e-rtdemo-'
 const URL = '/api/demo/realtime/send'
@@ -40,14 +41,16 @@ let groupId: number
 let shutId: number
 
 async function role(name: string, perms: string[]) {
-  const rid = await insertRow(ds.manager, 'iam_role', {
-    code: PREFIX + name,
-    name: PREFIX + name,
-    data_scope: 'own_dept',
-  })
+  const rid = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_role', {
+      code: PREFIX + name,
+      name: PREFIX + name,
+      data_scope: 'own_dept',
+    }),
+  )
   roleIds.push(rid)
   for (const p of perms)
-    await ds.query('INSERT INTO iam_role_menus (role_id, menu_id) VALUES (?, ?)', [
+    await ds.query('INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, 1)', [
       rid,
       await findId(ds.manager, 'iam_menu', { perms: p }),
     ])
@@ -55,16 +58,21 @@ async function role(name: string, perms: string[]) {
 }
 
 async function user(name: string, roles: number[], deptId: number | null, live = false) {
-  id[name] = await insertRow(ds.manager, 'iam_user', {
-    username: PREFIX + name,
-    display_name: name,
-    password_hash: 'not-used-by-this-spec',
-    password_changed_at: new Date(),
-    dept_id: deptId,
-  })
+  id[name] = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_user', {
+      username: PREFIX + name,
+      display_name: name,
+      password_hash: 'not-used-by-this-spec',
+      password_changed_at: new Date(),
+      dept_id: deptId,
+    }),
+  )
   userIds.push(id[name])
   for (const r of roles)
-    await ds.query('INSERT INTO iam_user_roles (user_id, role_id) VALUES (?, ?)', [id[name], r])
+    await ds.query('INSERT INTO iam_user_roles (user_id, role_id, tenant_id) VALUES (?, ?, 1)', [
+      id[name],
+      r,
+    ])
   token[name] = (await signIn(app, PREFIX + name)).accessToken
   if (live) got[name] = inbox(await connect(socketOf(app, { token: token[name] })))
 }
@@ -98,7 +106,9 @@ beforeAll(async () => {
   redis = app.get(REDIS)
   await cleanRedis(redis)
   for (const k of ['mine', 'other'] as const) {
-    DEPT[k] = await insertRow(ds.manager, 'iam_dept', { tree_path: '/', name: `${PREFIX}${k}` })
+    DEPT[k] = await inTenant1(() =>
+      insertRow(ds.manager, 'iam_dept', { tree_path: '/', name: `${PREFIX}${k}` }),
+    )
     await ds.query('UPDATE iam_dept SET tree_path = ? WHERE id = ?', [`/${DEPT[k]}/`, DEPT[k]])
   }
   const sendRole = await role('send', [demoRealtimePerms.send])

@@ -74,6 +74,8 @@
     "send": "发送",
     "broadcast": "发送给全员",
     "manage": "改派与终止",
-    "managers": "任命流程管理员"
+    "managers": "任命流程管理员",
+    "enterTenant": "进入租户",
+    "resetInitialPassword": "重置初始密码"
   }
 }

@@ -32,6 +32,7 @@ import {
 import { z } from 'zod'
 import { ActionLog } from '../../../../core/audit/action-log.js'
 import { RequirePerm } from '../../../../core/auth/decorators.js'
+import { PlatformOnly } from '../../../../core/auth/platform-only.js'
 import { Idempotent } from '../../../../core/guard/idempotent.js'
 import { ApiEnvelope } from '../../../../core/http/api-envelope.decorator.js'
 import type { SmsChannel } from './sms-channel.entity.js'
@@ -48,6 +49,7 @@ export class SmsChannelController {
 
   @Get()
   @RequirePerm(smsChannelPerms.browse)
+  @PlatformOnly()
   @ApiOperation({ summary: 'Page of sms channels' })
   @ApiEnvelope(pageVo(smsChannelVo))
   page(@Query({ schema: smsChannelQuery }) query: SmsChannelQuery) {
@@ -64,6 +66,7 @@ export class SmsChannelController {
 
   @Get(':id')
   @RequirePerm(smsChannelPerms.view)
+  @PlatformOnly()
   @ApiOperation({ summary: 'One sms channel' })
   @ApiEnvelope(smsChannelVo)
   get(@Param('id', ParseIntPipe) id: number) {
@@ -72,6 +75,7 @@ export class SmsChannelController {
 
   @Post()
   @RequirePerm(smsChannelPerms.create)
+  @PlatformOnly()
   @Idempotent()
   @ActionLog({
     domain: 'messaging.smsChannel',
@@ -86,6 +90,7 @@ export class SmsChannelController {
 
   @Put(':id')
   @RequirePerm(smsChannelPerms.modify)
+  @PlatformOnly()
   @ActionLog({ domain: 'messaging.smsChannel', verb: 'modify' })
   @ApiOperation({ summary: 'Change a sms channel' })
   @ApiEnvelope()
@@ -98,6 +103,7 @@ export class SmsChannelController {
 
   @Put(':id/enabled')
   @RequirePerm(smsChannelPerms.modify)
+  @PlatformOnly()
   @ActionLog({ domain: 'messaging.smsChannel', verb: 'modify' })
   @ApiOperation({ summary: 'Enable or disable a sms channel' })
   @ApiEnvelope()
@@ -111,6 +117,7 @@ export class SmsChannelController {
   @Post(':id/test')
   @HttpCode(200)
   @RequirePerm(smsChannelPerms.modify)
+  @PlatformOnly()
   @ActionLog({ domain: 'messaging.smsChannel', verb: 'test' })
   @ApiOperation({ summary: 'Test the stored SMS channel; only {ok} is returned' })
   @ApiEnvelope(connectionTestVo)
@@ -120,6 +127,7 @@ export class SmsChannelController {
 
   @Delete(':id')
   @RequirePerm(smsChannelPerms.remove)
+  @PlatformOnly()
   @ActionLog({ domain: 'messaging.smsChannel', verb: 'remove' })
   @ApiOperation({ summary: 'Delete a sms channel' })
   @ApiEnvelope()
@@ -130,6 +138,7 @@ export class SmsChannelController {
   @Post('batch-delete')
   @HttpCode(200)
   @RequirePerm(smsChannelPerms.remove)
+  @PlatformOnly()
   @ActionLog({ domain: 'messaging.smsChannel', verb: 'remove' })
   @ApiOperation({ summary: 'Delete sms channels: all or none' })
   @ApiEnvelope()

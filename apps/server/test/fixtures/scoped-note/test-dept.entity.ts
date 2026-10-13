@@ -1,5 +1,6 @@
 import { Column, Entity, OneToMany, PrimaryGeneratedColumn, type Relation } from 'typeorm'
 import { ScopedNote } from './scoped-note.entity.js'
+import { TenantColumn } from '../../../src/core/db/tenant-filter.js'
 
 /** Minimal dept tree (`test_dept`), stands in for iam_dept; circular relation with ScopedNote. */
 @Entity('test_dept')
@@ -18,4 +19,7 @@ export class TestDept {
 
   @OneToMany(() => ScopedNote, (note) => note.dept)
   notes: Relation<ScopedNote>[]
+
+  @TenantColumn()
+  tenantId: number
 }

@@ -15,6 +15,7 @@ import { REDIS, type Redis } from '../../src/core/redis/redis.module.js'
 import { findId, insertRow } from '../../src/db/seeds/upsert.js'
 import { bearer, signIn } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 const PREFIX = 'e2e-wfu-'
 
@@ -37,17 +38,22 @@ const names = (res: { body: { data: { displayName: string }[] } }) =>
 
 /** `name`'s user: display name PREFIX + name, username PREFIX + 'login-' + name. */
 async function user(name: string, extra: Record<string, unknown> = {}, roles: number[] = []) {
-  u[name] = await insertRow(ds.manager, 'iam_user', {
-    username: `${PREFIX}login-${name}`,
-    display_name: PREFIX + name,
-    dept_id: deptId,
-    password_hash: 'not-used-by-this-spec',
-    password_changed_at: new Date(),
-    ...extra,
-  })
+  u[name] = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_user', {
+      username: `${PREFIX}login-${name}`,
+      display_name: PREFIX + name,
+      dept_id: deptId,
+      password_hash: 'not-used-by-this-spec',
+      password_changed_at: new Date(),
+      ...extra,
+    }),
+  )
   made.iam_user.push(u[name]!)
   for (const r of roles)
-    await ds.query('INSERT INTO iam_user_roles (user_id, role_id) VALUES (?, ?)', [u[name], r])
+    await ds.query('INSERT INTO iam_user_roles (user_id, role_id, tenant_id) VALUES (?, ?, 1)', [
+      u[name],
+      r,
+    ])
 }
 
 beforeAll(async () => {
@@ -57,13 +63,15 @@ beforeAll(async () => {
   ds = app.get<DataSource>(getDataSourceToken())
   redis = app.get(REDIS)
   await cleanRedis(redis)
-  deptId = await insertRow(ds.manager, 'iam_dept', {
-    parent_id: 0,
-    name: `${PREFIX}dept`,
-    tree_path: '/',
-  })
+  deptId = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_dept', {
+      parent_id: 0,
+      name: `${PREFIX}dept`,
+      tree_path: '/',
+    }),
+  )
   made.iam_dept.push(deptId)
-  const staff = (await findId(ds.manager, 'iam_role', { code: 'staff' }))!
+  const staff = (await inTenant1(() => findId(ds.manager, 'iam_role', { code: 'staff' })))!
   await user('alice', {}, [staff])
   await user('bob', { dept_id: null })
   await user('carol', { enabled: false })
@@ -122,12 +130,14 @@ describe('GET /api/wf/depts/options', () => {
   const d: Record<string, number> = {}
   const flat = (nodes: Node[]): Node[] => nodes.flatMap((n) => [n, ...flat(n.children)])
   const dept = async (name: string, parentId: number, extra: Record<string, unknown> = {}) => {
-    d[name] = await insertRow(ds.manager, 'iam_dept', {
-      parent_id: parentId,
-      name: PREFIX + name,
-      tree_path: '/',
-      ...extra,
-    })
+    d[name] = await inTenant1(() =>
+      insertRow(ds.manager, 'iam_dept', {
+        parent_id: parentId,
+        name: PREFIX + name,
+        tree_path: '/',
+        ...extra,
+      }),
+    )
     made.iam_dept.push(d[name]!)
   }
 

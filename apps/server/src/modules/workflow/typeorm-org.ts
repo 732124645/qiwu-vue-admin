@@ -1,5 +1,6 @@
 import type { OrgDirectory, WfInitiatorCtx } from '@qiwu/shared'
 import type { EntityManager } from 'typeorm'
+import { tenantId } from '../../core/context/tenant.js'
 
 /** A DataSource, or a transaction's EntityManager to read the org chart inside that transaction. */
 export type OrgDb = Pick<EntityManager, 'query'>
@@ -12,57 +13,76 @@ const ids = (rows: { id: number | string }[]) => rows.map((r) => Number(r.id))
  * reaches nobody (as in auth, IamUserLookup). Depts: a deleted dept is no dept; a disabled
  * dept still exists in the org chart. `deptOfUser`/`initiatorCtx` also answer for a disabled or deleted user
  * (a running instance of a user deleted since still routes by their dept).
+ * One tenant's org chart (see docs/design-notes.md#tenancy): every row read, link rows included, is
+ * the context's, which is the instance's (WfStore reads instances through the ORM in it, the remind
+ * job runs each task in its own), so an id of another tenant (in a form value, a process tree, a link
+ * row) reaches nobody, as an unknown one.
  */
 export function typeormOrg(db: OrgDb): OrgDirectory {
-  /** `sql` holds one `IN (?)` for `wanted`; nothing wanted = nothing found (MySQL rejects `IN ()`) */
-  const usersIn = async (wanted: readonly number[], sql: string) =>
-    wanted.length ? ids(await db.query<{ id: number }[]>(sql, [wanted])) : []
+  /** `sql` holds one `IN (?)` for `wanted` (`params`); nothing wanted = nothing found (MySQL rejects `IN ()`) */
+  const usersIn = async (
+    wanted: readonly number[],
+    sql: string,
+    params: (tid: number) => unknown[],
+  ) => (wanted.length ? ids(await db.query<{ id: number }[]>(sql, params(tenantId()))) : [])
 
-  const userDept = async (userId: number) =>
-    (
+  const userDept = async (userId: number) => {
+    const tid = tenantId()
+    return (
       await db.query<{ id: number; tree_path: string }[]>(
         // qw:include-deleted u: a deleted user keeps their dept (see above); the dept must be live
         `SELECT d.id, d.tree_path FROM iam_user u
-           JOIN iam_dept d ON d.id = u.dept_id AND d.deleted_at IS NULL
-          WHERE u.id = ?`,
-        [userId],
+           JOIN iam_dept d ON d.id = u.dept_id AND d.tenant_id = ? AND d.deleted_at IS NULL
+          WHERE u.id = ? AND u.tenant_id = ?`,
+        [tid, userId, tid],
       )
     )[0]
+  }
 
   return {
     enabledUsers: (userIds) =>
       usersIn(
         userIds,
-        'SELECT u.id FROM iam_user u WHERE u.id IN (?) AND u.enabled = 1 AND u.deleted_at IS NULL ORDER BY u.id',
+        `SELECT u.id FROM iam_user u
+          WHERE u.id IN (?) AND u.tenant_id = ? AND u.enabled = 1 AND u.deleted_at IS NULL
+          ORDER BY u.id`,
+        (tid) => [userIds, tid],
       ),
 
     usersOfRoles: (roleIds) =>
       usersIn(
         roleIds,
         `SELECT DISTINCT u.id FROM iam_user_roles ur
-           JOIN iam_role r ON r.id = ur.role_id AND r.enabled = 1 AND r.deleted_at IS NULL
-           JOIN iam_user u ON u.id = ur.user_id AND u.enabled = 1 AND u.deleted_at IS NULL
-          WHERE ur.role_id IN (?) AND ur.deleted_at IS NULL
+           JOIN iam_role r ON r.id = ur.role_id AND r.tenant_id = ?
+                AND r.enabled = 1 AND r.deleted_at IS NULL
+           JOIN iam_user u ON u.id = ur.user_id AND u.tenant_id = ?
+                AND u.enabled = 1 AND u.deleted_at IS NULL
+          WHERE ur.role_id IN (?) AND ur.tenant_id = ? AND ur.deleted_at IS NULL
           ORDER BY u.id`,
+        (tid) => [tid, tid, roleIds, tid],
       ),
 
     usersOfPositions: (positionIds) =>
       usersIn(
         positionIds,
         `SELECT DISTINCT u.id FROM iam_user_positions up
-           JOIN iam_position p ON p.id = up.position_id AND p.enabled = 1 AND p.deleted_at IS NULL
-           JOIN iam_user u ON u.id = up.user_id AND u.enabled = 1 AND u.deleted_at IS NULL
-          WHERE up.position_id IN (?) AND up.deleted_at IS NULL
+           JOIN iam_position p ON p.id = up.position_id AND p.tenant_id = ?
+                AND p.enabled = 1 AND p.deleted_at IS NULL
+           JOIN iam_user u ON u.id = up.user_id AND u.tenant_id = ?
+                AND u.enabled = 1 AND u.deleted_at IS NULL
+          WHERE up.position_id IN (?) AND up.tenant_id = ? AND up.deleted_at IS NULL
           ORDER BY u.id`,
+        (tid) => [tid, tid, positionIds, tid],
       ),
 
     usersOfDepts: (deptIds) =>
       usersIn(
         deptIds,
         `SELECT u.id FROM iam_user u
-           JOIN iam_dept d ON d.id = u.dept_id AND d.deleted_at IS NULL
-          WHERE u.dept_id IN (?) AND u.enabled = 1 AND u.deleted_at IS NULL
+           JOIN iam_dept d ON d.id = u.dept_id AND d.tenant_id = ? AND d.deleted_at IS NULL
+          WHERE u.dept_id IN (?) AND u.tenant_id = ? AND u.enabled = 1 AND u.deleted_at IS NULL
           ORDER BY u.id`,
+        (tid) => [tid, deptIds, tid],
       ),
 
     deptOfUser: async (userId) => {
@@ -71,9 +91,10 @@ export function typeormOrg(db: OrgDb): OrgDirectory {
     },
 
     async deptHeads(deptId, levels) {
+      const tid = tenantId()
       const [dept] = await db.query<{ tree_path: string }[]>(
-        'SELECT tree_path FROM iam_dept WHERE id = ? AND deleted_at IS NULL',
-        [deptId],
+        'SELECT tree_path FROM iam_dept WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL',
+        [deptId, tid],
       )
       // `/1/5/9/` holds the ancestors and the dept itself: nearest first, `levels` of them
       const chain = (dept?.tree_path.split('/').filter(Boolean).map(Number) ?? [])
@@ -82,21 +103,24 @@ export function typeormOrg(db: OrgDb): OrgDirectory {
       if (!chain.length) return []
       const rows = await db.query<{ id: number; head_user_id: number }[]>(
         `SELECT d.id, d.head_user_id FROM iam_dept d
-           JOIN iam_user u ON u.id = d.head_user_id AND u.enabled = 1 AND u.deleted_at IS NULL
-          WHERE d.id IN (?) AND d.deleted_at IS NULL`,
-        [chain],
+           JOIN iam_user u ON u.id = d.head_user_id AND u.tenant_id = ?
+                AND u.enabled = 1 AND u.deleted_at IS NULL
+          WHERE d.id IN (?) AND d.tenant_id = ? AND d.deleted_at IS NULL`,
+        [tid, chain, tid],
       )
       const headOf = new Map(rows.map((r) => [Number(r.id), Number(r.head_user_id)]))
       return [...new Set(chain.flatMap((id) => headOf.get(id) ?? []))]
     },
 
     async initiatorCtx(userId): Promise<WfInitiatorCtx> {
+      const tid = tenantId()
       const roles = await db.query<{ id: number }[]>(
         `SELECT r.id FROM iam_user_roles ur
-           JOIN iam_role r ON r.id = ur.role_id AND r.enabled = 1 AND r.deleted_at IS NULL
-          WHERE ur.user_id = ? AND ur.deleted_at IS NULL
+           JOIN iam_role r ON r.id = ur.role_id AND r.tenant_id = ?
+                AND r.enabled = 1 AND r.deleted_at IS NULL
+          WHERE ur.user_id = ? AND ur.tenant_id = ? AND ur.deleted_at IS NULL
           ORDER BY r.id`,
-        [userId],
+        [tid, userId, tid],
       )
       return { deptTreePath: (await userDept(userId))?.tree_path ?? null, roleIds: ids(roles) }
     },

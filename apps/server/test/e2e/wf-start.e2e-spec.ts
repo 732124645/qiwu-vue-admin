@@ -21,6 +21,7 @@ import { WfBusinessHandler } from '../../src/modules/workflow/runtime/wf-handler
 import type { WfInstanceRow } from '../../src/modules/workflow/runtime/wf-runtime.entity.js'
 import { bearer, signIn } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 const PREFIX = 'e2e-wfs-'
 const LEAVE = `${PREFIX}leave`
@@ -133,8 +134,8 @@ interface ModelOpts {
 async function model(root: object, opts: ModelOpts = {}): Promise<string> {
   const key = opts.key ?? `${PREFIX}m${++seq}`
   const m = await ds.query(
-    `INSERT INTO wf_model (model_key, name, form_kind, initiator_scope, enabled)
-     VALUES (?, ?, ?, ?, ?)`,
+    `INSERT INTO wf_model (model_key, name, form_kind, initiator_scope, enabled, tenant_id)
+     VALUES (?, ?, ?, ?, ?, 1)`,
     [
       key,
       key,
@@ -146,8 +147,8 @@ async function model(root: object, opts: ModelOpts = {}): Promise<string> {
   )
   if (opts.published === false) return key
   const v = await ds.query(
-    `INSERT INTO wf_version (model_id, model_key, version, tree_json, form_snapshot)
-     VALUES (?, ?, 1, ?, ?)`,
+    `INSERT INTO wf_version (model_id, model_key, version, tree_json, form_snapshot, tenant_id)
+     VALUES (?, ?, 1, ?, ?, 1)`,
     [m.insertId, key, JSON.stringify(root), JSON.stringify({ fields: opts.fields ?? {} })],
   )
   await ds.query('UPDATE wf_model SET current_version_id = ? WHERE id = ?', [
@@ -173,14 +174,16 @@ const openTasks = (instanceId: number) =>
     [instanceId],
   )
 const leave = (userId: number, days: number) =>
-  insertRow(ds.manager, 'biz_leave_request', {
-    user_id: userId,
-    leave_kind: 'annual',
-    start_at: new Date(),
-    end_at: new Date(),
-    days,
-    reason: REASON,
-  })
+  inTenant1(() =>
+    insertRow(ds.manager, 'biz_leave_request', {
+      user_id: userId,
+      leave_kind: 'annual',
+      start_at: new Date(),
+      end_at: new Date(),
+      days,
+      reason: REASON,
+    }),
+  )
 const leaveRow = async (id: number) =>
   (
     await ds.query<{ state: string; instance_id: number | null }[]>(
@@ -190,7 +193,7 @@ const leaveRow = async (id: number) =>
   )[0]
 
 async function add(table: keyof typeof made, row: Record<string, unknown>) {
-  const id = await insertRow(ds.manager, table, row)
+  const id = await inTenant1(() => insertRow(ds.manager, table, row))
   made[table].push(id)
   return id
 }
@@ -252,7 +255,10 @@ beforeAll(async () => {
   await user('bob', d.other)
   await user('carol', d.other)
   await user('dave', d.other, { enabled: false })
-  await ds.query('INSERT INTO iam_user_roles (user_id, role_id) VALUES (?, ?)', [u.alice, roleId])
+  await ds.query('INSERT INTO iam_user_roles (user_id, role_id, tenant_id) VALUES (?, ?, 1)', [
+    u.alice,
+    roleId,
+  ])
   for (const who of ['alice', 'bob', 'carol'])
     tokens[who] = (await signIn(app, PREFIX + who)).accessToken
 })

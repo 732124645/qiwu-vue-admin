@@ -1,7 +1,14 @@
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 import { useStorage } from '@vueuse/core'
-import type { LoginBody, MePayload, SmsLoginBody, TokenPayload } from '@qiwu/shared'
+import {
+  DEFAULT_TENANT_ID,
+  type LoginBody,
+  type MePayload,
+  type SmsLoginBody,
+  type TokenPayload,
+} from '@qiwu/shared'
+import { sessionBrand } from '@/core/composables/use-brand'
 import { useTablePrefsStore } from '@/core/composables/use-table-prefs'
 import {
   accessToken,
@@ -9,7 +16,9 @@ import {
   refreshAccessToken,
   refreshSettled,
   resetSession,
+  sessionEnd,
   setSessionHint,
+  tenantExpect,
 } from '@/core/request/http'
 import { useMenuStore } from './menu'
 import { useNotifyStore } from './notify'
@@ -24,9 +33,38 @@ export const useAuthStore = defineStore('auth', () => {
     () => !!flags.value && (flags.value.mustChangePassword || flags.value.passwordExpired),
   )
 
+  /**
+   * The session's data tenant changed under a loaded `/me` (a platform user entering a tenant, another tab
+   * signing in elsewhere on the shared refresh cookie): the whole page reloads. A `/me` without `tenant`
+   * (multi-tenancy off) is the default tenant; signing out or in between (no `/me`) is no change.
+   */
+  watch(
+    () => me.value && (me.value.tenant?.id ?? DEFAULT_TENANT_ID),
+    (id, prev) => {
+      if (id && prev && id !== prev) location.reload()
+    },
+    { flush: 'sync' },
+  )
+  /** `/me.tenant`: the session's data tenant, only while multi-tenancy is on */
+  const tenant = computed(() => me.value?.tenant ?? null)
+  // the tenant the requests expect (`X-Tenant-Expect`) and the brand shown follow `/me`
+  watch(
+    me,
+    (m) => {
+      tenantExpect.value = m?.tenant?.id ?? null
+      sessionBrand.value = m ? (m.tenant ?? null) : undefined
+    },
+    { flush: 'sync', immediate: true },
+  )
+
   /** Any of the permission points (`<domain>.<resource>.<verb>`); root holds `*`. */
   const hasPerm = (perm: string | string[]) =>
     perms.value.has('*') || [perm].flat().some((p) => perms.value.has(p))
+  /**
+   * The platform root: `*` belongs to the builtin root role, which lives in the default tenant alone (still
+   * `*` while working inside another tenant). Pages over every tenant's data offer it their tenant filters.
+   */
+  const platformRoot = computed(() => perms.value.has('*'))
 
   /**
    * Lock screen (see docs/design-notes.md#layering): the page to return to while locked, null when unlocked. In localStorage, so
@@ -57,6 +95,7 @@ export const useAuthStore = defineStore('auth', () => {
     await refreshSettled()
     const token = await api.post<TokenPayload>(url, body, { silent: true })
     clear()
+    sessionEnd.value = null
     accessToken.value = token.accessToken
     setSessionHint(true)
   }
@@ -78,6 +117,7 @@ export const useAuthStore = defineStore('auth', () => {
     }
     setSessionHint(false)
     clear()
+    sessionEnd.value = null
   }
 
   return {
@@ -86,8 +126,10 @@ export const useAuthStore = defineStore('auth', () => {
     perms,
     roles,
     flags,
+    tenant,
     mustChangePassword,
     hasPerm,
+    platformRoot,
     locked,
     lock,
     unlock,

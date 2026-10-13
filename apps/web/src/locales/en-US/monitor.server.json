@@ -2,7 +2,9 @@
   "monitor": {
     "server": {
       "free": "Free",
-      "heap": "Node.js heap"
+      "heap": "Node.js heap",
+      "multiTenant": "Multi-tenancy",
+      "multiTenantOn": "On (set by the environment variable APP_MULTI_TENANT; changing it takes a restart of every instance)"
     }
   },
   "menu": {

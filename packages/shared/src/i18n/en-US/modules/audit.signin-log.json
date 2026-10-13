@@ -15,7 +15,9 @@
         "msgKey": "Message key",
         "msgParams": "Message parameters",
         "msg": "Message",
-        "userType": "User type"
+        "userType": "User type",
+        "tenantId": "Tenant",
+        "unresolved": "Unresolved tenant"
       }
     }
   }

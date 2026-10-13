@@ -42,8 +42,8 @@
         <text>{{ t('mine.signOut') }}</text>
       </view>
       <view class="qw-mine__foot">
-        <QwBrandMark size="30rpx" />
-        <text>{{ `${t('common.app.name')} · ${t('common.version')} ${version}` }}</text>
+        <QwBrandMark size="30rpx" :logo="brand.logo" />
+        <text>{{ `${brand.name} · ${t('common.version')} ${version}` }}</text>
       </view>
     </view>
     <wd-action-sheet
@@ -76,6 +76,7 @@ import QwTabBar from '@/core/components/QwTabBar.vue'
 import { LANGUAGE_KEY, locale, setLocale, t, tx } from '@/core/i18n'
 import { LOGIN_PAGE, api, assetUrl } from '@/core/request'
 import { useAuthStore } from '@/core/stores/auth'
+import { tenantBrand } from '@/core/tenancy'
 import {
   THEME_PREFS,
   canChooseTheme,
@@ -92,10 +93,12 @@ import { loadSubscribeIds, requestSubscribe } from '@/core/wx-subscribe'
  * then my profile and avatar, the password change and about (subpackage pages-sys), the language
  * (this device and the account's, as on the web), the appearance (not on the mini program), and sign-out.
  * New to-do WeChat alerts on the mini program, while the server offers subscribe templates.
- * Sign-in-only APIs over the caller's own row (see docs/design-notes.md#layering).
+ * Sign-in-only APIs over the caller's own row (see docs/design-notes.md#layering). The foot shows the tenant's
+ * brand (core/tenancy).
  */
 const auth = useAuthStore()
 const me = computed(() => auth.me)
+const brand = computed(() => tenantBrand(me.value))
 const avatar = computed(() => (me.value?.user.avatarUrl ? assetUrl(me.value.user.avatarUrl) : ''))
 const initial = computed(() => [...(me.value?.user.displayName ?? '')][0]?.toUpperCase() ?? '')
 /** dept and roles, one chip each: seeded names are i18n keys */

@@ -3,7 +3,8 @@
     "root": "超级管理员",
     "demo": "演示角色",
     "member": "注册成员",
-    "staff": "员工"
+    "staff": "员工",
+    "tenantAdmin": "租户管理员"
   },
   "dept": {
     "hq": "总部",
@@ -58,7 +59,8 @@
       "hr": "人事审批",
       "director": "总监审批",
       "twoLevels": "两级主管逐级审批",
-      "byAmount": "按报销金额"
+      "byAmount": "按报销金额",
+      "tenantAdmin": "租户管理员审批"
     },
     "path": {
       "over5": "超过 5 天",
@@ -97,5 +99,14 @@
   },
   "oauth": {
     "console": "管理后台"
+  },
+  "tenant": {
+    "default": "默认租户",
+    "yunshan": "云杉科技（示例）",
+    "qinghe": "青禾商贸（示例）"
+  },
+  "tenantPackage": {
+    "full": "示例套餐·全功能",
+    "noWorkflow": "示例套餐·无审批"
   }
 }

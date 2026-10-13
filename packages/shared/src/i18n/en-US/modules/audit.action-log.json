@@ -19,7 +19,8 @@
         "ok": "Succeeded",
         "errorMsg": "Error",
         "costMs": "Duration (ms)",
-        "userType": "User type"
+        "userType": "User type",
+        "actorTenantId": "Actor tenant"
       }
     }
   }

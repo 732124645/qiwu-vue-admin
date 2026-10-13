@@ -34,6 +34,8 @@ import { PermVersion } from '../../../../core/auth/perm-version.js'
 import { ROOT_ROLE } from '../../../../core/auth/principal.js'
 import { PASSWORD_RESET, SessionRevoker } from '../../../../core/auth/session-revoker.js'
 import { clsGet } from '../../../../core/context/cls.js'
+import { DEFAULT_TENANT_ID, tenantId } from '../../../../core/context/tenant.js'
+import { SecretBox } from '../../../../core/crypto/secret-box.js'
 import { BaseCrudService } from '../../../../core/db/base-crud.service.js'
 import { withCheckedPerm } from '../../../../core/data-scope/data-scope.js'
 import { replaceLinks } from '../../../../core/db/links.js'
@@ -53,6 +55,8 @@ import { DeptService } from '../dept/dept.service.js'
 import { OtpService } from '../../messaging/sms-otp/sms-otp.service.js'
 import { USER_POSITIONS, USER_ROLES } from '../iam-links.js'
 import { GrantPolicy } from '../role/grant-policy.js'
+import { assertUserQuota } from '../tenant/tenant-quota.js'
+import { mayManage, mayRemove, type Protection, protectedUsers } from './protected-users.js'
 import { User } from './user.entity.js'
 
 /** One live role of a user; `root` = the builtin root role. */
@@ -115,6 +119,7 @@ export class UserService extends BaseCrudService<User> {
     private readonly excel: ExcelService,
     private readonly depts: DeptService,
     private readonly i18n: I18nService,
+    private readonly box: SecretBox,
   ) {
     super(txHost, User)
   }
@@ -132,9 +137,10 @@ export class UserService extends BaseCrudService<User> {
       // tree paths end with '/', so /1/2/% never matches /1/23/
       qb.andWhere(
         `t.dept_id IN (SELECT c.id FROM iam_dept c
-           JOIN iam_dept f ON c.tree_path LIKE CONCAT(f.tree_path, '%') AND f.deleted_at IS NULL
-          WHERE f.id = :fDept AND c.deleted_at IS NULL)`,
-        { fDept: deptId },
+           JOIN iam_dept f ON c.tree_path LIKE CONCAT(f.tree_path, '%') AND f.tenant_id = c.tenant_id
+                AND f.deleted_at IS NULL
+          WHERE f.id = :fDept AND c.tenant_id = :fTenant AND c.deleted_at IS NULL)`,
+        { fDept: deptId, fTenant: tenantId() },
       )
     if (keyword)
       qb.andWhere('(t.username LIKE :kw OR t.display_name LIKE :kw)', { kw: contains(keyword) })
@@ -157,8 +163,10 @@ export class UserService extends BaseCrudService<User> {
     if (!row) throw new NotFoundException()
     const [vo] = await this.toVos([row])
     const positions = await this.txHost.tx.query<{ id: number }[]>(
-      'SELECT position_id AS id FROM iam_user_positions WHERE user_id = ? AND deleted_at IS NULL ORDER BY position_id',
-      [id],
+      `SELECT up.position_id AS id FROM iam_user_positions up
+         JOIN iam_position p ON p.id = up.position_id AND p.tenant_id = up.tenant_id AND p.deleted_at IS NULL
+        WHERE up.user_id = ? AND up.tenant_id = ? AND up.deleted_at IS NULL ORDER BY up.position_id`,
+      [id, tenantId()],
     )
     const roles = await this.rolesOf(id)
     return {
@@ -170,8 +178,8 @@ export class UserService extends BaseCrudService<User> {
   }
 
   /**
-   * POST: the body is checked against the current password policy; no password → the initial password
-   * param. `password_changed_at` stays null, so the first sign-in must change it. The dept must be live
+   * POST: the body is checked against the current password policy; no password → the data tenant's
+   * initial password (initialPassword). `password_changed_at` stays null, so the first sign-in must change it. The dept must be live
    * and in the caller's writable scope (404), the roles pass GrantPolicy (403), unknown roles/positions → 404.
    */
   async createUser(body: unknown): Promise<UserDetailVo> {
@@ -181,12 +189,16 @@ export class UserService extends BaseCrudService<User> {
     return this.detail(await this.insert(dto, hash))
   }
 
-  /** A new user with the bcrypt `hash`, must change it at the next sign-in; returns the id. */
+  /**
+   * A new user with the bcrypt `hash`, must change it at the next sign-in, within the tenant's user
+   * quota (409 `B1013`); returns the id.
+   */
   protected insert(
     { roleIds = [], positionIds = [], ...fields }: Omit<UserCreate, 'password'>,
     hash: string,
   ): Promise<number> {
     return this.txHost.withTransaction(async () => {
+      await assertUserQuota(this.txHost.tx, tenantId())
       await this.assertLiveDept(fields.deptId)
       const row = await this.create({ ...fields, passwordHash: hash, passwordChangedAt: null })
       await this.grants.assertAssignableRoles(roleIds, fields.deptId ?? null)
@@ -262,11 +274,17 @@ export class UserService extends BaseCrudService<User> {
     return this.excel.result(counts, failures, userColumns)
   }
 
-  /** Every live dept → its path of names (seeded names translated), siblings by `sort_no, id`. */
+  /**
+   * Every live dept of the data tenant → its path of names (seeded names translated), siblings by
+   * `sort_no, id`.
+   */
   protected async deptPaths(): Promise<Map<number, string>> {
     const rows = await this.txHost.tx.query<
       { id: number; tree_path: string; name: string; sort_no: number }[]
-    >('SELECT id, tree_path, name, sort_no FROM iam_dept WHERE deleted_at IS NULL')
+    >(
+      'SELECT id, tree_path, name, sort_no FROM iam_dept WHERE tenant_id = ? AND deleted_at IS NULL',
+      [tenantId()],
+    )
     const byId = new Map(rows.map((r) => [Number(r.id), r]))
     const lang = currentLocale()
     const text = (name: string) =>
@@ -294,8 +312,9 @@ export class UserService extends BaseCrudService<User> {
   }
 
   /**
-   * PUT: the fields sent change. A root user may be edited only by root and keeps the root role; a new
-   * dept must be in the caller's writable scope and not widen the relative scopes of the user's roles;
+   * PUT: the fields sent change. A protected user only by whom `mayManage` lets (a root user keeps the
+   * root role); a new dept must be in the caller's writable scope and not widen the relative scopes of
+   * the user's roles;
    * added roles pass GrantPolicy. Roles, dept or username changed → bumpUser; disabled → sessions revoked.
    * The mobile signs in (SMS codes): changing another user's needs the reset-password power too (the
    * perm, 403, and the user inside its scope, 404) and ends that user's sessions and unused codes.
@@ -307,7 +326,8 @@ export class UserService extends BaseCrudService<User> {
         await this.lockScopedIds([id])
         const stored = await this.repo.findOneByOrFail({ id })
         const held = await this.rolesOf(id)
-        this.assertManageable(held)
+        const why = await this.protection(id)
+        this.assertManageable(why)
         const mobileChanged = columns.mobile !== undefined && columns.mobile !== stored.mobile
         const principal = clsGet('principal')
         if (mobileChanged && id === principal?.userId)
@@ -321,7 +341,7 @@ export class UserService extends BaseCrudService<User> {
           )
         }
         const disabling = columns.enabled === false && stored.enabled
-        if (disabling) this.assertDisablable(id, held)
+        if (disabling) this.assertDisablable(id, why)
         const deptId = columns.deptId === undefined ? stored.deptId : columns.deptId
         const moved = deptId !== stored.deptId
         if (moved) await this.assertLiveDept(deptId)
@@ -355,8 +375,8 @@ export class UserService extends BaseCrudService<User> {
   }
 
   /**
-   * DELETE / batch-delete: all or nothing. Never the caller (422 user_self) nor a root user (422
-   * user_protected); soft delete, the role, position and preference links soft-deleted with it (iam.module
+   * DELETE / batch-delete: all or nothing. Never the caller (422 user_self) nor a protected user
+   * `mayRemove` refuses (422 user_protected); soft delete, the role, position and preference links soft-deleted with it (iam.module
    * references: the user's positions become deletable), then every session of each user ends.
    */
   override async remove(ids: readonly number[]): Promise<void> {
@@ -364,7 +384,9 @@ export class UserService extends BaseCrudService<User> {
     await this.txHost.withTransaction(async () => {
       await this.lockScopedIds(byId)
       if (byId.includes(clsGet('principal')?.userId ?? 0)) throw new BizError(Err.IAM_USER_SELF)
-      if ((await this.rootIds(byId)).size) throw new BizError(Err.IAM_USER_PROTECTED)
+      const p = clsGet('principal')
+      for (const why of (await protectedUsers(this.txHost.tx, byId)).values())
+        if (!mayRemove(p, why)) throw new BizError(Err.IAM_USER_PROTECTED)
       await this.deleteRows(byId)
     })
     for (const id of byId) await this.revoker.revokeUser(id, 'user_removed')
@@ -372,8 +394,8 @@ export class UserService extends BaseCrudService<User> {
 
   /**
    * PUT /:id/password (`reset-password`): a new password under the current policy that the user must
-   * change at the next sign-in (`password_changed_at = null`); every session of the user ends. Root users
-   * only by root.
+   * change at the next sign-in (`password_changed_at = null`); every session of the user ends. A
+   * protected user only by whom `mayManage` lets.
    */
   async resetPassword(id: number, body: unknown): Promise<void> {
     const { policy } = await this.authParams.load()
@@ -382,7 +404,7 @@ export class UserService extends BaseCrudService<User> {
     await this.after(
       this.txHost.withTransaction(async (): Promise<After> => {
         await this.lockScopedIds([id])
-        this.assertManageable(await this.rolesOf(id))
+        this.assertManageable(await this.protection(id))
         await this.repo.update(id, { passwordHash: hash, passwordChangedAt: null })
         return { revoke: PASSWORD_RESET }
       }),
@@ -413,16 +435,23 @@ export class UserService extends BaseCrudService<User> {
     if (voidMobile) await this.otp.voidMobile(voidMobile)
   }
 
-  /** Non-root callers never write a root user (its password, contacts or dept are a takeover path). */
-  protected assertManageable(held: HeldRole[]): void {
-    if (!clsGet('principal')?.root && held.some((r) => r.root))
-      throw new BizError(Err.IAM_USER_PROTECTED)
+  /** Why user `id` (of the data tenant) is protected, if it is (`protectedUsers`). */
+  protected async protection(id: number): Promise<Protection | undefined> {
+    return (await protectedUsers(this.txHost.tx, [id])).get(id)
   }
 
-  /** Nobody disables their own account or a root user. */
-  protected assertDisablable(id: number, held: HeldRole[]): void {
+  /**
+   * A protected user is written only by whom `mayManage` lets (its password, contacts or dept are a
+   * takeover path): root, or for another `tenant_admin` holder a holder.
+   */
+  protected assertManageable(why: Protection | undefined): void {
+    if (!mayManage(clsGet('principal'), why)) throw new BizError(Err.IAM_USER_PROTECTED)
+  }
+
+  /** Nobody disables their own account, a root user or the owner (`mayRemove`). */
+  protected assertDisablable(id: number, why: Protection | undefined): void {
     if (id === clsGet('principal')?.userId) throw new BizError(Err.IAM_USER_SELF)
-    if (held.some((r) => r.root)) throw new BizError(Err.IAM_USER_PROTECTED)
+    if (!mayRemove(clsGet('principal'), why)) throw new BizError(Err.IAM_USER_PROTECTED)
   }
 
   /** Live roles of the user (links to deleted roles are left out). */
@@ -430,10 +459,10 @@ export class UserService extends BaseCrudService<User> {
     const rows = await this.txHost.tx.query<{ id: number; name: string; root: number }[]>(
       `SELECT r.id, r.name, (r.code = ? AND r.is_builtin = 1) AS root
          FROM iam_user_roles ur
-         JOIN iam_role r ON r.id = ur.role_id AND r.deleted_at IS NULL
-        WHERE ur.user_id = ? AND ur.deleted_at IS NULL
+         JOIN iam_role r ON r.id = ur.role_id AND r.tenant_id = ur.tenant_id AND r.deleted_at IS NULL
+        WHERE ur.user_id = ? AND ur.tenant_id = ? AND ur.deleted_at IS NULL
         ORDER BY r.sort_no, r.id`,
-      [ROOT_ROLE, id],
+      [ROOT_ROLE, id, tenantId()],
     )
     return rows.map((r) => ({ id: Number(r.id), name: r.name, root: Number(r.root) === 1 }))
   }
@@ -444,15 +473,16 @@ export class UserService extends BaseCrudService<User> {
   }
 
   /**
-   * Replaces the positions; an unknown position → 404. The positions are read FOR SHARE: one deleted
-   * meanwhile (it locks its row first) is either seen deleted or waits for this commit and sees the link.
+   * Replaces the positions; an unknown position (another tenant's too) → 404. The positions are read FOR
+   * SHARE: one deleted meanwhile (it locks its row first) is either seen deleted or waits for this commit
+   * and sees the link.
    */
   protected async setPositions(userId: number, positionIds: readonly number[]): Promise<void> {
     const ids = [...new Set(positionIds)]
     if (ids.length) {
       const live = await this.txHost.tx.query<unknown[]>(
-        'SELECT id FROM iam_position WHERE id IN (?) AND deleted_at IS NULL FOR SHARE',
-        [ids],
+        'SELECT id FROM iam_position WHERE id IN (?) AND tenant_id = ? AND deleted_at IS NULL FOR SHARE',
+        [ids, tenantId()],
       )
       if (live.length !== ids.length) throw new NotFoundException()
     }
@@ -468,25 +498,34 @@ export class UserService extends BaseCrudService<User> {
     return assertLive(this.txHost.tx, 'iam_dept', deptId)
   }
 
-  /** The `iam.user.initial_password` param; unset or failing the policy → 422. */
+  /**
+   * The initial password of the data tenant (see docs/design-notes.md#tenancy): the default tenant's is the
+   * `iam.user.initial_password` param, any other tenant's its own, set when it was opened
+   * (`iam_tenant.initial_password_enc`); unset, unreadable or failing the policy → 422.
+   */
   protected async initialPassword(policy: PasswordPolicy): Promise<string> {
-    const value = await this.params.get(USER_INITIAL_PASSWORD_PARAM)
+    const tid = tenantId()
+    const value =
+      tid === DEFAULT_TENANT_ID
+        ? await this.params.get(USER_INITIAL_PASSWORD_PARAM)
+        : await this.tenantInitialPassword(tid)
     if (!value || !passwordSchema(policy).safeParse(value).success)
       throw new BizError(Err.IAM_INITIAL_PASSWORD_UNSET)
     return value
   }
 
-  /** Those of `ids` holding the builtin root role. */
-  protected async rootIds(ids: readonly number[]): Promise<Set<number>> {
-    if (!ids.length) return new Set()
-    const rows = await this.txHost.tx.query<{ id: number }[]>(
-      `SELECT DISTINCT ur.user_id AS id
-         FROM iam_user_roles ur
-         JOIN iam_role r ON r.id = ur.role_id AND r.deleted_at IS NULL
-        WHERE ur.user_id IN (?) AND ur.deleted_at IS NULL AND r.code = ? AND r.is_builtin = 1`,
-      [ids, ROOT_ROLE],
+  /** Tenant `tid`'s own initial password; null when it has none or the box does not open. */
+  private async tenantInitialPassword(tid: number): Promise<string | null> {
+    const [row] = await this.txHost.tx.query<{ enc: string | null }[]>(
+      'SELECT initial_password_enc AS enc FROM iam_tenant WHERE id = ? AND deleted_at IS NULL',
+      [tid],
     )
-    return new Set(rows.map((r) => Number(r.id)))
+    if (!row?.enc) return null
+    try {
+      return this.box.decrypt(row.enc)
+    } catch {
+      return null
+    }
   }
 
   /** `scopedQb('t')` with the dept joined for its name. */
@@ -501,11 +540,16 @@ export class UserService extends BaseCrudService<User> {
   }
 
   /**
-   * Rows → VOs: mobile/email masked unless `plainContacts`, `root` for holders of the builtin root role.
+   * Rows → VOs: mobile/email masked unless `plainContacts`, `root` for holders of the builtin root role,
+   * `protected` where `mayManage` refuses the caller.
    */
   protected async toVos(rows: User[]): Promise<UserVo[]> {
     const plain = this.plainContacts()
-    const roots = await this.rootIds(rows.map((r) => r.id))
+    const why = await protectedUsers(
+      this.txHost.tx,
+      rows.map((r) => r.id),
+    )
+    const p = clsGet('principal')
     return rows.map((r) => ({
       id: r.id,
       username: r.username,
@@ -518,7 +562,8 @@ export class UserService extends BaseCrudService<User> {
       gender: r.gender as UserGender,
       avatarUrl: r.avatarUrl,
       enabled: r.enabled,
-      root: roots.has(r.id),
+      root: why.get(r.id) === 'root',
+      protected: !mayManage(p, why.get(r.id)),
       lastLoginAt: iso(r.lastLoginAt),
       note: r.note,
       createdBy: r.createdBy,

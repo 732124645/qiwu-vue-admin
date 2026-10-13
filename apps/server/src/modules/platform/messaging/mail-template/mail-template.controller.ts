@@ -32,12 +32,14 @@ import {
 } from '@qiwu/shared'
 import { ActionLog } from '../../../../core/audit/action-log.js'
 import { RequirePerm } from '../../../../core/auth/decorators.js'
+import { PlatformOnly } from '../../../../core/auth/platform-only.js'
 import { Idempotent } from '../../../../core/guard/idempotent.js'
 import { ApiEnvelope } from '../../../../core/http/api-envelope.decorator.js'
 import type { MailTemplate } from './mail-template.entity.js'
 import { MailTemplateService } from './mail-template.service.js'
 
 @ApiTags('messaging')
+@PlatformOnly()
 @Controller('messaging/mail-templates')
 export class MailTemplateController {
   constructor(private readonly mailTemplates: MailTemplateService) {}

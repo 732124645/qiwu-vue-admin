@@ -5,6 +5,11 @@ import { DataScoped } from '<%= m.up %>core/data-scope/data-scope.js'
 import { <%= names([m.own.some((c) => c.base === 'decimal' && c.tsType === 'number') && 'decimalNumber', m.entityBase]) %> } from '<%= m.up %>core/db/base.entity.js'
 <%_ if (m.refs.length) { _%>
 import { referencedBy } from '<%= m.up %>core/db/references.js'
+<%_ } _%>
+<%_ if (m.tenant) { _%>
+import { TenantColumn } from '<%= m.up %>core/db/tenant-filter.js'
+<%_ } _%>
+<%_ if (m.refs.length) { _%>
 
 // other tables' rows holding these ids, checked on delete (no foreign keys: core/db/references.ts)
 <%_ for (const r of m.refs) { _%>
@@ -25,4 +30,8 @@ export class <%= m.Biz %> extends <%= m.entityBase %> {
   <%= c.field %>: <%= c.ts %>
 
 <% } -%>
+<%_ if (m.tenant) { _%>
+  @TenantColumn()
+  tenantId: number
+<%_ } _%>
 }

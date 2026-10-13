@@ -13,5 +13,6 @@
   "refresh_reuse": "Refresh token replayed: the session was revoked",
   "lock_screen_exceeded": "Too many wrong lock-screen passwords: the session was revoked",
   "password_check_exceeded": "Too many wrong current-password checks: all sessions were revoked",
-  "kicked": "Signed out by an administrator ({by})"
+  "kicked": "Signed out by an administrator ({by})",
+  "tenant_unavailable": "The tenant is disabled, has expired or multi-tenancy is off"
 }

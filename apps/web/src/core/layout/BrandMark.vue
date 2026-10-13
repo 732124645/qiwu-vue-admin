@@ -1,10 +1,26 @@
 <script setup lang="ts">
-/** Original Nested Tile artwork: an open frame and module on a theme-colored tile. */
-const { size = 28 } = defineProps<{ size?: number }>()
+/**
+ * Original Nested Tile artwork: an open frame and module on a theme-colored tile. With `src` (a tenant's
+ * logo) that image instead, on a surface-colored tile: legible on the navy side bar too.
+ */
+const { size = 28, src } = defineProps<{ size?: number; src?: string | null }>()
 </script>
 
 <template>
-  <span class="brand-mark" :style="{ width: `${size}px`, height: `${size}px` }" aria-hidden="true">
+  <span
+    v-if="src"
+    class="brand-mark brand-mark--image"
+    :style="{ width: `${size}px`, height: `${size}px` }"
+    aria-hidden="true"
+  >
+    <img :src alt="" />
+  </span>
+  <span
+    v-else
+    class="brand-mark"
+    :style="{ width: `${size}px`, height: `${size}px` }"
+    aria-hidden="true"
+  >
     <svg
       viewBox="0 0 24 24"
       fill="none"
@@ -46,5 +62,16 @@ const { size = 28 } = defineProps<{ size?: number }>()
 .brand-mark svg {
   width: 100%;
   height: 100%;
+}
+.brand-mark--image {
+  overflow: hidden;
+  background: var(--qw-surface);
+  box-shadow: inset 0 0 0 1px var(--qw-border);
+}
+/* sized against the tile's own grid area (a percentage padding would follow the parent's width) */
+.brand-mark--image img {
+  width: 80%;
+  height: 80%;
+  object-fit: contain;
 }
 </style>

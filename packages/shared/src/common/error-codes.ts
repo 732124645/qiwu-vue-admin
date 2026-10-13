@@ -80,6 +80,12 @@ export const Err = {
   AUTH_WX_MP_REFUSED: def('A1034', 403, 'error.auth.wx_mp_refused'),
   /** WeChat's code2Session could not be reached or failed (nothing of its answer is echoed) */
   AUTH_WX_MP_UPSTREAM: def('A1035', 502, 'error.auth.wx_mp_upstream'),
+  /** multi-tenancy: the session's data tenant is no longer the one the browser tab expected */
+  AUTH_TENANT_SWITCHED: def('A1040', 409, 'error.auth.tenant_switched'),
+  /** sign-in on a host bound to a tenant with the code of another one */
+  AUTH_TENANT_HOST_MISMATCH: def('A1041', 400, 'error.auth.tenant_host_mismatch'),
+  /** the session's tenant is disabled or expired, or multi-tenancy is off for it: the session ended */
+  AUTH_TENANT_INACTIVE: def('A1042', 401, 'error.auth.tenant_inactive'),
 
   /**
    * GrantPolicy (see docs/design-notes.md#permissions): a non-root caller gave a role holding perms they lack, a role whose data
@@ -112,6 +118,17 @@ export const Err = {
    * find it by (one outside the group format may still be corrected)
    */
   IAM_MENU_ROUTE_NAME_FIXED: def('B1012', 422, 'error.iam.menu_route_name_fixed'),
+  /** a new user would take the tenant past its user quota */
+  IAM_TENANT_USER_QUOTA: def('B1013', 409, 'error.iam.tenant_user_quota'),
+  /** a tenant package holds only menus open to tenants: never a platform-only one */
+  IAM_TENANT_PACKAGE_PLATFORM_MENU: def('B1014', 422, 'error.iam.tenant_package_platform_menu'),
+  /** the default tenant is never disabled, given an end or a package, and keeps its code */
+  IAM_TENANT_DEFAULT_FIXED: def('B1015', 422, 'error.iam.tenant_default_fixed'),
+  /**
+   * a tenant's domain is the platform's own host name (the request's host or one in `CORS_ORIGIN`):
+   * binding it would send every sign-in on the platform's address to that tenant
+   */
+  IAM_TENANT_DOMAIN_RESERVED: def('B1016', 422, 'error.iam.tenant_domain_reserved'),
 
   /** builtin params (seeded) are never deleted and keep whether they are public */
   SETTINGS_PARAM_BUILTIN: def('B2001', 422, 'error.settings.param_builtin'),
@@ -160,7 +177,7 @@ export const Err = {
 
   /**
    * codegen import / sync: the table is not a base table of this database, is a framework table
-   * (meta_, test_, cg_) or is already imported; params `{ table }`
+   * (meta_, test_, cg_, wxoa_) or is already imported; params `{ table }`
    */
   CODEGEN_TABLE_UNAVAILABLE: def('C3001', 422, 'error.codegen.table_unavailable'),
   /**

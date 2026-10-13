@@ -23,6 +23,16 @@ export interface AppClsStore extends ClsStore {
   scopeCache?: Map<string, unknown>
   /** Set by `@SkipDataScope()` for the decorated call: `scopedQb` applies no data scope. */
   skipDataScope?: boolean
+  /**
+   * The data tenant (see docs/design-notes.md#tenancy). This key and the next two are written only by
+   * `core/context` (`tenant.ts`, each entry point) and `core/auth`; everyone else goes through
+   * `withTenant` / `allTenants`.
+   */
+  tenantId?: number
+  /** Set by `allTenants`: no tenant condition (cleared again by a nested `withTenant`). */
+  allTenants?: true
+  /** The tenant of the acting user, when it differs from the data tenant; absent = the data tenant. */
+  actorTenantId?: number
 }
 
 /**

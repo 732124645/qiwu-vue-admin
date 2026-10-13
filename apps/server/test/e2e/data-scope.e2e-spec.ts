@@ -23,6 +23,7 @@ import { ScopedNoteService } from '../fixtures/scoped-note/scoped-note.service.j
 import { createScopedNoteTables, dropScopedNoteTables } from '../fixtures/scoped-note/setup.js'
 import { bearer, signIn } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
+import { inTenant1 } from '../setup/tenants.js'
 
 const PREFIX = 'ds-e2e-'
 /** Explicit ids far above the seeded depts. 70010's path starts with '/7000/7001' but not '/7000/7001/'. */
@@ -70,31 +71,41 @@ const expect404 = (res: request.Response) => {
 }
 
 async function role(name: string, dataScope: DataScope, perms: string[], picked: number[] = []) {
-  const id = await insertRow(ds.manager, 'iam_role', {
-    code: PREFIX + name,
-    name: PREFIX + name,
-    data_scope: dataScope,
-  })
+  const id = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_role', {
+      code: PREFIX + name,
+      name: PREFIX + name,
+      data_scope: dataScope,
+    }),
+  )
   for (const perm of perms)
-    await ds.query('INSERT INTO iam_role_menus (role_id, menu_id) VALUES (?, ?)', [
+    await ds.query('INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES (?, ?, 1)', [
       id,
       menuIds[Object.values(notePerms).indexOf(perm as never)],
     ])
   for (const dept of picked)
-    await ds.query('INSERT INTO iam_role_depts (role_id, dept_id) VALUES (?, ?)', [id, dept])
+    await ds.query('INSERT INTO iam_role_depts (role_id, dept_id, tenant_id) VALUES (?, ?, 1)', [
+      id,
+      dept,
+    ])
   roleIds[name] = id
 }
 
 async function user(name: string, roles: string[], deptId: number | null = D.mine) {
-  const id = await insertRow(ds.manager, 'iam_user', {
-    username: PREFIX + name,
-    display_name: name,
-    password_hash: 'not-used-by-this-spec',
-    password_changed_at: new Date(),
-    dept_id: deptId,
-  })
+  const id = await inTenant1(() =>
+    insertRow(ds.manager, 'iam_user', {
+      username: PREFIX + name,
+      display_name: name,
+      password_hash: 'not-used-by-this-spec',
+      password_changed_at: new Date(),
+      dept_id: deptId,
+    }),
+  )
   for (const r of roles)
-    await ds.query('INSERT INTO iam_user_roles (user_id, role_id) VALUES (?, ?)', [id, roleIds[r]])
+    await ds.query('INSERT INTO iam_user_roles (user_id, role_id, tenant_id) VALUES (?, ?, 1)', [
+      id,
+      roleIds[r],
+    ])
   userIds[name] = id
   tokens[name] = (await signIn(app, PREFIX + name)).accessToken
 }
@@ -114,16 +125,14 @@ beforeAll(async () => {
   await createScopedNoteTables(ds)
 
   for (const [id, parent, path] of DEPTS)
-    await ds.query('INSERT INTO iam_dept (id, parent_id, tree_path, name) VALUES (?, ?, ?, ?)', [
-      id,
-      parent,
-      path,
-      `${PREFIX}${id}`,
-    ])
+    await ds.query(
+      'INSERT INTO iam_dept (id, parent_id, tree_path, name, tenant_id) VALUES (?, ?, ?, ?, 1)',
+      [id, parent, path, `${PREFIX}${id}`],
+    )
   // the fixture resolves own_dept_tree in its own test_dept: mirror the same tree there
   await ds.query('DELETE FROM test_dept')
   await ds.query(
-    'INSERT INTO test_dept (id, parent_id, tree_path, name) SELECT id, parent_id, tree_path, name FROM iam_dept WHERE id IN (?)',
+    'INSERT INTO test_dept (id, parent_id, tree_path, name, tenant_id) SELECT id, parent_id, tree_path, name, tenant_id FROM iam_dept WHERE id IN (?)',
     [Object.values(D)],
   )
   for (const perm of Object.values(notePerms))
@@ -182,7 +191,7 @@ afterAll(async () => {
 beforeEach(async () => {
   await ds.query('TRUNCATE TABLE test_scoped_note')
   await ds.query(
-    'INSERT INTO test_scoped_note (id, title, dept_id, created_by) VALUES (1, ?, ?, ?), (2, ?, ?, ?), (3, ?, ?, ?), (4, ?, ?, ?), (5, ?, ?, ?)',
+    'INSERT INTO test_scoped_note (id, title, dept_id, created_by, tenant_id) VALUES (1, ?, ?, ?, 1), (2, ?, ?, ?, 1), (3, ?, ?, ?, 1), (4, ?, ?, ?, 1), (5, ?, ?, ?, 1)',
     [
       ['top', D.top, OTHER_USER],
       ['mine', D.mine, OTHER_USER],
@@ -395,11 +404,13 @@ describe('the hook in code (ScopedNoteService)', () => {
     perms,
   })
   const as = <T>(p: Principal | undefined, fn: () => Promise<T>, perm?: string) =>
-    cls.run(() => {
-      cls.set('principal', p)
-      if (perm) cls.set('checkedPerm', { perms: [perm], all: false })
-      return fn()
-    })
+    inTenant1(() =>
+      cls.run(() => {
+        cls.set('principal', p)
+        if (perm) cls.set('checkedPerm', { perms: [perm], all: false })
+        return fn()
+      }),
+    )
   const visible = (p: Principal | undefined, perm?: string) =>
     as(p, async () => ids(await svc.scopedQb('n').getMany()), perm)
 
@@ -413,7 +424,7 @@ describe('the hook in code (ScopedNoteService)', () => {
 
   it('no caller → nothing; @SkipDataScope → everything, for that call only', async () => {
     expect(await visible(undefined)).toEqual([])
-    expect(await svc.countAll()).toBe(5) // outside any request context, like a job
+    expect(await inTenant1(() => svc.countAll())).toBe(5) // outside any request, like a job in its tenant
     await as(me(scopeRole('own_dept')), async () => {
       expect(await svc.countAll()).toBe(5)
       expect(await svc.scopedQb('n').getCount()).toBe(1)

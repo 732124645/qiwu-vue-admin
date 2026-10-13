@@ -8,6 +8,7 @@ const SCRIPT = `
 import { createClient } from 'redis'
 import { DataSource } from 'typeorm'
 import { keyPattern } from './dist/core/redis/cache-namespaces.js'
+import { withTenant } from './dist/core/context/tenant.js'
 import { dataSourceOptions } from './dist/db/data-source.js'
 import { seedLimitedUser } from './dist/db/seeds/iam/iam.seed.js'
 import { insertRow } from './dist/db/seeds/upsert.js'
@@ -28,12 +29,12 @@ try {
 const sms = JSON.parse(SMS_USER)
 const ds = await new DataSource(dataSourceOptions()).initialize()
 try {
-  await ds.transaction(async (q) => {
+  await withTenant(1, () => ds.transaction(async (q) => {
     const userId = await seedLimitedUser(q, sms.username, sms.password)
     await q.query('UPDATE iam_user SET mobile = ? WHERE id = ?', [sms.mobile, userId])
     const channelId = await insertRow(q, 'msg_sms_channel', { driver: 'debug', name: 'mobile-e2e', enabled: 1 })
     await q.query('UPDATE msg_sms_template SET channel_id = ? WHERE code = ?', [channelId, 'auth.sms_code'])
-  })
+  }))
 } finally {
   await ds.destroy()
 }
