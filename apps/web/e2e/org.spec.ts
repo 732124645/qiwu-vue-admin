@@ -208,6 +208,7 @@ test("dept: moving a dept rewrites its children's paths and the own_dept_tree us
 test('menu: kind-driven form with the IconPicker; admin-created names follow the language (name_i18n)', async ({
   page,
 }) => {
+  test.setTimeout(90_000) // many steps, two reloads and two language switches
   const menuField = (prop: string, lang = 'zh-CN') => msg(`field.iam.menu.${prop}`, lang)
   const title = msg('crud.title.create', 'zh-CN', { name: msg('iam.menu.entity') })
   const [G, L] = ['e2e-org-menu-group', 'e2e-org-menu-link']
