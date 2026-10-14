@@ -99,7 +99,7 @@ export class OtpService {
       // to another user at once, and its pending codes must not sign that one in
       const [user] = await this.ds.query<{ mobile: string | null; tenant_id: number }[]>(
         // qw:cross-tenant the user by its global id, whatever context revokes it; its tenant comes from the row
-        'SELECT mobile, tenant_id FROM iam_user WHERE id = ?', // qw:include-deleted
+        'SELECT mobile, tenant_id FROM iam_user WHERE id = ?', // qw:include-deleted; qw:no-data-scope revokes a user's pending codes
         [userId],
       )
       if (user?.mobile)
@@ -261,6 +261,7 @@ export class OtpService {
   ): Promise<void> {
     const send = await this.txHost.withTransaction(READ_COMMITTED, async () => {
       const [user] = await this.txHost.tx.query<{ id: number; enabled: number }[]>(
+        // qw:no-data-scope whom a code is sent to, before any caller
         'SELECT id, enabled FROM iam_user WHERE tenant_id = ? AND mobile = ? AND deleted_at IS NULL LIMIT 1',
         [tenantId(), mobile],
       )

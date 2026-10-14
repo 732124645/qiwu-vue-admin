@@ -1,8 +1,14 @@
 # Changelog
 
-中文说明：本文件按功能区域汇总栖梧 / Qiwu 的用户可见变化，正文使用英文。`1.0.0` 于 2026-10-05 发布，`1.0.3` 于 2026-10-06 发布（`1.0.1`、`1.0.2` 未发布，内容并入 `1.0.3`），`1.1.0`（多租户）于 2026-10-14 发布。
+中文说明：本文件按功能区域汇总栖梧 / Qiwu 的用户可见变化，正文使用英文。`1.0.0` 于 2026-10-05 发布，`1.0.3` 于 2026-10-06 发布（`1.0.1`、`1.0.2` 未发布，内容并入 `1.0.3`），`1.1.0`（多租户）与 `1.2.0`（手写 SQL 的数据权限）于 2026-10-14 发布。
 
 All notable product changes are recorded here in Keep a Changelog style. The initial release below summarizes the delivered features. Planned work is identified explicitly.
+
+## [1.2.0] - 2026-10-14
+
+### Added
+
+- Data scope for hand-written SQL: `dataScopeSql(alias, columns)` / `dataScopeSqlFor(entity, alias)` return the same department/owner condition as the ORM path, as a parameterized `{ sql, params }` for raw queries. A new `pnpm verify` check reports raw SQL (and QueryBuilder table-name joins) on a data-scoped table that neither uses it nor states `qw:no-data-scope <reason>`. See `docs/data-scope.md`.
 
 ## [1.1.0] - 2026-10-14
 

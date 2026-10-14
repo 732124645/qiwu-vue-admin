@@ -490,6 +490,7 @@ export class StorageService {
       this.storages.findBy({ id: In(storageIds) }),
       // the objects' tenant (the caller's): an uploader of another tenant shows no name
       this.objects.manager.query<{ id: number; display_name: string }[]>(
+        // qw:no-data-scope labels: the uploaders of the objects listed, not a user list
         'SELECT id, display_name FROM iam_user WHERE id IN (?) AND tenant_id = ? AND deleted_at IS NULL',
         [userIds, tenantId()],
       ),

@@ -354,6 +354,7 @@ export class Notifier {
             timezone: string | null
           }[]
         >(
+          // qw:no-data-scope the recipients of a notice, not a list for the caller
           'SELECT id, email, mobile, locale, timezone FROM iam_user WHERE id IN (?) AND deleted_at IS NULL AND tenant_id = ?',
           [userIds, tenantId()],
         )

@@ -92,6 +92,7 @@ export class WfListService {
     const rows = await this.txHost.tx.query<
       { id: number; display_name: string; dept_name: string | null }[]
     >(
+      // qw:no-data-scope process pickers offer the whole org, not the caller's data scope
       `SELECT u.id, u.display_name, d.name AS dept_name FROM iam_user u
          LEFT JOIN iam_dept d ON d.id = u.dept_id AND d.tenant_id = ? AND d.deleted_at IS NULL
         WHERE u.tenant_id = ? AND u.enabled = 1 AND u.deleted_at IS NULL AND u.display_name LIKE ?
@@ -112,6 +113,7 @@ export class WfListService {
    */
   async deptOptions(): Promise<DeptTreeNode[]> {
     const rows = await this.txHost.tx.query<{ id: number; parent_id: number; name: string }[]>(
+      // qw:no-data-scope process pickers offer the whole org, not the caller's data scope
       `SELECT id, parent_id, name FROM iam_dept
         WHERE tenant_id = ? AND enabled = 1 AND deleted_at IS NULL ORDER BY sort_no, id`,
       [tenantId()],

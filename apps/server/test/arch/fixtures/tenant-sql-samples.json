@@ -131,9 +131,10 @@
         "await q.query('DELETE FROM t_link WHERE user_id < ?', [x]) // qw:cross-tenant a purge of every tenant",
         "await q.query('SELECT id FROM t_user WHERE id = ?', [id])",
         "/* qw:cross-tenant a block comment right above counts */",
-        "await q.query('SELECT id FROM t_user')"
+        "await q.query('SELECT id FROM t_user')",
+        "await q.query('SELECT id FROM t_user') /* qw:cross-tenant */"
       ],
-      "expect": ["4 t_user", "7 t_user", "11 t_user"]
+      "expect": ["4 t_user", "7 t_user", "11 t_user", "14 t_user"]
     },
     {
       "name": "withTenant( and allTenants( carry a reason",

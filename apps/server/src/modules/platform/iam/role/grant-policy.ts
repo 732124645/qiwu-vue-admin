@@ -404,6 +404,7 @@ export class GrantPolicy {
   private async picked(ids: readonly number[]): Promise<Map<number, number[]>> {
     const rows = ids.length
       ? await this.txHost.tx.query<{ role_id: number; id: number }[]>(
+          // qw:no-data-scope grant check: a role's picked depts, judged against the caller's scope
           `SELECT rd.role_id, d.id FROM iam_role_depts rd
              JOIN iam_dept d ON d.id = rd.dept_id AND d.tenant_id = rd.tenant_id AND d.deleted_at IS NULL
             WHERE rd.role_id IN (?) AND rd.tenant_id = ? AND rd.deleted_at IS NULL FOR SHARE`,
@@ -429,6 +430,7 @@ export class GrantPolicy {
    */
   private async holderDepts(id: number): Promise<(number | null)[]> {
     const rows = await this.txHost.tx.query<{ dept_id: number | null }[]>(
+      // qw:no-data-scope grant check: the depts of a role's holders
       `SELECT DISTINCT u.dept_id FROM iam_user_roles ur
          JOIN iam_user u ON u.id = ur.user_id AND u.tenant_id = ur.tenant_id AND u.deleted_at IS NULL
         WHERE ur.role_id = ? AND ur.tenant_id = ? AND ur.deleted_at IS NULL`,
@@ -446,7 +448,7 @@ export class GrantPolicy {
           `SELECT p.id AS root, c.id FROM iam_dept p
              JOIN iam_dept c ON c.tree_path LIKE CONCAT(p.tree_path, '%') AND c.tenant_id = p.tenant_id
                   AND c.deleted_at IS NULL
-            WHERE p.id IN (?) AND p.tenant_id = ? AND p.deleted_at IS NULL`,
+            WHERE p.id IN (?) AND p.tenant_id = ? AND p.deleted_at IS NULL`, // qw:no-data-scope grant check: the dept subtrees the scopes reach
           [roots, tenantId()],
         )
       : []

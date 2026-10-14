@@ -41,7 +41,7 @@ const SRC = 'apps/server/src/'
 const MIGRATIONS = 'apps/server/src/db/migrations/'
 const TABLES_FILE = 'apps/server/src/core/db/tenant-tables.ts'
 const BASELINE = 'scripts/arch/tenant-sql.baseline.json'
-const MARK = /qw:cross-tenant\s+\S/
+const MARK = /qw:cross-tenant\s+(?!\*\/)\S/
 const CONCAT = /\/\/\s*arch-allow:\s*sql-concat\b/
 const NOTE = /\btenant:\s*\S|qw:cross-tenant\s+\S/
 const PRIMITIVES = new Set(['withTenant', 'allTenants'])
@@ -73,7 +73,7 @@ const NOT_ALIAS = new Set(
 const OR = new Set(['or', 'xor', '||'])
 
 /** Words (lowercased; `` `name` `` too), strings and symbols, each with its bracket level. */
-function tokenize(text) {
+export function tokenize(text) {
   const out = []
   let depth = 0
   TOKEN.lastIndex = 0
@@ -118,7 +118,7 @@ function queryLevels(toks) {
  * too), JOIN, UPDATE (not `FOR UPDATE` nor `ON DUPLICATE KEY UPDATE`), INTO (with its column list) and
  * INSERT / REPLACE without INTO; `at` = the index of that word, `right` = a RIGHT JOIN.
  */
-function tableRefs(toks) {
+export function tableRefs(toks) {
   const refs = []
   for (let i = 0; i < toks.length; i++) {
     const t = toks[i]
@@ -272,14 +272,14 @@ export function tenantProblems(text, tenant, known) {
 // --- source files -----------------------------------------------------------------------------------
 
 /** The cooked text of a string or template literal, an interpolation as one placeholder word. */
-function literalText(n) {
+export function literalText(n) {
   if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) return n.text
   if (ts.isTemplateExpression(n))
     return n.head.text + n.templateSpans.map((s) => ` ${HOLE} ${s.literal.text}`).join('')
   return undefined
 }
 
-const calleeName = (call) =>
+export const calleeName = (call) =>
   ts.isIdentifier(call.expression)
     ? call.expression.text
     : ts.isPropertyAccessExpression(call.expression)

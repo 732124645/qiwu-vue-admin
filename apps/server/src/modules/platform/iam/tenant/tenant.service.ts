@@ -327,6 +327,7 @@ export class TenantService {
         : [],
       // qw:cross-tenant the live users of each listed tenant (platform page)
       this.ds.query<{ tid: number; n: number | string }[]>(
+        // qw:no-data-scope platform page: each listed tenant's size
         `SELECT tenant_id AS tid, COUNT(*) AS n FROM iam_user
           WHERE tenant_id IN (?) AND deleted_at IS NULL GROUP BY tenant_id`,
         [ids],

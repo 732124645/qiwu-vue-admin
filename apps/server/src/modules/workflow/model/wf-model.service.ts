@@ -138,9 +138,11 @@ const settingRefs = (scope: unknown, managers: unknown): OrgRefs => {
 
 // a deleted one still belongs to its tenant (and reaches nobody at run time, the org chart's rule)
 const ORG_SQL: Record<keyof OrgRefs, string> = {
+  // qw:no-data-scope reference check: the ids a model names belong to the tenant
   users: 'SELECT id FROM iam_user WHERE id IN (?) AND tenant_id = ?', // qw:include-deleted
   roles: 'SELECT id FROM iam_role WHERE id IN (?) AND tenant_id = ?', // qw:include-deleted
   positions: 'SELECT id FROM iam_position WHERE id IN (?) AND tenant_id = ?', // qw:include-deleted
+  // qw:no-data-scope reference check: the ids a model names belong to the tenant
   depts: 'SELECT id FROM iam_dept WHERE id IN (?) AND tenant_id = ?', // qw:include-deleted
 }
 

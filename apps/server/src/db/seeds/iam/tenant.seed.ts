@@ -9,7 +9,7 @@ import { findRow, insertRow } from '../upsert.js'
 export async function seedTenant(q: EntityManager, tid: number): Promise<string[]> {
   const [top] = await q.query(
     // qw:include-deleted a root dept the tenant deleted is not brought back
-    'SELECT id FROM iam_dept WHERE parent_id = 0 AND tenant_id = ? LIMIT 1',
+    'SELECT id FROM iam_dept WHERE parent_id = 0 AND tenant_id = ? LIMIT 1', // qw:no-data-scope a seed, no caller
     [tid],
   )
   if (!top) {

@@ -106,7 +106,7 @@ export class WxMpService {
       // qw:cross-tenant a globally unique identity's binding, before any tenant is known; qw:include-deleted
       `SELECT s.id, s.user_id, u.tenant_id FROM iam_user_social s
          JOIN iam_user u ON u.id = s.user_id
-        WHERE s.provider = ? AND s.appid = ? AND s.openid = ? AND s.deleted_at IS NULL`,
+        WHERE s.provider = ? AND s.appid = ? AND s.openid = ? AND s.deleted_at IS NULL`, // qw:no-data-scope sign-in by a WeChat binding, no caller
       [WX_MP, appid, openid],
     )
     if (bound) {
@@ -232,6 +232,7 @@ export class WxMpService {
       const res =
         'mobile' in proof
           ? await this.ds.query<{ affectedRows: number }>(
+              // qw:no-data-scope binds the proven user's own account
               `INSERT INTO iam_user_social
                  (provider, appid, openid, unionid, user_id, created_by, updated_by, tenant_id)
                SELECT ?, ?, ?, ?, id, id, id, tenant_id FROM iam_user
@@ -239,6 +240,7 @@ export class WxMpService {
               [...values, proof.mobile],
             )
           : await this.ds.query<{ affectedRows: number }>(
+              // qw:no-data-scope binds the proven user's own account
               `INSERT INTO iam_user_social
                  (provider, appid, openid, unionid, user_id, created_by, updated_by, tenant_id)
                SELECT ?, ?, ?, ?, id, id, id, tenant_id FROM iam_user

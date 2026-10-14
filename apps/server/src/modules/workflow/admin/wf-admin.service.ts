@@ -156,12 +156,14 @@ export async function instanceView(
   const tid = tenantId()
   const userNames = await byId(
     tx.query(
+      // qw:no-data-scope labels: the people of the instances listed, not a user list
       'SELECT id, display_name AS name FROM iam_user WHERE id IN (?) AND tenant_id = ?', // qw:include-deleted
       [ids([...insts.map((i) => i.initiatorId), ...users]), tid],
     ),
   )
   const deptNames = await byId(
     tx.query(
+      // qw:no-data-scope labels: the depts of the instances listed, not a dept list
       'SELECT id, name FROM iam_dept WHERE id IN (?) AND tenant_id = ?', // qw:include-deleted
       [ids([...insts.map((i) => i.initiatorDeptId), ...depts]), tid],
     ),

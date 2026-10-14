@@ -103,6 +103,7 @@ export class TenantProvisioner {
       await runTenantSeeds(q, id)
       await assertUserQuota(q, id)
       const [dept] = await q.query<{ id: number }[]>(
+        // qw:no-data-scope opening a tenant: its root dept
         'SELECT id FROM iam_dept WHERE parent_id = 0 AND tenant_id = ? AND deleted_at IS NULL ORDER BY id LIMIT 1',
         [id],
       )

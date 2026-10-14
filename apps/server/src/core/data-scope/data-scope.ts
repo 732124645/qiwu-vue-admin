@@ -45,6 +45,64 @@ const roleGroups = (p: Principal, checked?: PermRequirement): PrincipalRole[][] 
   return checked.all ? checked.perms.map((x) => holding([x])) : [holding(checked.perms)]
 }
 
+/** One condition of a role group's OR: `column` in a list, equal to a value, or under a dept path prefix. */
+interface ScopeTerm {
+  op: 'in' | 'eq' | 'tree'
+  column: string
+  value: unknown
+  /** its QueryBuilder parameter name */
+  key: string
+}
+
+/**
+ * The department/owner scope, per role group (`roleGroups`, ANDed): `null` = the group has an `all`
+ * role (no filter), otherwise the OR of its roles' scopes; an empty OR (an empty group, no picked depts,
+ * no own dept) lets nothing in. The one computation behind `deptScopeRule` and `dataScopeSql`.
+ */
+const scopeGroups = (
+  { dept, owner }: DataScopeColumns,
+  p: Principal,
+  checked: PermRequirement | undefined,
+): (ScopeTerm[] | null)[] =>
+  roleGroups(p, checked).map((roles, i) => {
+    if (roles.some((r) => r.dataScope === 'all')) return null
+    const has = (s: PrincipalRole['dataScope']) => roles.some((r) => r.dataScope === s)
+    const picked = [
+      ...new Set(roles.flatMap((r) => (r.dataScope === 'picked_depts' ? (r.deptIds ?? []) : []))),
+    ]
+    const terms: ScopeTerm[] = []
+    if (dept && picked.length)
+      terms.push({ op: 'in', column: dept, value: picked, key: `dsPicked${i}` })
+    if (dept && p.deptId !== null && has('own_dept'))
+      terms.push({ op: 'eq', column: dept, value: p.deptId, key: 'dsDept' })
+    if (dept && p.deptTreePath && has('own_dept_tree'))
+      terms.push({ op: 'tree', column: dept, value: `${p.deptTreePath}%`, key: 'dsPrefix' })
+    if (owner && has('own_rows'))
+      terms.push({ op: 'eq', column: owner, value: p.userId, key: 'dsMe' })
+    return terms
+  })
+
+/**
+ * One role group's condition: the bracketed OR of `terms`, `1=0` for none. `param` gives a term's
+ * value its placeholder (`:name` or `?`). Identifiers (alias, columns, table) come from code.
+ */
+const renderGroup = (
+  terms: ScopeTerm[],
+  alias: string,
+  deptTable: string,
+  param: (t: ScopeTerm) => string,
+): string => {
+  if (!terms.length) return '1=0'
+  const or = terms.map((t) => {
+    const col = `${alias}.${t.column}`
+    if (t.op === 'in') return `${col} IN (${param(t)})`
+    if (t.op === 'eq') return `${col} = ${param(t)}`
+    // arch-allow: sql-concat alias/column/table identifiers; tenant: tree paths are global dept ids, the prefix reaches the caller's own depts only
+    return `${col} IN (SELECT id FROM ${deptTable} WHERE tree_path LIKE ${param(t)} AND deleted_at IS NULL)`
+  })
+  return `(${or.join(' OR ')})`
+}
+
 /**
  * Department/owner rule, per role group (`roleGroups`, ANDed): a group with an `all` role adds no
  * filter; otherwise the OR of its roles' scopes; an empty group or an empty OR (no picked depts, no
@@ -55,35 +113,36 @@ const roleGroups = (p: Principal, checked?: PermRequirement): PrincipalRole[][] 
  */
 export const deptScopeRule =
   (deptTable = 'iam_dept'): ScopeRule =>
-  (qb, alias, { dept, owner }, p, checked) =>
-    roleGroups(p, checked).forEach((roles, i) => {
-      if (roles.some((r) => r.dataScope === 'all')) return
-      const has = (s: PrincipalRole['dataScope']) => roles.some((r) => r.dataScope === s)
-      const picked = [
-        ...new Set(roles.flatMap((r) => (r.dataScope === 'picked_depts' ? (r.deptIds ?? []) : []))),
-      ]
-      const or: string[] = []
-      if (dept && picked.length) or.push(`${alias}.${dept} IN (:...dsPicked${i})`) // arch-allow: sql-concat alias/column identifiers, group index; tenant: the ORM adds it to the alias
-      if (dept && p.deptId !== null && has('own_dept')) or.push(`${alias}.${dept} = :dsDept`) // arch-allow: sql-concat alias/column identifiers; tenant: the ORM adds it to the alias
-      if (dept && p.deptTreePath && has('own_dept_tree'))
-        or.push(
-          // arch-allow: sql-concat alias/column/table identifiers; tenant: tree paths are global dept ids, the prefix reaches the caller's own depts only
-          `${alias}.${dept} IN (SELECT id FROM ${deptTable} WHERE tree_path LIKE :dsPrefix AND deleted_at IS NULL)`,
-        )
-      if (owner && has('own_rows')) or.push(`${alias}.${owner} = :dsMe`) // arch-allow: sql-concat alias/column identifiers; tenant: the ORM adds it to the alias
-      qb.andWhere(or.length ? `(${or.join(' OR ')})` : '1=0', {
-        [`dsPicked${i}`]: picked,
-        dsDept: p.deptId,
-        dsPrefix: `${p.deptTreePath}%`,
-        dsMe: p.userId,
+  (qb, alias, columns, p, checked) => {
+    for (const terms of scopeGroups(columns, p, checked)) {
+      if (!terms) continue
+      const params: Record<string, unknown> = {}
+      const sql = renderGroup(terms, alias, deptTable, (t) => {
+        params[t.key] = t.value
+        return t.op === 'in' ? `:...${t.key}` : `:${t.key}`
       })
-    })
+      qb.andWhere(sql, params)
+    }
+  }
 
 /**
  * The rule chain every scoped entity gets unless its service replaces it. Tenants are no link of it: the
  * tenant condition sits in the ORM itself (core/db/tenant-filter.ts, docs/design-notes.md#tenancy).
  */
 export const defaultScopeRules = (): ScopeRule[] => [deptScopeRule()]
+
+/**
+ * Whose scope applies: `undefined` = no filter (`@SkipDataScope`, root), `null` = nothing visible (no
+ * caller), else the caller with CLS `checkedPerm`.
+ */
+const scopeCaller = ():
+  { p: Principal; checked: PermRequirement | undefined } | null | undefined => {
+  if (clsGet('skipDataScope')) return undefined
+  const p = clsGet('principal')
+  if (!p) return null
+  if (p.root) return undefined
+  return { p, checked: clsGet('checkedPerm') }
+}
 
 /**
  * The single data-scope hook (see docs/design-notes.md#data-scope): `@SkipDataScope` → no filter; no caller → nothing visible;
@@ -97,13 +156,56 @@ export function applyScopes<Q extends SelectQueryBuilder<ObjectLiteral>>(
   columns: DataScopeColumns,
   rules: readonly ScopeRule[],
 ): Q {
-  if (clsGet('skipDataScope')) return qb
-  const p = clsGet('principal')
-  if (!p) return qb.andWhere('1=0')
-  if (p.root) return qb
-  const checked = clsGet('checkedPerm')
-  for (const rule of rules) rule(qb, alias, columns, p, checked)
+  const c = scopeCaller()
+  if (c === null) return qb.andWhere('1=0')
+  if (c) for (const rule of rules) rule(qb, alias, columns, c.p, c.checked)
   return qb
+}
+
+const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/
+
+/**
+ * The data scope for hand-written SQL (see docs/data-scope.md): the condition `applyScopes` adds with
+ * the default rule chain, as text with `?` placeholders plus their values, for `tx.query`
+ * (`… WHERE <own conditions> AND ${sql}`, the values in the order of the text). `@SkipDataScope` and root
+ * → `1=1`, no caller → `1=0`; several role groups come bracketed. `alias`, the columns and `deptTable`
+ * are identifiers from code (anything else throws). The tenant condition is no part of it: the statement
+ * writes its own. Only the default rule chain (`deptTable` aside): a service that replaces `scopeRules`
+ * cannot use it, it goes through `scopedQb` or writes its rules into the SQL itself.
+ */
+export function dataScopeSql(
+  alias: string,
+  columns: DataScopeColumns,
+  deptTable = 'iam_dept',
+): { sql: string; params: unknown[] } {
+  for (const id of [alias, columns.dept, columns.owner, deptTable])
+    if (id !== null && !IDENT.test(id)) throw new Error(`dataScopeSql: not an identifier: ${id}`)
+  const c = scopeCaller()
+  if (c === undefined) return { sql: '1=1', params: [] }
+  if (c === null) return { sql: '1=0', params: [] }
+  const params: unknown[] = []
+  const parts: string[] = []
+  for (const terms of scopeGroups(columns, c.p, c.checked))
+    if (terms)
+      parts.push(
+        renderGroup(terms, alias, deptTable, (t) => {
+          params.push(t.value)
+          return '?'
+        }),
+      )
+  if (!parts.length) return { sql: '1=1', params }
+  return { sql: parts.length > 1 ? `(${parts.join(' AND ')})` : parts[0]!, params }
+}
+
+/** `dataScopeSql` over the columns a `@DataScoped` entity declares (`dataScopeSqlFor(User, 'u')`). */
+export const dataScopeSqlFor = (
+  entity: object,
+  alias: string,
+  deptTable?: string,
+): { sql: string; params: unknown[] } => {
+  const columns = dataScopeOf(entity)
+  if (!columns) throw new Error('dataScopeSqlFor: not a @DataScoped entity')
+  return dataScopeSql(alias, columns, deptTable)
 }
 
 /**

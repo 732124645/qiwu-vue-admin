@@ -154,7 +154,7 @@ export class WfNotify implements EntitySubscriberInterface, OnModuleInit {
   ): Promise<void> {
     const [row] = await this.txHost.tx.query<{ name: string }[]>(
       // qw:include-deleted a deleted assignee keeps their name on the notice
-      'SELECT display_name AS name FROM iam_user WHERE id = ? AND tenant_id = ?',
+      'SELECT display_name AS name FROM iam_user WHERE id = ? AND tenant_id = ?', // qw:no-data-scope a label of a notice
       [task.assigneeId, tenantId()],
     )
     await this.notifier.send({
@@ -187,7 +187,7 @@ export class WfNotify implements EntitySubscriberInterface, OnModuleInit {
       // qw:include-deleted a model or initiator deleted since still names its running instances
       `SELECT (SELECT m.name FROM wf_version v JOIN wf_model m ON m.id = v.model_id AND m.tenant_id = ?
                 WHERE v.id = ? AND v.tenant_id = ?) AS model,
-              (SELECT u.display_name FROM iam_user u WHERE u.id = ? AND u.tenant_id = ?) AS initiator`,
+              (SELECT u.display_name FROM iam_user u WHERE u.id = ? AND u.tenant_id = ?) AS initiator`, // qw:no-data-scope a label of a notice
       [tid, inst.versionId, tid, inst.initiatorId, tid],
     )
     return {

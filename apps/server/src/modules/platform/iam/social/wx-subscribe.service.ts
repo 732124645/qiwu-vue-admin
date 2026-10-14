@@ -124,6 +124,7 @@ export class WxSubscribeService {
    */
   private async recipient(userId: number, appid: string) {
     const [row] = await this.ds.query<{ openid: string; timezone: string | null }[]>(
+      // qw:no-data-scope the recipient of a notice
       `SELECT s.openid, u.timezone FROM iam_user_social s
          JOIN iam_user u ON u.id = s.user_id AND u.tenant_id = s.tenant_id
         WHERE s.user_id = ? AND s.provider = ? AND s.appid = ? AND s.tenant_id = ?

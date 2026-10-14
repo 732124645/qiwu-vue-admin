@@ -17,6 +17,7 @@ export async function assertUserQuota(q: EntityManager, tid: number, adding = 1)
   if (!tenant) throw new Error(`no tenant ${tid}`)
   if (tenant.user_quota === null) return
   const [{ n }] = await q.query<{ n: number | string }[]>(
+    // qw:no-data-scope the quota counts every live user of the tenant
     'SELECT COUNT(*) AS n FROM iam_user WHERE tenant_id = ? AND deleted_at IS NULL',
     [tid],
   )

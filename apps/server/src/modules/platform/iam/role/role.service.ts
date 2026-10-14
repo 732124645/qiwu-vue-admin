@@ -74,8 +74,10 @@ const LINKS: Record<
   },
   depts: {
     table: ROLE_DEPTS,
+    // qw:no-data-scope reference check: the picked depts are live
     live: 'SELECT id FROM iam_dept WHERE id IN (?) AND tenant_id = ? AND deleted_at IS NULL FOR SHARE',
     args: (ids) => [ids, tenantId()],
+    // qw:no-data-scope a role's own dept links (roles are not data-scoped)
     select: `SELECT rd.dept_id AS id FROM iam_role_depts rd
                JOIN iam_dept d ON d.id = rd.dept_id AND d.tenant_id = rd.tenant_id AND d.deleted_at IS NULL
               WHERE rd.role_id = ? AND rd.tenant_id = ? AND rd.deleted_at IS NULL ORDER BY rd.dept_id`,
@@ -196,6 +198,7 @@ export class RoleService extends BaseCrudService<Role> {
       )
       if (builtin) throw new BizError(Err.IAM_ROLE_BUILTIN)
       const [held] = await tx.query<unknown[]>(
+        // qw:no-data-scope in-use check: any live holder blocks the delete
         `SELECT ur.user_id FROM iam_user_roles ur
            JOIN iam_user u ON u.id = ur.user_id AND u.tenant_id = ur.tenant_id AND u.deleted_at IS NULL
           WHERE ur.role_id IN (?) AND ur.tenant_id = ? AND ur.deleted_at IS NULL LIMIT 1 FOR SHARE`,

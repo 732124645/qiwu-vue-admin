@@ -136,6 +136,7 @@ export class UserService extends BaseCrudService<User> {
     if (deptId)
       // tree paths end with '/', so /1/2/% never matches /1/23/
       qb.andWhere(
+        // qw:no-data-scope a filter of the scoped user list: the users stay scoped
         `t.dept_id IN (SELECT c.id FROM iam_dept c
            JOIN iam_dept f ON c.tree_path LIKE CONCAT(f.tree_path, '%') AND f.tenant_id = c.tenant_id
                 AND f.deleted_at IS NULL
@@ -282,6 +283,7 @@ export class UserService extends BaseCrudService<User> {
     const rows = await this.txHost.tx.query<
       { id: number; tree_path: string; name: string; sort_no: number }[]
     >(
+      // qw:no-data-scope path labels need every ancestor; the depts offered are scoped (deptOptions)
       'SELECT id, tree_path, name, sort_no FROM iam_dept WHERE tenant_id = ? AND deleted_at IS NULL',
       [tenantId()],
     )

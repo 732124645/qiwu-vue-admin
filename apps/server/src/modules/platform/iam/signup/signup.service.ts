@@ -62,6 +62,7 @@ export class SignupService {
       let deptId: number | null = null
       if (settings.defaultDeptId !== null) {
         const [dept] = await q.query<{ id: number }[]>(
+          // qw:no-data-scope sign-up's default dept, no caller
           'SELECT id FROM iam_dept WHERE id = ? AND tenant_id = ? AND enabled = 1 AND deleted_at IS NULL LIMIT 1 FOR SHARE',
           [settings.defaultDeptId, tid],
         )

@@ -52,6 +52,43 @@
 
 树服务 `BaseTreeService` 也沿用 `scopedQb` / `lockScopedIds`。部门新增前还没有 id，因此在写入后的事务内重新锁定检查；移动时检查更新后的整棵有效子树，越界则回滚。导入 upsert 只匹配范围内的行，范围外的同键行不能被覆盖。详见[生成器黄金样板](codegen-golden.md)。
 
+## 手写 SQL
+
+`scopedQb` 经 ORM 加上数据范围；`tx.query` 等原始 SQL 不经过它，读 `@DataScoped` 实体的表时要自己拼入同一条件。代表调用者读可见行的查询（列表、options、导出、展示给用户的计数）用 ORM 写不出来时（聚合、复杂联表等），用 `dataScopeSql(alias, columns, deptTable?)`：
+
+- 返回 `{ sql, params }`。`sql` 用 `?` 占位，`scope.params` 放在 `${scope.sql}` 在语句中的位置所对应的参数位置；放在 WHERE 末尾且后面没有占位符时，追加在其余参数之后即可。多个角色组时整体带括号，可以直接 `AND` 进 WHERE。
+- 与 `scopedQb` 用同一份计算：角色分组、五种范围、`checkedPerm`；root 与 `@SkipDataScope()` 得 `1=1`，没有调用者得 `1=0`。它只对应默认规则链（可传 `deptTable`）：替换了 `scopeRules` 的服务不能用它，要么走 `scopedQb`，要么自己把规则写进 SQL。
+- `dataScopeSqlFor(实体, alias)` 直接取实体 `@DataScoped` 声明的列；`deptTable` 默认 `iam_dept`。
+- 别名、列名、部门表名只能是代码里写定的标识符（字母、数字、下划线，不以数字开头），否则抛错；值一律走参数。
+- 租户条件不在其中：语句照常自己写 `tenant_id` 条件（见[多租户设计](design-notes.md#tenancy)），软删除行同样自己排除。
+
+```ts
+import { tenantId } from '../../../core/context/tenant.js'
+import { dataScopeSqlFor } from '../../../core/data-scope/data-scope.js'
+import { Book } from './book.entity.js'
+
+const scope = dataScopeSqlFor(Book, 'b')
+const rows = await this.txHost.tx.query<{ dept_id: number; n: number }[]>(
+  // arch-allow: sql-concat the data scope: identifiers from code, values in params; tenant: b.tenant_id = ?
+  `SELECT b.dept_id, COUNT(*) AS n FROM demo_book b
+    WHERE b.tenant_id = ? AND b.deleted_at IS NULL AND ${scope.sql}
+    GROUP BY b.dept_id`,
+  [tenantId(), ...scope.params],
+)
+```
+
+不代表调用者读可见行的系统查询不加范围：登录与会话、本人资料、授权与受保护用户判断、引用与占用检查、种子、定时任务、流程引擎解析人员、通知收件人、其他模块记录上的人名与部门名标签（如文件的上传人、流程里的人员）等。IAM 页面里范围本身就是目的的字段例外：例如部门负责人名按调用者的数据范围读取，负责人在范围外时显示为空。上述系统查询在该 SQL 字面量的某一行、或紧挨在它上面的注释行写 `qw:no-data-scope <理由>`，理由必填：
+
+```ts
+const [user] = await this.txHost.tx.query<unknown[]>(
+  // qw:no-data-scope in-use check: any live user of the depts blocks the delete
+  'SELECT id FROM iam_user WHERE dept_id IN (?) AND tenant_id = ? AND deleted_at IS NULL LIMIT 1 FOR SHARE',
+  [ids, tenantId()],
+)
+```
+
+架构检查 `data-scope-sql`（`pnpm verify` 中的 arch 一步，[脚本](../scripts/arch/data-scope-sql.mjs)）强制这条规则：从 `apps/server/src` 里带 `@DataScoped` 的类读出 `@Entity('<表>')`，字符串或模板字面量在 FROM、JOIN 之后（含子查询与 `DELETE FROM`）出现这些表时，要么是把范围直接写成 `${scope.sql}`（插值是某个值的 `.sql`）插进语句的模板字面量、且所在的某一层函数自身（不算其中的内层函数）调用了 `dataScopeSql` / `dataScopeSqlFor`，要么带上述标记；普通字符串放不进范围条件，一律要标记。因此同一函数里列表带范围、总数只插入 `${where}` 的写法会被报出，每条语句都要插入 `${scope.sql}`。`dataScopeSql` / `dataScopeSqlFor` 要在写 SQL 的那个函数（或它的外层函数）里直接调用，不要包进辅助方法：包进去检查认不出，又不能用标记消音（标记的意思是不加范围）。QueryBuilder 里用表名字符串的 `from` / `addFrom` / `…Join…`（如 `qb.from('iam_user', 'u')`）不经过 `scopedQb`，同样要标记，或改用实体走 `scopedQb`。迁移与 spec 文件不查，没有基线。它只看字面量：由多个字面量拼成、表名放在变量里、带括号的表引用（`FROM (t)`）都看不到，插入的 `.sql` 是否真是范围条件也不核对，评审时仍要留意。SQL 不做自动改写，理由见[设计说明](design-notes.md#data-scope)。
+
 ## 超管、系统任务与缓存边界
 
 `applyScopes()` 的顺序是：CLS `skipDataScope` 则跳过；没有 principal 则 `1=0`；`Principal.root` 则跳过；其余逐项应用规则。root 来自 `IamUserLookup` 对启用、未删除的内置 root 角色的判定，不是请求体字段，也不能给普通角色填一个 `*` 就获得超管权限。

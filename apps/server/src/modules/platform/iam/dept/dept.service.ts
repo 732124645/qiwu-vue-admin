@@ -88,6 +88,7 @@ export class DeptService extends BaseTreeService<Dept> {
   /** Users still in one of the depts (409); a locking read, so none moves in before the delete commits. */
   protected override async beforeRemove(ids: number[]): Promise<void> {
     const [user] = await this.txHost.tx.query<unknown[]>(
+      // qw:no-data-scope in-use check: any live user of the depts blocks the delete
       'SELECT id FROM iam_user WHERE dept_id IN (?) AND tenant_id = ? AND deleted_at IS NULL LIMIT 1 FOR SHARE',
       [ids, tenantId()],
     )
@@ -100,6 +101,7 @@ export class DeptService extends BaseTreeService<Dept> {
    */
   protected override async afterMove(ids: number[]): Promise<void> {
     const users = await this.txHost.tx.query<{ id: number }[]>(
+      // qw:no-data-scope sessions to reload: every user of the moved depts
       'SELECT id FROM iam_user WHERE dept_id IN (?) AND tenant_id = ? AND deleted_at IS NULL',
       [ids, tenantId()],
     )

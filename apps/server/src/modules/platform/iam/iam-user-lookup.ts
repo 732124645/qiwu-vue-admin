@@ -120,7 +120,7 @@ export class IamUserLookup implements UserLookup {
               d.name AS dept_name
          FROM iam_user u
          LEFT JOIN iam_dept d ON d.id = u.dept_id AND d.tenant_id = u.tenant_id AND d.deleted_at IS NULL
-        WHERE u.id = ? AND u.enabled = 1 AND u.deleted_at IS NULL`,
+        WHERE u.id = ? AND u.enabled = 1 AND u.deleted_at IS NULL`, // qw:no-data-scope loads a session's own user
       [userId],
     )
     if (!user) return null
@@ -179,6 +179,7 @@ export class IamUserLookup implements UserLookup {
     )
     const picked = ids.length
       ? await this.ds.query<PickedRow[]>(
+          // qw:no-data-scope the picked depts of the user's own roles: the input of its scope
           `SELECT rd.role_id, rd.dept_id FROM iam_role_depts rd
              JOIN iam_dept d ON d.id = rd.dept_id AND d.tenant_id = rd.tenant_id AND d.deleted_at IS NULL
             WHERE rd.role_id IN (?) AND rd.tenant_id = ? AND rd.deleted_at IS NULL`,
@@ -234,6 +235,7 @@ export class IamUserLookup implements UserLookup {
     const [row] =
       'username' in by
         ? await this.ds.query<CredentialRow[]>(
+            // qw:no-data-scope credential check of a sign-in
             `SELECT id, username, user_type, password_hash, enabled, password_changed_at
                FROM iam_user
               WHERE tenant_id = ? AND username = ? AND deleted_at IS NULL
@@ -244,7 +246,7 @@ export class IamUserLookup implements UserLookup {
             // qw:cross-tenant by the global id of a session, a proven sign-in or a credential re-check
             `SELECT id, username, user_type, password_hash, enabled, password_changed_at
                FROM iam_user
-              WHERE id = ? AND deleted_at IS NULL`,
+              WHERE id = ? AND deleted_at IS NULL`, // qw:no-data-scope credential check by a session's user id
             [by.userId],
           )
     return row
@@ -271,6 +273,7 @@ export class IamUserLookup implements UserLookup {
   async profile(userId: number): Promise<MeUser | null> {
     const tid = tenantId()
     const [u] = await this.ds.query<ProfileRow[]>(
+      // qw:no-data-scope the caller's own profile
       `SELECT u.id, u.username, u.display_name, u.avatar_url, u.dept_id, d.name AS dept_name,
               u.locale, u.timezone
          FROM iam_user u
@@ -320,7 +323,7 @@ export class IamUserLookup implements UserLookup {
     if (!all) {
       const [user] = await this.ds.query<{ tenant_id: number }[]>(
         // qw:cross-tenant the user by its global id, as in load; its tenant comes from the row
-        'SELECT tenant_id FROM iam_user WHERE id = ? AND deleted_at IS NULL',
+        'SELECT tenant_id FROM iam_user WHERE id = ? AND deleted_at IS NULL', // qw:no-data-scope the menus of a session's own user
         [userId],
       )
       // no user: no tenant, no menu

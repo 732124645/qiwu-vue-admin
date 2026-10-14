@@ -546,6 +546,7 @@ export class JobScheduler implements OnApplicationBootstrap, BeforeApplicationSh
         await withTenant(DEFAULT_TENANT_ID, async () => {
           const tid = tenantId()
           const roots = await this.ds.query<{ id: number }[]>(
+            // qw:no-data-scope the recipients of a job notice
             `SELECT DISTINCT u.id FROM iam_user u
                JOIN iam_user_roles ur ON ur.user_id = u.id AND ur.deleted_at IS NULL AND ur.tenant_id = ?
                JOIN iam_role r ON r.id = ur.role_id

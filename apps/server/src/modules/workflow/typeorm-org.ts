@@ -33,7 +33,7 @@ export function typeormOrg(db: OrgDb): OrgDirectory {
         // qw:include-deleted u: a deleted user keeps their dept (see above); the dept must be live
         `SELECT d.id, d.tree_path FROM iam_user u
            JOIN iam_dept d ON d.id = u.dept_id AND d.tenant_id = ? AND d.deleted_at IS NULL
-          WHERE u.id = ? AND u.tenant_id = ?`,
+          WHERE u.id = ? AND u.tenant_id = ?`, // qw:no-data-scope the process engine resolves people from the whole org, not for a caller
         [tid, userId, tid],
       )
     )[0]
@@ -43,6 +43,7 @@ export function typeormOrg(db: OrgDb): OrgDirectory {
     enabledUsers: (userIds) =>
       usersIn(
         userIds,
+        // qw:no-data-scope the process engine resolves people from the whole org, not for a caller
         `SELECT u.id FROM iam_user u
           WHERE u.id IN (?) AND u.tenant_id = ? AND u.enabled = 1 AND u.deleted_at IS NULL
           ORDER BY u.id`,
@@ -52,6 +53,7 @@ export function typeormOrg(db: OrgDb): OrgDirectory {
     usersOfRoles: (roleIds) =>
       usersIn(
         roleIds,
+        // qw:no-data-scope the process engine resolves people from the whole org, not for a caller
         `SELECT DISTINCT u.id FROM iam_user_roles ur
            JOIN iam_role r ON r.id = ur.role_id AND r.tenant_id = ?
                 AND r.enabled = 1 AND r.deleted_at IS NULL
@@ -65,6 +67,7 @@ export function typeormOrg(db: OrgDb): OrgDirectory {
     usersOfPositions: (positionIds) =>
       usersIn(
         positionIds,
+        // qw:no-data-scope the process engine resolves people from the whole org, not for a caller
         `SELECT DISTINCT u.id FROM iam_user_positions up
            JOIN iam_position p ON p.id = up.position_id AND p.tenant_id = ?
                 AND p.enabled = 1 AND p.deleted_at IS NULL
@@ -78,6 +81,7 @@ export function typeormOrg(db: OrgDb): OrgDirectory {
     usersOfDepts: (deptIds) =>
       usersIn(
         deptIds,
+        // qw:no-data-scope the process engine resolves people from the whole org, not for a caller
         `SELECT u.id FROM iam_user u
            JOIN iam_dept d ON d.id = u.dept_id AND d.tenant_id = ? AND d.deleted_at IS NULL
           WHERE u.dept_id IN (?) AND u.tenant_id = ? AND u.enabled = 1 AND u.deleted_at IS NULL
@@ -93,6 +97,7 @@ export function typeormOrg(db: OrgDb): OrgDirectory {
     async deptHeads(deptId, levels) {
       const tid = tenantId()
       const [dept] = await db.query<{ tree_path: string }[]>(
+        // qw:no-data-scope the process engine resolves people from the whole org, not for a caller
         'SELECT tree_path FROM iam_dept WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL',
         [deptId, tid],
       )
@@ -102,6 +107,7 @@ export function typeormOrg(db: OrgDb): OrgDirectory {
         .slice(0, levels)
       if (!chain.length) return []
       const rows = await db.query<{ id: number; head_user_id: number }[]>(
+        // qw:no-data-scope the process engine resolves people from the whole org, not for a caller
         `SELECT d.id, d.head_user_id FROM iam_dept d
            JOIN iam_user u ON u.id = d.head_user_id AND u.tenant_id = ?
                 AND u.enabled = 1 AND u.deleted_at IS NULL

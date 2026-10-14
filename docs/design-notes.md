@@ -50,6 +50,8 @@ English summary: Qiwu separates framework, platform, workflow and project code. 
 
 软删除唯一性使用未映射的 `alive` 生成列；引用登记处理存活检查、限制删除与级联。规则链只管部门与本人范围；租户条件不在规则链里，由 ORM 层统一追加（见[多租户](#tenancy)）。详见[数据权限](data-scope.md)与[多租户指南](multi-tenancy.md)。
 
+范围条件只在 ORM 路径上自动加上；手写 SQL 不经过 `scopedQb`，项目代码容易漏写。不对原始 SQL 做自动改写：解析任意 SQL 再插入条件，要为子查询、联表、UNION 各自找对位置，改错了就是悄悄多给数据或误伤查询，也难以评审。改为提供 `dataScopeSql`，它与 `scopedQb` 的默认规则链共用同一份范围计算（只是渲染成 `?` 占位），由写 SQL 的人显式拼入；不代表调用者读数据的系统查询用 `qw:no-data-scope <理由>` 显式豁免；架构检查 `data-scope-sql` 要求读带范围实体表的原始 SQL 字面量二者必居其一：是把范围直接写成 `${scope.sql}` 插进语句的模板字面量且所在函数自身调用了 `dataScopeSql`，或带标记；QueryBuilder 用表名字符串读这些表同样要标记。它是基于字面量的启发式检查，多个字面量拼成的 SQL、变量里的表名仍靠评审发现。用法见[数据权限](data-scope.md#手写-sql)。
+
 <a id="tenancy"></a>
 
 ## 多租户

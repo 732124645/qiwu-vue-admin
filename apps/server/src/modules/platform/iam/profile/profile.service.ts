@@ -79,6 +79,7 @@ export class ProfileService {
   async get(userId: number): Promise<ProfileVo> {
     const tid = tenantId()
     const [u] = await this.ds.query<ProfileRow[]>(
+      // qw:no-data-scope the caller's own row
       `SELECT u.id, u.username, u.display_name, u.gender, u.mobile, u.email, u.avatar_url, u.locale,
               d.name AS dept_name
          FROM iam_user u
@@ -123,6 +124,7 @@ export class ProfileService {
     const { currentPassword, mobileCode, ...fields } = dto
     const set = Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== undefined))
     const [stored] = await this.ds.query<{ mobile: string | null; password_hash: string }[]>(
+      // qw:no-data-scope the caller's own row
       'SELECT mobile, password_hash FROM iam_user WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL',
       [p.userId, tenantId()],
     )
@@ -218,6 +220,7 @@ export class ProfileService {
     const previous = await this.ds
       .transaction(async (q) => {
         const [row] = await q.query<{ avatar_url: string | null }[]>(
+          // qw:no-data-scope the caller's own row
           'SELECT avatar_url FROM iam_user WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL FOR UPDATE',
           [userId, tid],
         )
@@ -274,6 +277,7 @@ export class ProfileService {
     const { oldPassword, newPassword } = parsed.data
     const tid = tenantId()
     const [row] = await this.ds.query<{ password_hash: string }[]>(
+      // qw:no-data-scope the caller's own row
       'SELECT password_hash FROM iam_user WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL',
       [p.userId, tid],
     )

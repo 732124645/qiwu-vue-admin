@@ -74,6 +74,7 @@ export class SmsAuthService {
     )
       return invalid()
     const [row] = await this.ds.query<Array<{ id: number }>>(
+      // qw:no-data-scope sign-in by mobile, no caller
       'SELECT id FROM iam_user WHERE tenant_id = ? AND mobile = ? AND deleted_at IS NULL LIMIT 1',
       [at.tenantId, body.mobile],
     )
@@ -107,6 +108,7 @@ export class SmsAuthService {
     )
       throw invalid()
     const [row] = await this.ds.query<Array<{ id: number }>>(
+      // qw:no-data-scope password reset by mobile, no caller
       'SELECT id FROM iam_user WHERE tenant_id = ? AND mobile = ? AND deleted_at IS NULL AND enabled = 1 LIMIT 1',
       [at.tenantId, dto.mobile],
     )

@@ -336,7 +336,7 @@ export class WfDetailService {
     if (!ids.length) return new Map()
     const rows = await this.txHost.tx.query<{ id: number; display_name: string }[]>(
       // qw:include-deleted a deleted user's name stays on the timeline
-      'SELECT id, display_name FROM iam_user WHERE id IN (?) AND tenant_id = ?',
+      'SELECT id, display_name FROM iam_user WHERE id IN (?) AND tenant_id = ?', // qw:no-data-scope labels: the people on an instance's timeline
       [[...new Set(ids)], tenantId()],
     )
     return new Map(rows.map((r) => [Number(r.id), r.display_name]))
