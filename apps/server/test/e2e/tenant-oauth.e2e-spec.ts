@@ -393,8 +393,9 @@ describe('token, userinfo, introspection, revocation', () => {
         .set(bearer(t.root))
         .send({ expiresAt: new Date(Date.now() + 3_600_000).toISOString() })
         .expect(200)
-      // that moment passes
-      await ds.query('UPDATE iam_tenant SET expires_at = NOW(3) - INTERVAL 1 SECOND WHERE id = ?', [
+      // that moment passes (by the app clock, which judges it)
+      await ds.query('UPDATE iam_tenant SET expires_at = ? WHERE id = ?', [
+        new Date(Date.now() - 1000),
         C.id,
       ])
       const refreshed = await token('crm', {

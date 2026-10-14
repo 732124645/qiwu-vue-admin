@@ -1,8 +1,15 @@
 # Changelog
 
-中文说明：本文件按功能区域汇总栖梧 / Qiwu 的用户可见变化，正文使用英文。`1.0.0` 于 2026-10-05 发布，`1.0.3` 于 2026-10-06 发布（`1.0.1`、`1.0.2` 未发布，内容并入 `1.0.3`），`1.1.0`（多租户）与 `1.2.0`（手写 SQL 的数据权限）于 2026-10-14 发布。
+中文说明：本文件按功能区域汇总栖梧 / Qiwu 的用户可见变化，正文使用英文。`1.0.0` 于 2026-10-05 发布，`1.0.3` 于 2026-10-06 发布（`1.0.1`、`1.0.2` 未发布，内容并入 `1.0.3`），`1.1.0`（多租户）、`1.2.0`（手写 SQL 的数据权限）与 `1.2.1`（修复）于 2026-10-14 发布。
 
 All notable product changes are recorded here in Keep a Changelog style. The initial release below summarizes the delivered features. Planned work is identified explicitly.
+
+## [1.2.1] - 2026-10-14
+
+### Fixed
+
+- The last sign-in time shown after signing in (`GET /api/auth/me` `lastSignInAt`) no longer depends on the application and database clocks agreeing: sign-in log rows are timestamped by the application. Sessions started before the upgrade show the corrected time after their next sign-in.
+- Three server tests no longer fail on Windows or on hosts whose clock is off the database's.
 
 ## [1.2.0] - 2026-10-14
 

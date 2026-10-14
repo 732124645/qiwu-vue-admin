@@ -143,8 +143,10 @@ it('plans shell commands without single quotes and requires matches for the non-
   )
 })
 
-it('builds the shared package right after the frozen install, before verify, in both modes', () => {
-  for (const args of [[], ['--parallel']]) {
+it('builds the shared package right after the frozen install, before verify, in every mode the platform runs', () => {
+  // Windows refuses effective parallel mode before planning (see the next case)
+  const modes = process.platform === 'win32' ? [[]] : [[], ['--parallel']]
+  for (const args of modes) {
     const out = spawnSync(process.execPath, [PATH, '--dry', ...args], { encoding: 'utf8' }).stdout
     expect(out).toContain('shared build: RUN  pnpm --filter @qiwu/shared build\n')
     // a fresh checkout has no packages/shared/dist: verify's typecheck needs it

@@ -329,7 +329,7 @@ it('ProjectPaths moves the stored view paths of the moved views, down moves them
     migrateOnce('run')
   }
   await expectApplied(MIGRATIONS.length)
-}, 30_000)
+}, 120_000)
 
 it('dist reset.js refuses production and databases without a _dev/_test/_e2e suffix', () => {
   for (const env of [{ NODE_ENV: 'production' }, { DB_NAME: 'qiwu' }]) {

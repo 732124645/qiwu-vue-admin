@@ -12,6 +12,7 @@ import request from 'supertest'
 import type { DataSource } from 'typeorm'
 import { AppModule } from '../../src/app.module.js'
 import { setupApp } from '../../src/app.setup.js'
+import { AuthService } from '../../src/core/auth/auth.service.js'
 import { ABSOLUTE_MS, REFRESH_GRACE_MS, TokenService } from '../../src/core/auth/token.service.js'
 import { LAST_SIGNIN_SQL } from '../../src/core/audit/audit-writer.js'
 import { AuthParams, smsIpBucket } from '../../src/core/auth/auth-params.js'
@@ -930,8 +931,8 @@ describe('me', () => {
     await log('password', 1, '2020-01-06T00:00:00Z', id, new Date())
     expect((await get('me', first.access)).lastSignInAt).toBe('2020-01-02T08:00:00.000Z')
 
-    // a sign-in past the 1 s clock slack: its previous one is the first session's; the first
-    // session's stays
+    // a sign-in after the first one (whose clock ran 0.5 s ahead): its previous one is the first
+    // session's; the first session's stays
     await new Promise((r) => setTimeout(r, 1100))
     const [own] = await ds.query<{ at: Date }[]>(
       `SELECT created_at AS at FROM aud_signin_log WHERE user_id = ? AND created_at > '2021-01-01'`,
@@ -949,6 +950,47 @@ describe('me', () => {
     )
     expect(plan!.key).toBe('idx_aud_signin_log_user_created')
   })
+
+  it.each([
+    { dir: 'behind', skew: -15_000, via: 'password', name: 'last-behind' },
+    { dir: 'ahead of', skew: 15_000, via: 'password', name: 'last-ahead' },
+    { dir: 'ahead of', skew: 15_000, via: 'sms', name: 'last-ahead-sms' },
+  ])(
+    'GET /me lastSignInAt with the app clock 15 s $dir the database clock, the earlier sign-in by $via: the previous session sign-in, never its own',
+    async ({ skew, via, name }) => {
+      const id = await user(name)
+      // the clock moves on between the session's start and its sign-in log row
+      const issue = tokens.issue.bind(tokens)
+      vi.spyOn(tokens, 'issue').mockImplementation(async (...args: Parameters<typeof issue>) => {
+        const issued = await issue(...args)
+        vi.setSystemTime(Date.now() + 1)
+        return issued
+      })
+      const at = Date.now() + skew
+      freezeAt(at)
+      const first =
+        via === 'sms'
+          ? {
+              access: (
+                await inTenant1(() =>
+                  app
+                    .get(AuthService)
+                    .signInVerified(
+                      id,
+                      { kind: 'sms', timezone: null, label: name },
+                      { ip: nextIp(), ua: CHROME },
+                    ),
+                )
+              ).accessToken,
+            }
+          : await signedIn(name)
+      vi.setSystemTime(at + 1000)
+      const second = await signedIn(name)
+      await signinLog(PREFIX + name, 2)
+      expect((await get('me', second.access)).lastSignInAt).toBe(new Date(at).toISOString())
+      expect((await get('me', first.access)).lastSignInAt).toBeNull()
+    },
+  )
 
   it('GET /menus: a role granted one action sees the full group → page path; actions never appear', async () => {
     const { access } = await signedIn('menu-a')

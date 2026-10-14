@@ -63,6 +63,11 @@ export interface SigninLogEntry {
    * context's tenant.
    */
   tenantId?: number | null
+  /**
+   * When it happened (epoch ms, app clock); absent = now. A successful sign-in passes its session's
+   * `loginAt`, so GET /me can tell the session's own row from earlier ones.
+   */
+  at?: number
 }
 
 /** One `@ActionLog` call (see docs/design-notes.md#audit); the writer adds the caller and trace id from CLS. */
@@ -193,9 +198,6 @@ export function describeFault(
   }
 }
 
-/** How far the DB clock may lag the app's before a session's own sign-in row counts as an earlier one. */
-const CLOCK_SLACK_MS = 1000
-
 /** `lastSignIn`'s query (params: user id, before, tenant); exported for the spec that checks its index. */
 export const LAST_SIGNIN_SQL = `SELECT created_at AS at FROM aud_signin_log
   WHERE user_id = ? AND ok = 1 AND kind IN ('password', 'sms', 'wx-mp') AND created_at < ?
@@ -216,7 +218,9 @@ export class AuditWriter {
 
   constructor(@InjectDataSource() private readonly ds: DataSource) {}
 
+  /** `created_at` is written from the app clock (never the DB's default): see `lastSignIn`. */
   signin(e: SigninLogEntry): void {
+    const at = new Date(e.at ?? Date.now())
     const { browser, os } = parseUa(e.ua)
     const traceId = clsGet('traceId') ?? null
     const tid = e.tenantId === undefined ? tenantIdIfAny() : e.tenantId
@@ -230,8 +234,8 @@ export class AuditWriter {
         this.ds.query(
           `INSERT INTO aud_signin_log
              (trace_id, kind, user_id, user_type, username, client_id, ip, location, browser, os, ok, msg_key,
-              msg_params, tenant_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              msg_params, tenant_id, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             traceId,
             e.kind,
@@ -247,6 +251,7 @@ export class AuditWriter {
             e.msgKey,
             e.msgParams ? JSON.stringify(e.msgParams) : null,
             tid,
+            at,
           ],
         ),
       )
@@ -258,14 +263,15 @@ export class AuditWriter {
    * (and not deleted) before `loginAt`, i.e. the second-to-last one when this session's is the last. Anchored on the
    * session, not on row order: its own row is inserted after `loginAt` and without awaiting (it may not
    * be there yet), and a later sign-in elsewhere must not become this session's "previous" one.
-   * `CLOCK_SLACK_MS` keeps the session's own row out when the DB clock runs behind the app's.
+   * Its own row carries `loginAt` itself as `created_at` (app clock on both sides), so the strict `<`
+   * keeps it out however far the DB clock is off the app's.
    * Served by idx (user_id, created_at): every /me reads back from loginAt within the user's rows only,
    * in the user's own tenant (where its sign-ins are logged, also while it acts in another one).
    */
   async lastSignIn(userId: number, loginAt: number): Promise<string | null> {
     const [row] = await this.ds.query<{ at: Date }[]>(LAST_SIGNIN_SQL, [
       userId,
-      new Date(loginAt - CLOCK_SLACK_MS),
+      new Date(loginAt),
       clsGet('actorTenantId') ?? tenantId(),
     ])
     return row ? row.at.toISOString() : null

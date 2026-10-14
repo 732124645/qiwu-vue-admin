@@ -164,7 +164,9 @@ export class AuthService {
     )
     const badCredentials = at.byCode ? BAD_CREDENTIALS_TENANT : Err.AUTH_BAD_CREDENTIALS
     const log = (
-      e: Pick<SigninLogEntry, 'userId' | 'ok' | 'msgKey' | 'msgParams'> & { userType?: string },
+      e: Pick<SigninLogEntry, 'userId' | 'ok' | 'msgKey' | 'msgParams' | 'at'> & {
+        userType?: string
+      },
       kind: SigninLogEntry['kind'] = via?.kind ?? 'password',
     ) =>
       this.audit.signin({
@@ -261,7 +263,13 @@ export class AuthService {
     }
     await this.redis.del([keys.pair, keys.user, redisKey('authFail', 'cur', live.userId)])
     await this.lookup.recordSignIn(live.userId, { ip: client.ip, at: now, timezone })
-    log({ userId: live.userId, userType: issued.session.userType, ok: true, msgKey: 'signin.ok' })
+    log({
+      userId: live.userId,
+      userType: issued.session.userType,
+      ok: true,
+      msgKey: 'signin.ok',
+      at: issued.session.loginAt,
+    })
     return issued
   }
 
@@ -294,6 +302,7 @@ export class AuthService {
       username: string,
       id: number | null,
       userType: string,
+      at?: number,
     ) =>
       this.audit.signin({
         kind: opts.kind,
@@ -304,6 +313,7 @@ export class AuthService {
         ...client,
         ok,
         msgKey,
+        at,
       })
     const { policy, blocked } = await this.params.load()
     if (isBlocked(blocked, client.ip)) {
@@ -348,7 +358,7 @@ export class AuthService {
     // like a password sign-in: a proven sign-in clears the current-password counter (see docs/design-notes.md#auth-sessions)
     await this.redis.del(redisKey('authFail', 'cur', userId))
     await this.lookup.recordSignIn(userId, { ip: client.ip, at: now, timezone: opts.timezone })
-    log(true, 'signin.ok', cred.username, userId, issued.session.userType)
+    log(true, 'signin.ok', cred.username, userId, issued.session.userType, issued.session.loginAt)
     return issued
   }
 
