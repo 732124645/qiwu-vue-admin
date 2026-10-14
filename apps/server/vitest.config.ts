@@ -1,5 +1,9 @@
 import { defineConfig } from 'vitest/config'
 
+// one shard of a sharded run (`--shard i/n`, scripts/ci-local.mjs --part server) covers only its files:
+// `vitest run --merge-reports --coverage` over the blob reports of all shards checks the thresholds
+const shard = process.argv.some((arg) => arg.startsWith('--shard'))
+
 // One config for unit (*.spec.ts) and e2e (*.e2e-spec.ts) specs so `pnpm test <stem>` finds either.
 export default defineConfig({
   // read @qiwu/shared from src (its "source" export): no shared rebuild needed before tests;
@@ -23,10 +27,12 @@ export default defineConfig({
     // ENV_FILE: CoreConfigModule's mode file (load-env.ts already put the same values in process.env);
     // CODEGEN_TEMPLATES: the generator's templates from source too
     env: { I18N_DIR: 'src/i18n', ENV_FILE: '.env.test', CODEGEN_TEMPLATES: 'codegen-templates' },
-    // Enforced by `vitest run --coverage` (pnpm ci:local); workflow/engine 90
+    // Enforced by `vitest run --coverage` (pnpm ci:local) and by the merge of the shards; workflow/engine 90
     coverage: {
       include: ['src/**'],
-      thresholds: { 'src/core/**': { lines: 80 }, 'src/modules/workflow/engine/**': { lines: 90 } },
+      thresholds: shard
+        ? undefined
+        : { 'src/core/**': { lines: 80 }, 'src/modules/workflow/engine/**': { lines: 90 } },
     },
   },
 })

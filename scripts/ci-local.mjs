@@ -4,6 +4,13 @@
 // multi-tenancy on, then mobile when mobile/ exists) run side by side, each step in its own process group with its
 // output in its own log file; the first failure stops the other lane. --serial (the default until 3
 // green parallel runs in a row) wins over --parallel.
+// --part <name> [--shard <i>/<n>]: one slice of the gate, as the parallel jobs of .github/workflows/ci.yml
+// run it (each on its own runner, in order): checks (everything but the server tests and Playwright),
+// server (one vitest shard with coverage into a blob report under apps/server/.vitest/blob; shard 1
+// then runs gen:check-golden), coverage (merges those blobs and checks the coverage thresholds),
+// web-e2e (one Playwright shard) and more-e2e (Playwright with multi-tenancy on, then mobile). server
+// and web-e2e need --shard (1/1: one run; a server shard never checks the thresholds, --part coverage
+// does). The Playwright runs and the server specs that start dist need the server build only.
 import { spawn, spawnSync } from 'node:child_process'
 import { once } from 'node:events'
 import { closeSync, existsSync, openSync, readFileSync, rmSync } from 'node:fs'
@@ -19,11 +26,14 @@ const fileTimes = join(tmpdir(), 'qw-ci-local-server-files.json')
 const MOBILE = existsSync(join(root, 'mobile/package.json')) ? undefined : 'no mobile/'
 
 // [name, shell command, skip reason or undefined]
+const install = ['install', 'pnpm i --frozen-lockfile']
+// the shared package exports its types from dist and a fresh checkout has none: verify's
+// typecheck of the web e2e specs (tsconfig.node.json reads dist) would not resolve @qiwu/shared
+const sharedBuild = ['shared build', 'pnpm --filter @qiwu/shared build']
+const mobileInstall = ['mobile install', 'pnpm mobile:install', MOBILE]
 const before = [
-  ['install', 'pnpm i --frozen-lockfile'],
-  // the shared package exports its types from dist and a fresh checkout has none: verify's
-  // typecheck of the web e2e specs (tsconfig.node.json reads dist) would not resolve @qiwu/shared
-  ['shared build', 'pnpm --filter @qiwu/shared build'],
+  install,
+  sharedBuild,
   ['verify', 'pnpm verify'],
   ['build', 'pnpm -r build'],
   // the arch run inside verify precedes the build: scan the fresh apps/web/dist
@@ -32,36 +42,91 @@ const before = [
   // then render the form designer
   ['web dev smoke', 'pnpm smoke:web-dev'],
   ['test (non-server)', 'pnpm -r --fail-if-no-match --filter "!@qiwu/server" test'],
-  ['mobile install', 'pnpm mobile:install', MOBILE],
+  mobileInstall,
   ['mobile verify', 'pnpm mobile:verify', MOBILE],
   ['mobile test', 'pnpm mobile:test', MOBILE],
   ['mobile build h5', 'pnpm mobile:build:h5', MOBILE],
   // + the WeChat package size check (main package ≤ 2 MB)
   ['mobile build mp-weixin', 'pnpm mobile:build:mp-weixin', MOBILE],
 ]
+// a shard (`i/n`) also writes its results and coverage as a blob report for the merge
+const serverTest = (shard) =>
+  `pnpm --filter @qiwu/server exec vitest run${shard ? ` --shard=${shard}` : ''} --coverage --reporter=default${shard ? ' --reporter=blob' : ''} --reporter=../../scripts/vitest-file-times.mjs`
+// G0 modules = what the generator renders from their seeded config (.env.test: qiwu_test);
+// the server dist is the build step's
+const golden = ['gen:check-golden', 'pnpm gen:check-golden --skip-build']
+const playwrightTenant = ['playwright tenant', 'pnpm --filter @qiwu/web e2e:tenant']
+const mobileE2e = ['mobile e2e', 'pnpm mobile:e2e', MOBILE]
 // --parallel runs these two side by side: server tests + golden use .env.test (qiwu_test, Redis db
 // 15), Playwright .env.e2e (qiwu_e2e, db 14) and its own ports
 const lanes = [
-  [
-    [
-      'test server + coverage',
-      'pnpm --filter @qiwu/server exec vitest run --coverage --reporter=default --reporter=../../scripts/vitest-file-times.mjs',
-    ],
-    // G0 modules = what the generator renders from their seeded config (.env.test: qiwu_test);
-    // the server dist is the build step's
-    ['gen:check-golden', 'pnpm gen:check-golden --skip-build'],
-  ],
+  [['test server + coverage', serverTest()], golden],
   // runs the dist of the build step (server: .env.e2e, qiwu_e2e + Redis db 14; web: vite build +
   // preview under the SPA CSP); the global setup prints the browser channel. Then the same with
   // multi-tenancy on (e2e-tenant/: qiwu_tenant_e2e, 1, 3203/4176) and the mobile H5 suite on its own
   // database, Redis db and ports (qiwu_mobile_e2e, 9, 3201/4175): one Playwright run at a time
-  [
-    ['playwright', 'pnpm --filter @qiwu/web e2e'],
-    ['playwright tenant', 'pnpm --filter @qiwu/web e2e:tenant'],
-    ['mobile e2e', 'pnpm mobile:e2e', MOBILE],
-  ],
+  [['playwright', 'pnpm --filter @qiwu/web e2e'], playwrightTenant, mobileE2e],
 ]
 const after = [['smoke:boot', 'pnpm smoke:boot']]
+
+// --part <name> → (i, n) => its steps; the Playwright web servers build the web app and the H5 client
+// themselves, so the e2e parts build the server only
+const serverBuild = ['build (server)', 'pnpm --filter @qiwu/server build']
+const PARTS = {
+  checks: () => [...before, ...after],
+  // a shard alone never reaches the coverage thresholds (vitest.config.ts): the merge checks them
+  server: (i, n) => [
+    install,
+    sharedBuild,
+    serverBuild,
+    [`test server ${i}/${n} + coverage`, serverTest(`${i}/${n}`)],
+    ...(i === 1 ? [golden] : []),
+  ],
+  coverage: () => [
+    install,
+    [
+      'coverage (merged shards)',
+      'pnpm --filter @qiwu/server exec vitest run --merge-reports --coverage',
+    ],
+  ],
+  'web-e2e': (i, n) => [
+    install,
+    sharedBuild,
+    serverBuild,
+    [`playwright ${i}/${n}`, `pnpm --filter @qiwu/web e2e --shard=${i}/${n}`],
+  ],
+  'more-e2e': () => [install, sharedBuild, serverBuild, playwrightTenant, mobileInstall, mobileE2e],
+}
+const SHARDED = ['server', 'web-e2e']
+
+/** The steps of `--part <name> [--shard <i>/<n>]`, or undefined without --part. */
+function partSteps(argv) {
+  const joined = argv.find((arg) => /^--(part|shard)=/.test(arg))
+  if (joined)
+    throw new Error(
+      `write ${joined.replace('=', ' ')}: --part and --shard take their value as the next argument`,
+    )
+  const at = argv.indexOf('--part')
+  const shardAt = argv.indexOf('--shard')
+  if (at < 0) {
+    if (shardAt >= 0) throw new Error('--shard needs --part server or --part web-e2e')
+    return undefined
+  }
+  const part = argv[at + 1]
+  if (!Object.hasOwn(PARTS, part ?? ''))
+    throw new Error(`--part takes one of ${Object.keys(PARTS).join(', ')}, got ${part}`)
+  if (argv.includes('--parallel'))
+    throw new Error('--part runs its steps in order: drop --parallel')
+  // one server shard alone never checks the coverage thresholds: run every shard, then --part coverage
+  if (shardAt < 0 && SHARDED.includes(part))
+    throw new Error(`--part ${part} needs --shard <i>/<n> (1/1 for one run)`)
+  if (shardAt < 0) return PARTS[part](1, 1)
+  if (!SHARDED.includes(part)) throw new Error(`--part ${part} has no shards`)
+  const [, i, n] = /^(\d+)\/(\d+)$/.exec(argv[shardAt + 1] ?? '') ?? []
+  if (!(Number(i) >= 1 && Number(i) <= Number(n)))
+    throw new Error(`--shard takes <i>/<n> with 1 <= i <= n, got ${argv[shardAt + 1]}`)
+  return PARTS[part](Number(i), Number(n))
+}
 
 /** Signals the process group of `kid` (detached: its own group); false once the group is gone. */
 const group = (kid, sig) => {
@@ -170,6 +235,7 @@ function runStep([name, cmd, skip], dry, env) {
 
 async function main(argv) {
   const dry = argv.includes('--dry')
+  const part = partSteps(argv)
   const parallel = argv.includes('--parallel') && !argv.includes('--serial')
   if (process.platform === 'win32' && parallel) throw new Error('use --serial on Windows')
   if (!dry) rmSync(fileTimes, { force: true })
@@ -181,7 +247,8 @@ async function main(argv) {
       results.push(failed() ? [step[0], 'not run', ''] : runStep(step, dry, env))
   }
 
-  if (!parallel) serial([...before, ...lanes.flat(), ...after])
+  if (part) serial(part)
+  else if (!parallel) serial([...before, ...lanes.flat(), ...after])
   else {
     serial(before)
     if (failed()) serial(lanes.flat())

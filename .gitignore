@@ -29,6 +29,7 @@ data/
 playwright-report/
 test-results/
 blob-report/
+.vitest/
 
 # os / editor / logs
 .DS_Store

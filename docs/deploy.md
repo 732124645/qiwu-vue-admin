@@ -302,9 +302,9 @@ pm2 startup
 
 ## GitHub Actions 自动部署（可选）
 
-仓库带两个工作流和 `scripts/deploy/` 下的服务器部署套件。复刻仓库时，把两个工作流里的 `github.repository == '732124645/qiwu-vue-admin'` 改成自己的仓库名，`deploy.env` 的 `QW_REPO` 也一样。两个工作流必须一起改：只改了 `release.yml` 时，main 推送的 CI 运行会跳过门禁却显示成功，发布工作流会因其中的 `gate` 作业被跳过而报错退出。
+仓库带两个工作流和 `scripts/deploy/` 下的服务器部署套件。复刻仓库时，把两个工作流里每一处 `github.repository == '732124645/qiwu-vue-admin'`（`ci.yml` 有 3 处）都改成自己的仓库名，`deploy.env` 的 `QW_REPO` 也一样。两个工作流必须一起改：只改了 `release.yml` 时，main 推送的 CI 运行会跳过门禁却显示成功，发布工作流会因其中的 `gate` 作业被跳过而报错退出。
 
-- [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)：main 推送、PR 与手动触发时运行。ubuntu-24.04 上启动 MySQL 8.4 与 Redis 8 服务容器（账号密码每次随机；Redis 用户与生产一样只能访问 `qw:*`），`PW_CHANNEL=chromium` 让 Playwright 使用自带的 Chromium（本地默认仍是 Edge），然后运行完整门禁 `pnpm ci:local`；失败时上传 Playwright 结果（保留 7 天）。只在上游仓库自动运行，其他仓库只能手动触发。
+- [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)：main 推送、PR 与手动触发时运行。完整门禁按 `scripts/ci-local.mjs --part` 切成并行作业，都在 ubuntu-24.04 上运行：`checks`（安装、verify、构建、web dev smoke、非服务端测试、移动端检查与构建、`smoke:boot`）、服务端测试 3 片（vitest `--shard`，每片写一份 blob 报告，第 1 片随后跑 `gen:check-golden`）、网页 Playwright 3 片（`--shard`）、多租户 Playwright 加移动端 e2e；这些 part 作业各自启动自己的 MySQL 8.4 与 Redis 8 服务容器（账号密码每次随机；Redis 用户与生产一样只能访问 `qw:*`）。`coverage` 作业只做安装并合并各片报告，在这里检查覆盖率门槛，不需要数据库。`PW_CHANNEL=chromium` 让 Playwright 使用自带的 Chromium（本地默认仍是 Edge）；失败的作业上传各自的 Playwright 结果（保留 7 天）。汇总作业 `gate` 只在其他作业全部成功时成功（任一作业失败或被跳过都算失败），发布工作流只认它。本地完整门禁仍是 `pnpm ci:local`；单独跑其中一片用 `node scripts/ci-local.mjs --part <名称> [--shard <i>/<n>]`（`server` 与 `web-e2e` 必须带 `--shard`，单片不检查覆盖率门槛），加 `--dry` 只列出步骤。只在上游仓库自动运行，其他仓库只能手动触发。
 - [`.github/workflows/release.yml`](../.github/workflows/release.yml)：推送 `vX.Y.Z` 标签时不再重跑门禁。先校验标签格式、标签指向本次运行的提交且该提交在 `main` 上、`CHANGELOG.md` 中有非空的 `## [X.Y.Z]` 一节 → 再通过 Actions API 确认本仓库的 CI 工作流（按文件 `.github/workflows/ci.yml` 识别）已为同一提交成功跑完一次推送运行：事件为 `push`、分支为 `main`、提交号完全一致、已完成且结论为成功，同一仓库而非 fork，且这次运行中的 `gate` 作业结论为成功（被跳过不算：所有作业都被跳过的运行整体也显示成功）；PR、手动触发或其他分支的运行都不算 → 以该节创建 GitHub Release → 部署作业进入环境 `demo`（设了必需审批人时先等审批）→ 通过 SSH 把 `<标签> <提交号>` 发给服务器执行部署。预发布标签（如 `v1.1.0-rc.1`）不触发。
 
 发布一个版本（`CHANGELOG.md` 须已有非空的 `## [X.Y.Z]` 一节，版本号即标签去掉 `v`）：

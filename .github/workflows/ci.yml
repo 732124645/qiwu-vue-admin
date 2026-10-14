@@ -1,7 +1,12 @@
-# Full gate (pnpm ci:local) on a Linux runner: MySQL 8.4 and Redis 8 service containers with
-# throwaway credentials, Playwright on its bundled Chromium. Runs in the public repository only
-# (a fork: change the repository name below, or start it by hand). release.yml publishes a tag only
-# when a push run of this workflow on main passed for the tagged commit.
+# The full gate (pnpm ci:local) sliced into parallel jobs on Linux runners (scripts/ci-local.mjs
+# --part): checks, the server tests in 3 shards, their merged coverage (thresholds checked there),
+# the web Playwright suite in 3 shards, and Playwright with multi-tenancy on plus the mobile suite.
+# Each part job (checks, server shards, Playwright shards) starts its own MySQL 8.4 and Redis 8 service
+# containers with throwaway credentials; coverage only installs and merges, no database. Playwright
+# runs on its bundled Chromium. The job `gate` passes only when every other job passed. Runs in the
+# public repository only (a fork: change the repository name in every job below, or start it by hand).
+# release.yml publishes a tag only when a push run of this workflow on main passed `gate` for the
+# tagged commit.
 name: CI
 
 on:
@@ -22,10 +27,22 @@ defaults:
     shell: bash
 
 jobs:
-  gate:
+  part:
     if: github.repository == '732124645/qiwu-vue-admin' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - part: checks
+          - { part: server, shard: 1/3 }
+          - { part: server, shard: 2/3 }
+          - { part: server, shard: 3/3 }
+          - { part: web-e2e, shard: 1/3 }
+          - { part: web-e2e, shard: 2/3 }
+          - { part: web-e2e, shard: 3/3 }
+          - part: more-e2e
     env:
       HUSKY: '0'
       PW_CHANNEL: chromium
@@ -61,9 +78,12 @@ jobs:
           key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'mobile/pnpm-lock.yaml') }}
           restore-keys: pnpm-${{ runner.os }}-
       - run: pnpm i --frozen-lockfile
+      # the web dev smoke of checks opens it too
       - name: Playwright Chromium and its system packages
+        if: matrix.part != 'server'
         run: pnpm --filter @qiwu/web exec playwright install --with-deps chromium
       - name: Deploy kit shell check
+        if: matrix.part == 'checks'
         run: shellcheck scripts/deploy/*.sh
       - name: Test databases, Redis ACL user and apps/server/.env.local (throwaway)
         run: |
@@ -90,14 +110,75 @@ jobs:
             echo 'REDIS_USERNAME=qiwu'
             echo "REDIS_PASSWORD=${redis_pw}"
           } > apps/server/.env.local
-      - run: pnpm ci:local
+      - name: ci:local --part ${{ matrix.part }} ${{ matrix.shard }}
+        env:
+          PART: ${{ matrix.part }}
+          SHARD: ${{ matrix.shard }}
+        run: node scripts/ci-local.mjs --part "$PART" ${SHARD:+--shard "$SHARD"}
+      # for the coverage job; an artifact name cannot hold the shard's slash
+      - name: Blob report of this server shard
+        if: matrix.part == 'server'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: server-blob-${{ strategy.job-index }}
+          path: apps/server/.vitest/blob/
+          include-hidden-files: true
+          retention-days: 1
+          if-no-files-found: error
       - name: Playwright results of a failed run
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: playwright-results
+          name: playwright-results-${{ matrix.part }}-${{ strategy.job-index }}
           path: |
             apps/web/test-results
             mobile/test-results
           retention-days: 7
           if-no-files-found: ignore
+
+  # the coverage thresholds of apps/server/vitest.config.ts over all server shards together
+  coverage:
+    needs: part
+    if: github.repository == '732124645/qiwu-vue-admin' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      HUSKY: '0'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.22.1
+      - name: pnpm (the packageManager version of package.json)
+        run: |
+          npm install -g "$(node -p "require('./package.json').packageManager")"
+          echo "PNPM_STORE=$(pnpm store path --silent)" >> "$GITHUB_ENV"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.PNPM_STORE }}
+          key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'mobile/pnpm-lock.yaml') }}
+          restore-keys: pnpm-${{ runner.os }}-
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: server-blob-*
+          path: apps/server/.vitest/blob
+          merge-multiple: true
+      - run: node scripts/ci-local.mjs --part coverage
+
+  # the one job release.yml checks: fails unless every other job passed (a skipped one too)
+  gate:
+    needs: [part, coverage]
+    if: always() && (github.repository == '732124645/qiwu-vue-admin' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Every part and the merged coverage passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "results: $RESULTS"
+          for result in $RESULTS; do
+            [[ "$result" == success ]] || { echo "::error::a needed job ended in $result"; exit 1; }
+          done

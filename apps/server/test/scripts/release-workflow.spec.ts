@@ -55,6 +55,24 @@ it('no job calls ci.yml: the tag run does not repeat the gate', () => {
   expect(ci.jobs.gate).not.toHaveProperty('name')
 })
 
+it('ci.yml: gate needs every other job, always runs in the repository, and passes only on all successes', () => {
+  const ci = yaml.parse(readFileSync(join(WORKFLOWS, 'ci.yml'), 'utf8')) as Workflow
+  const { gate, ...others } = ci.jobs
+  expect([gate?.needs].flat().sort()).toEqual(Object.keys(others).sort())
+  const repo = ci.jobs.part?.if
+  expect(repo).toMatch(
+    /^github\.repository == '[^']+' \|\| github\.event_name == 'workflow_dispatch'$/,
+  )
+  for (const job of Object.values(others)) expect(job.if).toBe(repo)
+  expect(gate?.if).toBe(`always() && (${repo})`)
+  expect(gate?.steps).toHaveLength(1)
+  const step = gate?.steps?.[0]
+  expect(step?.env).toEqual({ RESULTS: "${{ join(needs.*.result, ' ') }}" })
+  expect(step?.run).toMatch(
+    /for result in \$RESULTS; do\n\s+\[\[ "\$result" == success \]\] \|\| \{[^}]*exit 1; \}/,
+  )
+})
+
 it('no step or job can be skipped past or have its failure ignored', () => {
   expect(wf.jobs.release?.if).toMatch(/^github\.repository == '[^']+'$/)
   expect(wf.jobs.deploy).not.toHaveProperty('if')
