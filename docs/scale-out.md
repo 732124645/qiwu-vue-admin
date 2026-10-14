@@ -24,7 +24,7 @@
 
 ## 共享限流
 
-`CoreThrottlerModule` 注入已有 node-redis 连接，`RedisThrottlerStorage` 用 Lua 原子更新滚动窗口。键经 `redisKey('throttle', throttlerName, handlerIpDigest, ...)` 构造，属于不可由缓存监控清除的 `throttle:` 命名空间；不存明文令牌、请求体或真实 IP。
+`CoreThrottlerModule` 注入已有 node-redis 连接，`RedisThrottlerStorage` 用 Lua 原子更新滚动窗口。键经 `redisKey('throttle', throttlerName, handlerIpDigest, ...)` 构造，属于不可由缓存列表清除的 `throttle:` 命名空间；不存明文令牌、请求体或真实 IP。
 
 每次命中独立过期，计时使用 Redis `TIME`，多个实例的本机时钟差异不会改变窗口。超过阈值进入固定封禁期，封禁期间请求不会延长封禁；到期重新计数。现有 `@RateLimit(limit, ttlMs)` API、框架的 tracker（含 IPv6 归一化）与 `Retry-After` / `X-RateLimit-*` 响应头保持不变。Redis 操作最多等待 5 秒，失败返回既有内部错误 `A0500` / HTTP 500，不降级为内存计数或放行。
 

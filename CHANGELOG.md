@@ -22,7 +22,7 @@ Multi-tenancy: one deployment serves several companies from one MySQL database (
 - Tenant packages: the menus a tenant may use, enforced on the server (permissions = role grants ∩ package). Routes of a feature group outside the package answer 404, and `GET /api/auth/me` lists the available `features`.
 - Sign-in by bound host name or tenant code on web, H5, App and mini program; unknown, disabled and existing codes get identical responses. Lockout, SMS codes, password resets, OAuth consent and WeChat bindings are per tenant.
 - Platform staff with `iam.tenant.enter` can enter a tenant for support with a required reason: a permanent banner, a two-hour limit, stale tabs reloaded through the `X-Tenant-Expect` header, and audit records for entering, leaving and every request made inside.
-- Platform pages (menus, dictionaries, parameters, storage, templates, code generation, jobs, monitoring and more) belong to the default tenant; with the switch on, API trace, API fault and cache pages are limited to the platform root. Operation and sign-in logs show the actor's tenant.
+- Platform pages (menus, dictionaries, parameters, storage, templates, code generation, jobs, monitoring and more) belong to the default tenant; with the switch on, the API trace, API fault and cache list pages are limited to the platform root. Operation and sign-in logs show the actor's tenant.
 - Code generator: tenant columns, `@TenantColumn()` and cross-tenant 404 cases in the generated end-to-end tests. `docs/multi-tenancy.md` explains how to write tenant-aware project code.
 - Demo data: sample tenants with their own packages and brands, created only when both `APP_DEMO_MODE` and `APP_MULTI_TENANT` are on.
 

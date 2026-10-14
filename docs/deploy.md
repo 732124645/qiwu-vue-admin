@@ -78,7 +78,7 @@ node --env-file-if-exists=.env.local --env-file-if-exists=.env dist/main.js
 APP_MULTI_TENANT=true
 ```
 
-打开前先复核默认租户里持有平台菜单的角色：开关打开后 API 访问日志、API 错误日志与缓存监控只限平台 root，其余平台页（字典、参数、存储、任务、租户管理等）对默认租户里的这些角色照旧可用。多实例部署时全部实例都重启才算切换完成。功能与运维见 [multi-tenancy.md](multi-tenancy.md)。
+打开前先复核默认租户里持有平台菜单的角色：开关打开后 API 访问日志、API 错误日志与缓存列表只限平台 root，其余平台页（字典、参数、存储、任务、租户管理等）对默认租户里的这些角色照旧可用。多实例部署时全部实例都重启才算切换完成。功能与运维见 [multi-tenancy.md](multi-tenancy.md)。
 
 - **全新安装**可以一开始就打开：第一次 `pnpm db:migrate` 在同一次运行里完成迁移并去掉默认值。
 - **已有库**分两次部署：
