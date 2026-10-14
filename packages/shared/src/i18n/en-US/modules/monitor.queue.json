@@ -1,0 +1,26 @@
+{
+  "field": {
+    "monitor": {
+      "queue": {
+        "name": "Queue",
+        "waiting": "Waiting",
+        "prioritized": "Prioritized",
+        "active": "Active",
+        "delayed": "Delayed",
+        "failed": "Failed",
+        "completed": "Completed",
+        "paused": "Paused",
+        "state": "State",
+        "id": "Job ID",
+        "jobName": "Job name",
+        "tenantId": "Tenant",
+        "attempts": "Attempts",
+        "failedReason": "Failure reason",
+        "createdAt": "Added at",
+        "processedAt": "Started at",
+        "finishedAt": "Finished at",
+        "data": "Job data"
+      }
+    }
+  }
+}

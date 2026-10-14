@@ -6,6 +6,10 @@ import type {
   MonitorMysqlVo,
   MonitorRedisVo,
   MonitorServerVo,
+  Page,
+  QueueJobState,
+  QueueJobVo,
+  QueueVo,
 } from '@qiwu/shared'
 import { api } from '@/core/request/http'
 
@@ -26,4 +30,16 @@ export const monitorApi = {
   /** deletes the keys of every clearable namespace */
   cacheClearAll: () => api.delete<CacheClearVo>(`${BASE}/cache/all-registered`),
   mysql: () => api.get<MonitorMysqlVo>(`${BASE}/mysql`),
+  /** the queues registered in the app, with their job counts */
+  queues: () => api.get<QueueVo[]>(`${BASE}/queues`),
+  /** one state's jobs of a queue, newest first */
+  queueJobs: (name: string, params: { state: QueueJobState; page: number; pageSize: number }) =>
+    api.get<Page<QueueJobVo>>(`${BASE}/queues/${encodeURIComponent(name)}/jobs`, { params }),
+  /** runs a failed job again */
+  queueRetry: (name: string, id: string) =>
+    api.post<void>(
+      `${BASE}/queues/${encodeURIComponent(name)}/jobs/${encodeURIComponent(id)}/retry`,
+    ),
+  queueRemove: (name: string, id: string) =>
+    api.delete<void>(`${BASE}/queues/${encodeURIComponent(name)}/jobs/${encodeURIComponent(id)}`),
 }

@@ -1102,7 +1102,7 @@ it('Menus: system → dicts, params; messaging → bulletins; audit → action /
   })
 })
 
-it('Menus: monitor → online users, server, Redis, cache, MySQL; system → regions; one action per perm', async () => {
+it('Menus: monitor → online users, server, Redis, cache, MySQL, queues; system → regions; one action per perm', async () => {
   await runSeeds(ds)
   const menu = (routeName: string) =>
     one(
@@ -1118,7 +1118,7 @@ it('Menus: monitor → online users, server, Redis, cache, MySQL; system → reg
     ).map((a: { perms: string }) => a.perms)
   const monitor = await menu('monitor')
   expect(monitor).toMatchObject({ parent_id: 0, kind: 'group', name: 'menu.monitor.title' })
-  const { cache, cacheClear, ...browseOnly } = monitorPerms
+  const { cache, cacheClear, queue, queueRetry, queueRemove, ...browseOnly } = monitorPerms
   const pages: [route: string, group: number, path: string, view: string, perms: string[]][] = [
     [
       'iam-session',
@@ -1142,6 +1142,13 @@ it('Menus: monitor → online users, server, Redis, cache, MySQL; system → reg
       '/monitor/cache',
       'platform/monitor/cache/index',
       [cache, cacheClear],
+    ],
+    [
+      'monitor-queue',
+      monitor.id,
+      '/monitor/queue',
+      'platform/monitor/queue/index',
+      [queue, queueRetry, queueRemove],
     ],
     [
       'geo-area',
@@ -1176,6 +1183,7 @@ it('Menus: monitor → online users, server, Redis, cache, MySQL; system → reg
     'monitor-redis',
     'monitor-cache',
     'monitor-mysql',
+    'monitor-queue',
   ])
 })
 
@@ -1252,6 +1260,7 @@ it('menu groups and pages follow the requested order', async () => {
     'monitor-redis',
     'monitor-cache',
     'monitor-mysql',
+    'monitor-queue',
   ])
   expect(await children(await id('devtools'))).toEqual([
     'codegen-table',
@@ -1690,6 +1699,7 @@ it('Menus: storage → file list, configs; monitor → tasks, run log; one actio
     'monitor-redis',
     'monitor-cache',
     'monitor-mysql',
+    'monitor-queue',
   ])
 })
 

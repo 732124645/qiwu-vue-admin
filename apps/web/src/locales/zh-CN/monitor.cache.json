@@ -39,7 +39,8 @@
         "excelReport": "导入错误报告",
         "lock": "锁",
         "jobLock": "任务锁",
-        "jobFire": "任务触发记录"
+        "jobFire": "任务触发记录",
+        "queue": "任务队列"
       }
     }
   },

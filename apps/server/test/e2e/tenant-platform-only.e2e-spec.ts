@@ -207,6 +207,7 @@ beforeAll(async () => {
     ...Object.values(httpTracePerms),
     ...Object.values(httpFaultPerms),
     monitorPerms.cache,
+    monitorPerms.queue,
     dictPerms.browse,
   ])
   auditor = await addUser(on, 1, `${PREFIX}auditor`, { roleId: auditorRole })
@@ -237,7 +238,7 @@ afterAll(async () => {
 })
 
 describe('@PlatformOnly() on the routes', () => {
-  it('sits on exactly the routes behind a platform perm (root only on the logs and the cache monitor); platform and tenant perms never meet', async () => {
+  it('sits on exactly the routes behind a platform perm (root only on the logs, the cache and queue monitors); platform and tenant perms never meet', async () => {
     const platform = await flaggedPerms(1)
     const tenant = await flaggedPerms(0)
     expect(platform.size).toBeGreaterThan(0)
@@ -273,7 +274,7 @@ describe('@PlatformOnly() on the routes', () => {
     expect(marked.get('DictController.page')).toBe('platform')
     expect(marked.has('DictController.options')).toBe(false)
     expect(marked.get('MonitorController.server')).toBe('platform')
-    // exactly the API logs and the cache monitor are root only, every other marked route 'platform'
+    // exactly the API logs, the cache and queue monitors are root only, every other marked route 'platform'
     const rootOnly = [...marked].filter(([, who]) => who === 'root').map(([key]) => key)
     expect(rootOnly.sort()).toEqual(
       [
@@ -289,6 +290,10 @@ describe('@PlatformOnly() on the routes', () => {
         'MonitorController.value',
         'MonitorController.clear',
         'MonitorController.clearAll',
+        'QueueMonitorController.list',
+        'QueueMonitorController.jobs',
+        'QueueMonitorController.retry',
+        'QueueMonitorController.remove',
       ].sort(),
     )
     expect([...marked.values()].filter((who) => who !== 'root' && who !== 'platform')).toEqual([])
@@ -392,13 +397,14 @@ describe('the sessions of another tenant', () => {
   })
 })
 
-describe('the API logs, the cache monitor', () => {
+describe('the API logs, the cache and queue monitors', () => {
   it('only root while the switch is on; anyone granted them while it is off', async () => {
     const reader = await tokenOf(auditor)
     const paths = [
       '/api/audit/http-traces',
       '/api/audit/http-faults',
       '/api/monitor/cache/namespaces',
+      '/api/monitor/queues',
     ]
     for (const path of paths) {
       expect((await http(on).get(path).set(bearer(reader))).status).toBe(403)

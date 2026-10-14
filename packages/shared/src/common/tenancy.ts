@@ -27,6 +27,7 @@ export const PLATFORM_ONLY_ROUTES: readonly string[] = [
   'monitor-mysql',
   'monitor-redis',
   'monitor-cache',
+  'monitor-queue',
   'scheduler-task',
   'scheduler-run',
   // dev tools (the process form and model designers belong to the workflow)
@@ -55,7 +56,8 @@ export const PLATFORM_ONLY_ROUTES: readonly string[] = [
 ]
 
 /**
- * The platform pages holding every tenant's data (the API access and error logs, the cache monitor): while
+ * The platform pages holding every tenant's data (the API access and error logs, the cache and queue
+ * monitors): while
  * multi-tenancy is on only root opens them, so the side menu leaves them out for everyone else, whatever
  * their roles were granted.
  */
@@ -63,4 +65,5 @@ export const ROOT_ONLY_ROUTES: readonly string[] = [
   'audit-http-trace',
   'audit-http-fault',
   'monitor-cache',
+  'monitor-queue',
 ]

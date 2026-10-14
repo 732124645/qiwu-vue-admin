@@ -36,7 +36,7 @@ describe('cache-namespaces', () => {
     )
   })
 
-  it('registers the cache namespaces (+ auth:sess:, auth:seen, core/auth; excel:report:, core/excel; dict:ver:, param:ver:) once each; auth:* is never clearable', () => {
+  it('registers the cache namespaces (+ auth:sess:, auth:seen, core/auth; excel:report:, core/excel; dict:ver:, param:ver:; queue:, core/queue) once each; auth:* is never clearable', () => {
     const prefixes = Object.values(CACHE_NAMESPACES).map((n) => n.prefix)
     expect(new Set(prefixes).size).toBe(prefixes.length)
     expect(prefixes.sort()).toEqual(
@@ -68,6 +68,7 @@ describe('cache-namespaces', () => {
         'lock:',
         'job:lock:',
         'job:fire:',
+        'queue:',
       ].sort(),
     )
     const clearableAuth = Object.values(CACHE_NAMESPACES).filter(

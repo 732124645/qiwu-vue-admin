@@ -1,0 +1,21 @@
+{
+  "monitor": {
+    "queue": {
+      "showJobs": "Jobs",
+      "jobsOf": "Jobs of {name}",
+      "running": "Running",
+      "empty": "No queue is registered yet",
+      "emptyHint": "Queues show here once a module declares one with registerQueue and provides its processor.",
+      "noJobs": "No jobs in this state",
+      "retry": "Retry",
+      "retried": "The job was queued again",
+      "removeConfirm": "Delete job {id}? This cannot be undone.",
+      "noData": "None"
+    }
+  },
+  "menu": {
+    "monitor": {
+      "queue": "Queue monitor"
+    }
+  }
+}

@@ -14,6 +14,7 @@ import { CoreHttpModule } from './core/http/http.module.js'
 import { CoreI18nModule } from './core/i18n/i18n.module.js'
 import { CoreLoggerModule } from './core/logger/logger.module.js'
 import { CoreNotifyModule } from './core/notify/notify.js'
+import { CoreQueueModule } from './core/queue/queue.module.js'
 import { CoreRealtimeModule } from './core/realtime/realtime.module.js'
 import { CoreRedisModule } from './core/redis/redis.module.js'
 import { CoreSettingsModule } from './core/settings/settings.module.js'
@@ -40,6 +41,8 @@ import { WorkflowModule } from './modules/workflow/workflow.module.js'
     // TypeORM DataSource + @Transactional() (CLS plugin): after CoreContextModule
     CoreDbModule,
     CoreRedisModule,
+    // BullMQ job queues on the shared Redis client (workers run on every instance)
+    CoreQueueModule,
     // AuditWriter (sign-in log, @ActionLog): needs the DataSource
     CoreAuditModule,
     // dict/param reads with Redis caches (core: Excel, notifications and auth need them too)

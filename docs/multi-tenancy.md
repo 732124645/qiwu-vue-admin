@@ -144,7 +144,7 @@
 
 **实时推送**按租户发：发给某个租户的全体用 `toTenant(tenantId(), …)`，没有发给所有租户的方法，见[实时推送](realtime.md)。
 
-**以后引入的队列**：消息里带 `tenantId`，消费者用 `withTenant` 包住处理。
+**任务队列**：用 `QueueService.add` 添加任务，它把当前 `tenantId()` 写进任务数据，上下文里没有租户时抛出 `TenantContextMissing`；处理器继承 `TenantJobProcessor`，`handle` 在任务所属租户的 `withTenant` 里执行，没有合法租户的任务立即失败、不重试。只处理平台表的工作用 `registerQueue({ name, platform: true })` 声明平台级队列，它的任务不带租户、处理时也没有租户。队列监控页含所有租户的任务，开关打开时只有平台 root 能打开。见[任务队列](queue.md)。
 
 **公开路由**（`@Public()`）没有会话，开关打开时请求里没有租户：在 `apps/server/test/e2e/tenant-public.e2e-spec.ts` 的清单里登记它的租户来源（登录解析、会话、授权码、资源行、渠道凭据或只读平台数据），漏登记的公开路由遍历用例失败；运行时漏写来源的公开路由一碰租户表就是 500，不会落到默认租户。
 

@@ -1,0 +1,21 @@
+{
+  "monitor": {
+    "queue": {
+      "showJobs": "查看任务",
+      "jobsOf": "{name}的任务",
+      "running": "运行中",
+      "empty": "还没有注册任何队列",
+      "emptyHint": "模块用 registerQueue 声明队列并提供处理器后，会在这里显示。",
+      "noJobs": "这个状态下没有任务",
+      "retry": "重试",
+      "retried": "任务已重新排队",
+      "removeConfirm": "删除任务 {id}？删除后无法恢复。",
+      "noData": "无"
+    }
+  },
+  "menu": {
+    "monitor": {
+      "queue": "队列监控"
+    }
+  }
+}

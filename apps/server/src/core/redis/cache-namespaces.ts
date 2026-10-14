@@ -106,12 +106,23 @@ export const CACHE_NAMESPACES = {
   lock: ns('lock:', false, false, 'global-id'),
   jobLock: ns('job:lock:', false, false, 'platform'),
   jobFire: ns('job:fire:', false, false, 'platform'),
+  /**
+   * BullMQ queues (core/queue): `{queue}:{job id}`, `{queue}:wait`, `{queue}:events`, … built by BullMQ
+   * under `queuePrefix()`. One queue holds every tenant's jobs, each naming its tenant in its data; job
+   * ids are BullMQ's counters, or custom ids that QueueService.add prefixes with the adding tenant
+   * (`t{tenantId}-`), so they are unique across tenants. Not clearable (BullMQ keeps its own state across these keys),
+   * masked (a job's data may be any tenant's).
+   */
+  queue: ns('queue:', false, true, 'global-id'),
 } as const satisfies Record<string, CacheNamespace>
 
 export type CacheNamespaceName = keyof typeof CACHE_NAMESPACES
 
 /** `REDIS_KEY_PREFIX` (validated by EnvSchema: word chars ending in `:`). */
 export const keyPrefix = (): string => process.env.REDIS_KEY_PREFIX ?? 'qw:'
+
+/** BullMQ's `prefix` option (`qw:queue`): BullMQ adds `:{queue}:…`, so every key falls in `queue`. */
+export const queuePrefix = (): string => keyPrefix() + CACHE_NAMESPACES.queue.prefix.slice(0, -1)
 
 const namespace = (name: CacheNamespaceName): CacheNamespace => CACHE_NAMESPACES[name]
 

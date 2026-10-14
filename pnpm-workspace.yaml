@@ -37,6 +37,9 @@ allowBuilds:
   # postinstall `npm install`s an old typescript/@types/node on Node 10/12 only (a no-op on 22); dist is
   # prebuilt (via @alicloud/dysmsapi20170525, SMS); never allowed to run
   '@alicloud/openapi-core': false
+  # optional native msgpack speed-up (via bullmq -> msgpackr); the install script only builds it when no
+  # prebuilt binary fits, msgpackr falls back to pure JS without it; never allowed to run
+  msgpackr-extract: false
 
 # braces <=3.0.3 stack-exhaustion DoS has no patched release (2026-10-05). It is only reached via
 # chokidar glob patterns (nestjs-i18n watch mode, not enabled; build tooling), never with user input.

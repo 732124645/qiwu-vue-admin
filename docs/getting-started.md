@@ -43,7 +43,7 @@ brew services start redis
 | Web Playwright（多租户开关打开）    | `qiwu_tenant_e2e` | 1        | 3203     | 4176          |
 | 移动端 Playwright（保留 mobile 时） | `qiwu_mobile_e2e` | 9        | 3201     | 4175          |
 
-Redis 的配置须提供这些数据库号。已有满足隔离要求的 `qiwu` ACL 用户可复用；首次安装由管理员在**持久 ACL 配置**中建立该用户，键仅允许 `~qw:*`、频道仅允许 `&qw:*`，不允许 `FLUSHDB`、`KEYS`、`CONFIG` 等管理或危险命令。业务需要普通读写、过期、事务、`SCAN` / `UNLINK`、Lua 等命令；分片适配器还需要 `SSUBSCRIBE`、`SPUBLISH`、`PUBSUB SHARDNUMSUB`，共享限流需要 `EVAL`、`TIME` 及 ZSET / hash 命令。测试用的 ACL 用户还需要只读 `INFO` 权限（`monitor.e2e` 读取 Redis 监控信息），由管理员审核并加入持久 ACL；这不放开 `FLUSHDB` / `KEYS` / `CONFIG`。其余监控所需的只读权限由管理员单独审核。参考 [Redis ACL 官方说明](https://redis.io/docs/latest/operate/oss_and_stack/management/security/acl/) 与 [多实例部署前置条件](scale-out.md)，不要给应用账号 `+@all` 或用它修改 ACL。
+Redis 的配置须提供这些数据库号。已有满足隔离要求的 `qiwu` ACL 用户可复用；首次安装由管理员在**持久 ACL 配置**中建立该用户，键仅允许 `~qw:*`、频道仅允许 `&qw:*`，不允许 `FLUSHDB`、`KEYS`、`CONFIG` 等管理或危险命令。业务需要普通读写、过期、事务、`SCAN` / `UNLINK`、Lua 等命令；分片适配器还需要 `SSUBSCRIBE`、`SPUBLISH`、`PUBSUB SHARDNUMSUB`，共享限流需要 `EVAL`、`TIME` 及 ZSET / hash 命令。应用的 ACL 用户（开发、测试与生产都一样）还需要只读的 `INFO` 权限：任务队列（BullMQ）每条连接建立时读取 Redis 版本，启动时读取淘汰策略，Redis 监控页与 `monitor.e2e` 也读它；由管理员审核并加入持久 ACL（如 `+info`），这不放开 `FLUSHDB` / `KEYS` / `CONFIG`。其余监控所需的只读权限由管理员单独审核。Redis 的 `maxmemory-policy` 应为 `noeviction`（Homebrew 安装的默认值即是），否则内存不足时排队中的任务会被淘汰，见[任务队列](queue.md#redis-要求)。参考 [Redis ACL 官方说明](https://redis.io/docs/latest/operate/oss_and_stack/management/security/acl/) 与 [多实例部署前置条件](scale-out.md)，不要给应用账号 `+@all` 或用它修改 ACL。
 
 所有键通过 `apps/server/src/core/redis/cache-namespaces.ts` 构造，保持 `REDIS_KEY_PREFIX=qw:`。不同部署必须选择不同的空闲 Redis db；Pub/Sub 频道还包含库号。同库同前缀会共用会话、缓存、限流与推送。演示环境不得占用上述测试库与 Redis db，不要凭端口空闲判断数据库可用。
 

@@ -1,0 +1,26 @@
+{
+  "field": {
+    "monitor": {
+      "queue": {
+        "name": "队列",
+        "waiting": "等待",
+        "prioritized": "优先",
+        "active": "执行中",
+        "delayed": "延迟",
+        "failed": "失败",
+        "completed": "完成",
+        "paused": "已暂停",
+        "state": "状态",
+        "id": "任务 ID",
+        "jobName": "任务名称",
+        "tenantId": "租户",
+        "attempts": "尝试次数",
+        "failedReason": "失败原因",
+        "createdAt": "加入时间",
+        "processedAt": "开始时间",
+        "finishedAt": "结束时间",
+        "data": "任务数据"
+      }
+    }
+  }
+}

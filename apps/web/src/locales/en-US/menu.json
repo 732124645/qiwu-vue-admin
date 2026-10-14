@@ -76,6 +76,7 @@
     "manage": "Reassign and terminate",
     "managers": "Appoint process managers",
     "enterTenant": "Enter tenant",
-    "resetInitialPassword": "Reset initial password"
+    "resetInitialPassword": "Reset initial password",
+    "retry": "Retry jobs"
   }
 }

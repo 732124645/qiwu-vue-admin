@@ -36,7 +36,7 @@ STORAGE_LOCAL_ROOT=/srv/qiwu/uploads
 LOG_LEVEL=info
 ```
 
-这里的 Redis db 0 必须先确认空闲且在服务配置范围内；开发、测试与独立演示安装不能共用它。`TRUST_PROXY` 只填实际代理地址；同机代理示例是 `127.0.0.1/32`，跨机部署需替换。Nest 保持 loopback 监听，不向 LAN / 公网开放端口；浏览器走同源 `/api/`，CORS 列表只列实际允许的源。
+这里的 Redis db 0 必须先确认空闲且在服务配置范围内；开发、测试与独立演示安装不能共用它。Redis 的 `maxmemory-policy` 必须设为 `noeviction`（在 `redis.conf` 中配置，应用账号不能执行 `CONFIG`）：任务队列把任务存在普通键里，其他淘汰策略在内存不足时会悄悄丢掉排队中的任务；应用启动时检查这一设置，不符合时记警告日志。应用的 Redis 用户需要只读的 `INFO`（任务队列建立连接时读取 Redis 版本），见[任务队列](queue.md#redis-要求)。`TRUST_PROXY` 只填实际代理地址；同机代理示例是 `127.0.0.1/32`，跨机部署需替换。Nest 保持 loopback 监听，不向 LAN / 公网开放端口；浏览器走同源 `/api/`，CORS 列表只列实际允许的源。
 
 `DB_USER`、`DB_PASSWORD`、`REDIS_USERNAME`、`REDIS_PASSWORD`、`APP_SECRET`、可选 `SEED_ADMIN_PASSWORD` 与微信密钥只放 git 忽略的 `apps/server/.env.local`，或由部署密钥系统注入进程环境。`.env` 不得定义这些键，连空值也不写；否则会遮住 `.env.local`。`APP_SECRET` 至少 32 个随机字符；同一部署全部实例必须一致，它还用于派生加密密钥，轮换需另做数据与会话处理。不要复制测试密钥；在 `NODE_ENV=production` 下，服务启动校验以及 `db:seed` / `db:migrate` 都拒绝含 `not-for-production`（不区分大小写）的 `APP_SECRET` / `SEED_ADMIN_PASSWORD`；数据库命令在连接或写入之前退出，错误不输出凭据值。任何 `VITE_*` 都不得含秘密。
 

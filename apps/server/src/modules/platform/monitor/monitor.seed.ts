@@ -1,4 +1,4 @@
-// Monitor menus: the server, Redis, cache and MySQL pages under the `monitor` group
+// Monitor menus: the server, Redis, cache, MySQL and queue pages under the `monitor` group
 // (found by route_name, never by id), each with its actions (upserted by perms). Names are i18n keys: the
 // pages' in the web monitor fragments (monitor.<page>.json), the actions' in menu.json.
 import { monitorPerms } from '@qiwu/shared'
@@ -54,6 +54,19 @@ const PAGES: PageSeed[] = [
     componentName: 'MonitorMysql',
     icon: 'lucide:database',
     actions: [[monitorPerms.mysql, 'menu.action.browse']],
+  },
+  {
+    routeName: 'monitor-queue',
+    name: 'menu.monitor.queue',
+    path: '/monitor/queue',
+    component: 'platform/monitor/queue/index',
+    componentName: 'MonitorQueue',
+    icon: 'lucide:list-checks',
+    actions: [
+      [monitorPerms.queue, 'menu.action.browse'],
+      [monitorPerms.queueRetry, 'menu.action.retry'],
+      [monitorPerms.queueRemove, 'menu.action.remove'],
+    ],
   },
 ]
 

@@ -1,8 +1,9 @@
 import { z } from 'zod'
+import { pageQuery } from '../../common/pagination.js'
 import { fieldDomains } from '../../validation/zod-i18n.js'
 
 /**
- * Monitoring, `/api/monitor/*`, read-only dashboards but for the cache clean-up. Sizes
+ * Monitoring, `/api/monitor/*`, read-only dashboards but for the cache clean-up and the queue jobs. Sizes
  * are bytes, durations seconds, `usage` a percentage 0–100. Field labels `field.monitor.<page>.<prop>`.
  *
  * - `GET /server` (`server`): `monitorServerVo` (systeminformation + `process`)
@@ -13,6 +14,12 @@ import { fieldDomains } from '../../validation/zod-i18n.js'
  * - `DELETE /cache/keys?ns=` or `?key=` (`cacheClear`): `cacheClearQuery` → `cacheClearVo`
  * - `DELETE /cache/all-registered` (`cacheClear`): every clearable namespace → `cacheClearVo`
  * - `GET /mysql` (`mysql`): `monitorMysqlVo`
+ * - `GET /queues` (`queue`): `queueVo[]`, the queues registered in the app (core/queue)
+ * - `GET /queues/:name/jobs` (`queue`): `queueJobsQuery` → `{ items: queueJobVo[], total }`
+ * - `POST /queues/:name/jobs/:id/retry` (`queueRetry`): a failed job runs again (409 when not failed)
+ * - `DELETE /queues/:name/jobs/:id` (`queueRemove`): the job goes (409 while it runs)
+ *
+ * The failure reason is masked like a request's error message (values under secret-named payload keys).
  *
  * Cache keys travel without the global `REDIS_KEY_PREFIX` (`dict:iam.gender`) and must fall in a
  * registered namespace; only `clearable` ones may be deleted (never `auth:*`), `masked` values are never
@@ -25,6 +32,9 @@ export const monitorPerms = {
   cache: 'monitor.cache.browse',
   cacheClear: 'monitor.cache.remove',
   mysql: 'monitor.mysql.browse',
+  queue: 'monitor.queue.browse',
+  queueRetry: 'monitor.queue.retry',
+  queueRemove: 'monitor.queue.remove',
 } as const
 
 // ---- server ----
@@ -207,3 +217,60 @@ export const monitorMysqlVo = z.object({
     .nullable(),
 })
 export type MonitorMysqlVo = z.infer<typeof monitorMysqlVo>
+
+// ---- queues ----
+
+/**
+ * Job states the queue page lists (BullMQ's `wait` list is `waiting`; `prioritized`: waiting jobs added
+ * with a priority; `active`: running now, listed read-only).
+ */
+export const QUEUE_JOB_STATES = [
+  'failed',
+  'completed',
+  'delayed',
+  'waiting',
+  'prioritized',
+  'active',
+] as const
+export type QueueJobState = (typeof QUEUE_JOB_STATES)[number]
+
+/** Most characters of a job's payload JSON the page gets (secret-named keys masked first). */
+export const QUEUE_DATA_PREVIEW_MAX = 500
+
+export const queueVo = z.object({
+  /** the queue name the module registered it under */
+  name: z.string(),
+  waiting: z.number().int(),
+  prioritized: z.number().int(),
+  active: z.number().int(),
+  delayed: z.number().int(),
+  failed: z.number().int(),
+  completed: z.number().int(),
+  paused: z.boolean(),
+})
+export type QueueVo = z.infer<typeof queueVo>
+
+/** `GET /queues/:name/jobs`: one state's jobs, newest first (`sort=timestamp`: oldest first). */
+export const queueJobsQuery = pageQuery(['timestamp'])
+  .extend({ state: z.enum(QUEUE_JOB_STATES).default('failed') })
+  .register(fieldDomains, { domain: 'monitor.queue' })
+export type QueueJobsQuery = z.output<typeof queueJobsQuery>
+
+export const queueJobVo = z.object({
+  /** BullMQ job id (a string) */
+  id: z.string(),
+  /** the job name given when it was added */
+  name: z.string(),
+  /** the tenant that added it; null = a job of a platform-wide queue */
+  tenantId: z.number().int().nullable(),
+  /** attempts run so far, of `attempts` */
+  attemptsMade: z.number().int(),
+  attempts: z.number().int(),
+  failedReason: z.string().nullable(),
+  createdAt: z.string(),
+  processedAt: z.string().nullable(),
+  finishedAt: z.string().nullable(),
+  /** payload JSON, secret-named keys masked, cut to `QUEUE_DATA_PREVIEW_MAX` characters */
+  data: z.string().nullable(),
+})
+export type QueueJobVo = z.infer<typeof queueJobVo>

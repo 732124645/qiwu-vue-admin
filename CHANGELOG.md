@@ -1,8 +1,15 @@
 # Changelog
 
-中文说明：本文件按功能区域汇总栖梧 / Qiwu 的用户可见变化，正文使用英文。`1.0.0` 于 2026-10-05 发布，`1.0.3` 于 2026-10-06 发布（`1.0.1`、`1.0.2` 未发布，内容并入 `1.0.3`），`1.1.0`（多租户）、`1.2.0`（手写 SQL 的数据权限）与 `1.2.1`（修复）于 2026-10-14 发布。
+中文说明：本文件按功能区域汇总栖梧 / Qiwu 的用户可见变化，正文使用英文。`1.0.0` 于 2026-10-05 发布，`1.0.3` 于 2026-10-06 发布（`1.0.1`、`1.0.2` 未发布，内容并入 `1.0.3`），`1.1.0`（多租户）、`1.2.0`（手写 SQL 的数据权限）、`1.2.1`（修复）与 `1.3.0`（任务队列）于 2026-10-14 发布。
 
 All notable product changes are recorded here in Keep a Changelog style. The initial release below summarizes the delivered features. Planned work is identified explicitly.
+
+## [1.3.0] - 2026-10-14
+
+### Added
+
+- Job queues on the existing Redis (BullMQ, no separate message broker): modules declare a queue with `registerQueue` and a processor extending `TenantJobProcessor`, and add jobs with `QueueService.add`, which records the caller's tenant; each job runs in that tenant, and a job without one fails at once without retries. Defaults: 3 attempts with exponential backoff, the last 1000 completed and 5000 failed jobs kept. Every instance runs the workers, which finish their running jobs on shutdown; start-up warns when Redis `maxmemory-policy` is not `noeviction`. See `docs/queue.md`.
+- Queue monitor page (System monitor → Queue monitor, platform only, root only with multi-tenancy on): job counts and paused state per queue, jobs by state with masked data, retrying failed jobs and removing jobs (permissions `monitor.queue.browse` / `retry` / `remove`, action-logged).
 
 ## [1.2.1] - 2026-10-14
 

@@ -474,6 +474,10 @@ describe('mysql', () => {
         '/cache/keys',
         '/cache/value',
         '/cache/all-registered',
+        '/queues',
+        '/queues/{name}/jobs',
+        '/queues/{name}/jobs/{id}',
+        '/queues/{name}/jobs/{id}/retry',
       ]
         .map((p) => `${URL}${p}`)
         .sort(),

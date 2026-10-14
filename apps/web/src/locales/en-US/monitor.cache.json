@@ -39,7 +39,8 @@
         "excelReport": "Import error reports",
         "lock": "Locks",
         "jobLock": "Job locks",
-        "jobFire": "Job runs"
+        "jobFire": "Job runs",
+        "queue": "Job queues"
       }
     }
   },
