@@ -7,7 +7,7 @@
 // --part <name> [--shard <i>/<n>]: one slice of the gate, as the parallel jobs of .github/workflows/ci.yml
 // run it (each on its own runner, in order): checks (everything but the server tests and Playwright),
 // server (one vitest shard with coverage into a blob report under apps/server/.vitest/blob; shard 1
-// then runs gen:check-golden), coverage (merges those blobs and checks the coverage thresholds),
+// then runs gen:check-golden and smoke:boot), coverage (merges those blobs and checks the coverage thresholds),
 // web-e2e (one Playwright shard) and more-e2e (Playwright with multi-tenancy on, then mobile). server
 // and web-e2e need --shard (1/1: one run; a server shard never checks the thresholds, --part coverage
 // does). The Playwright runs and the server specs that start dist need the server build only.
@@ -73,14 +73,15 @@ const after = [['smoke:boot', 'pnpm smoke:boot']]
 // themselves, so the e2e parts build the server only
 const serverBuild = ['build (server)', 'pnpm --filter @qiwu/server build']
 const PARTS = {
-  checks: () => [...before, ...after],
+  // smoke:boot boots against qiwu_test: only the server part has it migrated and seeded
+  checks: () => [...before],
   // a shard alone never reaches the coverage thresholds (vitest.config.ts): the merge checks them
   server: (i, n) => [
     install,
     sharedBuild,
     serverBuild,
     [`test server ${i}/${n} + coverage`, serverTest(`${i}/${n}`)],
-    ...(i === 1 ? [golden] : []),
+    ...(i === 1 ? [golden, ...after] : []),
   ],
   coverage: () => [
     install,

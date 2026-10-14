@@ -185,13 +185,14 @@ describe('--part: one slice of the gate per CI job', () => {
     )
   })
 
-  it('server: one vitest shard with coverage into a blob report; only shard 1 checks the golden modules', () => {
+  it('server: one vitest shard with coverage into a blob report; only shard 1 checks the golden modules and boots the build', () => {
     const shard = (i: number) =>
       `▶ test server ${i}/3 + coverage: RUN  ${vitest} --shard=${i}/3 --coverage --reporter=default --reporter=blob ${fileTimes}`
     expect(steps('--part', 'server', '--shard', '1/3')).toEqual([
       ...setup,
       shard(1),
       '▶ gen:check-golden: RUN  pnpm gen:check-golden --skip-build',
+      '▶ smoke:boot: RUN  pnpm smoke:boot',
     ])
     expect(steps('--part', 'server', '--shard', '2/3')).toEqual([...setup, shard(2)])
   })
@@ -216,13 +217,15 @@ describe('--part: one slice of the gate per CI job', () => {
     ])
   })
 
-  it('checks: every step of the full gate but the server tests and Playwright, in the same order', () => {
+  it('checks: every step of the full gate but the server tests, Playwright and the boot smoke, in the same order', () => {
     const full = names(steps())
     const checks = names(steps('--part', 'checks'))
     expect(checks).toEqual(
-      full.filter((step) => !/^(test server|gen:check-golden|playwright|mobile e2e)/.test(step)),
+      full.filter(
+        (step) => !/^(test server|gen:check-golden|playwright|mobile e2e|smoke:boot)/.test(step),
+      ),
     )
-    expect(checks).toContain('smoke:boot')
+    expect(checks).not.toContain('smoke:boot')
     expect(checks).toContain('mobile build mp-weixin')
   })
 
