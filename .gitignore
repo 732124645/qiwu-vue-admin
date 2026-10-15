@@ -37,6 +37,7 @@ blob-report/
 .idea/
 .vscode/*
 !.vscode/extensions.json
+!.vscode/launch.json
 
 # CommonJS insurance probe output (scripts/smoke-boot.mjs --cjs)
 apps/server/.cjs-probe/

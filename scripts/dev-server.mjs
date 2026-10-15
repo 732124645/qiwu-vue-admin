@@ -14,6 +14,21 @@ const tsc = spawn(process.execPath, [...tscArgs, '--preserveWatchOutput'], {
 })
 let app
 
+// QW_INSPECT=1 (or a port) opens the Node inspector on the app process only, never on tsc or Vite (a
+// global NODE_OPTIONS=--inspect would make every process of `pnpm dev` fight over the port); loopback
+// only. `node --watch` restarts the app on the same port, so a debugger set to reattach follows it.
+const flag = process.env.QW_INSPECT ?? ''
+const port = Number(flag)
+const inspectPort = ['1', 'true'].includes(flag)
+  ? 9229
+  : Number.isInteger(port) && port >= 1024 && port <= 65535
+    ? port
+    : undefined
+if (flag && inspectPort === undefined && !['0', 'false'].includes(flag))
+  console.warn(`QW_INSPECT=${flag} ignored: use 1, true or a port from 1024 to 65535`)
+const inspect =
+  inspectPort === undefined ? [] : [`--inspect=127.0.0.1:${inspectPort}`, '--enable-source-maps']
+
 // start the app after tsc's first build, so dist/main.js exists
 tsc.stdout.on('data', (chunk) => {
   process.stdout.write(chunk)
@@ -25,7 +40,7 @@ tsc.stdout.on('data', (chunk) => {
     '../../packages/shared/src/i18n',
   ]
   const watch = watched.map((p) => `--watch-path=${p}`)
-  app = spawn(process.execPath, [...watch, 'dist/main.js'], {
+  app = spawn(process.execPath, [...inspect, ...watch, 'dist/main.js'], {
     cwd,
     stdio: 'inherit',
     env: { I18N_DIR: 'src/i18n', CODEGEN_TEMPLATES: 'codegen-templates', ...process.env },

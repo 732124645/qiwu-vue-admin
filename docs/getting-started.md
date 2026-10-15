@@ -110,6 +110,18 @@ pnpm dev
 
 打开 `http://localhost:5173` 登录；停止开发进程使用该终端的 Ctrl+C。需要修改后端端口时，同时给 Web 的 Vite 进程设置 `API_PROXY_TARGET` 为对应后端地址（`apps/web/vite.config.ts`）；不要为了访问 API 把 Nest 端口开放给局域网。
 
+### 断点调试
+
+后端：用 `QW_INSPECT=1` 启动开发服务，只给后端应用进程打开 Node 调试端口 `127.0.0.1:9229`（tsc 与 Vite 不受影响；写端口号如 `QW_INSPECT=9230` 可换端口，同时把 `.vscode/launch.json` 里的 `port` 改成相同的值），并打开 source map：
+
+```sh
+QW_INSPECT=1 pnpm dev
+```
+
+Windows PowerShell 5.1 用 `$env:QW_INSPECT=1; pnpm.cmd dev`，用完 `Remove-Item Env:QW_INSPECT`；cmd 用 `set "QW_INSPECT=1"` 再 `call pnpm.cmd dev`，用完 `set "QW_INSPECT="`。然后在 VS Code 的“运行和调试”里选 **Server: attach**（`.vscode/launch.json`），断点直接打在 `apps/server/src` 的 TypeScript 上；改代码后应用自动重启，调试器自动重新附加；启动阶段（模块初始化、bootstrap）的代码在重新附加前就已执行，要断在那里，附加后保存一次文件触发重启即可。WebStorm 等用“Attach to Node.js/Chrome”连接同一端口。不要用全局 `NODE_OPTIONS=--inspect`：`pnpm dev` 里的每个 Node 进程都会去抢同一端口。
+
+前端：`pnpm dev` 运行时，在 VS Code 选 **Web: Edge** 或 **Web: Chrome** 打开 `http://localhost:5173`，断点打在 `apps/web/src`；也可以直接用浏览器开发者工具与 Vue DevTools。
+
 ## 5. 检查与后续使用
 
 ```sh

@@ -1,0 +1,35 @@
+{
+  // Server: start `pnpm dev` with QW_INSPECT=1 in a terminal first (PowerShell: `$env:QW_INSPECT=1; pnpm.cmd dev`),
+  // then attach. Web: with `pnpm dev` running, open the Vite dev server in a debuggable browser.
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Server: attach (pnpm dev with QW_INSPECT=1)",
+      "type": "node",
+      "request": "attach",
+      "address": "127.0.0.1",
+      "port": 9229,
+      "restart": true,
+      "sourceMaps": true,
+      "outFiles": [
+        "${workspaceFolder}/apps/server/dist/**/*.js",
+        "${workspaceFolder}/packages/shared/dist/**/*.js"
+      ],
+      "skipFiles": ["<node_internals>/**"]
+    },
+    {
+      "name": "Web: Edge (Vite dev server)",
+      "type": "msedge",
+      "request": "launch",
+      "url": "http://localhost:5173",
+      "webRoot": "${workspaceFolder}/apps/web"
+    },
+    {
+      "name": "Web: Chrome (Vite dev server)",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:5173",
+      "webRoot": "${workspaceFolder}/apps/web"
+    }
+  ]
+}

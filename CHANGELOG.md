@@ -1,8 +1,14 @@
 # Changelog
 
-中文说明：本文件按功能区域汇总栖梧 / Qiwu 的用户可见变化，正文使用英文。`1.0.0` 于 2026-10-05 发布，`1.0.3` 于 2026-10-06 发布（`1.0.1`、`1.0.2` 未发布，内容并入 `1.0.3`），`1.1.0`（多租户）、`1.2.0`（手写 SQL 的数据权限）、`1.2.1`（修复）与 `1.3.0`（任务队列）于 2026-10-14 发布。
+中文说明：本文件按功能区域汇总栖梧 / Qiwu 的用户可见变化，正文使用英文。`1.0.0` 于 2026-10-05 发布，`1.0.3` 于 2026-10-06 发布（`1.0.1`、`1.0.2` 未发布，内容并入 `1.0.3`），`1.1.0`（多租户）、`1.2.0`（手写 SQL 的数据权限）、`1.2.1`（修复）与 `1.3.0`（任务队列）于 2026-10-14 发布，`1.3.1`（开发调试开关）于 2026-10-15 发布。
 
 All notable product changes are recorded here in Keep a Changelog style. The initial release below summarizes the delivered features. Planned work is identified explicitly.
+
+## [1.3.1] - 2026-10-15
+
+### Added
+
+- Breakpoint debugging of the server in development: `QW_INSPECT=1 pnpm dev` (PowerShell: `$env:QW_INSPECT=1; pnpm.cmd dev`) opens the Node inspector on `127.0.0.1:9229` for the server app process only, with source maps; a port number instead of `1` picks another port. `.vscode/launch.json` adds a server attach configuration that reattaches after every restart, and Edge / Chrome launch configurations for the Vite dev server. See `docs/getting-started.md`.
 
 ## [1.3.0] - 2026-10-14
 
