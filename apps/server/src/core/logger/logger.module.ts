@@ -14,6 +14,12 @@ interface SerializedReq {
   remotePort?: number
 }
 
+/** What pino-std-serializers makes of a response. */
+interface SerializedRes {
+  statusCode: number
+  headers: Record<string, unknown>
+}
+
 const maskText = textRedactor(undefined)
 
 const errorLike = (e: unknown): e is { message: string; cause?: unknown } =>
@@ -62,7 +68,8 @@ function sanitizedError(serialized: Record<string, unknown>): Record<string, unk
  * the API logs (core/redact.ts; see docs/design-notes.md#audit): pino binds the request to the request's logger before
  * routing, when the route's `@Sensitive` fields are not known yet, so like the API logs of a request
  * whose route is unknown no query value is kept (every one masked; the query and params objects are
- * left out); secret headers are redacted. Errors are masked (`sanitizedError`, and the line's `msg`
+ * left out); secret headers are redacted, a redirect's `Location` keeps only its query names (a presigned
+ * download URL carries its signature there). Errors are masked (`sanitizedError`, and the line's `msg`
  * pino would take from them); the error filter logs 5xx already masked with the request's secrets too
  * (`describeFault`).
  */
@@ -90,6 +97,12 @@ export const pinoHttpOptions = (cfg: AppConfigService): Options => ({
       remoteAddress: req.remoteAddress,
       remotePort: req.remotePort,
     }),
+    res: (res: SerializedRes) => {
+      const { location } = res.headers ?? {}
+      return typeof location === 'string'
+        ? { ...res, headers: { ...res.headers, location: queryMaskedUrl(location) } }
+        : res
+    },
     err: sanitizedError,
   },
   // pino-pretty is a devDependency: only ever loaded in development

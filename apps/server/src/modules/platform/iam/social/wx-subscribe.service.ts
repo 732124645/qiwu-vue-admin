@@ -120,7 +120,8 @@ export class WxSubscribeService {
 
   /**
    * The user's live binding of `appid` and stored zone, or undefined; in the data tenant (the inbox
-   * row's on delivery, the caller's own for the template ids).
+   * row's on delivery, the caller's own for the template ids). A disabled user gets nothing outside
+   * the system (the binding stays for when the user is enabled again).
    */
   private async recipient(userId: number, appid: string) {
     const [row] = await this.ds.query<{ openid: string; timezone: string | null }[]>(
@@ -128,7 +129,7 @@ export class WxSubscribeService {
       `SELECT s.openid, u.timezone FROM iam_user_social s
          JOIN iam_user u ON u.id = s.user_id AND u.tenant_id = s.tenant_id
         WHERE s.user_id = ? AND s.provider = ? AND s.appid = ? AND s.tenant_id = ?
-          AND s.deleted_at IS NULL AND u.deleted_at IS NULL`,
+          AND s.deleted_at IS NULL AND u.deleted_at IS NULL AND u.enabled = 1`,
       [userId, WX_MP, appid, tenantId()],
     )
     return row

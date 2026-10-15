@@ -43,3 +43,9 @@ export type PrefVo = z.infer<typeof prefVo>
 
 /** Largest stored value as UTF-8 JSON; bigger → 413 `payload_too_large`. */
 export const PREF_VALUE_MAX_BYTES = 8192
+
+/**
+ * Most keys a user keeps (a reset deletes its key): a new key past it → 409
+ * `iam.pref_keys_limit`; a key already saved stays writable. Far above the list pages an app has.
+ */
+export const PREF_KEYS_MAX = 200

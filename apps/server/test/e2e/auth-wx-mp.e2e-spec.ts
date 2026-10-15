@@ -498,12 +498,22 @@ describe('sign-in and binding', () => {
     expect((await bind(withPassword(tBob, 'bob'), ip)).status).toBe(200)
     expectErr(await bind(withPassword(tCarol, 'carol'), ip), 409, Err.AUTH_WX_MP_BOUND)
     expect(await binding('carol')).toEqual([])
+    // the password was right: the refused binding guessed nothing, so it counts no failure
+    const fails = (name: string) =>
+      Promise.all(
+        [
+          redisKey('authFail', 'p', PREFIX + name, ip),
+          redisKey('authFail', 'u', PREFIX + name),
+        ].map(async (key) => Number(await redis.get(key))),
+      )
+    expect(await fails('carol')).toEqual([0, 0])
     expectErr(
       await bind(withPassword(await ticketFor('o-bob-2', ip), 'bob'), ip),
       409,
       Err.AUTH_WX_MP_USER_BOUND,
     )
     expect(await binding('bob')).toMatchObject([{ openid: 'o-bob' }])
+    expect(await fails('bob')).toEqual([0, 0])
     // by SMS code too (sms holds o-sms since the test above)
     await inTenant1(() =>
       insertRow(ds.manager, 'msg_sms_otp', {

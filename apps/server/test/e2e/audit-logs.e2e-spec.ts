@@ -286,7 +286,7 @@ describe('unlock: a username locked by failed sign-ins', () => {
   /** A fresh documentation-range client IP (RFC 5737) per call. */
   const nextIp = () => `198.51.100.${++ipSeq}`
 
-  it('unlock: every IP pair of the username ends at once (any spelling); 403 without unlock; action-logged', async () => {
+  it('unlock: every IP pair of the username ends at once (any spelling, fullwidth too); 403 without unlock; action-logged', async () => {
     const name = `${PREFIX}lock${process.pid}`
     const [ipA, ipB] = [nextIp(), nextIp()]
     // 10 failures reach the cross-IP threshold, whose captcha gate comes before the lock check
@@ -316,9 +316,11 @@ describe('unlock: a username locked by failed sign-ins', () => {
     }
     await call('admin', 'post', url, { username: '' }).expect(400)
     const trace = `${PREFIX}${process.pid}-unlock`
-    await call('admin', 'post', url, { username: name.toUpperCase() })
-      .set('X-Request-Id', trace)
-      .expect(200)
+    // typed in fullwidth forms: folded like the sign-in's name
+    const fullwidth = [...name.toUpperCase()]
+      .map((c) => String.fromCharCode(c.charCodeAt(0) + 0xfee0))
+      .join('')
+    await call('admin', 'post', url, { username: fullwidth }).set('X-Request-Id', trace).expect(200)
     // no longer locked: a wrong password is just a wrong password again, on both IPs
     for (const ip of [ipA, ipB]) {
       const res = await login(name, ip)
@@ -328,7 +330,8 @@ describe('unlock: a username locked by failed sign-ins', () => {
     expect(await logOf(ds, trace)).toMatchObject({
       domain: 'audit.signinLog',
       verb: 'unlock',
-      biz_id: name.toUpperCase(),
+      // the name as typed
+      biz_id: fullwidth,
       ok: 1,
     })
     // a username that was never locked: nothing to do, still 200

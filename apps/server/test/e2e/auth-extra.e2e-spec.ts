@@ -450,6 +450,26 @@ describe('sms', () => {
     await badCode(await smsLogin('login', value))
   })
 
+  it('sms login from another site (a foreign or null Origin) → 403 origin_rejected, no cookie, the code still unused', async () => {
+    const value = await code('login', 'signin')
+    for (const origin of ['https://evil.example', 'null']) {
+      const res = await http()
+        .post('/api/auth/sms/login')
+        .type('form')
+        .set('Origin', origin)
+        .send({ mobile: mobiles.login, code: value })
+      expect(res.status).toBe(403)
+      expect(res.body.code).toBe(Err.AUTH_ORIGIN_REJECTED.code)
+      expect(res.headers['set-cookie']).toBeUndefined()
+    }
+    const [row] = await ds.query<Array<{ consumed_at: Date | null; attempts: number }>>(
+      'SELECT consumed_at, attempts FROM msg_sms_otp WHERE mobile = ? AND scene = ? AND code = ? ORDER BY id DESC LIMIT 1',
+      [mobiles.login, 'signin', value],
+    )
+    expect(row).toMatchObject({ consumed_at: null, attempts: 0 })
+    await smsLogin('login', value).expect(200)
+  })
+
   it('sms login as the mobile client: refresh token in the body, no cookie, logged as mobile', async () => {
     const value = await code('other', 'signin')
     const res = await smsLogin('other', value, { keepSignedIn: true, clientId: 'mobile' }).expect(

@@ -18,9 +18,12 @@ export const signinLogPerms = {
   unlock: 'audit.signinLog.unlock',
 } as const
 
-/** POST /unlock: the username as typed at sign-in (an account's own spelling unlocks it too). */
+/**
+ * POST /unlock: the username as typed at sign-in (an account's own spelling unlocks it too), fullwidth
+ * forms folded like the sign-in's.
+ */
 export const signinLogUnlockBody = z
-  .object({ username: z.string().trim().min(1).max(64) })
+  .object({ username: z.string().trim().normalize('NFKC').min(1).max(64) })
   .register(fieldDomains, { domain: 'audit.signinLog' })
 export type SigninLogUnlockBody = z.infer<typeof signinLogUnlockBody>
 

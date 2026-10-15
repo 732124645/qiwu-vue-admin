@@ -30,16 +30,14 @@ export const paramPerms = {
   export: 'settings.param.export',
 } as const
 
+/** A param key's syntax (`paramCreate`, at most 128 characters): dotted snake_case. */
+export const PARAM_KEY = /^[a-z][a-z0-9_.]*$/
+
 /** POST body; columns with a DB default may be left out, nullable ones may be null. */
 export const paramCreate = z
   .object({
     // abort: an empty key is "required", not also "invalid format"
-    paramKey: z
-      .string()
-      .trim()
-      .min(1, { abort: true })
-      .max(128)
-      .regex(/^[a-z][a-z0-9_.]*$/),
+    paramKey: z.string().trim().min(1, { abort: true }).max(128).regex(PARAM_KEY),
     // may be empty (e.g. an empty blacklist)
     paramValue: z.string().trim().max(16_383),
     name: z.string().trim().min(1).max(128),

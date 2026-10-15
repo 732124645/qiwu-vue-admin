@@ -56,6 +56,7 @@
   },
   "iam": {
     "grant_exceeds_own": "You cannot grant a role beyond your own permissions or data scope",
+    "takeover_exceeds_own": "This user holds roles you cannot grant: only an administrator who can grant them may reset the password or change the mobile",
     "user_self": "You cannot delete or disable your own account",
     "user_protected": "The super administrator account is protected against this action",
     "initial_password_unset": "The initial password is unavailable or does not meet the password policy. Please enter a password",
@@ -70,7 +71,8 @@
     "tenant_user_quota": "The tenant's user quota is reached",
     "tenant_package_platform_menu": "A package holds only menus open to tenants, never a platform-only one",
     "tenant_default_fixed": "The default tenant cannot be disabled or given an expiry or a package, and keeps its code; the default tenant's initial password is the param iam.user.initial_password",
-    "tenant_domain_reserved": "A tenant cannot be bound to the platform's own domain"
+    "tenant_domain_reserved": "A tenant cannot be bound to the platform's own domain",
+    "pref_keys_limit": "Column settings are saved for the most lists allowed ({max}); reset some lists to their defaults first"
   },
   "storage": {
     "file_required": "Please choose a file to upload",

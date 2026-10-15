@@ -921,6 +921,107 @@ describe('actions', () => {
     expect(other.body.code).toBe(Err.IAM_USER_PROTECTED.code)
   })
 
+  it('reset password and another mobile take the account over: only for a user whose roles the caller could give (403 grant_exceeds_own)', async () => {
+    const hash = async (id: number) =>
+      (await ds.query('SELECT password_hash FROM iam_user WHERE id = ?', [id]))[0].password_hash
+    const mobile = async (id: number) =>
+      (await ds.query('SELECT mobile FROM iam_user WHERE id = ?', [id]))[0].mobile
+    // mgr (R&D subtree, every user perm, position browse) could give `staff`, never `extraPerm`
+    // (a perm it lacks), `wide` (scope all) or `pickedOut` (a dept outside its scope)
+    const plain = await newUser({ deptId: dept.platform, roleIds: [role.staff!] })
+    await call(tok.mgr!, 'put', `/${plain}/password`, { password: PW }).expect(200)
+    for (const held of [role.extraPerm!, role.wide!, role.pickedOut!]) {
+      const id = await newUser({ deptId: dept.platform, mobile: null, roleIds: [held] })
+      const before = await hash(id)
+      const reset = await call(tok.mgr!, 'put', `/${id}/password`, { password: PW }).expect(403)
+      expect(reset.body.code).toBe(Err.IAM_GRANT_EXCEEDS_OWN.code)
+      expect(await hash(id)).toBe(before)
+      const moved = await call(tok.mgr!, 'put', `/${id}`, { mobile: '13912345686' }).expect(403)
+      expect(moved.body.code).toBe(Err.IAM_GRANT_EXCEEDS_OWN.code)
+      expect(await mobile(id)).toBeNull()
+      // other fields of that user stay editable; root may reset it
+      await call(tok.mgr!, 'put', `/${id}`, { displayName: 'Edited' }).expect(200)
+      await call(tok.admin!, 'put', `/${id}/password`, { password: PW }).expect(200)
+    }
+  })
+
+  it('another mobile is judged on what the request leaves: a cleared one not at all, the roles and the dept after it', async () => {
+    const mobile = async (id: number) =>
+      (await ds.query('SELECT mobile FROM iam_user WHERE id = ?', [id]))[0].mobile
+    // clearing a mobile hands the account to nobody: not judged
+    const held = await newUser({
+      deptId: dept.platform,
+      mobile: '13912345687',
+      roleIds: [role.extraPerm!],
+    })
+    await call(tok.mgr!, 'put', `/${held}`, { mobile: null }).expect(200)
+    expect(await mobile(held)).toBeNull()
+    // the role mgr could not give leaves in the same request: judged on the roles the user keeps
+    await call(tok.mgr!, 'put', `/${held}`, {
+      roleIds: [role.staff!],
+      mobile: '13912345688',
+    }).expect(200)
+    expect([await mobile(held), await rolesOf(held)]).toEqual(['13912345688', [role.staff]])
+    // `narrow` browses positions at platform only: `tree` held at R&D reaches the whole R&D subtree,
+    // at platform only platform, so the move in the same request decides
+    await addRole('narrowUsers', 'own_dept_tree', Object.values(userPerms))
+    await addRole('narrowPos', 'picked_depts', ['iam.position.browse'], [dept.platform!])
+    await operator('narrow', dept.rd!, [role.narrowUsers!, role.narrowPos!])
+    const moving = await newUser({ deptId: dept.rd, mobile: null, roleIds: [role.tree!] })
+    const wide = await call(tok.narrow!, 'put', `/${moving}`, { mobile: '13912345689' }).expect(403)
+    expect(wide.body.code).toBe(Err.IAM_GRANT_EXCEEDS_OWN.code)
+    expect(await mobile(moving)).toBeNull()
+    await call(tok.narrow!, 'put', `/${moving}`, {
+      deptId: dept.platform,
+      mobile: '13912345689',
+    }).expect(200)
+    expect(await mobile(moving)).toBe('13912345689')
+  })
+
+  it('a grant of own_dept_tree in a dept waits for a move putting a subtree under that dept, then judges the moved subtree too', async () => {
+    // `race` browses positions at platform only; `tree` given at platform reaches platform's subtree
+    await addRole('raceUsers', 'own_dept_tree', Object.values(userPerms))
+    await addRole('racePos', 'picked_depts', ['iam.position.browse'], [dept.platform!])
+    await operator('race', dept.rd!, [role.raceUsers!, role.racePos!])
+    const pathOf = async (id: number) =>
+      (await ds.query('SELECT tree_path FROM iam_dept WHERE id = ?', [id]))[0].tree_path as string
+    const moved = await inTenant1(() =>
+      insertRow(ds.manager, 'iam_dept', { parent_id: dept.hq, tree_path: '/', name: unique() }),
+    )
+    created.depts.push(moved)
+    await ds.query('UPDATE iam_dept SET tree_path = ? WHERE id = ?', [
+      `${await pathOf(dept.hq!)}${moved}/`,
+      moved,
+    ])
+    // a move of that dept under platform, not committed yet
+    const move = ds.createQueryRunner()
+    await move.connect()
+    await move.startTransaction()
+    try {
+      await move.query('UPDATE iam_dept SET parent_id = ?, tree_path = ? WHERE id = ?', [
+        dept.platform,
+        `${await pathOf(dept.platform!)}${moved}/`,
+        moved,
+      ])
+      let settled = false
+      const pending = create(
+        { username: unique(), displayName: 'r', deptId: dept.platform, roleIds: [role.tree] },
+        tok.race!,
+      ).then((res) => ((settled = true), res))
+      await new Promise((r) => setTimeout(r, 500))
+      expect(settled).toBe(false)
+      await move.commitTransaction()
+      const res = await pending
+      expect(res.status).toBe(403)
+      expect(res.body.code).toBe(Err.IAM_GRANT_EXCEEDS_OWN.code)
+    } finally {
+      if (move.isTransactionActive) await move.rollbackTransaction()
+      await move.release()
+      // platform stays a leaf for the other cases
+      await ds.query('UPDATE iam_dept SET deleted_at = NOW(3) WHERE id = ?', [moved])
+    }
+  })
+
   it('assign roles: grant policy (403), the next request of the user has the new perms, root keeps root', async () => {
     const username = unique()
     const id = await newUser({ username, deptId: dept.platform })

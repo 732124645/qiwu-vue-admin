@@ -95,6 +95,17 @@ describe('GET /api/settings/dicts/:code/entries', () => {
     expect((await http().get(GENDER)).status).toBe(401)
   })
 
+  it('a code spelled otherwise (case, accents, an ignorable character) names no dict: 404, nothing cached', async () => {
+    for (const code of ['IAM.GENDER', 'iam.gendér', 'iam.gen%E2%80%8Bder']) {
+      const res = await http().get(`/api/settings/dicts/${code}/entries`).set(bearer(token))
+      expect(res.status).toBe(404)
+      const stored = decodeURIComponent(code)
+      expect(await redis.exists(redisKey('dict', 'entries', stored))).toBe(0)
+      expect(await dicts.entries(stored)).toBeNull()
+    }
+    expect((await http().get(GENDER).set(bearer(token))).status).toBe(200)
+  })
+
   it('unknown or disabled dicts → 404; disabled entries are left out', async () => {
     const res = await http().get('/api/settings/dicts/no.such_dict/entries').set(bearer(token))
     expect(res.status).toBe(404)
@@ -179,6 +190,15 @@ describe('GET /api/settings/params/public/:key', () => {
     ] as const) {
       const res = await http().get(`/api/settings/params/public/${key}`).expect(200)
       expect(res.body.data).toEqual({ key, value: String(value) })
+    }
+  })
+
+  it('a key spelled otherwise names no param: the same 404, nothing cached', async () => {
+    for (const key of [DEFAULT_TIMEZONE_PARAM.toUpperCase(), `${DEFAULT_TIMEZONE_PARAM}é`]) {
+      const res = await http().get(`/api/settings/params/public/${encodeURIComponent(key)}`)
+      expect(res.status).toBe(404)
+      expect(await redis.exists(redisKey('param', key))).toBe(0)
+      expect(await params.get(key)).toBeNull()
     }
   })
 

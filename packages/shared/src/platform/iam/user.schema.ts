@@ -33,14 +33,12 @@ export type UserGender = (typeof USER_GENDERS)[number]
 const id = z.number().int().positive()
 
 /** The editable columns; DB defaults (`gender`, `enabled`) and the id lists may be left out. */
+/** A sign-in name as stored: ASCII letters, digits and `_ . @ -` (at most 64). */
+export const USERNAME = /^[\w.@-]+$/
+
 const userFields = z.object({
   /** sign-in name: ASCII letters, digits and `_ . @ -` */
-  username: z
-    .string()
-    .trim()
-    .min(1)
-    .max(64)
-    .regex(/^[\w.@-]+$/),
+  username: z.string().trim().min(1).max(64).regex(USERNAME),
   displayName: z.string().trim().min(1).max(64),
   /** must lie in the caller's writable scope (404 otherwise) */
   deptId: id.nullish(),
@@ -118,7 +116,8 @@ export const userVo = z.object({
   /**
    * true when the caller may not edit this user, reset its password or change its roles: a root user for
    * a caller other than root, the tenant's owner for anyone but root, a holder of the builtin
-   * `tenant_admin` role for a caller holding neither root nor that role
+   * `tenant_admin` role for a caller holding neither root nor that role. A reset or a new mobile of
+   * another user is also refused (403) while the user holds a role the caller could not give.
    */
   protected: z.boolean(),
   lastLoginAt: z.iso.datetime().nullable(),
@@ -162,7 +161,10 @@ export const userAssignRolesBody = z
   .register(fieldDomains, { domain: 'iam.user' })
 export type UserAssignRolesBody = z.infer<typeof userAssignRolesBody>
 
-/** PUT /:id/password (`reset-password`) under the runtime policy: ends the user's sessions, forces a change at sign-in. */
+/**
+ * PUT /:id/password (`reset-password`) under the runtime policy: ends the user's sessions, forces a change
+ * at sign-in; refused (403) while the user holds a role the caller could not give.
+ */
 export function userResetPasswordBody(policy: PasswordPolicy) {
   return z
     .object({ password: passwordSchema(policy) })

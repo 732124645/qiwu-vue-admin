@@ -16,14 +16,23 @@ import { Dept } from './dept.entity.js'
 /** A dept with the display name of its head (joined, read-only). */
 export type DeptRow = Dept & { headUserName: string | null }
 
+/** Judges a move of the live depts `subtree` under the new ancestors `gained` (throws to refuse). */
+export type DeptMoveJudge = (subtree: number[], gained: number[]) => Promise<void>
+
+/** Dept ids of a tree path, top first (`/1/5/9/` → 1, 5, 9). */
+const pathIds = (treePath: string): number[] => treePath.split('/').filter(Boolean).map(Number)
+
 /**
  * Departments, the tree golden sample (docs/codegen-golden.md "Tree"): the tree rules and the data scope
  * (a dept is scoped by its own id; see docs/design-notes.md#data-scope) come from BaseTreeService; this class adds only the dept's
  * own parts: the name filter (seeded names match their text too), the head's name, the head as a user of
- * the caller's scope, no delete while users belong to the dept, and live sessions after a move.
+ * the caller's scope, no delete while users belong to the dept, a move judged as a grant, and live
+ * sessions after a move.
  */
 @Injectable()
 export class DeptService extends BaseTreeService<Dept> {
+  private moveJudge?: DeptMoveJudge
+
   constructor(
     txHost: TransactionHost<TransactionalAdapterTypeOrm>,
     private readonly permVersion: PermVersion,
@@ -83,6 +92,28 @@ export class DeptService extends BaseTreeService<Dept> {
     if (head == null || head === stored?.headUserId) return
     if (!(await this.users().andWhere('u.id = :head', { head }).getExists()))
       throw new NotFoundException()
+  }
+
+  /** The judge of every move (`GrantPolicy.assertDeptMove`, set by the role module when it starts). */
+  judgeMovesWith(judge: DeptMoveJudge): void {
+    this.moveJudge = judge
+  }
+
+  /**
+   * A move puts the subtree under new ancestors, and the `own_dept_tree` holders there reach it from
+   * then on (scopes read the paths live): a grant by the caller, judged while the paths are still the
+   * old ones (see docs/design-notes.md#permissions). Ancestors it already had give nobody anything new.
+   */
+  protected override async beforeMove(
+    stored: Dept,
+    parentPath: string,
+    subtree: number[],
+  ): Promise<void> {
+    const had = new Set(pathIds(stored.treePath))
+    const gained = pathIds(parentPath).filter((d) => !had.has(d))
+    if (!gained.length) return
+    if (!this.moveJudge) throw new Error('DeptService: no judge for dept moves')
+    await this.moveJudge(subtree, gained)
   }
 
   /** Users still in one of the depts (409); a locking read, so none moves in before the delete commits. */

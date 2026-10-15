@@ -81,7 +81,10 @@ export class DeptController {
   @Put(':id')
   @RequirePerm(deptPerms.modify)
   @ActionLog({ domain: 'iam.dept', verb: 'modify' })
-  @ApiOperation({ summary: 'Change a department (a new parent moves its whole subtree)' })
+  @ApiOperation({
+    summary:
+      'Change a department (a new parent moves its whole subtree; the move passes the grant policy, else 403 B1001)',
+  })
   @ApiEnvelope()
   update(@Param('id', ParseIntPipe) id: number, @Body({ schema: deptUpdate }) dto: DeptUpdate) {
     return this.depts.update(id, dto)

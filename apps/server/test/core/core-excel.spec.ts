@@ -16,6 +16,7 @@ import {
   checkZip,
   escapeFormula,
   formatInZone,
+  importParts,
   unescapeFormula,
   zipEntries,
 } from '../../src/core/excel/excel.js'
@@ -29,6 +30,23 @@ import { CoreI18nModule } from '../../src/core/i18n/i18n.module.js'
 import { REDIS } from '../../src/core/redis/redis.module.js'
 import { DictService } from '../../src/core/settings/dict.service.js'
 import { ParamService } from '../../src/core/settings/param.service.js'
+
+/** Each raw inflate the code under test made (an import's zip check) and the bytes it put out. */
+const { inflates } = vi.hoisted(() => ({
+  inflates: [] as { z: import('node:zlib').InflateRaw; out: number }[],
+}))
+vi.mock('node:zlib', async (importOriginal) => {
+  const zlib = await importOriginal<typeof import('node:zlib')>()
+  return {
+    ...zlib,
+    createInflateRaw: (...args: Parameters<typeof zlib.createInflateRaw>) => {
+      const seen = { z: zlib.createInflateRaw(...args), out: 0 }
+      seen.z.on('data', (chunk: Buffer) => (seen.out += chunk.length))
+      inflates.push(seen)
+      return seen.z
+    },
+  }
+})
 
 const params = new Map<string, string>()
 const store = new Map<string, string>()
@@ -480,6 +498,41 @@ describe('import', () => {
     params.set(excelImportParams.maxRows, '100000')
     const invalid = await read(bomb).catch((x: unknown) => x)
     expect((invalid as BizError).err).toBe(Err.EXCEL_INVALID)
+  })
+
+  it('a part inflating past its declared size stops right there, not after the whole part', async () => {
+    const big = 32 * 1024 * 1024
+    const zip = zipOf([['xl/sharedStrings.xml', 'a'.repeat(big)]])
+    const at = zip.lastIndexOf(Buffer.from('xl/sharedStrings.xml')) - 46
+    expect(zip.readUInt32LE(at)).toBe(0x02014b50)
+    zip.writeUInt32LE(1000, at + 24)
+    inflates.length = 0
+    expect(await importParts(zip, big * 2)).toBe('invalid')
+    expect(inflates).toHaveLength(1)
+    const [{ z }] = inflates as [(typeof inflates)[number]]
+    if (!z.closed) await new Promise((resolve) => z.once('close', resolve))
+    expect(inflates[0]!.out).toBeGreaterThan(1000)
+    expect(inflates[0]!.out).toBeLessThan(1024 * 1024)
+  })
+
+  it('a zip lying about its sizes is invalid before exceljs reads it; entries the directory does not list are never read', async () => {
+    const ok = excelLike(3)
+    const at = ok.lastIndexOf(Buffer.from('xl/sharedStrings.xml')) - 46
+    expect(ok.readUInt32LE(at)).toBe(0x02014b50)
+    // the shared strings declare 10 bytes but inflate to more (a bomb would to gigabytes)
+    const lying = Buffer.from(ok)
+    lying.writeUInt32LE(10, at + 24)
+    expect(checkZip(lying, 100_000)).toBe('ok')
+    expect(((await read(lying).catch((x: unknown) => x)) as BizError).err).toBe(Err.EXCEL_INVALID)
+    // a sheet nobody lists, hidden after the last listed entry: exceljs would take it for sheet1
+    const hidden = zipOf([['xl/worksheets/sheet1.xml', '<worksheet><<< not xml']])
+    const cdStart = ok.readUInt32LE(ok.length - 22 + 16)
+    const head = hidden.subarray(0, hidden.readUInt32LE(hidden.length - 22 + 16))
+    const smuggled = Buffer.concat([ok.subarray(0, cdStart), head, ok.subarray(cdStart)])
+    smuggled.writeUInt32LE(cdStart + head.length, smuggled.length - 22 + 16)
+    const { rows, failures } = await read(smuggled)
+    expect(failures).toEqual([])
+    expect(rows.map((r) => r.value)).toEqual(Array(3).fill({ code: 'c', name: 'n' }))
   })
 })
 

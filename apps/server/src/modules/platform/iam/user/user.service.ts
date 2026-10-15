@@ -74,6 +74,8 @@ interface After {
 }
 
 const iso = (d: Date | null) => (d ? d.toISOString() : null)
+/** `grant_exceeds_own` where a reset or a mobile change would hand over roles the caller cannot give */
+const TAKEOVER_EXCEEDS_OWN = { ...Err.IAM_GRANT_EXCEEDS_OWN, key: 'error.iam.takeover_exceeds_own' }
 
 /**
  * Export / import template / import columns in list order. The dept column is the dept id (see docs/design-notes.md#api-envelope): exported and offered in the template as `<id> - <path of names>`, imported by the id before
@@ -319,7 +321,8 @@ export class UserService extends BaseCrudService<User> {
    * the user's roles;
    * added roles pass GrantPolicy. Roles, dept or username changed → bumpUser; disabled → sessions revoked.
    * The mobile signs in (SMS codes): changing another user's needs the reset-password power too (the
-   * perm, 403, and the user inside its scope, 404) and ends that user's sessions and unused codes.
+   * perm, 403, and the user inside its scope, 404) and roles the caller could give (`assertTakeover`),
+   * and ends that user's sessions and unused codes.
    */
   async modify(id: number, dto: UserUpdate): Promise<void> {
     const { roleIds, positionIds, ...columns } = dto
@@ -347,6 +350,9 @@ export class UserService extends BaseCrudService<User> {
         const deptId = columns.deptId === undefined ? stored.deptId : columns.deptId
         const moved = deptId !== stored.deptId
         if (moved) await this.assertLiveDept(deptId)
+        // a mobile set (not cleared) signs in: judged on the roles the user holds after this request
+        if (changingAnotherMobile && columns.mobile !== null)
+          await this.assertTakeover(roleIds ?? held.map((r) => r.id), deptId)
         await this.update(id, columns)
         const current = held.map((r) => r.id)
         let rolesChanged = false
@@ -397,7 +403,8 @@ export class UserService extends BaseCrudService<User> {
   /**
    * PUT /:id/password (`reset-password`): a new password under the current policy that the user must
    * change at the next sign-in (`password_changed_at = null`); every session of the user ends. A
-   * protected user only by whom `mayManage` lets.
+   * protected user only by whom `mayManage` lets, any other one only with roles the caller could give
+   * (`assertTakeover`).
    */
   async resetPassword(id: number, body: unknown): Promise<void> {
     const { policy } = await this.authParams.load()
@@ -407,6 +414,11 @@ export class UserService extends BaseCrudService<User> {
       this.txHost.withTransaction(async (): Promise<After> => {
         await this.lockScopedIds([id])
         this.assertManageable(await this.protection(id))
+        const stored = await this.repo.findOneByOrFail({ id })
+        await this.assertTakeover(
+          (await this.rolesOf(id)).map((r) => r.id),
+          stored.deptId,
+        )
         await this.repo.update(id, { passwordHash: hash, passwordChangedAt: null })
         return { revoke: PASSWORD_RESET }
       }),
@@ -448,6 +460,21 @@ export class UserService extends BaseCrudService<User> {
    */
   protected assertManageable(why: Protection | undefined): void {
     if (!mayManage(clsGet('principal'), why)) throw new BizError(Err.IAM_USER_PROTECTED)
+  }
+
+  /**
+   * Setting another user's password or sign-in mobile hands the caller that account with every role it
+   * holds (`roleIds`, a disabled one too), so a non-root caller must be able to give all of them at the
+   * user's dept (`GrantPolicy.assertAssignableRoles`; 403 `grant_exceeds_own`, telling why).
+   */
+  protected async assertTakeover(roleIds: readonly number[], deptId: number | null): Promise<void> {
+    try {
+      await this.grants.assertAssignableRoles([...new Set(roleIds)], deptId)
+    } catch (e) {
+      throw e instanceof BizError && e.err === Err.IAM_GRANT_EXCEEDS_OWN
+        ? new BizError(TAKEOVER_EXCEEDS_OWN)
+        : e
+    }
   }
 
   /** Nobody disables their own account, a root user or the owner (`mayRemove`). */

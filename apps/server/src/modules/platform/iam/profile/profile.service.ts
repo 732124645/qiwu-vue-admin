@@ -7,6 +7,7 @@ import {
   fieldDomainOf,
   type Locale,
   LOCALES,
+  PREF_KEYS_MAX,
   PREF_VALUE_MAX_BYTES,
   type ProfileUpdate,
   type ProfileVo,
@@ -321,22 +322,42 @@ export class ProfileService {
     return row?.value ?? null
   }
 
-  /** Insert or replace (a reset key comes back); a value over `PREF_VALUE_MAX_BYTES` → 413. */
+  /**
+   * Insert or replace; a value over `PREF_VALUE_MAX_BYTES` → 413, a new key once the user keeps
+   * `PREF_KEYS_MAX` → 409. Counted under the user's row lock, so parallel writes never pass the cap.
+   */
   async setPref(userId: number, key: string, value: TableColumnsPref): Promise<void> {
     const json = JSON.stringify(value)
     if (Buffer.byteLength(json) > PREF_VALUE_MAX_BYTES) throw new BizError(Err.PAYLOAD_TOO_LARGE)
-    await this.ds.query(
-      `INSERT INTO iam_user_pref (user_id, pref_key, value, tenant_id) VALUES (?, ?, ?, ?) AS n
-         ON DUPLICATE KEY UPDATE value = n.value, deleted_at = NULL`,
-      [userId, key, json, tenantId()],
-    )
+    await this.ds.transaction(async (m) => {
+      await m.query(
+        // qw:no-data-scope the caller's own row, locked so its key count holds until the insert
+        'SELECT id FROM iam_user WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL FOR UPDATE',
+        [userId, tenantId()],
+      )
+      const [held] = await m.query<{ n: number; mine: number }[]>(
+        `SELECT COUNT(*) AS n, COALESCE(SUM(pref_key = ?), 0) AS mine
+           FROM iam_user_pref WHERE user_id = ? AND tenant_id = ? AND deleted_at IS NULL`,
+        [key, userId, tenantId()],
+      )
+      if (!Number(held?.mine) && Number(held?.n) >= PREF_KEYS_MAX)
+        throw new BizError(Err.IAM_PREF_KEYS_LIMIT, { max: PREF_KEYS_MAX })
+      await m.query(
+        `INSERT INTO iam_user_pref (user_id, pref_key, value, tenant_id) VALUES (?, ?, ?, ?) AS n
+           ON DUPLICATE KEY UPDATE value = n.value, deleted_at = NULL`,
+        [userId, key, json, tenantId()],
+      )
+    })
   }
 
-  /** Back to the page defaults (the row soft-deleted); unset keys are fine. */
+  /**
+   * Back to the page defaults: the row goes (a reset key no longer counts against `PREF_KEYS_MAX`);
+   * unset keys are fine.
+   */
   async deletePref(userId: number, key: string): Promise<void> {
     await this.ds.query(
-      `UPDATE iam_user_pref SET deleted_at = CURRENT_TIMESTAMP(3)
-        WHERE user_id = ? AND pref_key = ? AND tenant_id = ? AND deleted_at IS NULL`,
+      // qw:include-deleted a row a reset soft-deleted before goes too
+      'DELETE FROM iam_user_pref WHERE user_id = ? AND pref_key = ? AND tenant_id = ?',
       [userId, key, tenantId()],
     )
   }

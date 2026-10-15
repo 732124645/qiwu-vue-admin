@@ -45,6 +45,28 @@ const DAY_MS = 86_400_000
 /** Lock-screen checks per minute, per user and per client IP (IPv6 by /64, as the SMS limits). */
 const VERIFY_PER_MINUTE = { user: 20, ip: 60 }
 
+// A password sign-in's attempt, taken before bcrypt so parallel guesses cannot all pass the gates:
+// the pair locked → -1 (nothing counted, the lock not extended); no ticket checked and the user's
+// failures at the cross-IP threshold → -2; else the pair and user counters count it (pair TTL = the
+// lock, user TTL NX) and the pair's count is returned. Success deletes both, a refusal that guessed
+// nothing gives the attempt back (REFUND).
+// KEYS: pair, user · ARGV: lock threshold, lock ms, cross-IP threshold, ticket checked (1/0), hour ms
+const RESERVE = `
+if tonumber(redis.call('GET', KEYS[1]) or '0') >= tonumber(ARGV[1]) then return -1 end
+if ARGV[4] == '0' and tonumber(redis.call('GET', KEYS[2]) or '0') >= tonumber(ARGV[3]) then return -2 end
+local n = redis.call('INCR', KEYS[1])
+redis.call('PEXPIRE', KEYS[1], ARGV[2])
+redis.call('INCR', KEYS[2])
+redis.call('PEXPIRE', KEYS[2], ARGV[5], 'NX')
+return n`
+
+// KEYS: the counters an attempt reserved; each counted down once unless gone (a success deleted it)
+const REFUND = `
+for _, k in ipairs(KEYS) do
+  if tonumber(redis.call('GET', k) or '0') > 0 then redis.call('DECR', k) end
+end
+return 1`
+
 /** The caller as the sign-in endpoints see it (`ip` and `host` after `trust proxy`). */
 export interface Client {
   ip: string
@@ -120,7 +142,6 @@ const BAD_CREDENTIALS_TENANT: ErrorDef = {
   ...Err.AUTH_BAD_CREDENTIALS,
   key: 'error.auth.bad_credentials_tenant',
 }
-type FailKeys = ReturnType<typeof failKeys>
 
 /** Password sign-in (see docs/design-notes.md#auth-sessions); tokens and sessions are TokenService's, revocation SessionRevoker's. */
 @Injectable()
@@ -144,8 +165,10 @@ export class AuthService {
   /**
    * The sign-in's tenant (resolveLoginTenant: the host's, else `tenantCode`) → look up the stored
    * username for counter keys → ticket gate (mode or cross-IP failures) → IP blacklist → username+IP
-   * lock → bcrypt (fake hash for unknown, disabled or deleted users, and for anyone while the tenant did
-   * not resolve) → failure counters or, on success, reset + session + `last_login_*` + sign-in log. A
+   * lock, the attempt counted in the same step (`RESERVE`: parallel guesses reach bcrypt at most the
+   * lock threshold times, and past the cross-IP threshold only with a ticket) → bcrypt (fake hash for
+   * unknown, disabled or deleted users, and for anyone while the tenant did not resolve) → the IP's
+   * failure count or, on success, reset + session + `last_login_*` + sign-in log. A
    * required ticket is spent before the password check; a refused ticket changes no failure counters.
    * Every credential failure answers the same `bad_credentials` (naming the tenant code where one is
    * typed). `via`: a sign-in that also binds.
@@ -189,13 +212,18 @@ export class AuthService {
         ? null
         : await this.lookup.findCredentials({ tenantId: at.tenantId, username })
     const keys = failKeys(at.code, cred?.username ?? username, client.ip)
-    if (
-      ((await this.captcha.mode()) !== 'off' ||
-        Number(await this.redis.get(keys.user)) >= security.crossIpThreshold) &&
-      !(await this.captchaTickets.verify('signin', client.ip, body.captchaTicket))
-    ) {
+    const captchaRequired = () => {
       log({ userId: cred?.userId ?? null, ok: false, msgKey: 'signin.captcha_required' })
-      throw new BizError(Err.AUTH_CAPTCHA_REQUIRED)
+      return new BizError(Err.AUTH_CAPTCHA_REQUIRED)
+    }
+    let ticketed = false
+    if (
+      (await this.captcha.mode()) !== 'off' ||
+      Number(await this.redis.get(keys.user)) >= security.crossIpThreshold
+    ) {
+      if (!(await this.captchaTickets.verify('signin', client.ip, body.captchaTicket)))
+        throw captchaRequired()
+      ticketed = true
     }
     if (isBlocked(blocked, client.ip)) {
       log({ userId: null, ok: false, msgKey: 'signin.ip_blocked' })
@@ -207,14 +235,46 @@ export class AuthService {
       msgKey: 'signin.locked',
       msgParams: { minutes: security.lockMinutes },
     }
-    if (Number(await this.redis.get(keys.pair)) >= security.lockThreshold) {
+    const reserve = () =>
+      this.redis.eval(RESERVE, {
+        keys: [keys.pair, keys.user],
+        arguments: [
+          String(security.lockThreshold),
+          String(security.lockMinutes * 60_000),
+          String(security.crossIpThreshold),
+          ticketed ? '1' : '0',
+          String(HOUR_MS),
+        ],
+      })
+    let attempt = Number(await reserve())
+    // failures in parallel crossed the cross-IP threshold after the gate above: the ticket after all
+    if (attempt === -2) {
+      if (!(await this.captchaTickets.verify('signin', client.ip, body.captchaTicket)))
+        throw captchaRequired()
+      ticketed = true
+      attempt = Number(await reserve())
+    }
+    if (attempt < 0) {
       log(locked, 'locked')
       throw new BizError(Err.AUTH_LOCKED)
     }
+    // a refusal after the password matched guessed nothing: the attempt is given back, once
+    let refunded = false
+    const refund = async () => {
+      if (refunded) return
+      refunded = true
+      await this.redis.eval(REFUND, { keys: [keys.pair, keys.user] })
+    }
+    // past a matching password, an infrastructure error (Redis, the database) guessed nothing either
+    const proven = <T>(step: () => Promise<T>): Promise<T> =>
+      step().catch(async (e: unknown) => {
+        if (!(e instanceof BizError)) await refund().catch(() => undefined)
+        throw e
+      })
 
     const live = cred?.enabled ? cred : null
     const match = await bcrypt.compare(password, live?.passwordHash ?? FAKE_HASH)
-    const user = match && live ? await this.permVersion.load(live.userId) : null
+    const user = match && live ? await proven(() => this.permVersion.load(live.userId)) : null
     if (!live || !user) {
       const reason =
         at.tenantId === null
@@ -225,43 +285,51 @@ export class AuthService {
               ? 'disabled'
               : 'bad_password'
       log({ userId: cred?.userId ?? null, ok: false, msgKey: `signin.${reason}` })
-      if ((await this.countFailure(keys, security.lockMinutes)) >= security.lockThreshold) {
+      await this.redis.multi().incr(keys.ip).pExpire(keys.ip, HOUR_MS, 'NX').exec()
+      if (attempt >= security.lockThreshold) {
         log(locked, 'locked')
         throw new BizError(Err.AUTH_LOCKED)
       }
       throw new BizError(badCredentials)
     }
 
-    // A password change/reset or disable racing this sign-in commits first, then
-    // SessionRevoker.revokeUser bumps credver and ends the sessions. credver is read BEFORE the
-    // credentials are read again: a change committed before that read shows here (another hash, or
-    // disabled); one committed after it moves credver, so issue() refuses, or else the session
-    // existed before the revocation and was ended by it. Not counted as a failure: nothing was guessed.
-    const credVer = await this.tokens.credVersion(live.userId)
-    const again = await this.lookup.findCredentials({ userId: live.userId })
     const now = new Date()
-    const current = again?.enabled === true && again.passwordHash === live.passwordHash
-    // a refused bind (409, or the proof gone meanwhile) is a failed sign-in of this user
-    if (current)
-      await via?.beforeIssue(live.userId, { passwordHash: live.passwordHash }).catch((e) => {
-        log({ userId: live.userId, ok: false, msgKey: BIND_REFUSED })
-        throw e
-      })
-    const issued = current
-      ? await this.tokens.issue(user, {
-          keepSignedIn: body.keepSignedIn ?? false,
-          ip: client.ip,
-          ua: client.ua,
-          flags: passwordFlags(live.passwordChangedAt, policy, now.getTime()),
-          clientId,
-          credVer,
-        })
-      : null
-    if (!issued) {
-      log({ userId: live.userId, ok: false, msgKey: 'signin.credentials_changed' })
-      throw new BizError(badCredentials)
-    }
-    await this.redis.del([keys.pair, keys.user, redisKey('authFail', 'cur', live.userId)])
+    const issued = await proven(async () => {
+      // A password change/reset or disable racing this sign-in commits first, then
+      // SessionRevoker.revokeUser bumps credver and ends the sessions. credver is read BEFORE the
+      // credentials are read again: a change committed before that read shows here (another hash, or
+      // disabled); one committed after it moves credver, so issue() refuses, or else the session
+      // existed before the revocation and was ended by it. Not counted as a failure: nothing was guessed.
+      const credVer = await this.tokens.credVersion(live.userId)
+      const again = await this.lookup.findCredentials({ userId: live.userId })
+      const current = again?.enabled === true && again.passwordHash === live.passwordHash
+      // a refused bind (409, or the proof gone meanwhile) is a failed sign-in of this user
+      if (current)
+        await via
+          ?.beforeIssue(live.userId, { passwordHash: live.passwordHash })
+          .catch(async (e) => {
+            log({ userId: live.userId, ok: false, msgKey: BIND_REFUSED })
+            await refund()
+            throw e
+          })
+      const done = current
+        ? await this.tokens.issue(user, {
+            keepSignedIn: body.keepSignedIn ?? false,
+            ip: client.ip,
+            ua: client.ua,
+            flags: passwordFlags(live.passwordChangedAt, policy, now.getTime()),
+            clientId,
+            credVer,
+          })
+        : null
+      if (!done) {
+        log({ userId: live.userId, ok: false, msgKey: 'signin.credentials_changed' })
+        await refund()
+        throw new BizError(badCredentials)
+      }
+      await this.redis.del([keys.pair, keys.user, redisKey('authFail', 'cur', live.userId)])
+      return done
+    })
     await this.lookup.recordSignIn(live.userId, { ip: client.ip, at: now, timezone })
     log({
       userId: live.userId,
@@ -585,20 +653,5 @@ export class AuthService {
     for await (const found of this.redis.scanIterator({ MATCH: pairs, COUNT: 500 }))
       if (found.length) await this.redis.unlink(found)
     await this.redis.unlink(keys.user)
-  }
-
-  /** One more failure on every counter; returns the username+IP pair's count. */
-  private async countFailure(keys: FailKeys, lockMinutes: number): Promise<number> {
-    const [pair] = await this.redis
-      .multi()
-      .incr(keys.pair)
-      // the lock lasts lockMinutes after the last counted failure
-      .pExpire(keys.pair, lockMinutes * 60_000)
-      .incr(keys.user)
-      .pExpire(keys.user, HOUR_MS, 'NX')
-      .incr(keys.ip)
-      .pExpire(keys.ip, HOUR_MS, 'NX')
-      .exec()
-    return Number(pair)
   }
 }

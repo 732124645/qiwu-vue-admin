@@ -1,8 +1,24 @@
 # Changelog
 
-中文说明：本文件按功能区域汇总栖梧 / Qiwu 的用户可见变化，正文使用英文。`1.0.0` 于 2026-10-05 发布，`1.0.3` 于 2026-10-06 发布（`1.0.1`、`1.0.2` 未发布，内容并入 `1.0.3`），`1.1.0`（多租户）、`1.2.0`（手写 SQL 的数据权限）、`1.2.1`（修复）与 `1.3.0`（任务队列）于 2026-10-14 发布，`1.3.1`（开发调试开关）于 2026-10-15 发布。
+中文说明：本文件按功能区域汇总栖梧 / Qiwu 的用户可见变化，正文使用英文。`1.0.0` 于 2026-10-05 发布，`1.0.3` 于 2026-10-06 发布（`1.0.1`、`1.0.2` 未发布，内容并入 `1.0.3`），`1.1.0`（多租户）、`1.2.0`（手写 SQL 的数据权限）、`1.2.1`（修复）与 `1.3.0`（任务队列）于 2026-10-14 发布，`1.3.1`（开发调试开关）与 `1.4.0`（安全审查修复）于 2026-10-15 发布。
 
 All notable product changes are recorded here in Keep a Changelog style. The initial release below summarizes the delivered features. Planned work is identified explicitly.
+
+## [1.4.0] - 2026-10-15
+
+### Security
+
+- Resetting another user's password, or setting their sign-in mobile, now needs the right to grant every role that user holds, like assigning those roles; otherwise 403 `B1001` with the message `iam.takeover_exceeds_own` (a user administrator could take over a better-privileged account). A tenant administrator is judged only on the permissions it holds and the platform-only ones, so permissions of disabled or out-of-package menus a role keeps do not block it. Helpdesk-style roles with only `iam.user.reset-password` can no longer reset users whose roles carry permissions or a data scope they lack.
+- Moving a department is judged as a grant: the subtree must fit the caller's scope for every permission of the dept-subtree roles held above its new place (403 `iam.grant_exceeds_own`).
+- Password and SMS sign-in refuse a foreign or `null` `Origin` (403 `auth.origin_rejected`), so another site can no longer plant its own session in the console (login CSRF). Requests without `Origin` (apps, scripts) and mobile sign-ins are unchanged. Upgrade note: behind a reverse proxy, `Host` and the scheme must reach the server as the browser sent them (or the console's origin be listed in `CORS_ORIGIN`), as the refresh already required; otherwise console sign-in answers 403 `A1007`.
+- Sign-in usernames must use the stored syntax (letters, digits, `_ . @ -`; fullwidth forms are folded first); other spellings get 400 instead of revealing whether an account exists. Upgrade note: accounts whose stored username does not match that syntax (for example imported by SQL with Chinese names) must be renamed before upgrading, their sign-in answers 400. Parallel password guesses now reach the password check at most the lock threshold times.
+- Excel imports are rebuilt from the file's central directory and every part's real size is counted before parsing, so a file lying about its sizes is refused (400 `excel.invalid`) instead of exhausting memory.
+- Dictionary and parameter reads ignore codes outside the stored syntax (no cache entry per spelling); a user keeps at most 200 saved list settings (409 `iam.pref_keys_limit`); presigned download URLs are masked in request logs; `audit.retention_days` is root-only; disabled users get no WeChat reminders.
+- The mobile H5 dev server serves only the app and shared sources, without CORS, and only to its own pages (`docs/mobile.md`).
+
+### Fixed
+
+- `DATE` columns (e.g. a book's publication date) no longer come back a day early when the server process runs west of UTC.
 
 ## [1.3.1] - 2026-10-15
 

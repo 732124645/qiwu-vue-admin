@@ -56,6 +56,7 @@
   },
   "iam": {
     "grant_exceeds_own": "不能授予超出自己权限或数据范围的角色",
+    "takeover_exceeds_own": "该用户持有你不能授予的角色：只有能授予这些角色的管理员才能重置其密码或修改其手机号",
     "user_self": "不能删除或停用自己的账号",
     "user_protected": "超级管理员账号受保护，不能执行此操作",
     "initial_password_unset": "初始密码不可用或不符合密码策略，请填写密码",
@@ -70,7 +71,8 @@
     "tenant_user_quota": "已达到租户的用户数上限",
     "tenant_package_platform_menu": "套餐只能包含租户可用的菜单，不能包含平台专属菜单",
     "tenant_default_fixed": "默认租户不能停用、设置到期时间或套餐，编码也不能修改；默认租户的初始密码在参数 iam.user.initial_password 中设置",
-    "tenant_domain_reserved": "绑定域名不能是平台自身的域名"
+    "tenant_domain_reserved": "绑定域名不能是平台自身的域名",
+    "pref_keys_limit": "已保存的列表设置达到上限（{max} 个），请先将部分列表恢复默认设置"
   },
   "storage": {
     "file_required": "请选择要上传的文件",

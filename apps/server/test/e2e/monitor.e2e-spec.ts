@@ -36,6 +36,8 @@ import { cleanRedis } from '../setup/redis.js'
 import { inTenant1 } from '../setup/tenants.js'
 
 const PREFIX = 'e2e-monitor-'
+/** dict codes and param keys keep to the stored syntax (dotted snake_case), unlike the rest of PREFIX's rows */
+const SETTING = `e2e_monitor.race_${process.pid}`
 const URL = '/api/monitor'
 
 let app: NestExpressApplication
@@ -133,6 +135,9 @@ afterAll(async () => {
     await ds.query('DELETE FROM cfg_dict_entry WHERE dict_code LIKE ?', [`${PREFIX}%`])
     await ds.query('DELETE FROM cfg_dict WHERE code LIKE ?', [`${PREFIX}%`])
     await ds.query('DELETE FROM cfg_param WHERE param_key LIKE ?', [`${PREFIX}%`])
+    await ds.query('DELETE FROM cfg_dict_entry WHERE dict_code = ?', [SETTING])
+    await ds.query('DELETE FROM cfg_dict WHERE code = ?', [SETTING])
+    await ds.query('DELETE FROM cfg_param WHERE param_key = ?', [SETTING])
     await ds.query('DELETE FROM iam_user_roles WHERE user_id IN (?)', [userIds])
     await ds.query('DELETE FROM iam_user WHERE id IN (?)', [userIds])
     await ds.query('DELETE FROM iam_role_menus WHERE role_id = ?', [roleId])
@@ -374,7 +379,7 @@ describe('cache', () => {
   })
 
   it('cache: a clear racing a dict fill (namespace) or a param fill (key) leaves no stale value cached', async () => {
-    const code = `${PREFIX}race-${process.pid}`
+    const code = SETTING
     await ds.query('INSERT INTO cfg_dict (code, name) VALUES (?, ?)', [code, code])
     await ds.query('INSERT INTO cfg_dict_entry (dict_code, value, label) VALUES (?, ?, ?)', [
       code,
@@ -397,7 +402,7 @@ describe('cache', () => {
     expect(await redis.get(redisKey('dict', 'entries', code))).toBeNull()
     expect((await app.get(DictService).entries(code))?.entries.map((e) => e.label)).toEqual(['new'])
 
-    const key = `${PREFIX}race-${process.pid}`
+    const key = SETTING
     await ds.query('INSERT INTO cfg_param (param_key, param_value, name) VALUES (?, ?, ?)', [
       key,
       'old',

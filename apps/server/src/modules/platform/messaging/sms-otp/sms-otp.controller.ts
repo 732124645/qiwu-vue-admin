@@ -14,7 +14,12 @@ import {
 import type { Request, Response } from 'express'
 import { z } from 'zod'
 import { ActionLog, SkipActionLog } from '../../../../core/audit/action-log.js'
-import { answerWithTokens, clientOf, tokenPayload } from '../../../../core/auth/auth.controller.js'
+import {
+  answerWithTokens,
+  assertSignInOrigin,
+  clientOf,
+  tokenPayload,
+} from '../../../../core/auth/auth.controller.js'
 import { plainIp } from '../../../../core/auth/auth-params.js'
 import { Public } from '../../../../core/auth/decorators.js'
 import { AppConfigService } from '../../../../core/config/config.module.js'
@@ -52,7 +57,7 @@ export class SmsOtpController {
   @HttpCode(200)
   @ApiOperation({
     summary:
-      'Sign in with a single-use SMS code and set the refresh cookie (clientId mobile: returns the refresh token instead)',
+      'Sign in with a single-use SMS code and set the refresh cookie (clientId mobile: returns the refresh token instead); a foreign Origin → 403 A1007 before the code is checked (clientId mobile: not judged)',
   })
   @ApiEnvelope(tokenPayload)
   async login(
@@ -60,6 +65,7 @@ export class SmsOtpController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ): Promise<TokenPayload> {
+    assertSignInOrigin(req, this.cfg, body.clientId)
     const tokens = await this.smsAuth.login(body, clientOf(req), timezoneOf(req.get('x-timezone')))
     return answerWithTokens(res, this.cfg, tokens, body.keepSignedIn ?? false, body.clientId)
   }

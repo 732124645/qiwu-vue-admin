@@ -104,7 +104,7 @@ APP_MULTI_TENANT=true
 
 租户可以绑定自己的域名（在租户管理里填写），用户在这个域名上登录不填租户编码。每个绑定的域名都要指到同一套服务：
 
-- DNS 指向反向代理；nginx 的 `server_name` 加上这些域名（与主域名同一个 `server` 块，或复制一份只改 `server_name` 与证书），`/api/`、`/socket.io/`、`/files/` 与 SPA 回退的配置同主域名。转发时保留浏览器的 `Host`（示例的 `proxy_set_header Host $http_host`）：服务端按主机名识别租户，也按它核对 refresh 与 WebSocket 的 Origin。
+- DNS 指向反向代理；nginx 的 `server_name` 加上这些域名（与主域名同一个 `server` 块，或复制一份只改 `server_name` 与证书），`/api/`、`/socket.io/`、`/files/` 与 SPA 回退的配置同主域名。转发时保留浏览器的 `Host`（示例的 `proxy_set_header Host $http_host`）：服务端按主机名识别租户，也按它核对登录、refresh 与 WebSocket 的 Origin。
 - 证书覆盖每个绑定的域名（多域名证书或通配符证书）；生产环境只走 HTTPS。
 - `CORS_ORIGIN` 只列平台自己的源，不要写租户的域名：同源请求本来就通过，而 `CORS_ORIGIN` 里的主机名被当作平台主机名，绑定给租户时 422。
 - 平台人员用主域名登录；别的租户的令牌在已绑定租户的域名上回 401。
@@ -253,7 +253,7 @@ server {
 }
 ```
 
-SPA 回退支持 `/sso` 等前端路由；`/api/` 与 `/socket.io/` 保留原路径转发。代理**覆盖** `X-Forwarded-For`，不追加客户端伪造的值；Host 与 Proto 保留本站来源，避免 refresh 与 WebSocket Origin 校验失败。WebSocket 读超时应长于心跳周期；若修改心跳配置，重新核对 75 秒示例。原理见 [nginx WebSocket 官方说明](https://nginx.org/en/docs/http/websocket.html)。
+SPA 回退支持 `/sso` 等前端路由；`/api/` 与 `/socket.io/` 保留原路径转发。代理**覆盖** `X-Forwarded-For`，不追加客户端伪造的值；Host 与 Proto 保留本站来源，避免登录、refresh 与 WebSocket 的 Origin 校验失败（失败时控制台登录回 403 `A1007`）。WebSocket 读超时应长于心跳周期；若修改心跳配置，重新核对 75 秒示例。原理见 [nginx WebSocket 官方说明](https://nginx.org/en/docs/http/websocket.html)。
 
 `location ~ /\.` 也会阻断 `/.well-known/`。使用 webroot 方式续签证书时，在处理 ACME 请求的 `server` 中单独放行挑战目录（HTTP-01 通常由 80 端口处理）；`root` 与证书客户端的 webroot 一致，例如：
 

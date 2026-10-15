@@ -657,14 +657,62 @@ describe('protected users', () => {
       [1, B.deptId],
       [1, B.deptId],
     ])
-    // an unprotected user: as before
+    // an unprotected user: as before, while the caller could give every role it holds (alice holds
+    // the `all` role the owner gave her, which only a tenant_admin holder gives)
+    const plain = await addUser(on, B.id, 'plain', { deptId: B.deptId })
+    expect(
+      outcome(
+        await call('put', `/api/iam/users/${plain}/password`, opsToken).send({
+          password: NEW_PASSWORD,
+        }),
+      ),
+    ).toEqual(OK)
     expect(
       outcome(
         await call('put', `/api/iam/users/${B.users.alice}/password`, opsToken).send({
           password: NEW_PASSWORD,
         }),
       ),
+    ).toEqual(as(Err.IAM_GRANT_EXCEEDS_OWN))
+  })
+
+  it('a tenant_admin holder takes over the holder of a role keeping a disabled or out-of-package menu; a platform perm stays refused, as for a user administrator', async () => {
+    const action = (name: string, perms: string, enabled: number) =>
+      insertRow(ds.manager, 'iam_menu', {
+        parent_id: 0,
+        kind: 'action',
+        name: `${PREFIX}${name}`,
+        perms,
+        enabled,
+      })
+    const idle = await action('idle', 'tro.idle.run', 0)
+    const outside = await action('outside', 'tro.outside.run', 1)
+    menus.push(idle, outside)
+    await ds.query('INSERT INTO iam_tenant_package_menus (package_id, menu_id) VALUES (?, ?)', [
+      B.packageId,
+      idle,
+    ])
+    const kept = await insertRole(B.id, `${PREFIX}kept`, { scope: 'own_dept' })
+    await ds.query('INSERT INTO iam_role_menus (role_id, menu_id, tenant_id) VALUES ?', [
+      [
+        [kept, idle, B.id],
+        [kept, outside, B.id],
+      ],
+    ])
+    const holder = await addUser(on, B.id, 'kept-holder', { deptId: B.deptId, roleId: kept })
+    const bossToken = await tokenOf(boss)
+    const reset = (token: string) =>
+      call('put', `/api/iam/users/${holder}/password`, token).send({ password: NEW_PASSWORD })
+    expect(outcome(await reset(bossToken))).toEqual(OK)
+    expect(
+      outcome(
+        await call('put', `/api/iam/users/${holder}`, bossToken).send({ mobile: '13900009078' }),
+      ),
     ).toEqual(OK)
+    // a user administrator holds neither perm: it could not give the role, so it takes over nobody holding it
+    expect(outcome(await reset(await tokenOf(ops)))).toEqual(as(Err.IAM_GRANT_EXCEEDS_OWN))
+    await grant(kept, B.id, [[...(await platformPerms())][0]!])
+    expect(outcome(await reset(bossToken))).toEqual(as(Err.IAM_GRANT_EXCEEDS_OWN))
   })
 
   it('the list marks whom the caller may not edit: owner and holders for a user administrator, the owner for a holder', async () => {

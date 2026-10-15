@@ -2,8 +2,9 @@
 // The real pino-http options write to a captured stream; nothing the client sent as a secret (query
 // values: key-named or plain-named like @Sensitive ones, Authorization, Cookie) nor a driver error's SQL
 // parameters reaches the output.
-import { Controller, Get, type INestApplication } from '@nestjs/common'
+import { Controller, Get, type INestApplication, Res } from '@nestjs/common'
 import { Test } from '@nestjs/testing'
+import type { Response } from 'express'
 import { LoggerModule, PinoLogger } from 'nestjs-pino'
 import request from 'supertest'
 import { QueryFailedError } from 'typeorm'
@@ -21,6 +22,14 @@ class LogProbeController {
   probe() {
     this.logger.info('inside the handler')
     return 'ok'
+  }
+
+  @Get('redirect')
+  redirect(@Res() res: Response) {
+    res.redirect(
+      302,
+      'https://bucket.example/o/1?X-Amz-Signature=SIG-S3CRET&X-Amz-Credential=CRED-S3CRET',
+    )
   }
 
   @Get('db')
@@ -86,6 +95,18 @@ it('request lines keep the path and query names, never a query value or a secret
   expect(logged[0]!.req).not.toHaveProperty('query')
   for (const secret of ['T0KEN-S3CRET', 'PV-S3CRET', 'BEARER-S3CRET', 'COOKIE-S3CRET'])
     expect(out).not.toContain(secret)
+})
+
+it("a redirect's Location keeps its origin, path and query names, never a value (a presigned URL's signature)", async () => {
+  lines.length = 0
+  await request(app.getHttpServer()).get('/log-probe/redirect').expect(302)
+  const done = lines
+    .map((l) => JSON.parse(l) as { msg: string; res?: { headers?: Record<string, unknown> } })
+    .find((l) => l.msg === 'request completed')
+  expect(done?.res?.headers?.location).toBe(
+    'https://bucket.example/o/1?X-Amz-Signature=***&X-Amz-Credential=***',
+  )
+  for (const secret of ['SIG-S3CRET', 'CRED-S3CRET']) expect(lines.join('')).not.toContain(secret)
 })
 
 it('errors keep a masked message (causes too) and their stack frames, never a driver dump or quoted value', async () => {

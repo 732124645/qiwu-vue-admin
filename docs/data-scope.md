@@ -50,7 +50,7 @@
 4. 引用完整性另由 `assertReferencesLive()` 检查。已登记的引用指向不存在或软删除的父行时返回 404；新引用在事务内读父行 `FOR SHARE`，未改变的引用不重复锁定。这保证有效引用，不等于自动检查父行的数据权限；业务要求父行也在调用者范围内时，需要额外使用父实体的范围入口。
 5. `remove()` 经 `softDeleteRows()`：有有效限制引用则返回 409 `in_use`；级联记录在同一事务中软删除。TypeORM 普通实体查询排除软删除行，原始 SQL 仍须显式处理 `deleted_at IS NULL`。
 
-树服务 `BaseTreeService` 也沿用 `scopedQb` / `lockScopedIds`。部门新增前还没有 id，因此在写入后的事务内重新锁定检查；移动时检查更新后的整棵有效子树，越界则回滚。导入 upsert 只匹配范围内的行，范围外的同键行不能被覆盖。详见[生成器黄金样板](codegen-golden.md)。
+树服务 `BaseTreeService` 也沿用 `scopedQb` / `lockScopedIds`。部门新增前还没有 id，因此在写入后的事务内重新锁定检查；移动时检查更新后的整棵有效子树，越界则回滚；部门移动还按授予判断新上级部门里部门子树范围角色的持有者（见[权限与授权](design-notes.md#permissions)）。导入 upsert 只匹配范围内的行，范围外的同键行不能被覆盖。详见[生成器黄金样板](codegen-golden.md)。
 
 ## 手写 SQL
 

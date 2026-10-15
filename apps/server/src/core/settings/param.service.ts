@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common'
 import { InjectDataSource } from '@nestjs/typeorm'
+import { PARAM_KEY } from '@qiwu/shared'
 import type { DataSource } from 'typeorm'
 import { keyPart, keyPattern, redisKey } from '../redis/cache-namespaces.js'
 import { REDIS, type Redis } from '../redis/redis.module.js'
@@ -75,6 +76,9 @@ export class ParamService {
   }
 
   private load(key: string): Promise<CachedParam | null> {
+    // only a key as stored names a row: other spellings the collation still matches (case, accents)
+    // must not each become a cache entry of their own
+    if (key.length > 128 || !PARAM_KEY.test(key)) return Promise.resolve(null)
     return readThrough(this.redis, redisKey('param', key), redisKey('paramVer', key), async () => {
       const [row] = await this.ds.query<
         { param_value: string; is_public: number; is_secret: number }[]

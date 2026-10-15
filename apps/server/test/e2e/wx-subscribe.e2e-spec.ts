@@ -196,6 +196,7 @@ beforeAll(async () => {
   await user('race')
   await user('rollback')
   await user('none', {}, null)
+  await user('off', { enabled: 0 })
   await user('gone', {}, { deleted_at: new Date() })
   await user('elsewhere', {}, { appid: 'wx00e2e0000000other' })
 })
@@ -296,6 +297,12 @@ describe('switch on', () => {
     expect(gateway.subscribeSend).toHaveBeenCalledTimes(2)
     expect(answers.get('o-stale2')).toEqual([40001])
     expect(vi.mocked(Logger.prototype.warn).mock.calls.flat().join('\n')).toContain('errcode 40001')
+  })
+
+  it('a disabled user gets no WeChat push (the binding stays for when it is enabled again)', async () => {
+    await notify('off')
+    expect((await lastInbox('off')).status).toBe('delivered')
+    expect(gateway.subscribeSend).not.toHaveBeenCalled()
   })
 
   it('no quota (43101): no retry, nothing warned, the inbox row stays delivered', async () => {

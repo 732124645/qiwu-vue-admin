@@ -23,7 +23,7 @@ import { clsGet } from '../context/cls.js'
 import { RateLimit } from '../guard/rate-limit.decorator.js'
 import { ApiEnvelope } from '../http/api-envelope.decorator.js'
 import { BizError } from '../http/biz-error.js'
-import { originAllowed } from '../http/origin.js'
+import { foreignOrigin, originAllowed } from '../http/origin.js'
 import { timezoneOf } from '../i18n/locale.js'
 import { plainIp } from './auth-params.js'
 import { AuthService, type Client } from './auth.service.js'
@@ -83,6 +83,16 @@ export function answerWithTokens(
   return { accessToken: tokens.accessToken, expiresIn: tokens.expiresIn }
 }
 
+/**
+ * Login CSRF defence of the sign-ins that set the console cookie (see docs/design-notes.md#auth-sessions):
+ * a foreign `Origin` (`foreignOrigin`) → 403 before any credential is checked. A `mobile` sign-in sets
+ * no cookie, so it is not judged (mini programs and apps send no browser Origin).
+ */
+export function assertSignInOrigin(req: Request, cfg: AppConfigService, clientId?: string): void {
+  if (clientId !== MOBILE_CLIENT && foreignOrigin(req, cfg.get('CORS_ORIGIN')))
+    throw new BizError(Err.AUTH_ORIGIN_REJECTED)
+}
+
 /** The well-formed refresh token of the request's cookie, else null. */
 const refreshCookie = (req: Request): string | null => {
   const rt: unknown = req.cookies?.[REFRESH_COOKIE]
@@ -116,7 +126,7 @@ export class AuthController {
   @HttpCode(200)
   @ApiOperation({
     summary:
-      'Password sign-in; captchaTicket (scene signin) required by captcha.mode or cross-IP failures (403 A1021); sets the refresh cookie (clientId mobile: returns the refresh token instead). Multi-tenancy on: the tenant is the host’s, else tenantCode (blank = the default tenant); a tenantCode contradicting the host’s tenant → 400 A1041',
+      'Password sign-in; captchaTicket (scene signin) required by captcha.mode or cross-IP failures (403 A1021); sets the refresh cookie (clientId mobile: returns the refresh token instead), a foreign Origin → 403 A1007 before the password is checked (clientId mobile: not judged). Multi-tenancy on: the tenant is the host’s, else tenantCode (blank = the default tenant); a tenantCode contradicting the host’s tenant → 400 A1041',
   })
   @ApiEnvelope(tokenPayload)
   async login(
@@ -124,6 +134,7 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ): Promise<TokenPayload> {
+    assertSignInOrigin(req, this.cfg, body.clientId)
     const t = await this.auth.login(body, clientOf(req), timezoneOf(req.get('x-timezone')))
     return answerWithTokens(res, this.cfg, t, body.keepSignedIn ?? false, body.clientId)
   }

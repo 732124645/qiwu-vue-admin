@@ -20,6 +20,8 @@ pnpm -C mobile dev:mp-weixin   # 用微信开发者工具导入 mobile/dist/dev/
 pnpm -C mobile dev:app         # 用 HBuilderX 导入 mobile/dist/dev/app，运行到手机或模拟器
 ```
 
+H5 调试服务器与预览服务器（锁定的 Vite 5.2）在 `mobile/vite.config.ts` 中加固：uni-h5 会关闭 `fs.strict`，Vite 随后会把本机任何文件交给请求者，所以重新打开它，只允许 `mobile/` 与 shared 源码；关闭 CORS；Host 不是 localhost 或 IP 字面量（DNS 重绑定）、或请求来自别的网站（外站 Origin、`Sec-Fetch-Site: cross-site`）一律 403，WebSocket 升级（热更新、代理的实时连接；Vite 自己不核对其 Origin）同样核对，不通过就直接断开。用 `--host` 让局域网里的手机按 IP 访问仍可用，但这会把调试服务器开放给同一网络。要用 `*.local` 名称或内网穿透域名访问时，把这些主机名（不带端口，逗号分隔）写进环境变量 `QW_H5_ALLOWED_HOSTS` 再启动，例如 `QW_H5_ALLOWED_HOSTS=my-mac.local pnpm -C mobile dev:h5`；只写自己掌控的名称，列出的名称与 localhost 同等可信，且请求须原样带着该 Host 到达。
+
 ## 基础层（`mobile/src/core`）
 
 - **请求**（`request.ts`）：`api.get/post/put/delete`、`upload`（`uni.uploadFile` 走后端上传，字段 `file`）。基址默认 `/api`（H5 走代理）；小程序与 App 构建时设 `VITE_API_BASE=https://<域名>/api`。每个请求带 `X-Client-Id: mobile`、`Accept-Language`、`X-Timezone`；access 令牌只在内存，refresh 令牌存 uni 存储（`qw.auth.rt`），401 时单飞刷新（`POST /auth/refresh {refreshToken}`，应答同登录：`accessToken` + 轮换后的 `refreshToken`）并重放；刷新被拒 → 清会话、`reLaunch` 到 `/pages/login/index`。403/409/422/429/5xx 与网络错误弹 toast，`silent` 调用方自己处理；例外是 403 `A1004`（须先改密码，服务端此时只放行 `/auth/me`、`/auth/menus`、改密与退出）：不弹 toast，`reLaunch` 到改密页 `/pages-sys/password/index`。
@@ -292,7 +294,7 @@ pnpm -C mobile dev:app         # 用 HBuilderX 导入 mobile/dist/dev/app，运�
 - [ ] 实时推送：在电脑端让员工提交请假，主管手机上的待办角标和消息角标在 **2 秒内**各加 1（小程序、App 分别试）；切到后台再回来，能重连并补拉计数；管理员在电脑端强退这个会话后，手机 2 秒内回到登录页并给出提示。
   - 如果角标要等约 60 秒才变（轮询兜底），先查 socket 合法域名和反向代理的 WebSocket 升级。
   - 再查握手是否被拒为 `forbidden_origin`：真机的 WebSocket 握手可能带 `Origin` 头，它既不是本站的源、也不在 `CORS_ORIGIN` 里时，服务端会拒绝。
-  - 在反向代理上临时记录 `/socket.io/` 请求的 `Origin` 头（nginx 用 `$http_origin`），把看到的值原样加进 `CORS_ORIGIN`（逗号分隔，与已有的值并列；只加看到的那个值，不要放宽），然后重启服务端。`CORS_ORIGIN` 同时是 web 端刷新令牌接口的 Origin（CSRF）白名单（`apps/server/src/core/http/origin.ts`），加进去的源也能凭 refresh cookie 换新令牌。
+  - 在反向代理上临时记录 `/socket.io/` 请求的 `Origin` 头（nginx 用 `$http_origin`），把看到的值原样加进 `CORS_ORIGIN`（逗号分隔，与已有的值并列；只加看到的那个值，不要放宽），然后重启服务端。`CORS_ORIGIN` 同时是 web 端登录与刷新令牌接口的 Origin（CSRF）白名单（`apps/server/src/core/http/origin.ts`），加进去的源也能凭 refresh cookie 换新令牌。
 - [ ] 订阅消息（有真实的 AppID、AppSecret 和模板时）：小程序「我的」页出现「新待办微信提醒」，点击后微信弹窗申请订阅；之后给这个用户派一个新待办，微信服务通知里收到提醒，点开进入该审批的详情。没订阅或开关关闭时不发。
 - [ ] App 版本更新（安卓 App、iOS App 各一遍）：
   1. 开关关闭：没有提示。

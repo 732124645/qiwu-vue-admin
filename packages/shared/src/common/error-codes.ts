@@ -129,6 +129,8 @@ export const Err = {
    * binding it would send every sign-in on the platform's address to that tenant
    */
   IAM_TENANT_DOMAIN_RESERVED: def('B1016', 422, 'error.iam.tenant_domain_reserved'),
+  /** a new UI preference key past `PREF_KEYS_MAX` (the keys already saved stay writable) */
+  IAM_PREF_KEYS_LIMIT: def('B1017', 409, 'error.iam.pref_keys_limit'),
 
   /** builtin params (seeded) are never deleted and keep whether they are public */
   SETTINGS_PARAM_BUILTIN: def('B2001', 422, 'error.settings.param_builtin'),

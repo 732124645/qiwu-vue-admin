@@ -9,6 +9,7 @@ import type { NestExpressApplication } from '@nestjs/platform-express'
 import { Test } from '@nestjs/testing'
 import { getDataSourceToken } from '@nestjs/typeorm'
 import {
+  AUDIT_RETENTION_PARAM,
   DEFAULT_TIMEZONE_PARAM,
   Err,
   PARAM_SECRET_MASK,
@@ -443,7 +444,7 @@ describe('params (hand-written)', () => {
   const builtin = async (key: string) =>
     Number((await ds.query('SELECT id FROM cfg_param WHERE param_key = ?', [key]))[0].id)
 
-  it('only root may write signup switch, role or department defaults, or the WeChat sign-in switch', async () => {
+  it('only root may write signup switch, role or department defaults, the WeChat sign-in switch or the audit retention', async () => {
     expect(
       await findId(ds.manager, 'cfg_param', { param_key: 'auth.signup.default_role_code' }),
     ).toBeUndefined()
@@ -452,6 +453,7 @@ describe('params (hand-written)', () => {
       signupParams.defaultRoleId,
       signupParams.defaultDeptId,
       WX_MP_ENABLED_PARAM,
+      AUDIT_RETENTION_PARAM,
     ]) {
       const id = await builtin(key)
       const [before] = await ds.query<{ param_value: string }[]>(

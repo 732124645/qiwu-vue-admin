@@ -23,7 +23,7 @@ import { redisKey } from '../redis/cache-namespaces.js'
 import { REDIS, type Redis } from '../redis/redis.module.js'
 import { DictService } from '../settings/dict.service.js'
 import { ParamService } from '../settings/param.service.js'
-import { checkZip, escapeFormula, formatInZone, unescapeFormula, worksheetsLast } from './excel.js'
+import { escapeFormula, formatInZone, importParts, unescapeFormula } from './excel.js'
 
 /**
  * One column of an export, import template or import ("Excel 字典转换、@InDict"): modules
@@ -107,13 +107,13 @@ async function* oneBatch(rows: object[]): AsyncGenerator<object[]> {
 
 /**
  * Rows of the workbook's first sheet (workbook order) as exceljs's streaming reader parses them; no
- * sheet → 400 `excel.invalid`. Worksheet parts are streamed last (`worksheetsLast`), so the shared
+ * sheet → 400 `excel.invalid`. `parts` = the checked file (`importParts`): worksheets last, so the shared
  * strings are known when rows arrive and nothing spills to disk; styles are kept for date cells.
- * Leaving the loop early stops inflating the file.
+ * Leaving the loop early stops parsing the file (`importParts` already inflated it once, within its budget).
  */
-async function* firstSheetRows(buf: Buffer): AsyncGenerator<ExcelJS.Row> {
+async function* firstSheetRows(parts: Buffer[]): AsyncGenerator<ExcelJS.Row> {
   const reader = new ExcelJS.stream.xlsx.WorkbookReader(
-    Readable.from(worksheetsLast(buf), { objectMode: false }),
+    Readable.from(parts, { objectMode: false }),
     { styles: 'cache' },
   )
   // a sheet arriving before these would be spilled to a temp file; the parts, when present, come
@@ -245,9 +245,9 @@ export class ExcelService {
     const { maxMb, maxRows, maxColumns } = await this.limits()
     const max = maxMb * 1024 * 1024
     if (buf.length > max) throw new BizError(Err.PAYLOAD_TOO_LARGE)
-    const zip = checkZip(buf, max * 20)
-    if (zip === 'unsafe') throw new BizError(Err.EXCEL_UNSAFE)
-    if (zip === 'invalid') throw new BizError(Err.EXCEL_INVALID)
+    const parts = await importParts(buf, max * 20)
+    if (parts === 'unsafe') throw new BizError(Err.EXCEL_UNSAFE)
+    if (parts === 'invalid') throw new BizError(Err.EXCEL_INVALID)
 
     const byHeader = new Map<string, ExcelColumn>()
     for (const c of columns.filter(importable))
@@ -268,7 +268,7 @@ export class ExcelService {
     let at: [number, ExcelColumn][] | undefined
     let valued = 0
     try {
-      for await (const row of firstSheetRows(buf)) {
+      for await (const row of firstSheetRows(parts)) {
         if (!row.hasValues) continue
         if (row.cellCount > maxColumns)
           throw new BizError(Err.EXCEL_TOO_MANY_COLUMNS, { max: maxColumns })

@@ -274,6 +274,47 @@ describe('login', () => {
     expect(bcrypt.getRounds(FAKE_HASH)).toBe(BCRYPT_COST)
   })
 
+  it('Origin: a foreign or null one (a form of another site) → 403 origin_rejected before the password, no cookie, nothing counted; own origin, CORS_ORIGIN, none or a mobile sign-in → ok', async () => {
+    await user('csrf')
+    const name = `${PREFIX}csrf`
+    const ip = nextIp()
+    const foreign = (origin: string) =>
+      http()
+        .post('/api/auth/login')
+        .type('form')
+        .set('X-Forwarded-For', ip)
+        .set('User-Agent', CHROME)
+        .set('Origin', origin)
+        .send({ username: name, password: PW })
+    for (const origin of ['https://evil.example', 'null']) {
+      const res = await foreign(origin)
+      expect(res.status).toBe(403)
+      expect(res.body.code).toBe(Err.AUTH_ORIGIN_REJECTED.code)
+      expect(cookieOf(res)).toBe('')
+    }
+    const wrong = await login(name, 'Wrong#pass1', {
+      ip,
+      headers: { Origin: 'https://evil.example' },
+    })
+    expect(wrong.body.code).toBe(Err.AUTH_ORIGIN_REJECTED.code)
+    expect([await failCount('p', name, ip), await failCount('u', name)]).toEqual([0, 0])
+    for (const headers of [{ Origin: selfOrigin() }, {}] as Record<string, string>[])
+      expect(cookieOf(await login(name, PW, { headers }).expect(200))).not.toBe('')
+    const cfg = app.get(AppConfigService)
+    const get = cfg.get.bind(cfg)
+    vi.spyOn(cfg, 'get').mockImplementation(((k: string) =>
+      k === 'CORS_ORIGIN' ? 'https://admin.example' : get(k as never)) as typeof cfg.get)
+    await login(name, PW, { headers: { Origin: 'https://admin.example' } }).expect(200)
+    // a mobile sign-in sets no cookie: nothing to plant
+    const mobile = await http()
+      .post('/api/auth/login')
+      .set('X-Forwarded-For', nextIp())
+      .set('Origin', 'https://evil.example')
+      .send({ username: name, password: PW, clientId: 'mobile' })
+      .expect(200)
+    expect(cookieOf(mobile)).toBe('')
+  })
+
   it('username+IP lock: the 5th failure locks that pair only; another IP still signs in; success resets', async () => {
     await user('carol')
     const ipA = nextIp()
@@ -284,12 +325,14 @@ describe('login', () => {
     const fifth = await login(`${PREFIX}carol`, 'Wrong#pass1', { ip: ipA })
     expect(fifth.status).toBe(429)
     expect(fifth.body.code).toBe(Err.AUTH_LOCKED.code)
-    // locked: even the right password, in any spelling the collation maps to the account, is refused
-    for (const name of [`${PREFIX}CAROL`, `${PREFIX}cärol`]) {
+    // locked: even the right password, in another case or fullwidth (folded to the name), is refused
+    for (const name of [`${PREFIX}CAROL`, `${PREFIX}ｃａｒｏｌ`]) {
       const res = await login(name, PW, { ip: ipA })
       expect(res.status).toBe(429)
       expect(res.body.code).toBe(Err.AUTH_LOCKED.code)
     }
+    // a spelling outside the username syntax is no sign-in at all
+    expect((await login(`${PREFIX}cärol`, PW, { ip: ipA })).status).toBe(400)
     // 5 failures, the lock itself, 2 refusals (the username column matches case-insensitively)
     const log = await signinLog(`${PREFIX}carol`, 8)
     expect(log.filter((r) => r.kind === 'locked').map((r) => r.msg_params)).toEqual(
@@ -305,6 +348,125 @@ describe('login', () => {
     expect(await redis.exists(redisKey('authFail', 'u', `${PREFIX}carol`))).toBe(0)
     // the pair on ipA stays locked
     expect((await login(`${PREFIX}carol`, PW, { ip: ipA })).status).toBe(429)
+  })
+
+  it('the counters tell no names apart: failures under other spellings land alike for an existing and a missing account', async () => {
+    await user('dora')
+    const answers = async (name: string) => {
+      const ip = nextIp()
+      for (let i = 1; i <= 4; i++) await login(name, 'Wrong#pass1', { ip }).expect(401)
+      const codes = []
+      for (const spelling of [name.toUpperCase(), name.replace('o', 'ｏ'), name.replace('o', 'ö')])
+        codes.push((await login(spelling, 'Wrong#pass1', { ip })).body.code)
+      return codes
+    }
+    const known = await answers(`${PREFIX}dora`)
+    expect(known).toEqual([Err.AUTH_LOCKED.code, Err.AUTH_LOCKED.code, Err.VALIDATION_FAILED.code])
+    expect(await answers(`${PREFIX}nodora`)).toEqual(known)
+  })
+
+  it('parallel guesses from one IP reach bcrypt at most the lock threshold times; the right password then is locked out too', async () => {
+    const id = await user('burst')
+    const [{ password_hash: hash }] = await ds.query<{ password_hash: string }[]>(
+      'SELECT password_hash FROM iam_user WHERE id = ?',
+      [id],
+    )
+    const { lockThreshold } = (await app.get(AuthParams).load()).security
+    const compare = bcrypt.compare
+    let open = () => {}
+    const gate = new Promise<void>((resolve) => (open = resolve))
+    // this user's wrong guesses wait inside bcrypt until the gate opens: all of them are in flight at once
+    const spy = vi.spyOn(bcrypt, 'compare').mockImplementation((async (s: string, h: string) => {
+      if (h === hash && s !== PW) await gate
+      return compare(s, h)
+    }) as typeof bcrypt.compare)
+    const checks = () => spy.mock.calls.filter((c) => c[1] === hash).length
+    const ip = nextIp()
+    try {
+      const wrong = Array.from({ length: lockThreshold + 3 }, (_, i) =>
+        login(`${PREFIX}burst`, `Wrong#pass${i}`, { ip }).then((res) => res),
+      )
+      await vi.waitFor(() => expect(checks()).toBe(lockThreshold), { timeout: 5000 })
+      const right = await login(`${PREFIX}burst`, PW, { ip })
+      expect(right.status).toBe(429)
+      expect(right.body.code).toBe(Err.AUTH_LOCKED.code)
+      open()
+      const answers = (await Promise.all(wrong)).map((res) => res.status).sort()
+      expect(answers).toEqual([
+        ...Array<number>(lockThreshold - 1).fill(401),
+        ...Array(4).fill(429),
+      ])
+      expect(checks()).toBe(lockThreshold)
+      expect(await failCount('p', `${PREFIX}burst`, ip)).toBe(lockThreshold)
+    } finally {
+      open()
+    }
+  })
+
+  it('parallel guesses from several IPs one failure short of the cross-IP threshold: one reaches bcrypt, the rest need a captcha (A1021)', async () => {
+    const id = await user('spread')
+    const name = `${PREFIX}spread`
+    const [{ password_hash: hash }] = await ds.query<{ password_hash: string }[]>(
+      'SELECT password_hash FROM iam_user WHERE id = ?',
+      [id],
+    )
+    const { crossIpThreshold } = (await app.get(AuthParams).load()).security
+    const userKey = redisKey('authFail', 'u', name)
+    await redis.set(userKey, String(crossIpThreshold - 1))
+    const N = 5
+    // every request reads the counter below the threshold before any of them counts its attempt
+    let arrived = 0
+    let open = () => {}
+    const gate = new Promise<void>((resolve) => (open = resolve))
+    const timer = setTimeout(open, 5000)
+    const get = redis.get.bind(redis)
+    vi.spyOn(redis, 'get').mockImplementation((async (key: string) => {
+      const value = await get(key)
+      if (key === userKey && ++arrived === N) open()
+      if (key === userKey) await gate
+      return value
+    }) as typeof redis.get)
+    const spy = vi.spyOn(bcrypt, 'compare')
+    try {
+      const answers = await Promise.all(
+        Array.from({ length: N }, (_, i) => login(name, `Wrong#pass${i}`)),
+      )
+      expect(arrived).toBe(N)
+      expect(answers.map((r) => `${r.status} ${r.body.code}`).sort()).toEqual([
+        `401 ${Err.AUTH_BAD_CREDENTIALS.code}`,
+        ...Array<string>(N - 1).fill(`403 ${Err.AUTH_CAPTCHA_REQUIRED.code}`),
+      ])
+      expect(spy.mock.calls.filter((c) => c[1] === hash)).toHaveLength(1)
+      expect(await failCount('u', name)).toBe(crossIpThreshold)
+    } finally {
+      clearTimeout(timer)
+    }
+  })
+
+  it('an infrastructure error after the password matched (session load, token issue) gives the attempt back', async () => {
+    await user('infra')
+    const name = `${PREFIX}infra`
+    const counters = (ip: string) => Promise.all([failCount('p', name, ip), failCount('u', name)])
+    const permVersion = app.get(PermVersion)
+    for (const fail of [
+      () => vi.spyOn(permVersion, 'load').mockRejectedValueOnce(new Error('database down')),
+      () => vi.spyOn(tokens, 'issue').mockRejectedValueOnce(new Error('redis down')),
+    ]) {
+      const ip = nextIp()
+      const spy = fail()
+      expect((await login(name, PW, { ip })).status).toBe(500)
+      expect(await counters(ip)).toEqual([0, 0])
+      spy.mockRestore()
+    }
+    // a wrong password still counts
+    const ip = nextIp()
+    await login(name, 'Wrong#pass1', { ip }).expect(401)
+    expect(await counters(ip)).toEqual([1, 1])
+  })
+
+  it('a username with spaces around it signs in (trimmed before the syntax check)', async () => {
+    await user('spaced')
+    await login(`  ${PREFIX}spaced\t`, PW).expect(200)
   })
 
   it('TRUST_PROXY excluding the source: a spoofed X-Forwarded-For still counts against the real IP', async () => {

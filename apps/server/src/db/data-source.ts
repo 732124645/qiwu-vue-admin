@@ -42,6 +42,9 @@ export function dataSourceOptions(
     password: env.DB_PASSWORD,
     database: env.DB_NAME,
     timezone: 'Z',
+    // a DATE is a calendar day, not an instant: as its 'YYYY-MM-DD' text (as a JS Date at UTC midnight
+    // TypeORM would read it back with local getters, a day early where the process runs west of UTC)
+    dateStrings: ['DATE'],
     supportBigNumbers: true,
     bigNumberStrings: false,
     synchronize: false,

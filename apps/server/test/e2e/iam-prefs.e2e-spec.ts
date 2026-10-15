@@ -1,10 +1,11 @@
 // iam/profile UI preferences (`iam_user_pref`): upsert/read/reset of the caller's own keys, no
 // permission needed, isolation between users, key whitelist and value schema (400), size cap (413),
+// key count cap (409),
 // 401 without a session, rows soft-deleted with their user (the reference registry), Swagger paths.
 import type { NestExpressApplication } from '@nestjs/platform-express'
 import { Test } from '@nestjs/testing'
 import { getDataSourceToken } from '@nestjs/typeorm'
-import { Err, type TableColumnsPref } from '@qiwu/shared'
+import { Err, PREF_KEYS_MAX, type TableColumnsPref } from '@qiwu/shared'
 import request from 'supertest'
 import type { DataSource } from 'typeorm'
 import { AppModule } from '../../src/app.module.js'
@@ -81,13 +82,13 @@ it('unset → null; PUT inserts, PUT again replaces; DELETE resets (and is idemp
   expect((await call('a', 'get')).body.data.value).toEqual(cols('name', 'code', 'note'))
   await call('a', 'delete').expect(200)
   expect((await call('a', 'get')).body.data).toEqual({ value: null })
-  // a reset soft-deletes the row; the next PUT brings it back
+  // a reset removes the row (it no longer counts against the key cap)
   expect(
-    await ds.query(
-      'SELECT deleted_at IS NOT NULL AS gone FROM iam_user_pref WHERE user_id = ? AND pref_key = ?',
-      [userIds[0], KEY],
-    ),
-  ).toEqual([{ gone: 1 }])
+    await ds.query('SELECT 1 FROM iam_user_pref WHERE user_id = ? AND pref_key = ?', [
+      userIds[0],
+      KEY,
+    ]),
+  ).toEqual([])
   await call('a', 'delete').expect(200)
 })
 
@@ -165,6 +166,49 @@ it('413: a valid value over 8 KB serialized is refused and nothing is stored', a
   const res = await call('a', 'put', KEY, { value: big }).expect(413)
   expect(res.body.code).toBe(Err.PAYLOAD_TOO_LARGE.code)
   expect((await call('a', 'get')).body.data).toEqual({ value: null })
+})
+
+it('409: a new key once the user keeps the most keys; keys already saved stay writable, a reset frees one; parallel new keys never pass the cap', async () => {
+  const c = await user('c')
+  const send = (method: 'put' | 'delete', key: string) => {
+    const req = request(app.getHttpServer())[method](`${URL}/${key}`).set(bearer(c.token))
+    return method === 'put' ? req.send({ value: cols('b') }) : req
+  }
+  try {
+    const rows = Array.from({ length: PREF_KEYS_MAX }, (_, i) => [
+      c.id,
+      `table.cap.k${i}`,
+      JSON.stringify(cols('a')),
+      1,
+    ])
+    await ds.query('INSERT INTO iam_user_pref (user_id, pref_key, value, tenant_id) VALUES ?', [
+      rows,
+    ])
+    const res = await send('put', 'table.cap.new').expect(409)
+    expect(res.body.code).toBe(Err.IAM_PREF_KEYS_LIMIT.code)
+    expect(res.body.msg).toContain(String(PREF_KEYS_MAX))
+    await send('put', 'table.cap.k1').expect(200)
+    // another user is not affected
+    await call('a', 'put', 'table.cap.new', { value: cols('x') }).expect(200)
+    // reset lists free their keys: one new key each, however many come at once
+    await send('delete', 'table.cap.k0').expect(200)
+    await send('put', 'table.cap.new').expect(200)
+    await send('delete', 'table.cap.k1').expect(200)
+    const parallel = await Promise.all(
+      Array.from({ length: 5 }, (_, i) => send('put', `table.cap.p${i}`)),
+    )
+    expect(parallel.map((r) => r.status).sort()).toEqual([200, 409, 409, 409, 409])
+    const [{ n }] = await ds.query<{ n: number }[]>(
+      'SELECT COUNT(*) AS n FROM iam_user_pref WHERE user_id = ? AND deleted_at IS NULL',
+      [c.id],
+    )
+    expect(Number(n)).toBe(PREF_KEYS_MAX)
+  } finally {
+    await ds.query('DELETE FROM iam_user_pref WHERE user_id = ? OR pref_key = ?', [
+      c.id,
+      'table.cap.new',
+    ])
+  }
 })
 
 it('401 without a session', async () => {

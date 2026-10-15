@@ -13,7 +13,13 @@ import { TransactionHost } from '@nestjs-cls/transactional'
 import type { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm'
 import { Err, pageQuery } from '@qiwu/shared'
 import { ClsService } from 'nestjs-cls'
-import { DataSource, type EntityManager, QueryFailedError, type Repository } from 'typeorm'
+import {
+  DataSource,
+  type EntityManager,
+  EntitySchema,
+  QueryFailedError,
+  type Repository,
+} from 'typeorm'
 import { AppModule } from '../../src/app.module.js'
 import { CoreContextModule } from '../../src/core/context/context.module.js'
 import { CoreDbModule } from '../../src/core/db/db.module.js'
@@ -85,6 +91,7 @@ it('a) DataSource from env: the test database, UTC session, numeric bigints, met
       type: 'mysql',
       database: process.env.DB_NAME,
       timezone: 'Z',
+      dateStrings: ['DATE'],
       supportBigNumbers: true,
       bigNumberStrings: false,
       migrationsTableName: 'meta_migrations',
@@ -99,6 +106,38 @@ it('a) DataSource from env: the test database, UTC session, numeric bigints, met
     expect(typeof loaded.id).toBe('number')
     expect(Math.abs(loaded.createdAt.getTime() - Date.now())).toBeLessThan(60_000)
   }))
+
+it('a DATE comes back as the day it stores, whatever the process time zone (west of UTC too)', async () => {
+  const tz = process.env.TZ
+  process.env.TZ = 'America/New_York'
+  try {
+    const [row] = await ds.query("SELECT CAST('2024-05-01' AS DATE) AS d")
+    expect(row.d).toBe('2024-05-01')
+    // through an entity's `type: 'date'` column, as the modules read one
+    const Day = new EntitySchema<{ id: number; day: string }>({
+      name: 'test_day',
+      columns: { id: { type: 'int', primary: true }, day: { type: 'date' } },
+    })
+    const own = new DataSource({
+      ...dataSourceOptions(),
+      entities: [Day],
+      migrations: [],
+      subscribers: [],
+    })
+    await own.initialize()
+    try {
+      await own.query('CREATE TABLE test_day (id INT PRIMARY KEY, day DATE NOT NULL)')
+      await own.query("INSERT INTO test_day VALUES (1, '2024-05-01')")
+      expect((await own.getRepository(Day).findOneByOrFail({ id: 1 })).day).toBe('2024-05-01')
+    } finally {
+      await own.query('DROP TABLE IF EXISTS test_day')
+      await own.destroy()
+    }
+  } finally {
+    if (tz === undefined) delete process.env.TZ
+    else process.env.TZ = tz
+  }
+})
 
 it('b) circular Relation<T> entities load in both directions under ESM', () =>
   inTenant1(async () => {

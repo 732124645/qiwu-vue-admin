@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common'
 import { InjectDataSource } from '@nestjs/typeorm'
-import type { DictEntry, DictPayload, I18nText } from '@qiwu/shared'
+import { CG_IDENT, type DictEntry, type DictPayload, type I18nText } from '@qiwu/shared'
 import type { DataSource } from 'typeorm'
 import { keyPart, redisKey } from '../redis/cache-namespaces.js'
 import { REDIS, type Redis } from '../redis/redis.module.js'
@@ -64,6 +64,9 @@ export class DictService {
 
   /** Enabled entries of an enabled dict in `sort_no` order; null = no such (enabled) dict. */
   async entries(code: string): Promise<DictPayload | null> {
+    // only a code as stored names a dict: other spellings the collation still matches (case, accents)
+    // must not each become a cache entry of their own
+    if (!CG_IDENT.dictCode.test(code)) return null
     return readThrough(
       this.redis,
       redisKey('dict', 'entries', code),

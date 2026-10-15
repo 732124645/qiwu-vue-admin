@@ -55,7 +55,8 @@ const ancestorsOf = (treePath: string): number[] =>
  * whose id is unknown before the insert. Every read inside a write is a locking read, so concurrent moves,
  * adds and enables see each other's committed paths.
  * Module hooks (defaults do nothing): `beforeWrite` (checks of the module's own columns, inside the
- * transaction), `beforeRemove` (references that block a delete), `afterMove` (after the commit).
+ * transaction), `beforeMove` (inside a move, before the paths change), `beforeRemove` (references that
+ * block a delete), `afterMove` (after the commit).
  * Paths longer than the 512-character column are refused before writing (422), including deleted
  * descendants of a moved subtree.
  */
@@ -163,6 +164,13 @@ export abstract class BaseTreeService<E extends TreeEntity> extends BaseCrudServ
   /** Hook: rows elsewhere that keep the locked `ids` from being deleted (throw to refuse). */
   protected async beforeRemove(_ids: number[]): Promise<void> {}
 
+  /**
+   * Hook inside a move, once the subtree and the new parent are locked and checked and before any path
+   * changes: `stored` still has its old path, `parentPath` = the new parent's path (`/` for the top
+   * level), `subtree` = the live ids moving (throw to refuse).
+   */
+  protected async beforeMove(_stored: E, _parentPath: string, _subtree: number[]): Promise<void> {}
+
   /** Hook, after the commit: `ids` = the moved row and every row under it (their paths changed). */
   protected async afterMove(_ids: number[]): Promise<void> {}
 
@@ -204,6 +212,7 @@ export abstract class BaseTreeService<E extends TreeEntity> extends BaseCrudServ
       if (this.has('enabled') && !parent!.enabled) throw new BizError(Err.TREE_PARENT_DISABLED)
       parentPath = parent!.treePath
     }
+    await this.beforeMove(stored, parentPath, subtree)
     const path = `${parentPath}${stored.id}/`
     // qw:include-deleted — the prefix UPDATE also rewrites soft-deleted descendants.
     // A locking read sees current paths after the scope/parent locks, not an older snapshot.

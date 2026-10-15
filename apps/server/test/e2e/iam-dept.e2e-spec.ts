@@ -527,6 +527,28 @@ describe('data scope', () => {
       expect.arrayContaining([`${PREFIX}watcher`, `${PREFIX}mover`, `${PREFIX}member`]),
     )
   })
+
+  it('a move is a grant: the own_dept_tree holders it puts above a subtree must fit the caller (403 grant_exceeds_own); root may', async () => {
+    // carol edits every dept, but browses users of her own subtree only
+    const org = await addRole('org', 'all', [deptPerms.browse, deptPerms.view, deptPerms.modify])
+    const near = await addRole('near', 'own_dept_tree', [userPerms.browse])
+    const y = await add(dept.hq!)
+    const x = await add(dept.hq!)
+    const below = await add(x.id)
+    const empty = await add(dept.hq!)
+    await user('carol', y.id, [org, near])
+    await user('far', below.id, [], false)
+    const before = await pathOf(below.id)
+    const res = await call('carol', 'put', `/${x.id}`, { parentId: y.id })
+    expectErr(res, 403, Err.IAM_GRANT_EXCEEDS_OWN.code)
+    expect(await pathOf(below.id)).toBe(before)
+    expect(await usersSeenBy('carol')).not.toContain(`${PREFIX}far`)
+    // under a dept nobody holds own_dept_tree in, and back up (no new ancestor): nothing given
+    await call('carol', 'put', `/${x.id}`, { parentId: empty.id }).expect(200)
+    await call('carol', 'put', `/${x.id}`, { parentId: dept.hq }).expect(200)
+    await call('admin', 'put', `/${x.id}`, { parentId: y.id }).expect(200)
+    expect(await usersSeenBy('carol')).toContain(`${PREFIX}far`)
+  })
 })
 
 describe('errors', () => {

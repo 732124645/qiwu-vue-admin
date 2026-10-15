@@ -4,6 +4,7 @@ import { passwordSchema, type PasswordPolicy } from './password-policy.js'
 import { fieldDomains } from '../validation/zod-i18n.js'
 import { captchaTicket } from './captcha.js'
 import { type MeTenant, tenantCode } from '../platform/iam/tenant.schema.js'
+import { USERNAME } from '../platform/iam/user.schema.js'
 
 /**
  * Auth contract between server and web (see docs/design-notes.md#auth-sessions). Endpoints under /api/auth:
@@ -24,9 +25,16 @@ export type FirstPartyClient = (typeof FIRST_PARTY_CLIENTS)[number]
 /** Sign-in body field choosing the session's client; absent = `console`. */
 const firstPartyClient = z.enum(FIRST_PARTY_CLIENTS).optional()
 
+/**
+ * A sign-in name in the stored syntax (`iam.user.username`), fullwidth forms folded first (NFKC). The
+ * lookup's collation maps other spellings (accents, ligatures) onto an account, and the failure counters
+ * of an account use its stored name: such a spelling would tell existing names apart.
+ */
+const signInName = z.string().trim().normalize('NFKC').min(1).max(64).regex(USERNAME)
+
 export const loginBody = z
   .object({
-    username: z.string().trim().min(1).max(64),
+    username: signInName,
     password: z.string().min(1).max(128),
     keepSignedIn: z.boolean().optional(),
     captchaTicket: captchaTicket.optional(),
@@ -49,12 +57,7 @@ export const authMobile = z
   .regex(/^\+?\d[\d-]{4,30}$/)
 export const smsOtpCode = z.string().regex(/^\d{6}$/)
 /** Same sign-in name syntax as `iam.user.username`. */
-export const signupUsername = z
-  .string()
-  .trim()
-  .min(1)
-  .max(64)
-  .regex(/^[\w.@-]+$/)
+export const signupUsername = z.string().trim().min(1).max(64).regex(USERNAME)
 
 /**
  * POST /api/auth/sms/code → {@link SmsCodeVo}. `captchaTicket` has scene `sms_send` and is required

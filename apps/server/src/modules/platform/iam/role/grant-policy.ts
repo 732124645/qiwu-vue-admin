@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common'
+import { Injectable, NotFoundException, type OnModuleInit } from '@nestjs/common'
 import { TransactionHost } from '@nestjs-cls/transactional'
 import type { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm'
 import { Err } from '@qiwu/shared'
@@ -72,7 +72,8 @@ function reach(
  * ① `assertMenus` — the role menu grant, and `assertMenuWrite` — a menu edit making perms effective for
  * the roles granted it; ② `assertDataScope` — the role data scope; ③ `assertAssignableRoles` — a role
  * given to a user (user create / edit, assign roles, role members); `assertEnabling` — a role enabled
- * again hands out its whole grant (① + ②). Reads of roles, their menus and picked depts are locking reads
+ * again hands out its whole grant (① + ②); `assertDeptMove` — a dept moved under the holders of
+ * `own_dept_tree` roles. Reads of roles, their menus and picked depts are locking reads
  * (FOR SHARE): a concurrent grant on the same role (which locks the role FOR UPDATE first) is either seen
  * or waits for this commit. The current sign-up role is root-managed at every role write entry.
  * A holder of the builtin `tenant_admin` role is its tenant's root for the data scope (see
@@ -81,12 +82,17 @@ function reach(
  * (`tenantAdminPerms`), never its menu rows.
  */
 @Injectable()
-export class GrantPolicy {
+export class GrantPolicy implements OnModuleInit {
   constructor(
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
     private readonly depts: DeptService,
     private readonly authParams: AuthParams,
   ) {}
+
+  /** Dept moves are grants too (`assertDeptMove`); DeptService cannot inject this class (it needs it). */
+  onModuleInit(): void {
+    this.depts.judgeMovesWith((subtree, gained) => this.assertDeptMove(subtree, gained))
+  }
 
   /** Refuse non-root writes to the current sign-up role, after the role lock is held. */
   async assertNotSignupRole(ids: readonly number[]): Promise<void> {
@@ -127,7 +133,10 @@ export class GrantPolicy {
     )
     const judged = [...roles, ...relative]
     if (!judged.length) return
-    const perms = await this.perms(judged.map((r) => r.id))
+    const perms = await this.perms(
+      p,
+      judged.map((r) => r.id),
+    )
     // every perm of the role's menus, enabled or not: a menu enabled later must not widen the grant
     if (roles.some((r) => perms.get(r.id)?.some((x) => !p.perms.includes(x)))) throw exceeds()
     const picked = await this.picked(
@@ -214,7 +223,7 @@ export class GrantPolicy {
   async assertEnabling(roleId: number): Promise<void> {
     const p = caller()
     if (!p) return
-    const perms = (await this.perms([roleId])).get(roleId) ?? []
+    const perms = (await this.perms(p, [roleId])).get(roleId) ?? []
     if (perms.some((x) => !p.perms.includes(x))) throw exceeds()
     await this.judge(p, roleId, await this.scopeOf(roleId), perms)
   }
@@ -244,7 +253,7 @@ export class GrantPolicy {
       if (before === 'all') return []
       return (reach(next, d, subtrees) as number[]).filter((x) => !before.includes(x))
     })
-    if (depts.length) await this.fits(p, depts, (await this.perms([roleId])).get(roleId) ?? [])
+    if (depts.length) await this.fits(p, depts, (await this.perms(p, [roleId])).get(roleId) ?? [])
   }
 
   /**
@@ -264,6 +273,32 @@ export class GrantPolicy {
       holders.flatMap((d) => reach(role, d, subtrees) as number[]),
       perms,
     )
+  }
+
+  /**
+   * A dept move, called inside it before the paths change: the live depts `subtree` go under the new
+   * ancestors `gained`, so every enabled `own_dept_tree` role held by a live user of those depts reaches
+   * them from then on, and a non-root caller must be able to give that reach (`fits`, for every perm of
+   * each role). The other scopes reach by dept id and do not change; holders inside the subtree keep
+   * what they reach. A disabled role is judged when it is enabled again (`assertEnabling`).
+   */
+  async assertDeptMove(subtree: readonly number[], gained: readonly number[]): Promise<void> {
+    const p = caller()
+    if (!p || !subtree.length || !gained.length) return
+    const rows = await this.txHost.tx.query<{ id: number }[]>(
+      // qw:no-data-scope grant check: the own_dept_tree roles held in the depts a move puts above a subtree
+      `SELECT DISTINCT r.id FROM iam_user_roles ur
+         JOIN iam_user u ON u.id = ur.user_id AND u.tenant_id = ur.tenant_id AND u.deleted_at IS NULL
+         JOIN iam_role r ON r.id = ur.role_id AND r.tenant_id = ur.tenant_id AND r.deleted_at IS NULL
+              AND r.enabled = 1 AND r.data_scope = 'own_dept_tree'
+        WHERE u.dept_id IN (?) AND ur.tenant_id = ? AND ur.deleted_at IS NULL
+        FOR SHARE`,
+      [gained, tenantId()],
+    )
+    const ids = rows.map((r) => Number(r.id))
+    if (!ids.length) return
+    const perms = await this.perms(p, ids)
+    for (const id of ids) await this.fits(p, subtree, perms.get(id) ?? [])
   }
 
   /**
@@ -362,10 +397,14 @@ export class GrantPolicy {
   }
 
   /**
-   * Perms of the menus of each role in `ids` (enabled or not); the builtin tenant_admin role's are what
-   * the session load gives it (`tenantAdminPerms`), never its menu rows.
+   * Perms of the menus of each role in `ids` (enabled or not), as judged for caller `p`; the builtin
+   * tenant_admin role's are what the session load gives it (`tenantAdminPerms`), never its menu rows.
+   * A tenant admin caller is judged on the perms it holds and the platform-only ones only (those it
+   * never holds, so they stay refused): it holds every perm a menu open to its tenant gives once that
+   * menu counts (`tenantAdminPerms`), so the other perms of a role (a disabled menu's, one outside the
+   * package) give no holder anything the tenant admin would not get with it.
    */
-  private async perms(ids: readonly number[]): Promise<Map<number, string[]>> {
+  private async perms(p: Principal, ids: readonly number[]): Promise<Map<number, string[]>> {
     const rows = await this.txHost.tx.query<{ role_id: number; perms: string }[]>(
       `SELECT DISTINCT rm.role_id, m.perms
          FROM iam_role_menus rm
@@ -379,12 +418,18 @@ export class GrantPolicy {
     for (const r of rows)
       out.set(Number(r.role_id), [...(out.get(Number(r.role_id)) ?? []), r.perms])
     const admins = (await this.roles(ids)).filter(isTenantAdmin)
+    const menus = admins.length || p.tenantAdmin ? await this.menus('FOR SHARE') : []
     if (admins.length) {
-      const perms = tenantAdminPerms(
-        await this.menus('FOR SHARE'),
-        await packageMenuIds(this.txHost.tx, tenantId()),
-      )
+      const perms = tenantAdminPerms(menus, await packageMenuIds(this.txHost.tx, tenantId()))
       for (const r of admins) out.set(Number(r.id), perms)
+    }
+    if (p.tenantAdmin) {
+      const platform = platformPerms(menus)
+      for (const [id, perms] of out)
+        out.set(
+          id,
+          perms.filter((x) => p.perms.includes(x) || platform.has(x)),
+        )
     }
     return out
   }
@@ -439,7 +484,11 @@ export class GrantPolicy {
     return rows.map((r) => (r.dept_id === null ? null : Number(r.dept_id)))
   }
 
-  /** Dept → itself and every live dept under it, for the depts `ids` (nulls skipped). */
+  /**
+   * Dept → itself and every live dept under it, for the depts `ids` (nulls skipped). A locking read: a
+   * dept move (which locks its subtree FOR UPDATE, then judges the roles held above it) either commits
+   * first and is seen here, or waits for this grant and sees its holder.
+   */
   private async subtrees(ids: readonly (number | null)[]): Promise<Map<number, number[]>> {
     const roots = [...new Set(ids.filter((d): d is number => d !== null))]
     const rows = roots.length
@@ -448,7 +497,8 @@ export class GrantPolicy {
           `SELECT p.id AS root, c.id FROM iam_dept p
              JOIN iam_dept c ON c.tree_path LIKE CONCAT(p.tree_path, '%') AND c.tenant_id = p.tenant_id
                   AND c.deleted_at IS NULL
-            WHERE p.id IN (?) AND p.tenant_id = ? AND p.deleted_at IS NULL`, // qw:no-data-scope grant check: the dept subtrees the scopes reach
+            WHERE p.id IN (?) AND p.tenant_id = ? AND p.deleted_at IS NULL
+            FOR SHARE`, // qw:no-data-scope grant check: the dept subtrees the scopes reach
           [roots, tenantId()],
         )
       : []

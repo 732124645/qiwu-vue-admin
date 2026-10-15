@@ -160,7 +160,9 @@ export class UserController {
   @Put(':id')
   @RequirePerm(userPerms.modify)
   @ActionLog({ domain: 'iam.user', verb: 'modify' })
-  @ApiOperation({ summary: 'Change a user (roles pass the grant policy)' })
+  @ApiOperation({
+    summary: 'Change a user (roles, and another user’s new mobile, pass the grant policy)',
+  })
   @ApiEnvelope()
   update(@Param('id', ParseIntPipe) id: number, @Body({ schema: userUpdate }) dto: UserUpdate) {
     return this.users.modify(id, dto)
@@ -183,7 +185,10 @@ export class UserController {
   @Put(':id/password')
   @RequirePerm(userPerms['reset-password'])
   @ActionLog({ domain: 'iam.user', verb: 'reset-password' })
-  @ApiOperation({ summary: 'Reset a password (must be changed at sign-in; signed out everywhere)' })
+  @ApiOperation({
+    summary:
+      'Reset a password (only of a user whose roles the caller could grant, else 403 B1001; must be changed at sign-in; signed out everywhere)',
+  })
   @policyBody(userResetPasswordBody(DEFAULT_PASSWORD_POLICY))
   @ApiEnvelope()
   resetPassword(@Param('id', ParseIntPipe) id: number, @Body() body: unknown) {
