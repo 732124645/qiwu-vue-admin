@@ -20,7 +20,7 @@ v1.0.0 已于 2026-10-05 发布，功能与已知边界见 [CHANGELOG.md](CHANGE
 - 演示地址：[demo.qiwuadmin.com](https://demo.qiwuadmin.com)
 - 账号：`admin`；密码：`admin@123`
 - 文档站：[qiwuadmin.com](https://qiwuadmin.com)；源码：[qiwu-vue-admin](https://github.com/732124645/qiwu-vue-admin)
-- 版本：`v1.0.0`；许可：[MIT](LICENSE)
+- 版本：见 [Releases](https://github.com/732124645/qiwu-vue-admin/releases) 与 [CHANGELOG](CHANGELOG.md)；许可：[MIT](LICENSE)
 
 演示模式可浏览全部功能，写操作均拒绝并提示「演示模式下不能执行此操作」，访客 IP / UA 已脱敏，登录使用滑块验证码，请勿输入真实个人数据。
 
@@ -85,6 +85,18 @@ pnpm.cmd dev
 
 项目代码按 [MIT](LICENSE) 发布；代码、模板与种子原创，参考其他后台仅用于功能与架构，不复制实现。第三方资产另见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)：BPMN 设计器所用 `bpmn-js` 有额外的 bpmn.io 标志义务，标志必须保持可见、未遮挡、未修改；移动端和数据资产也须遵守各自许可。PM2 仅作为可选全局运维工具，使用方式见部署文档。
 
+`pnpm verify` 里的许可检查（`pnpm license:check`）是本仓库自己的规则：模板以 MIT 发布，所以默认只接受宽松许可的依赖（个别例外登记在 `license-exceptions.json`）。用本模板开发自己的项目时，依赖用什么许可由你决定：可以修改 `scripts/license-check.mjs` 的允许列表，或从根目录 `package.json` 的 `verify` 中去掉 `&& pnpm license:check`（保留移动端时，`mobile/package.json` 的 `verify` 也一样处理）。去掉检查也会一并去掉其中的禁用包列表；所选依赖的许可义务由你自行评估。
+
+### 免责声明
+
+- 本项目按 MIT 许可“按原样”提供，不提供任何明示或默示的担保。
+- 是否使用、如何使用由使用者自行决定，并自行承担全部风险与责任；作者与贡献者不对任何人用本项目或其衍生项目开发、部署、运营的系统，以及由此造成的任何直接或间接损失负责。上线前请自行完成安全、测试与合规检查，并办理所在地要求的手续（如中国大陆的备案、个人信息保护义务）。
+- 禁止将本项目用于违反所在国家或地区法律法规的用途，包括但不限于诈骗、赌博、传销、非法获取或泄露个人信息、侵犯知识产权、传播违法信息；由此产生的一切法律责任由使用者自行承担，与作者和贡献者无关。
+- 第三方组件的许可与条款由使用者自行遵守，见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
+- 演示站仅用于功能展示，数据会被重置，请勿填写真实的个人信息或敏感数据。
+
+完整内容见文档站的[免责声明](https://qiwuadmin.com/guide/disclaimer)。
+
 ## English
 
 Qiwu is an MIT-licensed admin template built with NestJS 12, Vue 3.5, Element Plus, TypeScript, MySQL and Redis. A pnpm workspace contains the server, Web app and shared contracts. The display brand is **栖梧 / Qiwu**, the project name is `qiwu-vue-admin`, and internal packages use `@qiwu/*`.
@@ -96,7 +108,7 @@ Implemented areas include identity and organization management, five data-scope 
 - Demo: [demo.qiwuadmin.com](https://demo.qiwuadmin.com)
 - Account: `admin`; password: `admin@123`
 - Docs: [qiwuadmin.com](https://qiwuadmin.com); source: [qiwu-vue-admin](https://github.com/732124645/qiwu-vue-admin)
-- Version: `v1.0.0`; license: [MIT](LICENSE)
+- Version: see [Releases](https://github.com/732124645/qiwu-vue-admin/releases) and the [CHANGELOG](CHANGELOG.md); license: [MIT](LICENSE)
 
 Demo mode lets visitors browse all features but refuses every write with “演示模式下不能执行此操作” (“This operation is not allowed in demo mode”); visitor IP / UA are masked, login uses a slider captcha, and visitors should not enter real personal data.
 
@@ -140,3 +152,15 @@ Tutorials and feature introductions are on the docs site [qiwuadmin.com](https:/
 ### License and originality
 
 Project code is released under [MIT](LICENSE). Implementations, templates and seeds are original; other admin systems are referenced only for features and architecture. Consult [third-party notices](THIRD-PARTY-NOTICES.md) for dependencies and assets. The BPMN designer's `bpmn-js` license additionally requires the bpmn.io logo to remain visible, unobscured and unchanged. PM2 is an optional globally installed operations tool described in the deployment guide.
+
+The license check in `pnpm verify` (`pnpm license:check`) is this repository's own rule: the template is released under MIT, so by default it only accepts permissively licensed dependencies (the few exceptions are registered in `license-exceptions.json`). In a project built from the template, the licenses of your dependencies are your decision: edit the allow list in `scripts/license-check.mjs`, or remove `&& pnpm license:check` from the `verify` script in the root `package.json` (and in `mobile/package.json` if you keep the mobile app). Dropping the check also drops its list of banned packages; assessing the license obligations of the dependencies you choose is up to you.
+
+### Disclaimer
+
+- This project is provided "as is" under the MIT license, without warranty of any kind, express or implied.
+- Whether and how to use it is your own decision, at your own risk and responsibility. The authors and contributors are not liable for any system that anyone develops, deploys or operates with this project or a derivative of it, nor for any direct or indirect loss arising from it. Before going live, do your own security, testing and compliance checks and complete the formalities your jurisdiction requires (for example website (ICP) filing and personal information protection duties in mainland China).
+- Using this project for purposes that violate the laws or regulations of your country or region is prohibited, including but not limited to fraud, gambling, pyramid schemes, unlawfully obtaining or disclosing personal information, infringing intellectual property and spreading illegal content. All legal liability arising from such use lies with the user, not with the authors or contributors.
+- You must comply with the licenses and terms of third-party components yourself; see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+- The demo site is for showcasing features only and its data is reset; do not enter real personal or sensitive data.
+
+The full text is on the docs site: [Disclaimer](https://qiwuadmin.com/en/guide/disclaimer).

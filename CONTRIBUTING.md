@@ -36,7 +36,7 @@
 - **权限**：权限码格式为 `<domain>.<resource>.<verb>`，如 `iam.user.browse`。
 - **数据库**：只使用参数化 SQL；新表、迁移与命名约定见 [代码生成](docs/codegen.md) 与 [黄金样板](docs/codegen-golden.md)。
 - **审计**：每个非 GET 的控制器方法都要有 `@ActionLog` 或 `@SkipActionLog()`。
-- **依赖**：新依赖必须通过 `pnpm license:check`（MIT、ISC、BSD、Apache-2.0 等；不接受 GPL、AGPL 或仅 LGPL 许可），并说明引入理由；带安装构建脚本的依赖要同时在 `pnpm-workspace.yaml` 的 `allowBuilds` 中登记，否则 `pnpm i` 会报 `ERR_PNPM_IGNORED_BUILDS`。
+- **依赖**：新依赖必须通过 `pnpm license:check`（MIT、ISC、BSD、Apache-2.0 等；不接受 GPL、AGPL 或仅 LGPL 许可），并说明引入理由；带安装构建脚本的依赖要同时在 `pnpm-workspace.yaml` 的 `allowBuilds` 中登记，否则 `pnpm i` 会报 `ERR_PNPM_IGNORED_BUILDS`。这条规则约束的是提交到本仓库的贡献；用本模板开发自己的项目时，依赖许可由你决定（见 README 的“许可与原创性”）。
 - **测试文件名**：spec 文件名在全仓库唯一，测试过滤使用完整主干，不能是另一个 spec 名称的子串。
 - **项目代码位置**：业务代码放项目域目录，见 [代码生成](docs/codegen.md)。
 
@@ -91,7 +91,7 @@ Follow the [getting-started guide](docs/getting-started.md) for Node, pnpm, MySQ
 - **Permissions**: permission codes use `<domain>.<resource>.<verb>`, such as `iam.user.browse`.
 - **Database**: parameterized SQL only; table, migration and naming conventions are in [code generation](docs/codegen.md) and the [golden examples](docs/codegen-golden.md).
 - **Auditing**: every non-GET controller method has `@ActionLog` or `@SkipActionLog()`.
-- **Dependencies**: a new dependency must pass `pnpm license:check` (MIT, ISC, BSD, Apache-2.0 and similar; no GPL, AGPL or LGPL-only licenses), and the PR explains why it is needed; a dependency with install/build scripts must also be listed under `allowBuilds` in `pnpm-workspace.yaml`, otherwise `pnpm i` fails with `ERR_PNPM_IGNORED_BUILDS`.
+- **Dependencies**: a new dependency must pass `pnpm license:check` (MIT, ISC, BSD, Apache-2.0 and similar; no GPL, AGPL or LGPL-only licenses), and the PR explains why it is needed; a dependency with install/build scripts must also be listed under `allowBuilds` in `pnpm-workspace.yaml`, otherwise `pnpm i` fails with `ERR_PNPM_IGNORED_BUILDS`. This rule applies to contributions to this repository; in your own project built from the template, dependency licenses are your decision (see “License and originality” in the README).
 - **Spec file names**: unique across the repository; test filters use the full stem, never a substring of another spec name.
 - **Project code**: application code goes into project-domain directories; see [code generation](docs/codegen.md).
 
