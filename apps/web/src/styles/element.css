@@ -311,7 +311,7 @@ html.dark:root {
   }
   /* Keep the slider's 300px image and drag coordinates intact at a 375px viewport. */
   :root .el-dialog:has(.captcha-dialog) .el-dialog__body {
-    padding-inline: 8px;
+    --qw-dialog-pad-x: 8px;
   }
 }
 /* QwEditTable (a master-sub form's rows): a cell's form item fills the cell and keeps the room of its
@@ -424,8 +424,25 @@ html.dark:root {
   --el-skeleton-to-color: var(--qw-border);
 }
 :root .qw-table-skeleton > p {
-  margin: 0 0 8px;
-  color: var(--qw-text-3);
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+:root .qw-table-skeleton__header {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  color: var(--qw-text-2);
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--qw-surface-2);
+  border-bottom: 1px solid var(--qw-border);
 }
 :root .qw-table-skeleton__row {
   display: flex;
@@ -436,6 +453,13 @@ html.dark:root {
 :root .qw-table-skeleton__cell {
   box-sizing: border-box;
   padding: 0 16px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+:root .qw-table-skeleton__row .qw-table-skeleton__cell :is(.el-skeleton, .el-skeleton__item) {
+  width: min(72%, 180px);
 }
 
 /* ---------- side trees (TreePanel): 32px rounded rows, the selected node tinted like a selected tag ---------- */
@@ -474,6 +498,8 @@ html.dark:root {
   --el-dialog-border-radius: var(--qw-radius-lg);
   --el-dialog-box-shadow: var(--qw-shadow-2);
   --el-dialog-bg-color: var(--qw-surface);
+  --qw-dialog-pad-x: 24px;
+  --qw-dialog-pad-y: 24px;
   max-width: calc(100vw - 32px);
   padding: 0;
 }
@@ -494,12 +520,24 @@ html.dark:root {
   height: 56px;
 }
 :root .el-dialog__body {
-  padding: 24px;
+  padding: var(--qw-dialog-pad-y) var(--qw-dialog-pad-x);
 }
 :root .qw-dialog-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
   margin-top: 16px;
+  margin-right: calc(-1 * var(--qw-dialog-pad-x));
+  margin-bottom: calc(-1 * var(--qw-dialog-pad-y));
+  margin-left: calc(-1 * var(--qw-dialog-pad-x));
   padding-top: 16px;
+  padding-right: var(--qw-dialog-pad-x);
+  padding-bottom: 20px;
+  padding-left: var(--qw-dialog-pad-x);
   border-top: 1px solid var(--qw-border);
+  background: var(--qw-surface-2);
 }
 :root .el-overlay {
   backdrop-filter: blur(2px);

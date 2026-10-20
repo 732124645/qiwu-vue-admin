@@ -61,6 +61,26 @@ const columnWidth = (width: number | string) => `${Number.parseInt(String(width)
 <template>
   <div v-if="loading && !hasLoaded" class="qw-table-skeleton" aria-busy="true">
     <p role="status">{{ t('crud.loading') }}</p>
+    <div class="qw-table-skeleton__header" aria-hidden="true">
+      <span v-if="selection" class="qw-table-skeleton__cell" style="flex: 0 0 48px" />
+      <span
+        v-for="c in visibleColumns"
+        :key="c.prop"
+        class="qw-table-skeleton__cell"
+        :style="{
+          flex: c.width ? `0 0 ${columnWidth(c.width)}` : `1 0 ${columnWidth(c.minWidth ?? 80)}`,
+        }"
+      >
+        {{ c.literal ? c.label : t(c.label) }}
+      </span>
+      <span
+        v-if="$slots.actions"
+        class="qw-table-skeleton__cell"
+        :style="{ flex: `0 0 ${columnWidth(actionsWidth)}` }"
+      >
+        {{ t('crud.action.operations') }}
+      </span>
+    </div>
     <el-skeleton :count="5" aria-hidden="true" inert>
       <template #template>
         <div class="qw-table-skeleton__row">

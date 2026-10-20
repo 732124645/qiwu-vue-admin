@@ -71,6 +71,9 @@ describe('first table load', () => {
       await flushPromises()
       expect(wrapper.find('.qw-table-skeleton').attributes('aria-busy')).toBe('true')
       expect(wrapper.findAll('.qw-table-skeleton__row')).toHaveLength(5)
+      expect(wrapper.find('.qw-table-skeleton__header').text()).toContain(
+        i18n.global.t(columns[0]!.label),
+      )
       expect(wrapper.findComponent({ name: 'ElTable' }).exists()).toBe(false)
       expect(wrapper.find('[role="status"]').text()).toBe(i18n.global.t('crud.loading'))
       setLocale('en-US')
@@ -195,6 +198,8 @@ describe('first table load', () => {
 it('separates every shared dialog footer with the design border token', () => {
   const footer = /:root \.qw-dialog-footer\s*\{([^}]+)\}/.exec(elementCss)?.[1]
   expect(footer).toMatch(/border-top:\s*1px solid var\(--qw-border\)/)
+  expect(footer).toMatch(/display:\s*flex/)
+  expect(footer).toMatch(/justify-content:\s*flex-end/)
   expect(footer).toMatch(/padding-top:\s*16px/)
   expect(footer).toMatch(/margin-top:\s*16px/)
 })
