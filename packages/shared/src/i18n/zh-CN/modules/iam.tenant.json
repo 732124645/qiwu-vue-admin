@@ -4,6 +4,7 @@
       "tenant": {
         "code": "租户编码",
         "name": "租户名称",
+        "appId": "公众号 AppID",
         "packageId": "租户套餐",
         "packageName": "租户套餐",
         "enabled": "启用状态",

@@ -52,6 +52,23 @@
     "leaveNew": "New leave request",
     "leaveView": "Leave request"
   },
+  "wxoa": {
+    "title": "Official Accounts",
+    "account": "Accounts",
+    "chat": "Conversations",
+    "message": "Message log",
+    "reply": "Auto replies",
+    "menu": "Custom menus",
+    "fan": "Fans",
+    "material": "Materials",
+    "template": "Template messages",
+    "qrcode": "Channel QR codes",
+    "draft": "Article drafts",
+    "publish": "Published articles",
+    "mass": "Mass messages",
+    "stat": "Statistics",
+    "notice": "Subscription notices"
+  },
   "action": {
     "browse": "Browse",
     "view": "View",
@@ -75,6 +92,13 @@
     "broadcast": "Send to everyone",
     "manage": "Reassign and terminate",
     "managers": "Appoint process managers",
+    "sync": "Sync",
+    "commentBrowse": "Browse comments",
+    "clearQuota": "Reset API call counts",
+    "tagBrowse": "Browse tags",
+    "tagCreate": "Add tags",
+    "tagModify": "Edit tags",
+    "tagRemove": "Delete tags",
     "enterTenant": "Enter tenant",
     "resetInitialPassword": "Reset initial password",
     "retry": "Retry jobs"

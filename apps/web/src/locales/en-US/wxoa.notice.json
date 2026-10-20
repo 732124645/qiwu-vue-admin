@@ -1,0 +1,36 @@
+{
+  "wxoa": {
+    "notice": {
+      "refresh": "Refresh my templates",
+      "empty": "No subscribe notification templates",
+      "col": {
+        "title": "Template title",
+        "content": "Template content",
+        "id": "Template ID"
+      },
+      "add": {
+        "action": "Add template",
+        "title": "Add subscribe notification template",
+        "template": "Template",
+        "done": "Template added",
+        "category": "Category",
+        "more": "Load more ({shown} of {total} shown)",
+        "keywords": "Keywords (pick {min}–{max})",
+        "scene": "Service scene",
+        "scenePlaceholder": "Up to 15 characters, e.g. “Order shipped”"
+      },
+      "send": {
+        "action": "Send",
+        "title": "Send subscribe notification",
+        "template": "Template",
+        "fans": "Fans",
+        "fansPlaceholder": "Search followed fans by remark or OpenID",
+        "url": "Link",
+        "done": "Queued {count} subscribe notifications",
+        "fansLimit": "{count} chosen, at most {max} per send",
+        "needFanBrowse": "Choosing fans needs the permission to browse fans"
+      },
+      "removeConfirm": "Delete template “{title}”?"
+    }
+  }
+}

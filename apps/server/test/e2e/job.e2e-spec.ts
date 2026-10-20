@@ -7,7 +7,7 @@
 // Test handlers are a provider of this spec's testing module; tasks are added through the API or straight
 // into job_task, runs read from job_run.
 import { setTimeout as sleep } from 'node:timers/promises'
-import { Injectable } from '@nestjs/common'
+import { Injectable, Logger } from '@nestjs/common'
 import type { NestExpressApplication } from '@nestjs/platform-express'
 import { SchedulerRegistry } from '@nestjs/schedule'
 import { Test } from '@nestjs/testing'
@@ -412,16 +412,33 @@ describe('registry', () => {
     }
   })
 
-  it('loads the enabled tasks at start', async () => {
+  it('loads the enabled tasks at start; warns once for an enabled one whose handler is not registered', async () => {
     const on = await insertTask()
     const off = await insertTask({ enabled: 0 })
-    const other = await boot()
+    const gone = await insertTask({ handler: 'test.removed' })
+    const warn = vi.spyOn(Logger.prototype, 'warn')
     try {
-      const s = other.get(JobScheduler)
-      expect(s.isScheduled(on)).toBe(true)
-      expect(s.isScheduled(off)).toBe(false)
+      const other = await boot()
+      try {
+        const s = other.get(JobScheduler)
+        expect(s.isScheduled(on)).toBe(true)
+        expect(s.isScheduled(off)).toBe(false)
+        expect(s.isScheduled(gone)).toBe(false)
+        const about = warn.mock.calls.filter(
+          ([meta]) => (meta as { taskId?: number } | undefined)?.taskId === gone,
+        )
+        expect(about).toEqual([
+          [
+            { taskId: gone, handler: 'test.removed' },
+            'enabled task not scheduled: its handler is not registered',
+          ],
+        ])
+      } finally {
+        await other.close()
+      }
     } finally {
-      await other.close()
+      warn.mockRestore()
+      await ds.query('UPDATE job_task SET enabled = 0 WHERE id = ?', [gone])
     }
   })
 
@@ -961,6 +978,8 @@ describe('retry', () => {
         "SELECT name, handler, enabled, group_code FROM job_task WHERE name LIKE 'seed.task.%' ORDER BY id",
       )
     expect(rows.map((r) => [r.name, r.handler, r.enabled])).toEqual([
+      ['seed.task.wxoaMessagePurge', 'wxoa.message.purge', 0],
+      ['seed.task.wxoaFanSync', 'wxoa.fan.sync', 0],
       ['seed.task.auditPurge', 'audit.purge', 1],
       ['seed.task.sessionSweep', 'session.sweep', 1],
       ['seed.task.notifyDispatch', 'notify.dispatch', 0],

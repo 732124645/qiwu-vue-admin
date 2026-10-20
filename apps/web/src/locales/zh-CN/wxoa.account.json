@@ -1,0 +1,63 @@
+{
+  "wxoa": {
+    "account": {
+      "entity": "公众号账号",
+      "appIdFixed": "AppID 添加后不可修改；换公众号请新建账号",
+      "sandboxPlain": "测试号只支持明文模式",
+      "plainHint": "明文模式只建议测试号使用",
+      "secretSet": "已设置，留空不变",
+      "aesKeyRequired": "兼容模式和安全模式需要填写 EncodingAESKey",
+      "callbackUrl": "服务器地址（URL）",
+      "callbackHint": "填到公众号后台的服务器配置；后台与公网访问地址不同时，把前缀换成公网地址",
+      "callbackLater": "保存后在这里显示服务器地址",
+      "copy": "复制",
+      "copied": "已复制",
+      "copyFailed": "复制失败，请手动选择地址复制",
+      "close": "关闭",
+      "lastPushAt": "最近推送",
+      "noPush": "未接通",
+      "test": {
+        "action": "测试连接",
+        "title": "测试连接",
+        "token": "获取 access_token",
+        "api": "调用接口（IP 白名单）",
+        "ok": "通过",
+        "failed": "失败",
+        "skipped": "未执行",
+        "code": "错误码",
+        "ip": "被拒绝的 IP",
+        "ipHint": "请在公众号后台把这个 IP 加入 IP 白名单后重试",
+        "lastPush": "最近推送",
+        "noPush": "尚未收到微信推送",
+        "again": "重新测试",
+        "codes": {
+          "B6001": "连不上微信服务器，或微信的应答无法识别：检查本服务器能否访问 api.weixin.qq.com，稍后再试",
+          "B6002": "微信拒绝了请求：核对公众号的状态与配置后再试",
+          "B6003": "该公众号没有这个接口的权限：未认证的账号和测试号常见此情况",
+          "B6004": "本服务器的 IP 不在公众号的 IP 白名单中",
+          "B6005": "该接口今天的调用次数已用完：明天再试，或在“接口配额”中清零",
+          "B6006": "微信不认可 AppID 或 AppSecret：核对后在“编辑”中重新填写 AppSecret（AppID 填错需新建账号）"
+        }
+      },
+      "quota": {
+        "action": "接口配额",
+        "title": "接口调用配额",
+        "api": "接口",
+        "dailyLimit": "每日上限",
+        "used": "已用",
+        "remain": "剩余",
+        "clear": "清零调用次数",
+        "clearConfirm": "清零调用次数与公众号后台的“重置 API 调用次数”每月合计只能用 {count} 次，确定现在清零吗？",
+        "cleared": "调用次数已清零"
+      },
+      "switch": {
+        "none": "没有可用的公众号账号",
+        "goAccounts": "去添加或启用账号",
+        "askAdmin": "请联系管理员添加或启用账号",
+        "disabled": "已停用",
+        "failed": "账号列表加载失败"
+      },
+      "needVerified": "此功能需要已认证的服务号：当前账号未认证或是测试号，微信可能拒绝调用。"
+    }
+  }
+}

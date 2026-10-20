@@ -76,6 +76,8 @@ export const CACHE_NAMESPACES = {
    * access token (subscribe messages; a secret, masked). Not clearable: a cleared code could be replayed.
    */
   wxMp: ns('wxmp:', false, true, 'global-id'),
+  /** WeChat Official Account tokens, callback bindings and sync caches; ids are shared across tenants. */
+  wxoa: ns('wxoa:', false, true, 'global-id'),
   oauth2Code: ns('oauth2:code:', false, true, 'global-id'),
   /** direct-upload grants */
   presign: ns('presign:', false, true, 'global-id'),

@@ -81,6 +81,11 @@ export const EnvSchema = z.preprocess(
        * to switch it; off = the single default tenant
        */
       APP_MULTI_TENANT: flag.default(false),
+      /**
+       * WeChat Official Account management (see docs/design-notes.md#wxoa): read at startup only; off =
+       * the module is not loaded (its routes 404, no jobs, no calls to WeChat), its menus hidden
+       */
+      APP_WXOA: flag.default(false),
       STORAGE_LOCAL_ROOT: z.string().default(DEFAULT_UPLOAD_ROOT),
       /**
        * WeChat mini program sign-in (also param `auth.wx_mp.enabled`): the AppID and its

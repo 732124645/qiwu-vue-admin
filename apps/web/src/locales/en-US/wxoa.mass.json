@@ -1,0 +1,85 @@
+{
+  "wxoa": {
+    "mass": {
+      "compose": "Mass message",
+      "target": {
+        "label": "Recipients",
+        "all": "All fans",
+        "tag": "Fans by tag",
+        "openids": "OpenID list",
+        "openIds": "OpenIDs",
+        "openIdsPlaceholder": "Enter at least two OpenIDs separated by spaces or commas",
+        "openIdsHint": "{count} recognized",
+        "tagLabel": "Tag"
+      },
+      "kindLabel": "Message type",
+      "kind": {
+        "text": "Text",
+        "image": "Image",
+        "voice": "Voice",
+        "video": "Video",
+        "mpnews": "Articles"
+      },
+      "text": "Text",
+      "mediaId": "Media ID",
+      "draft": "Article draft",
+      "chooseDraft": "Choose draft",
+      "changeDraft": "Change draft",
+      "ignoreReprint": "Send even if judged a reprint",
+      "preview": {
+        "openId": "Preview fan OpenID",
+        "action": "Preview",
+        "done": "Preview sent"
+      },
+      "send": "Send",
+      "sent": "Mass job submitted",
+      "confirmTitle": "Confirm mass send",
+      "confirm": {
+        "all": "Send this message to all fans. Continue?",
+        "tag": "Send this message to fans tagged “{tag}”. Continue?",
+        "openids": "Send this message to {count} OpenIDs. Continue?"
+      },
+      "removeConfirm": "Delete this mass record?",
+      "validation": {
+        "tag": "Choose a tag",
+        "openIds": "Enter at least two OpenIDs",
+        "text": "Enter message text",
+        "media": "Enter a media ID",
+        "draft": "Choose an article draft",
+        "previewOpenId": "Enter the OpenID of the fan to preview to"
+      },
+      "empty": "No mass records",
+      "col": {
+        "id": "Job ID",
+        "target": "Target",
+        "kind": "Type",
+        "state": "State",
+        "clientMsgId": "Client ID",
+        "finishedAt": "Finished at",
+        "receipt": "Receipt"
+      },
+      "comments": {
+        "action": "Comments",
+        "title": "Article comments",
+        "all": "All",
+        "elected": "Selected",
+        "empty": "No comments",
+        "select": "Select",
+        "unselect": "Unselect",
+        "reply": "Reply",
+        "replyPlaceholder": "Write a reply",
+        "removeConfirm": "Delete this comment?",
+        "article": "Article",
+        "open": "Open comments",
+        "close": "Close comments",
+        "opened": "Comments opened",
+        "closed": "Comments closed",
+        "removeReply": "Delete reply",
+        "removeReplyConfirm": "Delete this reply?"
+      },
+      "retry": "Retry",
+      "retryConfirm": "The outcome of this mass job is unknown. Submit it again with the same client ID? WeChat drops a duplicate within 24 hours.",
+      "receipt": "Total {total}, sent {sent}, failed {error}"
+    }
+  }
+}

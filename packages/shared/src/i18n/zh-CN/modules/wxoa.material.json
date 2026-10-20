@@ -1,0 +1,13 @@
+{
+  "field": {
+    "wxoa": {
+      "material": {
+        "accountId": "公众号账号",
+        "mediaKind": "素材类型",
+        "title": "标题",
+        "intro": "简介",
+        "file": "文件"
+      }
+    }
+  }
+}

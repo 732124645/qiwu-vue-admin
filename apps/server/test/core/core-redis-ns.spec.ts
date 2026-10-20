@@ -56,6 +56,7 @@ describe('cache-namespaces', () => {
         'captcha:',
         'sms:limit:',
         'wxmp:',
+        'wxoa:',
         'oauth2:code:',
         'presign:',
         'dict:',

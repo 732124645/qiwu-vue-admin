@@ -74,9 +74,19 @@ const MIGRATIONS: [name: string, tables: string[]][] = [
   ['CfgAppVersion20261002110000', ['cfg_app_version']],
   ['DictSingleDefault20261002120000', []],
   ['AuditUserType20261002120100', []],
+  ['WxoaAccounts20261006100000', ['wxoa_account', 'wxoa_fan', 'wxoa_tag', 'wxoa_message']],
+  [
+    'WxoaAutomation20261006100100',
+    ['wxoa_reply_rule', 'wxoa_menu', 'wxoa_material', 'wxoa_qrcode'],
+  ],
   [
     'Tenancy20261007100000',
     ['iam_tenant', 'iam_tenant_domain', 'iam_tenant_package', 'iam_tenant_package_menus'],
+  ],
+  ['WxoaTenant20261018100000', []],
+  [
+    'WxoaContent20261018100100',
+    ['wxoa_draft', 'wxoa_publish', 'wxoa_mass_job', 'wxoa_inline_image'],
   ],
 ]
 /** Applied migrations once SoftDeleteAll is reverted: its down is checked there. */
@@ -262,7 +272,7 @@ async function roundTrip(migrate: (command: 'run' | 'revert') => void) {
   // the migrations' own shape (multi-tenancy off keeps it; hardening drops the defaults): every tenant
   // column and the operator's tenant default to 1
   const defaulted = await tenantDefaults(ds)
-  expect(defaulted).toHaveLength(33)
+  expect(defaulted).toHaveLength(41)
   expect(
     await ds.query(
       `SELECT DISTINCT column_default AS d FROM information_schema.columns
@@ -933,6 +943,8 @@ describe('OAuth2 clients and consents', () => {
 describe('Tenancy', () => {
   const dup = { driverError: { code: 'ER_DUP_ENTRY' } }
   const TENANT_TABLES = ALL_TABLES.filter((t) => !PLATFORM_TABLES.includes(t))
+  const TENANCY_INDEX = MIGRATIONS.findIndex(([name]) => name === 'Tenancy20261007100000')
+  const MIGRATIONS_AFTER_TENANCY = MIGRATIONS.length - TENANCY_INDEX - 1
   /** `tenant_id` of every table that has one: table → `type nullable`. */
   const tenantColumns = async (): Promise<Record<string, string>> =>
     Object.fromEntries(
@@ -991,7 +1003,7 @@ describe('Tenancy', () => {
     expect(
       PLATFORM_TABLES.filter((t) => t !== 'meta_migrations' && !ALL_TABLES.includes(t)),
     ).toEqual([])
-    expect(TENANT_TABLES).toHaveLength(32)
+    expect(TENANT_TABLES).toHaveLength(44)
     // their defaults: hardened or not, depending on what ran before (see the migration round trip)
     expect(await tenantColumns()).toEqual({
       ...Object.fromEntries(
@@ -1116,6 +1128,8 @@ describe('Tenancy', () => {
   })
 
   it('down refuses while a second tenant exists and changes nothing', async () => {
+    // Tenancy 后面已有 WXOA 迁移：先只回退后续迁移，确保本用例实际测试 Tenancy.down 的拒绝逻辑。
+    for (let i = 0; i < MIGRATIONS_AFTER_TENANCY; i++) migrateOnce('revert')
     const before = await tenancyState()
     const { insertId } = await ds.query(
       "INSERT INTO iam_tenant (code, name) VALUES ('mig-second', 'x')",
@@ -1124,7 +1138,7 @@ describe('Tenancy', () => {
       const r = node('dist/db/migrate.js', ['revert'])
       expect(r.status).toBe(1)
       expect(r.stdout + r.stderr).toContain('Tenancy down refused')
-      await expectApplied(MIGRATIONS.length)
+      await expectApplied(TENANCY_INDEX + 1)
       expect(await tenancyState()).toEqual(before)
     } finally {
       migrateOnce('run') // back, had the down gone through
@@ -1132,11 +1146,35 @@ describe('Tenancy', () => {
     }
   })
 
+  it('the Official Account tenant migration refuses its down while a row of another tenant exists and changes nothing', async () => {
+    const at = MIGRATIONS.findIndex(([name]) => name === 'WxoaTenant20261018100000')
+    for (let i = at + 1; i < MIGRATIONS.length; i++) migrateOnce('revert')
+    const before = await tenancyState()
+    const { insertId } = await ds.query(
+      "INSERT INTO wxoa_tag (tenant_id, account_id, tag_id, name) VALUES (2, 999999, 1, 'mig-other')",
+    )
+    try {
+      const r = node('dist/db/migrate.js', ['revert'])
+      expect(r.status).toBe(1)
+      expect(r.stdout + r.stderr).toContain('WxoaTenant down refused')
+      await expectApplied(at + 1)
+      expect(await tenancyState()).toEqual(before)
+    } finally {
+      await ds.query('DELETE FROM wxoa_tag WHERE id = ?', [insertId])
+      migrateOnce('run')
+    }
+    await expectApplied(MIGRATIONS.length)
+  })
+
   it('an up stopped halfway finishes when run again', async () => {
     const before = await tenancyState()
     try {
-      // as if up had failed halfway: not recorded, some steps done, others not
-      await ds.query("DELETE FROM meta_migrations WHERE name = 'Tenancy20261007100000'")
+      // 后续迁移在真实的 Tenancy.up 失败时不会运行；先回退它们再模拟中途留下的 DDL。
+      for (let i = 0; i < MIGRATIONS_AFTER_TENANCY; i++) migrateOnce('revert')
+      // 模拟迁移执行到一半失败：记录未写入，但部分 DDL 已经落库。
+      await ds.query(
+        "DELETE FROM meta_migrations WHERE name IN ('Tenancy20261007100000', 'WxoaTenant20261018100000', 'WxoaContent20261018100100')",
+      )
       await ds.query('ALTER TABLE wf_task DROP INDEX idx_wf_task_tenant')
       await ds.query(
         'ALTER TABLE wf_form DROP INDEX uk_wf_form_name, ADD UNIQUE KEY uk_wf_form_name (name, alive)',

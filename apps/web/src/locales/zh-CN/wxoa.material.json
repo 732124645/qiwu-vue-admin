@@ -1,0 +1,42 @@
+{
+  "wxoa": {
+    "material": {
+      "col": {
+        "preview": "预览",
+        "fileName": "文件名",
+        "byteSize": "大小",
+        "origin": "来源",
+        "mediaId": "media_id"
+      },
+      "origin": {
+        "local": "本系统上传",
+        "pulled": "从微信同步"
+      },
+      "previewLarge": "查看大图：{name}",
+      "download": "下载",
+      "removeConfirm": "确定删除素材“{name}”吗？微信上的该素材会同时删除；正被自动回复规则使用的素材不能删除。",
+      "upload": {
+        "action": "上传素材",
+        "title": "上传永久素材",
+        "choose": "选择文件",
+        "hint": "支持 {exts}，不超过 {size}",
+        "badType": "“{name}”不能作为{kind}素材，只支持 {exts}",
+        "noFile": "请选择要上传的文件",
+        "submit": "上传",
+        "done": "已上传"
+      },
+      "sync": {
+        "action": "同步素材",
+        "running": "正在同步素材：已完成 {done}/{total}",
+        "runningNoTotal": "正在同步素材：已完成 {done}",
+        "done": "上次同步完成于 {time}",
+        "failed": "上次同步失败（{code}），可以重新同步",
+        "interrupted": "上次同步已中断，可以重新同步"
+      },
+      "picker": {
+        "title": "选择素材",
+        "empty": "还没有这种类型的素材，请先在素材管理页上传或同步"
+      }
+    }
+  }
+}

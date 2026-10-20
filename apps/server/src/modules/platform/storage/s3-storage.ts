@@ -29,7 +29,7 @@ const status = (e: unknown) =>
  * The first `max` bytes of a response body, reading no further: leaving the loop destroys the stream
  * (and its socket), so a body longer than asked for is never read to its end.
  */
-async function readCapped(body: unknown, max: number): Promise<Buffer> {
+export async function readCapped(body: unknown, max: number): Promise<Buffer> {
   const chunks: Buffer[] = []
   let size = 0
   for await (const chunk of (body ?? []) as AsyncIterable<Uint8Array>) {
@@ -37,6 +37,7 @@ async function readCapped(body: unknown, max: number): Promise<Buffer> {
     size += chunk.length
     if (size >= max) break
   }
+
   return Buffer.concat(chunks).subarray(0, max)
 }
 
@@ -122,6 +123,19 @@ export class S3Storage {
       }),
       { expiresIn: S3_DOWNLOAD_TTL_SEC },
     )
+  }
+
+  /** Reads at most `max` bytes from a stored object for trusted server-side consumers. */
+  async read(key: string, isPublic: boolean, max: number): Promise<Buffer | null> {
+    try {
+      const response = await this.client.send(
+        new GetObjectCommand({ Bucket: this.cfg.bucket, Key: this.key(key, isPublic) }),
+      )
+      return readCapped(response.Body, max)
+    } catch (e) {
+      if (status(e) === 404) return null
+      throw e
+    }
   }
 
   /**

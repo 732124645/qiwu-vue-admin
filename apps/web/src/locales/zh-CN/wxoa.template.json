@@ -1,0 +1,33 @@
+{
+  "wxoa": {
+    "template": {
+      "tab": {
+        "templates": "模板",
+        "records": "发送记录"
+      },
+      "col": {
+        "title": "模板标题",
+        "content": "模板内容",
+        "industry": "所属行业",
+        "templateId": "模板 ID",
+        "example": "示例"
+      },
+      "refresh": "从微信刷新",
+      "empty": "没有模板：先在微信公众平台的“模板消息”里添加，再点“从微信刷新”",
+      "removeConfirm": "删除模板“{title}”？微信上的模板会一并删除，之后不能再用它发送。",
+      "send": {
+        "action": "发送",
+        "title": "发送模板消息",
+        "template": "模板",
+        "fansPlaceholder": "输入备注名或 OpenID 搜索已关注的粉丝",
+        "fansLimit": "已选 {count} 个，每次最多 {max} 个",
+        "needFanBrowse": "选择粉丝需要粉丝管理的查看权限",
+        "noFields": "这个模板没有需要填写的字段",
+        "done": "已提交 {count} 条，正在后台发送，结果见发送记录"
+      },
+      "records": {
+        "occurredAt": "发送时间"
+      }
+    }
+  }
+}

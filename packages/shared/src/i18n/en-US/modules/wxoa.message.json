@@ -1,0 +1,30 @@
+{
+  "field": {
+    "wxoa": {
+      "message": {
+        "accountId": "Official account",
+        "openId": "Fan openid",
+        "direction": "Direction",
+        "channel": "Channel",
+        "msgKind": "Message type",
+        "occurredAtFrom": "Occurred from",
+        "occurredAtTo": "Occurred to",
+        "beforeId": "Before message",
+        "limit": "Count",
+        "fanId": "Fan",
+        "kind": "Message type",
+        "body": "Message content",
+        "materialId": "Material",
+        "objectId": "Media file from the conversation",
+        "thumbMaterialId": "Thumbnail material",
+        "content": "Text",
+        "title": "Title",
+        "description": "Description",
+        "musicUrl": "Music link",
+        "hqMusicUrl": "High-quality music link",
+        "url": "Link",
+        "picUrl": "Picture link"
+      }
+    }
+  }
+}

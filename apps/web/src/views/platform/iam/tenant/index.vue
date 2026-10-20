@@ -16,6 +16,7 @@ import { openDialog } from '@/core/dialog'
 import { tx } from '@/core/i18n'
 import { Icon } from '@/core/icons'
 import { usePerm } from '@/core/permission'
+import { useMenuStore } from '@/core/stores/menu'
 import { useTagsStore } from '@/core/stores/tags'
 import TenantEnter from './enter.vue'
 import TenantForm from './form.vue'
@@ -32,11 +33,17 @@ const { t } = useI18n()
 const { query, rows, total, loading, filtered, search, reset, refresh, onSortChange } = useCrudList(
   {
     api: tenantApi,
-    filters: { code: '', name: '', enabled: null as string | null },
+    filters: { code: '', name: '', appId: '', enabled: null as string | null },
     sort: '-createdAt',
   },
 )
 const showSearch = ref(true)
+/**
+ * 按公众号 AppID 查占用它的租户，只在公众号模块开着时显示：模块开关只在服务端，关着时 GET /menus
+ * 不带 `wxoa` 分组，所以以菜单树里有没有它为准（看不到公众号菜单的人也就不显示这个条件）。
+ */
+const menus = useMenuStore()
+const wxoaOn = computed(() => menus.tree.some((n) => n.routeName === 'wxoa'))
 // fits the content area at 1440 wide without a horizontal scroll (the fixed actions column would cover the
 // domains): the creation time is in the column settings, hidden at first
 const columns: QwColumn[] = [
@@ -170,6 +177,9 @@ async function enter(row: TenantVo) {
         </el-form-item>
         <el-form-item :label="t('field.iam.tenant.name')">
           <el-input v-model="query.name" name="name" clearable />
+        </el-form-item>
+        <el-form-item v-if="wxoaOn" :label="t('field.iam.tenant.appId')">
+          <el-input v-model="query.appId" name="appId" clearable />
         </el-form-item>
         <el-form-item :label="t('field.iam.tenant.enabled')">
           <DictSelect v-model="query.enabled" code="core.enabled" />

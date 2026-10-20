@@ -24,6 +24,8 @@ export const RT = {
    * the recipient's approval to-dos changed (a task assigned to, handled by or taken from them; see docs/design-notes.md#workflow): sent to those users after the action's transaction commits; the web reloads its to-do count and lists
    */
   wfTask: 'wf:task',
+  /** an inbound Official Account message for the selected account; the web reloads its conversation */
+  wxoaMessage: 'wxoa:message',
 } as const
 export type RealtimeType = (typeof RT)[keyof typeof RT]
 
@@ -49,6 +51,8 @@ export interface RealtimePayloads {
   'demo:message': { from: { id: number; name: string }; text: string; at: string }
   /** the instance whose tasks changed for the recipient; details come from the approval center API */
   'wf:task': { instanceId: number }
+  /** ids only: never the content or the fan's openid */
+  'wxoa:message': { accountId: number; messageId: number }
 }
 
 /** `{type, payload}`; narrowing on `type` types the payload. */

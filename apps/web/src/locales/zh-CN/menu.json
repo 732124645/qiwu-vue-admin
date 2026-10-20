@@ -52,6 +52,23 @@
     "leaveNew": "新建请假",
     "leaveView": "请假详情"
   },
+  "wxoa": {
+    "title": "公众号",
+    "account": "账号管理",
+    "chat": "会话",
+    "message": "消息记录",
+    "reply": "自动回复",
+    "menu": "自定义菜单",
+    "fan": "粉丝管理",
+    "material": "素材管理",
+    "template": "模板消息",
+    "qrcode": "渠道二维码",
+    "draft": "图文草稿",
+    "publish": "发表记录",
+    "mass": "群发消息",
+    "stat": "数据统计",
+    "notice": "订阅通知"
+  },
   "action": {
     "browse": "浏览",
     "view": "查看",
@@ -75,6 +92,13 @@
     "broadcast": "发送给全员",
     "manage": "改派与终止",
     "managers": "任命流程管理员",
+    "sync": "同步",
+    "commentBrowse": "浏览留言",
+    "clearQuota": "清零调用次数",
+    "tagBrowse": "浏览标签",
+    "tagCreate": "新增标签",
+    "tagModify": "修改标签",
+    "tagRemove": "删除标签",
     "enterTenant": "进入租户",
     "resetInitialPassword": "重置初始密码",
     "retry": "重试任务"

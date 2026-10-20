@@ -1,0 +1,15 @@
+{
+  "field": {
+    "wxoa": {
+      "qrcode": {
+        "accountId": "Official account",
+        "label": "QR code name",
+        "qrKind": "QR code type",
+        "scene": "Scene",
+        "expireSeconds": "Validity (seconds)",
+        "tagId": "Auto tag",
+        "days": "Days"
+      }
+    }
+  }
+}

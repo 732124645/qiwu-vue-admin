@@ -1,0 +1,56 @@
+{
+  "wxoa": {
+    "draft": {
+      "create": "新建草稿",
+      "edit": "编辑草稿",
+      "articleTitle": "文章标题",
+      "author": "作者",
+      "digest": "摘要",
+      "sourceUrl": "原文链接",
+      "cover": "封面素材",
+      "chooseCover": "选择封面",
+      "coverPicker": "选择永久图片素材",
+      "content": "正文",
+      "openComment": "允许留言",
+      "fansCommentOnly": "仅粉丝可留言",
+      "addArticle": "添加文章",
+      "removeArticle": "删除文章",
+      "moveUp": "上移",
+      "moveDown": "下移",
+      "untitled": "未命名文章",
+      "preview": "预览",
+      "hidePreview": "收起预览",
+      "unsynced": "此草稿有未同步修改，发布或群发前请先同步。",
+      "unsyncedImages": "以下正文图片未能同步",
+      "empty": "暂无草稿",
+      "removeConfirm": "删除草稿“{title}”？微信草稿箱中的对应内容也会删除。",
+      "origin": {
+        "local": "本地",
+        "pulled": "从微信拉取"
+      },
+      "col": {
+        "title": "标题",
+        "articleCount": "篇数",
+        "origin": "来源",
+        "mediaId": "草稿 ID",
+        "syncedAt": "同步时间",
+        "updatedAt": "更新时间"
+      },
+      "sync": {
+        "action": "同步到微信",
+        "done": "草稿已同步到微信"
+      },
+      "pull": {
+        "action": "从微信拉取",
+        "done": "草稿拉取完成，共 {count} 条",
+        "partial": "有 {count} 条草稿未能拉取"
+      },
+      "pulledLayout": "此草稿从微信草稿箱拉取，原有排版样式已在清洗时丢失，请检查后再同步。",
+      "picker": {
+        "articles": "{count} 篇",
+        "notSynced": "未同步",
+        "dirty": "有未同步修改"
+      }
+    }
+  }
+}

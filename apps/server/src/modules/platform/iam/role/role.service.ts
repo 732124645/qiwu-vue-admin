@@ -11,7 +11,7 @@ import {
   type RoleQuery,
 } from '@qiwu/shared'
 import type { DeepPartial, QueryDeepPartialEntity, SelectQueryBuilder } from 'typeorm'
-import { switchedOff } from '../../../../core/auth/menu-features.js'
+import { GRANT_SWITCHES, type Switch, switchedOff } from '../../../../core/auth/menu-features.js'
 import { PermVersion } from '../../../../core/auth/perm-version.js'
 import { type DataScope, ROOT_ROLE, TENANT_ADMIN_ROLE } from '../../../../core/auth/principal.js'
 import { AppConfigService } from '../../../../core/config/config.module.js'
@@ -211,18 +211,18 @@ export class RoleService extends BaseCrudService<Role> {
 
   /**
    * The menus of the grant tree: every menu (disabled ones too) by `sort_no, id`, except while
-   * multi-tenancy is off its pages and what is under them, and in a data tenant other than the default
-   * one the platform-only menus (the flag covers their subtrees) and every menu outside its package (see
-   * docs/design-notes.md#tenancy). Only that switch hides menus here: the API docs page stays grantable
-   * while SWAGGER_ENABLED is off (as the menu management lists every menu). `live`: the ids of every live
-   * menu, the hidden ones too.
+   * multi-tenancy or the Official Account module is off their pages and what is under them, and in a
+   * data tenant other than the default one the platform-only menus (the flag covers their subtrees) and
+   * every menu outside its package (see docs/design-notes.md#tenancy). Only those switches
+   * (`GRANT_SWITCHES`) hide menus here: the API docs page stays grantable while SWAGGER_ENABLED is off
+   * (as the menu management lists every menu). `live`: the ids of every live menu, the hidden ones too.
    */
   private async grantableMenus(): Promise<{ rows: MenuNodeRow[]; live: number[] }> {
     const all = await this.txHost.tx.query<MenuNodeRow[]>(
       `SELECT id, parent_id, kind, name, name_i18n, perms, enabled, route_name, tree_path, platform_only
          FROM iam_menu WHERE deleted_at IS NULL ORDER BY sort_no, id`,
     )
-    const on = (s: string) => s !== 'APP_MULTI_TENANT' || this.cfg.get('APP_MULTI_TENANT')
+    const on = (s: Switch) => !GRANT_SWITCHES.has(s) || this.cfg.get(s)
     const hidden = all.filter((r) => switchedOff(r.route_name, on)).map((r) => `/${r.id}/`)
     const tenantOnly = tenantId() !== DEFAULT_TENANT_ID
     const inPackage = await this.packages.menusOf(tenantId())

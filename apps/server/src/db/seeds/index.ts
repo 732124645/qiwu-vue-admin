@@ -58,6 +58,8 @@ import { seedWorkflowMenus } from './workflow/menu.seed.js'
 import { seedProcessTemplates } from './workflow/process-templates.seed.js'
 import { seedWorkflowTemplates } from './workflow/templates.seed.js'
 import { seedWorkflow } from './workflow/workflow.seed.js'
+import { seedWxoa } from './wxoa/wxoa.seed.js'
+import { seedWxoaDemo } from './wxoa/wxoa-demo.seed.js'
 
 type Seed = (q: EntityManager) => Promise<string[]>
 
@@ -81,6 +83,7 @@ const SEEDS: Record<string, Seed[]> = {
     seedSmsTemplate,
     seedSmsRecord,
   ],
+  wxoa: [seedWxoa, seedWxoaDemo],
   audit: [seedAudit, seedActionLog, seedSigninLog, seedHttpTrace, seedHttpFault],
   storage: [seedStorage, seedStorageObject, seedStorageConfig],
   monitor: [seedMonitorGroup, seedSession, seedMonitor],

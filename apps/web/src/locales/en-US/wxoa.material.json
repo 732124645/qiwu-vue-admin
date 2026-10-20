@@ -1,0 +1,42 @@
+{
+  "wxoa": {
+    "material": {
+      "col": {
+        "preview": "Preview",
+        "fileName": "File name",
+        "byteSize": "Size",
+        "origin": "Source",
+        "mediaId": "media_id"
+      },
+      "origin": {
+        "local": "Uploaded here",
+        "pulled": "Synced from WeChat"
+      },
+      "previewLarge": "View {name} large",
+      "download": "Download",
+      "removeConfirm": "Delete the material “{name}”? It is deleted on WeChat too; a material an auto-reply rule uses cannot be deleted.",
+      "upload": {
+        "action": "Upload material",
+        "title": "Upload a permanent material",
+        "choose": "Choose file",
+        "hint": "{exts}; up to {size}",
+        "badType": "“{name}” cannot be uploaded as {kind}: only {exts}",
+        "noFile": "Choose the file to upload",
+        "submit": "Upload",
+        "done": "Uploaded"
+      },
+      "sync": {
+        "action": "Sync materials",
+        "running": "Syncing materials: {done} of {total} done",
+        "runningNoTotal": "Syncing materials: {done} done",
+        "done": "Last sync finished at {time}",
+        "failed": "The last sync failed ({code}); you can run it again",
+        "interrupted": "The last sync was interrupted; you can run it again"
+      },
+      "picker": {
+        "title": "Choose material",
+        "empty": "No material of this kind yet: upload or sync it on the material page first"
+      }
+    }
+  }
+}

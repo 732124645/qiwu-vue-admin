@@ -1,0 +1,16 @@
+{
+  "field": {
+    "wxoa": {
+      "fan": {
+        "accountId": "公众号账号",
+        "subscribed": "是否关注",
+        "blocked": "是否在黑名单",
+        "tagId": "标签",
+        "openId": "openid",
+        "remark": "备注名",
+        "fanIds": "所选粉丝",
+        "op": "操作"
+      }
+    }
+  }
+}

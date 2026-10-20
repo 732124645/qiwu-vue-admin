@@ -26,7 +26,9 @@
     "sessionSweep": "清理过期在线会话",
     "notifyDispatch": "派发待发送通知",
     "demoEcho": "示例：回显消息",
-    "wfTaskRemind": "发送待办超时提醒"
+    "wfTaskRemind": "发送待办超时提醒",
+    "wxoaMessagePurge": "清理过期公众号消息",
+    "wxoaFanSync": "同步公众号粉丝"
   },
   "inboxTemplate": {
     "schedulerJobTimeout": "任务超时告警"

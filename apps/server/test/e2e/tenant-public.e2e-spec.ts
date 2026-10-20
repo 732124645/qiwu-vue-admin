@@ -48,6 +48,8 @@ const PUBLIC_ROUTES: Record<string, Source> = {
   'POST /oauth2/revoke': 'session',
   'POST /oauth2/token': 'grant',
   'POST /auth/wx-mp/login': 'row',
+  'GET /wxoa/callback/:key': 'row',
+  'POST /wxoa/callback/:key': 'row',
   'POST /messaging/sms/receipt/:channel': 'channel',
   'GET /health': 'platform',
   'GET /auth/captcha': 'platform',

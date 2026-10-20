@@ -1,0 +1,56 @@
+{
+  "wxoa": {
+    "draft": {
+      "create": "New draft",
+      "edit": "Edit draft",
+      "articleTitle": "Article title",
+      "author": "Author",
+      "digest": "Digest",
+      "sourceUrl": "Source URL",
+      "cover": "Cover material",
+      "chooseCover": "Choose cover",
+      "coverPicker": "Choose permanent image material",
+      "content": "Content",
+      "openComment": "Allow comments",
+      "fansCommentOnly": "Fans only",
+      "addArticle": "Add article",
+      "removeArticle": "Remove article",
+      "moveUp": "Move up",
+      "moveDown": "Move down",
+      "untitled": "Untitled article",
+      "preview": "Preview",
+      "hidePreview": "Hide preview",
+      "unsynced": "This draft has unsynced changes. Sync it before publishing or mass sending.",
+      "unsyncedImages": "The following body images could not be synced",
+      "empty": "No drafts",
+      "removeConfirm": "Delete draft “{title}”? The corresponding WeChat draft will also be deleted.",
+      "origin": {
+        "local": "Local",
+        "pulled": "Pulled from WeChat"
+      },
+      "col": {
+        "title": "Title",
+        "articleCount": "Articles",
+        "origin": "Origin",
+        "mediaId": "Draft ID",
+        "syncedAt": "Synced at",
+        "updatedAt": "Updated at"
+      },
+      "sync": {
+        "action": "Sync to WeChat",
+        "done": "Draft synced to WeChat"
+      },
+      "pull": {
+        "action": "Pull from WeChat",
+        "done": "Pulled {count} drafts",
+        "partial": "{count} drafts could not be pulled"
+      },
+      "pulledLayout": "This draft was pulled from WeChat; its original layout styles were removed when it was cleaned. Check it before syncing.",
+      "picker": {
+        "articles": "{count} articles",
+        "notSynced": "Not synced",
+        "dirty": "Unsynced changes"
+      }
+    }
+  }
+}

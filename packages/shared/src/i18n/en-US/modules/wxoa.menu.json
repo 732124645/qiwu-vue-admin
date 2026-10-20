@@ -1,0 +1,24 @@
+{
+  "field": {
+    "wxoa": {
+      "menu": {
+        "accountId": "Official account",
+        "menuKind": "Menu type",
+        "label": "Menu name",
+        "matchTagId": "Matched tag",
+        "matchPlatform": "Matched client platform",
+        "buttons": "Buttons",
+        "subButtons": "Sub-buttons",
+        "name": "Button name",
+        "kind": "Button type",
+        "key": "Button key",
+        "url": "Web link",
+        "appId": "Mini program AppID",
+        "pagePath": "Mini program page path",
+        "articleId": "Published article ID",
+        "mediaId": "Material media_id",
+        "userId": "Fan openid or WeChat ID"
+      }
+    }
+  }
+}

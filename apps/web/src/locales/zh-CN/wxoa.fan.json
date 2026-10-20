@@ -1,0 +1,57 @@
+{
+  "wxoa": {
+    "fan": {
+      "col": {
+        "tags": "标签",
+        "subscribedAt": "关注时间",
+        "unsubscribedAt": "取消关注时间",
+        "lastInboundAt": "最近发消息",
+        "qrScene": "关注时的二维码场景",
+        "subscribeScene": "关注来源",
+        "unionId": "UnionID",
+        "lang": "语言",
+        "syncedAt": "资料同步时间"
+      },
+      "remark": {
+        "action": "备注",
+        "title": "修改备注名"
+      },
+      "block": {
+        "action": "拉黑",
+        "confirm": "把选中的粉丝（{count} 个）加入黑名单？",
+        "done": "已加入黑名单"
+      },
+      "unblock": {
+        "action": "移出黑名单",
+        "confirm": "把选中的粉丝（{count} 个）移出黑名单？",
+        "done": "已移出黑名单"
+      },
+      "tagging": {
+        "action": "打标签",
+        "title": "给粉丝打标签",
+        "count": "已选 {count} 个粉丝",
+        "add": "打上标签",
+        "remove": "去掉标签",
+        "done": "标签已更新"
+      },
+      "sync": {
+        "action": "同步粉丝",
+        "running": "正在同步粉丝：已处理 {done} / {total}",
+        "runningNoTotal": "正在同步粉丝：已处理 {done}",
+        "done": "上次同步完成于 {time}",
+        "failed": "上次同步失败（{code}），可以重新同步",
+        "interrupted": "上次同步已中断，可以重新同步"
+      },
+      "tags": {
+        "title": "标签",
+        "entity": "标签",
+        "all": "全部粉丝",
+        "add": "新建标签",
+        "full": "每个公众号最多 {max} 个标签",
+        "sync": "从微信同步标签",
+        "synced": "标签已同步",
+        "removeConfirm": "删除标签“{name}”？微信上的这个标签会一起删除，打了这个标签的粉丝都会失去它。"
+      }
+    }
+  }
+}

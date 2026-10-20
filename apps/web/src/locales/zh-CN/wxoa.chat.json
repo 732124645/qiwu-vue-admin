@@ -1,0 +1,39 @@
+{
+  "wxoa": {
+    "chat": {
+      "needsBrowse": "查看会话还需要“消息记录”的浏览权限，请联系管理员同时授予。",
+      "conversations": "最近会话",
+      "unsubscribed": "已取关",
+      "blocked": "黑名单",
+      "noConversations": "还没有粉丝发来消息",
+      "more": "加载更多会话",
+      "pick": "从左侧选择一个会话",
+      "noMessages": "暂无消息",
+      "earlier": "查看更早的消息",
+      "forward": "转发",
+      "window": {
+        "inbound": "48 小时消息窗口",
+        "event": "1 分钟事件窗口",
+        "never": "尚未开启",
+        "open": "截至 {time}，已用 {used}/{max} 条",
+        "closed": "已于 {time} 关闭（已用 {used}/{max} 条）",
+        "allClosed": "两个发送窗口都已关闭，微信会拒收客服消息；粉丝再次发消息、点菜单或扫码后才能发送。"
+      },
+      "composer": {
+        "send": "发送",
+        "bytes": "{used}/{max} 字节",
+        "media": {
+          "image": "图片",
+          "voice": "语音",
+          "video": "视频"
+        },
+        "thumb": "缩略图",
+        "none": "未选择",
+        "pick": "选择素材",
+        "copy": "会话中的媒体文件 #{id}",
+        "mediaHint": "从永久素材中选择，或在会话里转发粉丝发来的图片 / 语音；新文件请先到素材管理上传。",
+        "needsMaterial": "选择素材还需要素材管理的浏览权限；可以在会话里转发粉丝发来的图片 / 语音。"
+      }
+    }
+  }
+}

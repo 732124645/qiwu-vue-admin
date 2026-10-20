@@ -4,6 +4,7 @@
       "tenant": {
         "code": "Tenant code",
         "name": "Tenant name",
+        "appId": "Official Account AppID",
         "packageId": "Package",
         "packageName": "Package",
         "enabled": "Enabled",

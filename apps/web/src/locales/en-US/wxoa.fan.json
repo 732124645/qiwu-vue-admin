@@ -1,0 +1,57 @@
+{
+  "wxoa": {
+    "fan": {
+      "col": {
+        "tags": "Tags",
+        "subscribedAt": "Followed at",
+        "unsubscribedAt": "Unfollowed at",
+        "lastInboundAt": "Last message",
+        "qrScene": "QR code scene at follow",
+        "subscribeScene": "Follow source",
+        "unionId": "UnionID",
+        "lang": "Language",
+        "syncedAt": "Profile synced at"
+      },
+      "remark": {
+        "action": "Remark",
+        "title": "Edit remark"
+      },
+      "block": {
+        "action": "Block",
+        "confirm": "Add the selected fans ({count}) to the blacklist?",
+        "done": "Added to the blacklist"
+      },
+      "unblock": {
+        "action": "Unblock",
+        "confirm": "Remove the selected fans ({count}) from the blacklist?",
+        "done": "Removed from the blacklist"
+      },
+      "tagging": {
+        "action": "Tag",
+        "title": "Tag fans",
+        "count": "{count} fans selected",
+        "add": "Add the tag",
+        "remove": "Remove the tag",
+        "done": "Tags updated"
+      },
+      "sync": {
+        "action": "Sync fans",
+        "running": "Syncing fans: {done} of {total} done",
+        "runningNoTotal": "Syncing fans: {done} done",
+        "done": "Last sync finished at {time}",
+        "failed": "The last sync failed ({code}); you can run it again",
+        "interrupted": "The last sync was interrupted; you can run it again"
+      },
+      "tags": {
+        "title": "Tags",
+        "entity": "tag",
+        "all": "All fans",
+        "add": "New tag",
+        "full": "An account has at most {max} tags",
+        "sync": "Sync tags from WeChat",
+        "synced": "Tags synced",
+        "removeConfirm": "Delete the tag “{name}”? It is deleted on WeChat too, and every fan with it loses it."
+      }
+    }
+  }
+}

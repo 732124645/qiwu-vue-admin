@@ -1,0 +1,24 @@
+{
+  "field": {
+    "wxoa": {
+      "menu": {
+        "accountId": "公众号账号",
+        "menuKind": "菜单类型",
+        "label": "菜单名称",
+        "matchTagId": "匹配标签",
+        "matchPlatform": "匹配客户端平台",
+        "buttons": "菜单按钮",
+        "subButtons": "子菜单",
+        "name": "按钮名称",
+        "kind": "按钮类型",
+        "key": "按钮 KEY",
+        "url": "网页链接",
+        "appId": "小程序 AppID",
+        "pagePath": "小程序页面路径",
+        "articleId": "发布的图文 ID",
+        "mediaId": "素材 media_id",
+        "userId": "粉丝 openid 或微信号"
+      }
+    }
+  }
+}

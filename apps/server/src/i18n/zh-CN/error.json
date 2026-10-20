@@ -118,5 +118,21 @@
     "request_invalid": "授权请求无效：response_type 必须是 code，申请的权限范围必须在客户端已登记的范围内",
     "insufficient_scope": "该令牌不代表任何用户，不能读取用户信息",
     "client_builtin": "内置客户端受保护，不能执行此操作"
+  },
+  "wxoa": {
+    "upstream": "无法连接微信服务器，或微信的应答无法识别，请稍后重试",
+    "upstream_refused": "微信拒绝了此次请求（错误码 {errcode}）",
+    "api_unauthorized": "该公众号没有调用此接口的权限，未认证的账号和测试号常见此情况",
+    "ip_not_allowed": "本服务器的 IP {ip} 不在该公众号的 IP 白名单中，请在微信公众平台添加后重试",
+    "quota_exceeded": "该接口今日的调用次数已用完",
+    "credential_invalid": "微信不认可该公众号的 AppID 或 AppSecret，请核对后重新填写",
+    "send_window": "不能给该粉丝发送客服消息：已超出可回复的时间或条数",
+    "aes_key_required": "兼容模式和安全模式需要填写 EncodingAESKey",
+    "default_menu_required": "请先发布默认菜单，再发布个性化菜单",
+    "sync_running": "该公众号正在同步，请等待完成后再试",
+    "account_disabled": "该公众号已停用，请启用后再操作",
+    "draft_unsynced": "草稿有未同步修改，请先同步",
+    "cover_unavailable": "封面不是可用的永久图片素材",
+    "mass_retry_expired": "该群发任务已超过可重发的时限（23 小时），请核对群发结果后新建任务"
   }
 }

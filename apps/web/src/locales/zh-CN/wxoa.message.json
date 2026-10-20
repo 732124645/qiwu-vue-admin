@@ -1,0 +1,40 @@
+{
+  "wxoa": {
+    "message": {
+      "col": {
+        "occurredAt": "发生时间",
+        "content": "内容",
+        "sendState": "发送状态",
+        "errcode": "微信错误码",
+        "wxMsgId": "微信消息 ID"
+      },
+      "direction": {
+        "in": "收到",
+        "out": "发出"
+      },
+      "body": {
+        "recognition": "语音识别：{text}",
+        "download": "下载语音",
+        "truncated": "内容过长，已截断保存"
+      },
+      "event": {
+        "subscribe": "关注",
+        "unsubscribe": "取消关注",
+        "SCAN": "已关注用户扫码",
+        "LOCATION": "上报位置",
+        "CLICK": "点击菜单",
+        "VIEW": "点击菜单打开网页",
+        "view_miniprogram": "点击菜单打开小程序",
+        "scancode_push": "菜单扫码",
+        "scancode_waitmsg": "菜单扫码并等待回复",
+        "pic_sysphoto": "菜单拍照发图",
+        "pic_photo_or_album": "菜单拍照或从相册发图",
+        "pic_weixin": "菜单从微信相册发图",
+        "location_select": "菜单发送位置",
+        "TEMPLATESENDJOBFINISH": "模板消息送达回执",
+        "MASSSENDJOBFINISH": "群发回执",
+        "PUBLISHJOBFINISH": "发布回执"
+      }
+    }
+  }
+}

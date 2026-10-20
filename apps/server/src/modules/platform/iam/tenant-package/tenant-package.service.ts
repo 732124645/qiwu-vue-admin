@@ -13,7 +13,9 @@ import {
   type TenantPackageVo,
 } from '@qiwu/shared'
 import type { SelectQueryBuilder } from 'typeorm'
+import { GRANT_SWITCHES, type Switch, switchedOff } from '../../../../core/auth/menu-features.js'
 import { PermVersion } from '../../../../core/auth/perm-version.js'
+import { AppConfigService } from '../../../../core/config/config.module.js'
 import { BaseCrudService } from '../../../../core/db/base-crud.service.js'
 import { forest } from '../../../../core/db/base-tree.service.js'
 import { type LinkTable, replaceLinks } from '../../../../core/db/links.js'
@@ -57,6 +59,7 @@ export class TenantPackageService extends BaseCrudService<TenantPackage> {
   constructor(
     txHost: TransactionHost<TransactionalAdapterTypeOrm>,
     private readonly permVersion: PermVersion,
+    private readonly cfg: AppConfigService,
   ) {
     super(txHost, TenantPackage)
   }
@@ -110,9 +113,13 @@ export class TenantPackageService extends BaseCrudService<TenantPackage> {
       .getMany()
   }
 
-  /** GET /menu-tree: every menu open to tenants (`platform_only = 0`) as a forest, for the grant tree. */
+  /**
+   * GET /menu-tree: every menu open to tenants (`platform_only = 0`) as a forest, for the grant tree;
+   * 与角色授权树一样，`GRANT_SWITCHES` 里关闭的功能（如公众号模块未启用）连同其下级菜单都不列出，
+   * 免得把一个不存在的模块配进套餐。
+   */
   async menuTree(): Promise<RoleMenuNode[]> {
-    const rows = await this.txHost.tx.query<
+    const all = await this.txHost.tx.query<
       {
         id: number
         parent_id: number
@@ -121,11 +128,16 @@ export class TenantPackageService extends BaseCrudService<TenantPackage> {
         name_i18n: RoleMenuNode['nameI18n']
         perms: string | null
         enabled: number
+        route_name: string | null
+        tree_path: string
       }[]
     >(
-      `SELECT id, parent_id, kind, name, name_i18n, perms, enabled FROM iam_menu
+      `SELECT id, parent_id, kind, name, name_i18n, perms, enabled, route_name, tree_path FROM iam_menu
         WHERE platform_only = 0 AND deleted_at IS NULL ORDER BY sort_no, id`,
     )
+    const on = (s: Switch) => !GRANT_SWITCHES.has(s) || this.cfg.get(s)
+    const hidden = all.filter((r) => switchedOff(r.route_name, on)).map((r) => `/${r.id}/`)
+    const rows = all.filter((r) => !hidden.some((path) => r.tree_path.includes(path)))
     return forest(
       rows.map((r) => ({
         id: Number(r.id),

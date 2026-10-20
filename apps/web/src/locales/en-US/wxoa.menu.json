@@ -1,0 +1,80 @@
+{
+  "wxoa": {
+    "menu": {
+      "kind": {
+        "default": "Default menu",
+        "conditional": "Conditional menus"
+      },
+      "state": {
+        "draft": "Not published",
+        "changed": "Unpublished changes",
+        "live": "Published"
+      },
+      "notice": {
+        "new": "New menu: save it before publishing",
+        "unsaved": "There are unsaved changes",
+        "unpublished": "There are unpublished changes: fans still see the menu published last",
+        "draft": "Not published yet: fans do not see this menu",
+        "live": "Published at {at}"
+      },
+      "newDefault": "Add the default menu",
+      "newConditional": "Add a conditional menu",
+      "noDefault": "No default menu yet",
+      "noConditional": "No conditional menus yet",
+      "conditionalHint": "A conditional menu matches a fan tag or a client platform and can be published once the default menu is",
+      "empty": "No menus yet: add the default menu, or pull the current one from WeChat",
+      "matchTag": "Tag: {tag}",
+      "matchPlatform": "Platform: {platform}",
+      "matchHint": "Choose at least one match condition",
+      "tagNeedsBrowse": "Matching a tag also needs the permission to view tags (fan management); ask an administrator",
+      "untitled": "Untitled",
+      "hasProblem": "(has a problem)",
+      "addButton": "Add a button",
+      "addSub": "Add a sub-button",
+      "pickButton": "Select or add a button in the phone preview",
+      "bytes": "{used}/{max} bytes",
+      "parentHint": "A button with sub-buttons only needs a name; remove all its sub-buttons to give it a kind",
+      "keyHint": "WeChat sends this KEY when a fan taps the button; click reply rules match on it",
+      "miniprogramUrlHint": "Older WeChat clients without mini program support open this web page",
+      "legacy": "This button kind is retired: it can only be kept as it is or removed",
+      "moveEarlier": "Move earlier",
+      "moveLater": "Move later",
+      "removeButton": "Remove button",
+      "fixErrors": "Please fix the marked problems first",
+      "discard": "Discard changes",
+      "discardConfirm": "The custom menu “{label}” has unsaved changes. Discard them?",
+      "close": "Close",
+      "publish": {
+        "action": "Publish",
+        "confirm": "Fans' WeChat clients may take a few minutes to show the new menu (following again shows it at once). Publish now?",
+        "done": "Published",
+        "saveFirst": "Save before publishing"
+      },
+      "remove": {
+        "confirm": "Delete the menu “{label}”?",
+        "confirmLive": "Delete the menu “{label}”? It is published and will be removed from WeChat as well."
+      },
+      "pull": {
+        "action": "Pull from WeChat",
+        "confirm": "The account's live menus will replace their local counterparts (the default menu and each conditional menu WeChat still has); their unpublished changes are lost, and so are unsaved changes. Local menus WeChat does not have stay as unpublished drafts. Pull now?",
+        "done": "Pulled",
+        "skipped": {
+          "no_match": "Pulled; {count} conditional menu(s) matching neither a tag nor a platform could not be imported",
+          "invalid": "Pulled; {count} menu(s) with buttons or a match rule this system cannot hold could not be imported"
+        }
+      },
+      "clear": {
+        "action": "Clear live menus",
+        "confirm": "Every live menu of the account (conditional ones included) will be deleted and fans will see no menu. Clear now?",
+        "done": "Live menus cleared"
+      },
+      "tryMatch": {
+        "action": "Test matching",
+        "title": "Test menu matching",
+        "hint": "Enter a fan's openid or WeChat ID to see the menu WeChat shows that fan",
+        "run": "Test",
+        "none": "No menu matches this fan"
+      }
+    }
+  }
+}

@@ -121,7 +121,14 @@ export class TenantService {
     private readonly acting: TenantActing,
   ) {}
 
-  async page({ code, name, packageId, enabled, ...paging }: TenantQuery): Promise<Page<TenantVo>> {
+  async page({
+    code,
+    name,
+    packageId,
+    enabled,
+    appId,
+    ...paging
+  }: TenantQuery): Promise<Page<TenantVo>> {
     const qb = this.repo.createQueryBuilder('t')
     if (code) qb.andWhere('t.code LIKE :code', { code: contains(code) })
     if (name) {
@@ -134,6 +141,13 @@ export class TenantService {
     }
     if (packageId !== undefined) qb.andWhere('t.packageId = :packageId', { packageId })
     if (enabled !== undefined) qb.andWhere('t.enabled = :enabled', { enabled })
+    // 公众号 AppID 跨租户唯一：平台人员按 AppID 查是哪个租户占用（释放方式见 docs/multi-tenancy.md）
+    if (appId)
+      qb.andWhere(
+        // qw:cross-tenant the platform's tenant list looks up which tenant holds the AppID
+        't.id IN (SELECT a.tenant_id FROM wxoa_account a WHERE a.app_id = :appId AND a.deleted_at IS NULL)',
+        { appId },
+      )
     const { items, total } = await paginate(qb, paging)
     return { items: await this.vos(items), total }
   }

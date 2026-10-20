@@ -154,6 +154,23 @@ export const Err = {
   /** a built-in client (`console`) is read-only: change, enable/disable, reset secret, delete */
   OAUTH_CLIENT_BUILTIN: def('B4010', 422, 'error.oauth.client_builtin'),
 
+  /** WeChat Official Accounts gateway and account management errors. */
+  WXOA_UPSTREAM: def('B6001', 502, 'error.wxoa.upstream'),
+  WXOA_UPSTREAM_REFUSED: def('B6002', 422, 'error.wxoa.upstream_refused'),
+  WXOA_API_UNAUTHORIZED: def('B6003', 422, 'error.wxoa.api_unauthorized'),
+  WXOA_IP_NOT_ALLOWED: def('B6004', 422, 'error.wxoa.ip_not_allowed'),
+  WXOA_QUOTA_EXCEEDED: def('B6005', 429, 'error.wxoa.quota_exceeded'),
+  WXOA_CREDENTIAL_INVALID: def('B6006', 422, 'error.wxoa.credential_invalid'),
+  WXOA_SEND_WINDOW: def('B6007', 422, 'error.wxoa.send_window'),
+  WXOA_AES_KEY_REQUIRED: def('B6008', 422, 'error.wxoa.aes_key_required'),
+  WXOA_DEFAULT_MENU_REQUIRED: def('B6009', 422, 'error.wxoa.default_menu_required'),
+  WXOA_SYNC_RUNNING: def('B6010', 409, 'error.wxoa.sync_running'),
+  WXOA_ACCOUNT_DISABLED: def('B6011', 422, 'error.wxoa.account_disabled'),
+  WXOA_DRAFT_UNSYNCED: def('B6101', 409, 'error.wxoa.draft_unsynced'),
+  WXOA_COVER_UNAVAILABLE: def('B6102', 422, 'error.wxoa.cover_unavailable'),
+  /** retry of a mass job past WeChat's 24-hour clientmsgid window (23 hours after it was created) */
+  WXOA_MASS_RETRY_EXPIRED: def('B6103', 409, 'error.wxoa.mass_retry_expired'),
+
   /** upload without a `file` part */
   STORAGE_FILE_REQUIRED: def('C1001', 400, 'error.storage.file_required'),
   /** extension not allowed, or the content (magic number) is not what the extension says; params `{ ext }` */

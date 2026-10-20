@@ -118,5 +118,21 @@
     "request_invalid": "Invalid authorization request: response_type must be code and the requested scopes must be among the client's",
     "insufficient_scope": "This token acts for no user and cannot read user info",
     "client_builtin": "Built-in clients are protected against this action"
+  },
+  "wxoa": {
+    "upstream": "WeChat could not be reached or sent an answer that could not be read. Please try again later",
+    "upstream_refused": "WeChat refused the request (errcode {errcode})",
+    "api_unauthorized": "This official account may not call this WeChat API; unverified and sandbox accounts often lack it",
+    "ip_not_allowed": "This server's IP {ip} is not on the account's IP whitelist. Add it on the WeChat Official Accounts Platform and try again",
+    "quota_exceeded": "Today's call quota of this WeChat API is used up",
+    "credential_invalid": "WeChat does not accept the account's AppID or AppSecret. Check them and enter them again",
+    "send_window": "Cannot send a customer-service message to this fan: the reply time or message count is used up",
+    "aes_key_required": "Compatible and secure modes need an EncodingAESKey",
+    "default_menu_required": "Publish the default menu before a conditional menu",
+    "sync_running": "A sync of this kind is running for the account already. Try again when it finishes",
+    "account_disabled": "This official account is disabled. Enable it first",
+    "draft_unsynced": "The draft has unsynced changes; sync it first",
+    "cover_unavailable": "The cover is not an available permanent image material",
+    "mass_retry_expired": "This mass job is past its retry window (23 hours). Check its outcome and create a new job if needed"
   }
 }

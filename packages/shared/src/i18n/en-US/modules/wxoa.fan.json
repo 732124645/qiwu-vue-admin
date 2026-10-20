@@ -1,0 +1,16 @@
+{
+  "field": {
+    "wxoa": {
+      "fan": {
+        "accountId": "Official account",
+        "subscribed": "Following",
+        "blocked": "Blocked",
+        "tagId": "Tag",
+        "openId": "openid",
+        "remark": "Remark",
+        "fanIds": "Selected fans",
+        "op": "Operation"
+      }
+    }
+  }
+}

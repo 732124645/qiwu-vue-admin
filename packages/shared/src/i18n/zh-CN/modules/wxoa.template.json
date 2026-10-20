@@ -1,0 +1,16 @@
+{
+  "field": {
+    "wxoa": {
+      "template": {
+        "accountId": "公众号账号",
+        "refresh": "重新拉取",
+        "fanIds": "接收粉丝",
+        "data": "模板数据",
+        "url": "跳转链接",
+        "miniprogram": "跳转小程序",
+        "appId": "小程序 AppID",
+        "pagePath": "小程序页面路径"
+      }
+    }
+  }
+}

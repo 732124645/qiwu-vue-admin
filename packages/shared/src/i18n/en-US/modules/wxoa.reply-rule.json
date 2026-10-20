@@ -1,0 +1,26 @@
+{
+  "field": {
+    "wxoa": {
+      "replyRule": {
+        "accountId": "Official account",
+        "name": "Rule name",
+        "triggerKind": "Trigger",
+        "matchMode": "Match mode",
+        "keywords": "Keywords",
+        "eventKey": "Menu key or QR scene",
+        "priority": "Priority",
+        "replyKind": "Reply type",
+        "replyBody": "Reply content",
+        "materialId": "Material",
+        "enabled": "Enabled",
+        "content": "Text",
+        "title": "Title",
+        "description": "Description",
+        "musicUrl": "Music link",
+        "hqMusicUrl": "High-quality music link",
+        "url": "Link",
+        "picUrl": "Picture link"
+      }
+    }
+  }
+}

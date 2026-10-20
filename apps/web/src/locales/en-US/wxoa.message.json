@@ -1,0 +1,40 @@
+{
+  "wxoa": {
+    "message": {
+      "col": {
+        "occurredAt": "Time",
+        "content": "Content",
+        "sendState": "Send state",
+        "errcode": "WeChat error code",
+        "wxMsgId": "WeChat message ID"
+      },
+      "direction": {
+        "in": "Received",
+        "out": "Sent"
+      },
+      "body": {
+        "recognition": "Recognized speech: {text}",
+        "download": "Download voice",
+        "truncated": "Too long: stored truncated"
+      },
+      "event": {
+        "subscribe": "Followed",
+        "unsubscribe": "Unfollowed",
+        "SCAN": "Scanned a QR code (already following)",
+        "LOCATION": "Reported location",
+        "CLICK": "Menu click",
+        "VIEW": "Menu link opened",
+        "view_miniprogram": "Menu mini program opened",
+        "scancode_push": "Menu scan",
+        "scancode_waitmsg": "Menu scan awaiting a reply",
+        "pic_sysphoto": "Menu photo taken",
+        "pic_photo_or_album": "Menu photo or album picture",
+        "pic_weixin": "Menu WeChat album picture",
+        "location_select": "Menu location sent",
+        "TEMPLATESENDJOBFINISH": "Template message receipt",
+        "MASSSENDJOBFINISH": "Broadcast receipt",
+        "PUBLISHJOBFINISH": "Publish receipt"
+      }
+    }
+  }
+}

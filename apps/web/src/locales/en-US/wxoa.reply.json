@@ -1,0 +1,42 @@
+{
+  "wxoa": {
+    "reply": {
+      "entity": "reply rule",
+      "col": {
+        "match": "Condition"
+      },
+      "when": {
+        "subscribe": "When a fan follows",
+        "default": "When no other rule matches"
+      },
+      "triggerHint": {
+        "subscribe": "Replies when a fan follows; a follow through a channel QR code uses the scan rule of its scene first",
+        "keyword": "Replies when a fan's text (or recognized voice) matches a keyword",
+        "default": "Replies to a fan's message no rule matched (never to events)",
+        "click": "Replies when a fan taps a menu click button with the same key",
+        "scan": "Replies when a fan scans a channel QR code with the same scene (a scan to follow too)"
+      },
+      "keywordPlaceholder": "Type a keyword and press Enter",
+      "keywordHint": "Up to {max}, each at most 30 characters; leading and trailing spaces and letter case are ignored",
+      "priorityHint": "Higher values match first; at the same priority exact matches come before contains matches",
+      "clickKey": "Menu key",
+      "clickHint": "Exactly the key of the menu button (case-sensitive)",
+      "scanScene": "QR code scene",
+      "scanPlaceholder": "Pick a channel QR code of this account, or type a scene",
+      "scanHint": "Letters, digits, underscores and hyphens only, at most 64",
+      "bytes": "{used}/{max} bytes",
+      "material": {
+        "image": "Image material",
+        "voice": "Voice material",
+        "video": "Video material",
+        "thumb": "Thumbnail material"
+      },
+      "materialNo": "Material #{id}",
+      "materialNone": "None chosen",
+      "materialPick": "Choose material",
+      "materialChange": "Change",
+      "materialNeedsBrowse": "Choosing a material also needs the permission to view materials; ask an administrator",
+      "soleHint": "An account can have one enabled follow reply and one enabled default reply"
+    }
+  }
+}

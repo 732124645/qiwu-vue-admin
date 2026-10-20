@@ -1,0 +1,36 @@
+{
+  "wxoa": {
+    "stat": {
+      "range": "Date range",
+      "query": "Query",
+      "rangeHint": "Use at most {max} past days and exclude today",
+      "group": {
+        "users": "User changes",
+        "messages": "Messages",
+        "interfaces": "Interfaces",
+        "articles": "Articles"
+      },
+      "failed": "This group could not be loaded",
+      "metric": {
+        "new_user": "New users",
+        "cancel_user": "Unfollows",
+        "cumulate_user": "Total users",
+        "msg_user": "Messaging users (summed over message types)",
+        "msg_count": "Messages",
+        "callback_count": "Calls",
+        "fail_count": "Failures",
+        "total_time_cost": "Total time",
+        "max_time_cost": "Max time",
+        "read_user": "Readers",
+        "share_user": "Sharers",
+        "zaikan_user": "Wow users",
+        "like_user": "Likes",
+        "comment_count": "Comments",
+        "collection_user": "Favorites",
+        "redirect_ori_page_user": "Original page readers",
+        "send_page_count": "Delivered"
+      },
+      "quota": "API quota"
+    }
+  }
+}

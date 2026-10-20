@@ -1,0 +1,33 @@
+{
+  "wxoa": {
+    "template": {
+      "tab": {
+        "templates": "Templates",
+        "records": "Send records"
+      },
+      "col": {
+        "title": "Title",
+        "content": "Content",
+        "industry": "Industry",
+        "templateId": "Template ID",
+        "example": "Example"
+      },
+      "refresh": "Refresh from WeChat",
+      "empty": "No templates: add them under Template messages on the WeChat Official Accounts Platform, then refresh from WeChat",
+      "removeConfirm": "Delete the template “{title}”? It is deleted on WeChat too and can no longer be sent.",
+      "send": {
+        "action": "Send",
+        "title": "Send a template message",
+        "template": "Template",
+        "fansPlaceholder": "Search followed fans by remark or OpenID",
+        "fansLimit": "{count} chosen, at most {max} per send",
+        "needFanBrowse": "Choosing fans needs the permission to browse fans",
+        "noFields": "This template has no fields to fill in",
+        "done": "{count} messages queued; they are sent in the background, see the send records"
+      },
+      "records": {
+        "occurredAt": "Sent at"
+      }
+    }
+  }
+}

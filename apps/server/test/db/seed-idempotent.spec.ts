@@ -78,6 +78,8 @@ import {
   WF_TEMPLATE_KEY_PREFIX,
   wfPerms,
   WX_MP_ENABLED_PARAM,
+  WXOA_RETENTION_DAYS_DEFAULT,
+  wxoaParams,
   WX_SUBSCRIBE_ENABLED_PARAM,
   WX_SUBSCRIBE_TEMPLATES_PARAM,
   wxSubscribeTemplates,
@@ -1198,7 +1200,15 @@ it('menu groups and pages follow the requested order', async () => {
     ).map((r: { route_name: string }) => r.route_name)
   const id = async (route: string) =>
     (await one('SELECT id FROM iam_menu WHERE route_name = ?', [route])).id
-  expect(await children(0)).toEqual(['home', 'workflow', 'biz', 'system', 'monitor', 'devtools'])
+  expect(await children(0)).toEqual([
+    'home',
+    'workflow',
+    'biz',
+    'wxoa',
+    'system',
+    'monitor',
+    'devtools',
+  ])
   expect(await children(await id('workflow'))).toEqual([
     'wf-start',
     'wf-todo',
@@ -2368,6 +2378,21 @@ it('dicts with labels in every language, params with defaults', async () => {
     'wf.category',
     'wf.instance_state',
     'wf.task_state',
+    'wxoa.account_kind',
+    'wxoa.button_kind',
+    'wxoa.channel',
+    'wxoa.client_platform',
+    'wxoa.crypto_mode',
+    'wxoa.mass_state',
+    'wxoa.mass_target',
+    'wxoa.match_mode',
+    'wxoa.media_kind',
+    'wxoa.msg_kind',
+    'wxoa.publish_state',
+    'wxoa.qr_kind',
+    'wxoa.reply_kind',
+    'wxoa.reply_trigger',
+    'wxoa.send_state',
   ])
   const entries: { dict_code: string; value: string; label: string; label_i18n: any }[] =
     await ds.query('SELECT dict_code, value, label, label_i18n FROM cfg_dict_entry')
@@ -2468,6 +2493,8 @@ it('dicts with labels in every language, params with defaults', async () => {
     [oauthParams.consentTtlDays]: String(OAUTH_CONSENT_TTL_DAYS_DEFAULT),
     [WX_SUBSCRIBE_ENABLED_PARAM]: 'false',
     [WX_SUBSCRIBE_TEMPLATES_PARAM]: expect.any(String),
+    [wxoaParams.copyInbound]: 'true',
+    [wxoaParams.retentionDays]: String(WXOA_RETENTION_DAYS_DEFAULT),
     // App updates: no update prompt unless switched on
     [APP_UPDATE_PARAMS.enabled]: 'false',
     [APP_UPDATE_PARAMS.reviewVersion]: '',

@@ -1,0 +1,80 @@
+{
+  "wxoa": {
+    "menu": {
+      "kind": {
+        "default": "默认菜单",
+        "conditional": "个性化菜单"
+      },
+      "state": {
+        "draft": "未发布",
+        "changed": "有未发布的修改",
+        "live": "已发布"
+      },
+      "notice": {
+        "new": "新菜单：保存后才能发布",
+        "unsaved": "有未保存的修改",
+        "unpublished": "有未发布的修改：粉丝看到的仍是上次发布的菜单",
+        "draft": "尚未发布：粉丝还看不到这个菜单",
+        "live": "已于 {at} 发布"
+      },
+      "newDefault": "新建默认菜单",
+      "newConditional": "新建个性化菜单",
+      "noDefault": "还没有默认菜单",
+      "noConditional": "还没有个性化菜单",
+      "conditionalHint": "个性化菜单按粉丝标签或客户端平台匹配，须在默认菜单发布后才能发布",
+      "empty": "还没有菜单：新建默认菜单，或从微信拉取当前的菜单",
+      "matchTag": "标签：{tag}",
+      "matchPlatform": "平台：{platform}",
+      "matchHint": "至少选择一个匹配条件",
+      "tagNeedsBrowse": "按标签匹配还需要标签查看权限（粉丝管理），请联系管理员授予",
+      "untitled": "未命名",
+      "hasProblem": "（有问题）",
+      "addButton": "添加菜单",
+      "addSub": "添加子菜单",
+      "pickButton": "在手机预览中选择或添加菜单按钮",
+      "bytes": "{used}/{max} 字节",
+      "parentHint": "带子菜单的按钮只需填写名称；删除全部子菜单后可以设置按钮类型",
+      "keyHint": "粉丝点击时微信推送这个 KEY，自动回复的点击规则按它匹配",
+      "miniprogramUrlHint": "不支持小程序的旧版微信客户端会打开这个网页",
+      "legacy": "这是已停用的按钮类型，只能原样保留或删除",
+      "moveEarlier": "前移",
+      "moveLater": "后移",
+      "removeButton": "删除按钮",
+      "fixErrors": "请先修正标出的问题",
+      "discard": "放弃修改",
+      "discardConfirm": "自定义菜单“{label}”有未保存的修改，确定放弃吗？",
+      "close": "关闭",
+      "publish": {
+        "action": "发布",
+        "confirm": "发布后，粉丝的微信客户端可能要几分钟后才显示新菜单（重新关注可立即看到）。确定发布吗？",
+        "done": "已发布",
+        "saveFirst": "请先保存再发布"
+      },
+      "remove": {
+        "confirm": "确定删除菜单“{label}”吗？",
+        "confirmLive": "确定删除菜单“{label}”吗？它已发布，会同时从微信删除。"
+      },
+      "pull": {
+        "action": "从微信拉取",
+        "confirm": "将用公众号当前生效的菜单覆盖本地对应的菜单（默认菜单，以及微信上仍存在的个性化菜单），这些菜单未发布的修改会丢失，当前未保存的修改也会丢失；微信上没有的本地菜单保留为未发布草稿。确定拉取吗？",
+        "done": "已拉取",
+        "skipped": {
+          "no_match": "已拉取；{count} 个个性化菜单既没有匹配标签也没有匹配平台，未能导入",
+          "invalid": "已拉取；{count} 个菜单含本系统无法保存的按钮或匹配规则，未能导入"
+        }
+      },
+      "clear": {
+        "action": "清空线上菜单",
+        "confirm": "将删除公众号当前生效的全部菜单（含个性化菜单），粉丝将看不到菜单。确定清空吗？",
+        "done": "线上菜单已清空"
+      },
+      "tryMatch": {
+        "action": "测试匹配",
+        "title": "测试菜单匹配",
+        "hint": "输入粉丝的 openid 或微信号，查看微信给这个粉丝显示的菜单",
+        "run": "测试",
+        "none": "这个粉丝没有匹配到菜单"
+      }
+    }
+  }
+}

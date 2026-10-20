@@ -12,7 +12,8 @@
     "string": "{field}最多 {maximum} 个字符",
     "number": "{field}不能大于 {maximum}",
     "number_exclusive": "{field}必须小于 {maximum}",
-    "array": "{field}最多 {maximum} 项"
+    "array": "{field}最多 {maximum} 项",
+    "date": "{field}最多只能覆盖 {maximum} 天"
   },
   "invalid_format": {
     "email": "{field}不是有效的邮箱地址",
@@ -85,6 +86,11 @@
     "duplicate": "{field}有重复项",
     "refresh_needs_code": "启用刷新令牌须同时启用授权码",
     "auto_approve_subset": "{field}只能从授权范围中选择"
+  },
+  "wxoa": {
+    "bytes": "{field}不能超过 {maxBytes} 字节",
+    "menu_match": "个性化菜单至少需要一个匹配条件（标签或客户端平台）",
+    "xml_char": "{field}含有不能发送的控制字符或不完整的字符"
   },
   "tenant_code_reserved": "{field}是保留字，不能使用",
   "tenant_domain": "{field}须为主机名：字母、数字、连字符与点（按小写保存），不含协议、端口、路径与通配符",

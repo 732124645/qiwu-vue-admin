@@ -7,13 +7,14 @@ import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { DOMWrapper, flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import ElementPlus from 'element-plus'
-import type { TenantVo } from '@qiwu/shared'
+import type { MenuNode, TenantVo } from '@qiwu/shared'
 import { dialogs } from '@/core/dialog'
 import DialogHost from '@/core/dialog/DialogHost.vue'
 import { i18n, setLocale } from '@/core/i18n'
 import { vPerm } from '@/core/permission'
 import { accessToken } from '@/core/request/http'
 import { useAuthStore } from '@/core/stores/auth'
+import { useMenuStore } from '@/core/stores/menu'
 import { useTagsStore } from '@/core/stores/tags'
 import TenantPage from '@/views/platform/iam/tenant/index.vue'
 import { me, mockApi, ok, type Route } from './mock-api'
@@ -113,6 +114,20 @@ afterEach(() => {
 })
 
 describe('tenant page', () => {
+  it('the AppID lookup shows only while the Official Account menus exist, and searches by it', async () => {
+    const calls = await mountPage({})
+    const appIdInput = () => page.find('.qw-search-panel input[name="appId"]')
+    expect(appIdInput().exists()).toBe(false)
+    useMenuStore().tree = [{ id: 9, routeName: 'wxoa', children: [] } as unknown as MenuNode]
+    await nextTick()
+    await appIdInput().setValue('wx0123456789abcdef')
+    await page.find('.qw-search-panel form').trigger('submit')
+    await flushPromises()
+    expect(calls.filter((c) => c.url === '/iam/tenants').at(-1)!.params).toMatchObject({
+      appId: 'wx0123456789abcdef',
+    })
+  })
+
   it('lists tenants; the default one cannot be disabled, entered or have a password reset', async () => {
     await mountPage({})
     const acme = rowOf('acme.example.org')

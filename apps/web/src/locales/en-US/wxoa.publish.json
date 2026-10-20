@@ -1,0 +1,29 @@
+{
+  "wxoa": {
+    "publish": {
+      "empty": "No published records",
+      "pull": {
+        "action": "Pull from WeChat",
+        "done": "Published records pulled"
+      },
+      "removeConfirm": "Delete published record “{title}”? This cannot be undone.",
+      "col": {
+        "title": "First article",
+        "state": "State",
+        "publishId": "Publish ID",
+        "articleId": "Article ID",
+        "finishedAt": "Finished at",
+        "articleUrls": "Article links"
+      },
+      "articleLink": "Article {n}",
+      "create": {
+        "action": "Publish",
+        "pick": "Choose a draft to publish",
+        "title": "Confirm publishing",
+        "confirm": "Publish draft “{title}”? Fans will be able to see the articles.",
+        "done": "Submitted for publishing; the result shows in the records shortly"
+      },
+      "commentsHint": "Article comments are managed from the article records on the Mass messages page: WeChat’s comment API only takes the msg_data_id a mass send returns, which published articles do not have."
+    }
+  }
+}

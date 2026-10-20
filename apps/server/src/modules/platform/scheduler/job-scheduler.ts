@@ -132,6 +132,15 @@ export class JobScheduler implements OnApplicationBootstrap, BeforeApplicationSh
     for (const task of await this.tasks.findBy({ enabled: true })) {
       // through sync: a message handled meanwhile is never overwritten by this older read
       await this.sync(task.id)
+      // 处理器未注册（其模块被开关关闭或已删除）：不调度也不补跑，免得每次启动都记一条失败；
+      // 启动时记一条警告，运维才知道这个启用的任务实际不会运行
+      if (!this.jobs.get(task.handler)) {
+        this.logger.warn(
+          { taskId: task.id, handler: task.handler },
+          'enabled task not scheduled: its handler is not registered',
+        )
+        continue
+      }
       await this.catchUp(task).catch((err: unknown) =>
         this.logger.error({ taskId: task.id, err }, 'misfire check failed'),
       )
@@ -172,15 +181,17 @@ export class JobScheduler implements OnApplicationBootstrap, BeforeApplicationSh
   }
 
   /**
-   * Schedules the task as stored (enabled), or drops its cron job (disabled, deleted). Syncs of one task
-   * are chained: each reads the task after the previous one has installed its schedule.
+   * Schedules the task as stored (enabled, its handler registered), or drops its cron job (disabled,
+   * deleted, or a handler of a module switched off such as `APP_WXOA`: it would only record a failed run
+   * at every fire; a manual run still records one). Syncs of one task are chained: each reads the task
+   * after the previous one has installed its schedule.
    */
   sync(taskId: number): Promise<void> {
     const next = (this.syncing.get(taskId) ?? Promise.resolve())
       .catch(() => undefined)
       .then(async () => {
         const task = await this.tasks.findOneBy({ id: taskId })
-        if (task?.enabled) this.schedule(task)
+        if (task?.enabled && this.jobs.get(task.handler)) this.schedule(task)
         else this.unschedule(taskId)
       })
     this.syncing.set(taskId, next)
@@ -195,10 +206,10 @@ export class JobScheduler implements OnApplicationBootstrap, BeforeApplicationSh
   /** The enabled tasks as stored against this instance's cron jobs: each difference is re-synced. */
   private async reconcile(): Promise<void> {
     const stored = await this.tasks.find({
-      select: { id: true, cron: true },
+      select: { id: true, cron: true, handler: true },
       where: { enabled: true },
     })
-    const want = new Map(stored.map((t) => [t.id, t.cron]))
+    const want = new Map(stored.filter((t) => this.jobs.get(t.handler)).map((t) => [t.id, t.cron]))
     const have = new Map<number, string>()
     for (const [name, job] of this.crons.getCronJobs())
       if (name.startsWith('job_task:'))

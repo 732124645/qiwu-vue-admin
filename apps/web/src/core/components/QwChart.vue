@@ -1,21 +1,24 @@
 <script lang="ts">
 import type { ComposeOption } from 'echarts/core'
-import type { BarSeriesOption, GaugeSeriesOption } from 'echarts/charts'
+import type { BarSeriesOption, GaugeSeriesOption, LineSeriesOption } from 'echarts/charts'
 import type {
   AriaComponentOption,
   GridComponentOption,
   TitleComponentOption,
   TooltipComponentOption,
+  LegendComponentOption,
 } from 'echarts/components'
 
 /** What QwChart draws: the series and components it registers (add both here for a new chart kind). */
 export type QwChartOption = ComposeOption<
   | BarSeriesOption
   | GaugeSeriesOption
+  | LineSeriesOption
   | AriaComponentOption
   | GridComponentOption
   | TitleComponentOption
   | TooltipComponentOption
+  | LegendComponentOption
 >
 </script>
 
@@ -24,8 +27,14 @@ import { computed, nextTick, shallowRef, watch } from 'vue'
 import VChart from 'vue-echarts'
 import { use } from 'echarts/core'
 import { SVGRenderer } from 'echarts/renderers'
-import { BarChart, GaugeChart } from 'echarts/charts'
-import { AriaComponent, GridComponent, TitleComponent, TooltipComponent } from 'echarts/components'
+import { BarChart, GaugeChart, LineChart } from 'echarts/charts'
+import {
+  AriaComponent,
+  GridComponent,
+  LegendComponent,
+  TitleComponent,
+  TooltipComponent,
+} from 'echarts/components'
 import { chartLocale } from '@/core/i18n'
 import { useAppStore } from '@/core/stores/app'
 
@@ -34,7 +43,9 @@ use([
   SVGRenderer,
   BarChart,
   GaugeChart,
+  LineChart,
   AriaComponent,
+  LegendComponent,
   GridComponent,
   TitleComponent,
   TooltipComponent,

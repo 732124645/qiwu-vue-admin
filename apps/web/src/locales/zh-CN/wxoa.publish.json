@@ -1,0 +1,29 @@
+{
+  "wxoa": {
+    "publish": {
+      "empty": "暂无发表记录",
+      "pull": {
+        "action": "从微信拉取",
+        "done": "发表记录拉取完成"
+      },
+      "removeConfirm": "删除发表记录“{title}”？此操作不可恢复。",
+      "col": {
+        "title": "首篇标题",
+        "state": "状态",
+        "publishId": "发表 ID",
+        "articleId": "文章 ID",
+        "finishedAt": "完成时间",
+        "articleUrls": "文章链接"
+      },
+      "articleLink": "第 {n} 篇",
+      "create": {
+        "action": "发布",
+        "pick": "选择要发布的草稿",
+        "title": "确认发布",
+        "confirm": "发布草稿“{title}”？发布后粉丝可以看到文章。",
+        "done": "已提交发布，结果稍后在发表记录中更新"
+      },
+      "commentsHint": "文章留言在“群发消息”页的图文群发记录里管理：微信的留言接口只认群发返回的 msg_data_id，发布的文章没有它。"
+    }
+  }
+}

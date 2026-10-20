@@ -1,0 +1,85 @@
+{
+  "wxoa": {
+    "mass": {
+      "compose": "群发消息",
+      "target": {
+        "label": "发送对象",
+        "all": "全部粉丝",
+        "tag": "标签粉丝",
+        "openids": "OpenID 列表",
+        "tagLabel": "标签",
+        "openIds": "OpenID",
+        "openIdsPlaceholder": "输入至少两个 OpenID，使用空格或逗号分隔",
+        "openIdsHint": "已识别 {count} 个"
+      },
+      "kindLabel": "消息类型",
+      "kind": {
+        "text": "文字",
+        "image": "图片",
+        "voice": "语音",
+        "video": "视频",
+        "mpnews": "图文"
+      },
+      "text": "文字内容",
+      "mediaId": "素材 ID",
+      "draft": "图文草稿",
+      "chooseDraft": "选择草稿",
+      "changeDraft": "更换草稿",
+      "ignoreReprint": "被判定为转载时仍继续群发",
+      "preview": {
+        "openId": "预览粉丝 OpenID",
+        "action": "预览",
+        "done": "预览已发送"
+      },
+      "send": "群发",
+      "sent": "群发任务已提交",
+      "confirmTitle": "确认群发",
+      "confirm": {
+        "all": "将向全部粉丝群发此消息，确认继续？",
+        "tag": "将向标签“{tag}”下的粉丝群发此消息，确认继续？",
+        "openids": "将向 {count} 个 OpenID 群发此消息，确认继续？"
+      },
+      "removeConfirm": "删除这条群发记录？",
+      "validation": {
+        "tag": "请选择标签",
+        "openIds": "请输入至少两个 OpenID",
+        "text": "请输入文字内容",
+        "media": "请输入素材 ID",
+        "draft": "请选择图文草稿",
+        "previewOpenId": "请输入预览粉丝的 OpenID"
+      },
+      "empty": "暂无群发记录",
+      "col": {
+        "id": "任务 ID",
+        "target": "对象",
+        "kind": "类型",
+        "state": "状态",
+        "clientMsgId": "客户端 ID",
+        "finishedAt": "完成时间",
+        "receipt": "回执"
+      },
+      "comments": {
+        "action": "留言",
+        "title": "文章留言",
+        "all": "全部",
+        "elected": "精选",
+        "empty": "暂无留言",
+        "select": "精选",
+        "unselect": "取消精选",
+        "reply": "回复",
+        "replyPlaceholder": "输入回复内容",
+        "removeConfirm": "删除这条留言？",
+        "article": "第几篇",
+        "open": "打开留言",
+        "close": "关闭留言",
+        "opened": "已打开留言",
+        "closed": "已关闭留言",
+        "removeReply": "删除回复",
+        "removeReplyConfirm": "删除这条回复？"
+      },
+      "retry": "重发",
+      "retryConfirm": "这条群发的结果未知，是否用同一客户端 ID 再提交一次？微信在 24 小时内会按它去重。",
+      "receipt": "总数 {total}，成功 {sent}，失败 {error}"
+    }
+  }
+}

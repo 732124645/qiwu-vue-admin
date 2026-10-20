@@ -26,7 +26,9 @@
     "sessionSweep": "Sweep ended online sessions",
     "notifyDispatch": "Dispatch pending notifications",
     "demoEcho": "Sample: echo a message",
-    "wfTaskRemind": "Send overdue to-do reminders"
+    "wfTaskRemind": "Send overdue to-do reminders",
+    "wxoaMessagePurge": "Purge expired Official Account messages",
+    "wxoaFanSync": "Sync Official Account fans"
   },
   "inboxTemplate": {
     "schedulerJobTimeout": "Job timeout alert"

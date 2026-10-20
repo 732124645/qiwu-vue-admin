@@ -177,11 +177,15 @@ export const tenantUpdate = z
   .register(fieldDomains, { domain: 'iam.tenant' })
 export type TenantUpdate = z.input<typeof tenantUpdate>
 
-/** GET query: paging, sort and the list filters (code and name contain, the rest equal). */
+/**
+ * GET query: paging, sort and the list filters (code and name contain, the rest equal; `appId`: the
+ * tenant holding a live Official Account of that AppID).
+ */
 export const tenantQuery = pageQuery(['code', 'name', 'expiresAt', 'createdAt', 'id'])
   .extend({
     code: z.string().trim().max(32).optional(),
     name: z.string().trim().max(64).optional(),
+    appId: z.string().trim().max(32).optional(),
     packageId: z.coerce.number().int().positive().optional(),
     enabled: z.stringbool().optional(),
   })

@@ -1,0 +1,43 @@
+{
+  "wxoa": {
+    "qrcode": {
+      "entity": "QR code",
+      "col": {
+        "image": "Code",
+        "scanCount": "Scans",
+        "subscribeCount": "Follows",
+        "expiresAt": "Expires at",
+        "qrUrl": "Code content"
+      },
+      "expired": "Expired",
+      "never": "Never expires",
+      "download": "Download",
+      "unit": {
+        "minute": "Minutes",
+        "hour": "Hours",
+        "day": "Days"
+      },
+      "form": {
+        "validity": "Validity",
+        "sceneHint": "Letters, digits, underscores or hyphens, up to 64; unique within the account and fixed once created",
+        "expiryHint": "From {min} seconds to {days} days",
+        "permanentHint": "Permanent codes are limited in number and cannot be deleted on WeChat: one deleted here keeps working",
+        "tagHint": "Fans who scan the code or follow through it get this tag",
+        "noTag": "No tag"
+      },
+      "stats": {
+        "action": "Stats",
+        "title": "Scans of {name}",
+        "days": "Last {days} days",
+        "scans": "Scans",
+        "subscribes": "Follows",
+        "scansTotal": "Scans: {count}",
+        "subscribesTotal": "Follows: {count}"
+      },
+      "removeConfirm": {
+        "temporary": "Delete the QR code “{name}”?",
+        "permanent": "Delete the QR code “{name}”? Only the record here is deleted: the permanent code keeps working on WeChat and still counts against the limit, but its scans are no longer counted or tagged."
+      }
+    }
+  }
+}

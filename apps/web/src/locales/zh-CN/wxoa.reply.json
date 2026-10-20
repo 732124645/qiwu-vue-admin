@@ -1,0 +1,42 @@
+{
+  "wxoa": {
+    "reply": {
+      "entity": "回复规则",
+      "col": {
+        "match": "触发条件"
+      },
+      "when": {
+        "subscribe": "粉丝关注时",
+        "default": "其它规则都未命中时"
+      },
+      "triggerHint": {
+        "subscribe": "粉丝关注时回复；扫描渠道二维码关注时，优先使用该二维码场景的扫码规则",
+        "keyword": "粉丝发送的文字（或语音识别结果）命中关键词时回复",
+        "default": "粉丝的消息没有命中任何规则时回复（不对事件回复）",
+        "click": "粉丝点击自定义菜单里 KEY 相同的“点击推事件”按钮时回复",
+        "scan": "粉丝扫描场景相同的渠道二维码时回复（含扫码关注）"
+      },
+      "keywordPlaceholder": "输入关键词后按回车",
+      "keywordHint": "最多 {max} 个，每个不超过 30 个字；比较时忽略首尾空格和英文大小写",
+      "priorityHint": "数值大的规则先匹配；优先级相同时精确匹配先于包含匹配",
+      "clickKey": "菜单 KEY",
+      "clickHint": "与自定义菜单按钮的 KEY 完全一致（区分大小写）",
+      "scanScene": "二维码场景",
+      "scanPlaceholder": "选择本账号的渠道二维码，或输入场景值",
+      "scanHint": "场景值只能包含字母、数字、下划线和连字符，最多 64 位",
+      "bytes": "{used}/{max} 字节",
+      "material": {
+        "image": "图片素材",
+        "voice": "语音素材",
+        "video": "视频素材",
+        "thumb": "缩略图素材"
+      },
+      "materialNo": "素材 #{id}",
+      "materialNone": "未选择",
+      "materialPick": "选择素材",
+      "materialChange": "更换",
+      "materialNeedsBrowse": "选择素材还需要素材查看权限，请联系管理员授予",
+      "soleHint": "每个账号只能启用一条关注回复和一条默认回复"
+    }
+  }
+}

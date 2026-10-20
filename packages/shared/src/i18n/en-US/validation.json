@@ -12,7 +12,8 @@
     "string": "{field} must be at most {maximum} characters",
     "number": "{field} must be at most {maximum}",
     "number_exclusive": "{field} must be less than {maximum}",
-    "array": "{field} must have at most {maximum} items"
+    "array": "{field} must have at most {maximum} items",
+    "date": "{field} can cover at most {maximum} days"
   },
   "invalid_format": {
     "email": "{field} must be a valid email address",
@@ -85,6 +86,11 @@
     "duplicate": "{field} has duplicate items",
     "refresh_needs_code": "The refresh token grant needs the authorization code grant too",
     "auto_approve_subset": "{field} may only hold scopes the client has"
+  },
+  "wxoa": {
+    "bytes": "{field} must be at most {maxBytes} bytes",
+    "menu_match": "A conditional menu needs a tag or a client platform to match",
+    "xml_char": "{field} contains control characters or broken characters that cannot be sent"
   },
   "tenant_code_reserved": "{field} is reserved",
   "tenant_domain": "{field} must be a host name: letters, digits, hyphens and dots (kept in lower case), without scheme, port, path or wildcard",

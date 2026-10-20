@@ -32,6 +32,7 @@ SWAGGER_ENABLED=false
 ALLOW_PRIVATE_ENDPOINTS=false
 CODEGEN_WRITE=false
 APP_DEMO_MODE=false
+APP_WXOA=false
 STORAGE_LOCAL_ROOT=/srv/qiwu/uploads
 LOG_LEVEL=info
 ```
@@ -469,7 +470,11 @@ demo seed 给**新建**的种子管理员与 OA 示例用户免首登改密；�
 - `SWAGGER_ENABLED=true` 时服务端在 `/api/docs` 提供 Swagger UI（JSON：`/api/docs-json`）；默认 `false`，生产环境建议保持关闭。
 - `SWAGGER_ENABLED=false` 时不注册 Swagger UI / JSON 端点，菜单也自动隐藏；关闭后可人工检查两端点为 404。开发 `.env.example` 显式设为 `true`，正式部署须按本文设回 `false`。
 - 菜单"系统工具 → 系统接口"是 `link_type=iframe` 的页面，在布局内以 iframe 打开同源的 `/api/docs`（反向代理须把 `/api/` 转发到服务端）。
-- `SWAGGER_ENABLED=false` 时 `GET /api/auth/menus` 不下发该菜单（无论角色是否授权），前端也就不注册该路由。映射在 `apps/server/src/core/auth/menu-features.ts`（`route_name → 开关`，v1 仅此一项）：新增"随服务端开关出现"的菜单时在此登记。
+- `SWAGGER_ENABLED=false` 时 `GET /api/auth/menus` 不下发该菜单（无论角色是否授权），前端也就不注册该路由。映射在 `apps/server/src/core/auth/menu-features.ts`（`route_name → 开关`；另有租户管理两页随 `APP_MULTI_TENANT`、「公众号」分组随 `APP_WXOA`）：新增"随服务端开关出现"的菜单时在此登记。
+
+## 公众号模块开关
+
+`APP_WXOA` 默认 `false`，只在启动时读取，切换须全部实例重启。关闭时不加载公众号模块：`/api/wxoa/*`（含回调地址）回 404，不注册它的定时任务处理器，不访问微信，侧栏与角色授权树不显示「公众号」分组；打开后行为与配置见[公众号管理](wxoa.md#启用)。表始终由迁移创建，打开开关不需要额外的迁移。
 
 ## 实时推送（Socket.IO）
 

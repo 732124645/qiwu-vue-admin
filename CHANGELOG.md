@@ -1,8 +1,22 @@
 # Changelog
 
-中文说明：本文件按功能区域汇总栖梧 / Qiwu 的用户可见变化，正文使用英文。`1.0.0` 于 2026-10-05 发布，`1.0.3` 于 2026-10-06 发布（`1.0.1`、`1.0.2` 未发布，内容并入 `1.0.3`），`1.1.0`（多租户）、`1.2.0`（手写 SQL 的数据权限）、`1.2.1`（修复）与 `1.3.0`（任务队列）于 2026-10-14 发布，`1.3.1`（开发调试开关）与 `1.4.0`（安全审查修复）于 2026-10-15 发布，`1.4.1`（界面细节）于 2026-10-20 发布。
+中文说明：本文件按功能区域汇总栖梧 / Qiwu 的用户可见变化，正文使用英文。`1.0.0` 于 2026-10-05 发布，`1.0.3` 于 2026-10-06 发布（`1.0.1`、`1.0.2` 未发布，内容并入 `1.0.3`），`1.1.0`（多租户）、`1.2.0`（手写 SQL 的数据权限）、`1.2.1`（修复）与 `1.3.0`（任务队列）于 2026-10-14 发布，`1.3.1`（开发调试开关）与 `1.4.0`（安全审查修复）于 2026-10-15 发布，`1.4.1`（界面细节）与 `1.5.0`（微信公众号管理，默认关闭）于 2026-10-20 发布。
 
 All notable product changes are recorded here in Keep a Changelog style. The initial release below summarizes the delivered features. Planned work is identified explicitly.
+
+## [1.5.0] - 2026-10-20
+
+### Added
+
+- WeChat Official Account management, off by default: set `APP_WXOA=true` in the server environment to load it (restart required; see `docs/wxoa.md`). Off, the module is not loaded at all: every `/api/wxoa/*` route including the push callback answers 404, no job, token refresh or call to WeChat runs, and its menus are hidden from the side menu and role grants.
+  - Access and interaction: several accounts per tenant with write-only secrets, the push callback (plain, compatible and safe mode, signature and replay checks), message history and conversations with service replies, auto replies including QR-scan replies, custom and conditional menus with a phone preview, fans, tags and blacklist with Excel export, permanent media, template messages and channel QR codes with automatic tagging. Verified on a WeChat test account.
+  - Content and operations (WeChat requires a verified service account; verified so far against a simulated WeChat gateway only): article drafts, publishing and publish records, mass sends with retry inside WeChat's 24-hour de-duplication window, statistics charts, article comments and subscribe notices.
+  - Multi-tenancy aware: each tenant manages its own accounts; one AppID can be connected to one tenant only (with multi-tenancy on, adding an account first proves the AppSecret); jobs run per active tenant; platform staff can look up which tenant holds an AppID.
+- Server test runs refuse an unregistered database / Redis pair and hold a per-database run lock, so two checkouts can no longer wipe each other's test sessions.
+
+### Upgrade notes
+
+- The official account tables are created by the migrations whether or not the module is switched on; they stay empty while it is off.
 
 ## [1.4.1] - 2026-10-20
 

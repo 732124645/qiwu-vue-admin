@@ -1,0 +1,63 @@
+{
+  "wxoa": {
+    "account": {
+      "entity": "official account",
+      "appIdFixed": "The AppID cannot change once added; add a new account for another official account",
+      "sandboxPlain": "Sandbox accounts support plaintext mode only",
+      "plainHint": "Plaintext mode is recommended for sandbox accounts only",
+      "secretSet": "Set; leave blank to keep",
+      "aesKeyRequired": "Compatible and secure modes need an EncodingAESKey",
+      "callbackUrl": "Server URL",
+      "callbackHint": "Enter it in the server settings of the WeChat console; if the public address differs from this console's, replace the prefix with the public one",
+      "callbackLater": "The server URL shows here once saved",
+      "copy": "Copy",
+      "copied": "Copied",
+      "copyFailed": "Could not copy; select the URL and copy it by hand",
+      "close": "Close",
+      "lastPushAt": "Last push",
+      "noPush": "Not connected",
+      "test": {
+        "action": "Test connection",
+        "title": "Connection test",
+        "token": "Get access_token",
+        "api": "Call an API (IP whitelist)",
+        "ok": "Passed",
+        "failed": "Failed",
+        "skipped": "Not run",
+        "code": "Error code",
+        "ip": "Refused IP",
+        "ipHint": "Add this IP to the account's IP whitelist on the WeChat console and test again",
+        "lastPush": "Last push",
+        "noPush": "No push from WeChat yet",
+        "again": "Test again",
+        "codes": {
+          "B6001": "WeChat could not be reached or its answer could not be read: check that this server can reach api.weixin.qq.com, then try again later",
+          "B6002": "WeChat refused the request: check the account's status and settings, then try again",
+          "B6003": "The account may not call this API: unverified and sandbox accounts often lack it",
+          "B6004": "This server's IP is not on the account's IP whitelist",
+          "B6005": "Today's call quota of this API is used up: try tomorrow, or reset it under \"API quota\"",
+          "B6006": "WeChat does not accept the AppID or AppSecret: check them and enter the AppSecret again under \"Edit\" (a wrong AppID needs a new account)"
+        }
+      },
+      "quota": {
+        "action": "API quota",
+        "title": "API call quota",
+        "api": "API",
+        "dailyLimit": "Daily limit",
+        "used": "Used",
+        "remain": "Remaining",
+        "clear": "Reset call counts",
+        "clearConfirm": "Resetting the call counts here and \"Reset API call counts\" on the WeChat console can be used {count} times a month in total. Reset now?",
+        "cleared": "Call counts reset"
+      },
+      "switch": {
+        "none": "No official account available",
+        "goAccounts": "Add or enable an account",
+        "askAdmin": "Ask an administrator to add or enable an account",
+        "disabled": "Disabled",
+        "failed": "Could not load the account list"
+      },
+      "needVerified": "This feature needs a verified service account: the current account is unverified or a sandbox account, so WeChat may refuse the calls."
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "field": {
+    "wxoa": {
+      "material": {
+        "accountId": "Official account",
+        "mediaKind": "Material type",
+        "title": "Title",
+        "intro": "Introduction",
+        "file": "File"
+      }
+    }
+  }
+}

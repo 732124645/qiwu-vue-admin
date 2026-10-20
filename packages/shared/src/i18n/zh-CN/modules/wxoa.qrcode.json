@@ -1,0 +1,15 @@
+{
+  "field": {
+    "wxoa": {
+      "qrcode": {
+        "accountId": "公众号账号",
+        "label": "二维码名称",
+        "qrKind": "二维码类型",
+        "scene": "场景值",
+        "expireSeconds": "有效期（秒）",
+        "tagId": "自动打标签",
+        "days": "统计天数"
+      }
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "field": {
+    "wxoa": {
+      "account": {
+        "accountId": "公众号账号",
+        "label": "账号名称",
+        "appId": "AppID",
+        "accountKind": "账号类型",
+        "verified": "是否认证",
+        "cryptoMode": "消息加密方式",
+        "appSecret": "AppSecret",
+        "token": "Token",
+        "aesKey": "EncodingAESKey",
+        "enabled": "是否启用",
+        "note": "备注"
+      }
+    }
+  }
+}

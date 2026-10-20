@@ -1,0 +1,36 @@
+{
+  "wxoa": {
+    "notice": {
+      "refresh": "刷新我的模板",
+      "empty": "暂无订阅通知模板",
+      "col": {
+        "title": "模板标题",
+        "content": "模板内容",
+        "id": "模板 ID"
+      },
+      "add": {
+        "action": "添加模板",
+        "title": "添加订阅通知模板",
+        "template": "模板",
+        "done": "模板已添加",
+        "category": "类目",
+        "more": "加载更多（已显示 {shown} / {total}）",
+        "keywords": "关键词（选 {min}–{max} 个）",
+        "scene": "服务场景",
+        "scenePlaceholder": "15 字以内，如“订单发货提醒”"
+      },
+      "send": {
+        "action": "发送",
+        "title": "发送订阅通知",
+        "template": "模板",
+        "fans": "粉丝",
+        "fansPlaceholder": "按备注或 OpenID 搜索已关注的粉丝",
+        "url": "跳转链接",
+        "done": "已提交 {count} 条订阅通知",
+        "fansLimit": "已选 {count} 个，每次最多 {max} 个",
+        "needFanBrowse": "选择粉丝需要粉丝浏览权限"
+      },
+      "removeConfirm": "删除模板“{title}”？"
+    }
+  }
+}

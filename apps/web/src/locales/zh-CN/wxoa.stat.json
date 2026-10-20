@@ -1,0 +1,36 @@
+{
+  "wxoa": {
+    "stat": {
+      "range": "统计区间",
+      "query": "查询",
+      "rangeHint": "只能查询过去 {max} 天内，不能包含今天",
+      "group": {
+        "users": "用户增减",
+        "messages": "消息统计",
+        "interfaces": "接口统计",
+        "articles": "图文统计"
+      },
+      "failed": "这组数据加载失败",
+      "metric": {
+        "new_user": "新增用户",
+        "cancel_user": "取消关注",
+        "cumulate_user": "累计用户",
+        "msg_user": "发消息用户（各消息类型合计）",
+        "msg_count": "消息数",
+        "callback_count": "调用次数",
+        "fail_count": "失败次数",
+        "total_time_cost": "总耗时",
+        "max_time_cost": "最大耗时",
+        "read_user": "阅读人数",
+        "share_user": "分享人数",
+        "zaikan_user": "在看人数",
+        "like_user": "点赞人数",
+        "comment_count": "留言数",
+        "collection_user": "收藏人数",
+        "redirect_ori_page_user": "阅读原文人数",
+        "send_page_count": "送达人数"
+      },
+      "quota": "接口配额"
+    }
+  }
+}

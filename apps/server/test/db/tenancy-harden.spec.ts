@@ -67,7 +67,7 @@ afterAll(async () => {
 
 it('drops the default of every tenant column, the nullable sign-in one and the actor’s tenant too; a second run alters nothing', async () => {
   const all = await columns('all')
-  expect(all).toHaveLength(33) // 32 tenant tables' tenant_id + aud_action_log.actor_tenant_id
+  expect(all).toHaveLength(45) // tenant tables' tenant_id + aud_action_log.actor_tenant_id
   expect(all).toEqual(
     expect.arrayContaining(['aud_action_log.actor_tenant_id', 'aud_signin_log.tenant_id']),
   )
@@ -198,7 +198,16 @@ it('upgrading a database to tenancy with multi-tenancy on: that run keeps the de
     expect(await executed()).toContain(TENANCY)
     expect(said).toContain('tenancy-harden: skipped')
     expect(said).toContain('APP_MULTI_TENANT off')
-    expect(await columns('defaulted')).toEqual(await columns('all'))
+    const allColumns = await columns('all')
+    // The content migration creates its four tables with a required tenant_id and no transitional default.
+    expect(await columns('defaulted')).toEqual(
+      allColumns.filter(
+        (column) =>
+          !['wxoa_draft', 'wxoa_publish', 'wxoa_mass_job', 'wxoa_inline_image'].some((table) =>
+            column.startsWith(`${table}.`),
+          ),
+      ),
+    )
 
     expect(migrate('run', true)).toContain('tenancy-harden: default dropped on')
     expect(await columns('defaulted')).toEqual([])
@@ -214,7 +223,7 @@ it('a new database with multi-tenancy on: one run migrates and hardens', async (
     expect(await executed()).toHaveLength(
       readdirSync('src/db/migrations').filter((f) => f.endsWith('.ts')).length,
     )
-    expect(await columns('all')).toHaveLength(33)
+    expect(await columns('all')).toHaveLength(45)
     expect(await columns('defaulted')).toEqual([])
   } finally {
     await restoreTestSchema(ds) // the seed rows

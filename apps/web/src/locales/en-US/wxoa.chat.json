@@ -1,0 +1,39 @@
+{
+  "wxoa": {
+    "chat": {
+      "needsBrowse": "Viewing conversations also needs the view permission of the message log; ask an administrator to grant both.",
+      "conversations": "Recent conversations",
+      "unsubscribed": "Unfollowed",
+      "blocked": "Blocked",
+      "noConversations": "No fan has sent a message yet",
+      "more": "More conversations",
+      "pick": "Choose a conversation on the left",
+      "noMessages": "No messages",
+      "earlier": "Earlier messages",
+      "forward": "Forward",
+      "window": {
+        "inbound": "48-hour message window",
+        "event": "1-minute event window",
+        "never": "Not opened",
+        "open": "Until {time}, {used}/{max} used",
+        "closed": "Closed at {time} ({used}/{max} used)",
+        "allClosed": "Both send windows are closed and WeChat refuses customer-service messages; sending works again after the fan sends a message, taps the menu or scans a QR code."
+      },
+      "composer": {
+        "send": "Send",
+        "bytes": "{used}/{max} bytes",
+        "media": {
+          "image": "Image",
+          "voice": "Voice",
+          "video": "Video"
+        },
+        "thumb": "Thumbnail",
+        "none": "None chosen",
+        "pick": "Choose material",
+        "copy": "Media file #{id} of a conversation",
+        "mediaHint": "Choose a permanent material, or forward an image or voice a fan sent; upload new files on the material page first.",
+        "needsMaterial": "Choosing a material also needs the permission to view materials; an image or voice a fan sent can still be forwarded."
+      }
+    }
+  }
+}

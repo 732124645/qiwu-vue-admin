@@ -28,7 +28,16 @@ const {
   placeholder = '',
   disabled = false,
   height = 360,
-} = defineProps<{ placeholder?: string; disabled?: boolean; height?: number }>()
+  imageTypes,
+  imageMaxBytes,
+} = defineProps<{
+  placeholder?: string
+  disabled?: boolean
+  height?: number
+  /** Optional upload preflight. Unset keeps the editor's existing image behavior. */
+  imageTypes?: readonly string[]
+  imageMaxBytes?: number
+}>()
 const { t, locale } = useI18n()
 
 // every menu writes tags and attributes the whitelist keeps
@@ -62,7 +71,15 @@ const toolbarConfig: Partial<IToolbarConfig> = {
 
 /** The file an image menu or a paste hands over: uploaded, then inserted by its public URL. */
 async function uploadImage(file: File, insert: (url: string, alt: string, href: string) => void) {
-  if (!isImage(file.type)) {
+  if (imageTypes?.length && !imageTypes.includes(file.type)) {
+    ElMessage.error(t('upload.error.imageOnly', { name: file.name }))
+    return
+  }
+  if (imageMaxBytes != null && file.size >= imageMaxBytes) {
+    ElMessage.error(t('upload.error.tooLarge', { name: file.name }))
+    return
+  }
+  if (!imageTypes?.length && !isImage(file.type)) {
     ElMessage.error(t('upload.error.imageOnly', { name: file.name }))
     return
   }
@@ -83,7 +100,10 @@ const editorConfig = (): Partial<IEditorConfig> => ({
     image: { menuKeys: ['editImage', 'viewImageLink', 'deleteImage'] },
   },
   MENU_CONF: {
-    uploadImage: { allowedFileTypes: [...STORAGE_IMAGE_MIMES], customUpload: uploadImage },
+    uploadImage: {
+      allowedFileTypes: imageTypes?.length ? [...imageTypes] : [...STORAGE_IMAGE_MIMES],
+      customUpload: uploadImage,
+    },
   },
 })
 

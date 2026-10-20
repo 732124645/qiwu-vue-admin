@@ -1,0 +1,26 @@
+{
+  "field": {
+    "wxoa": {
+      "replyRule": {
+        "accountId": "公众号账号",
+        "name": "规则名称",
+        "triggerKind": "触发类型",
+        "matchMode": "匹配方式",
+        "keywords": "关键词",
+        "eventKey": "菜单 KEY 或二维码场景",
+        "priority": "优先级",
+        "replyKind": "回复类型",
+        "replyBody": "回复内容",
+        "materialId": "素材",
+        "enabled": "是否启用",
+        "content": "文本内容",
+        "title": "标题",
+        "description": "描述",
+        "musicUrl": "音乐链接",
+        "hqMusicUrl": "高品质音乐链接",
+        "url": "跳转链接",
+        "picUrl": "图片链接"
+      }
+    }
+  }
+}

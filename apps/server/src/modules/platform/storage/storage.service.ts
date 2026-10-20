@@ -26,6 +26,8 @@ import {
   STORAGE_MAX_SIZE_DEFAULT,
   storageParams,
   type StorageBizTag,
+  WXOA_MEDIA_TAG,
+  wxoaMediaRef,
 } from '@qiwu/shared'
 import { fileTypeFromBuffer } from 'file-type'
 import {
@@ -57,7 +59,7 @@ import { FsObject } from './fs-object.entity.js'
 import { StorageConfig } from './config/config.entity.js'
 import { dropUnusedSecrets } from './config/config.service.js'
 import { LocalStorage } from './local-storage.js'
-import { type S3Config, S3Storage } from './s3-storage.js'
+import { readCapped, type S3Config, S3Storage } from './s3-storage.js'
 import { StorageAccess } from './storage-access.js'
 
 /** A storage's driver (both offer put / remove / publicUrl). */
@@ -317,6 +319,100 @@ export class StorageService {
     }
   }
 
+  /** Stores checked bytes for the Official Account module under its tenant-scoped private media tag. */
+  async putWxoaMedia(
+    accountId: number,
+    file: { name: string; data: Buffer },
+    rule: { exts: readonly string[]; maxBytes: number },
+    uploaderId = 0,
+  ): Promise<FsObjectVo> {
+    if (!file.data.length) throw new BizError(Err.STORAGE_FILE_REQUIRED)
+    const originalName = displayName(file.name)
+    const ext = extname(originalName).slice(1).toLowerCase()
+    if (
+      !rule.exts.some((e) => e.toLowerCase() === ext) ||
+      (STORAGE_DENIED_EXTS as readonly string[]).includes(ext)
+    )
+      throw new BizError(Err.STORAGE_TYPE_REJECTED, { ext: ext || '?' })
+    if (file.data.length > Math.min(rule.maxBytes, await this.maxBytes()))
+      throw new BizError(Err.PAYLOAD_TOO_LARGE)
+    const mime = await typeOf(file.data, ext, insideOf(file.data, ext))
+    if (!mime) throw new BizError(Err.STORAGE_TYPE_REJECTED, { ext })
+    return this.storeBytes(file.data, originalName, ext, mime, {
+      bizTag: WXOA_MEDIA_TAG,
+      bizRef: wxoaMediaRef(accountId),
+      isPublic: false,
+      uploaderId,
+    })
+  }
+
+  async removeWxoaMedia(accountId: number, id: number): Promise<void> {
+    await this.remove(id, { bizTag: WXOA_MEDIA_TAG, bizRef: wxoaMediaRef(accountId) }).catch(
+      (err: unknown) => {
+        if (!(err instanceof NotFoundException)) throw err
+      },
+    )
+  }
+
+  /** Reads a tenant-scoped stored object for a trusted server-side module path. */
+  async readInternal(
+    id: number,
+    want: { bizTag: string; bizRef?: string; publicOnly?: boolean; maxBytes: number },
+  ): Promise<{ data: Buffer; mime: string; name: string }> {
+    const obj = await this.objects.findOneBy({ id })
+    if (
+      !obj ||
+      obj.bizTag !== want.bizTag ||
+      (want.bizRef !== undefined && obj.bizRef !== want.bizRef) ||
+      (want.publicOnly && !obj.isPublic)
+    )
+      throw new NotFoundException()
+    if (obj.size > want.maxBytes) throw new BizError(Err.PAYLOAD_TOO_LARGE)
+    const client = this.clientFor(await this.storages.findOneByOrFail({ id: obj.storageId }))
+    const cap = want.maxBytes + 1
+    const data =
+      client instanceof S3Storage
+        ? await client.read(obj.objectKey, obj.isPublic, cap)
+        : await readCapped(await client.read(obj.objectKey, obj.isPublic), cap)
+    if (!data) throw new NotFoundException()
+    if (data.length > want.maxBytes) throw new BizError(Err.PAYLOAD_TOO_LARGE)
+    return { data, mime: obj.mime, name: obj.originalName }
+  }
+
+  private async storeBytes(
+    data: Buffer,
+    originalName: string,
+    ext: string,
+    mime: string,
+    meta: { bizTag: string; bizRef?: string; isPublic: boolean; uploaderId: number },
+  ): Promise<FsObjectVo> {
+    const storage = await this.primary()
+    const client = this.clientFor(storage)
+    const key = newKey(ext)
+    await client.put(key, data, meta.isPublic, mime)
+    try {
+      const row = await this.objects.save(
+        this.objects.create({
+          storageId: storage.id,
+          objectKey: key,
+          originalName,
+          mime,
+          size: data.length,
+          sha256: createHash('sha256').update(data).digest('hex'),
+          isPublic: meta.isPublic,
+          publicUrl: meta.isPublic ? client.publicUrl(key) : null,
+          bizTag: meta.bizTag,
+          bizRef: meta.bizRef ?? null,
+          uploaderId: meta.uploaderId,
+        }),
+      )
+      return this.vo(row)
+    } catch (error) {
+      await client.remove(key, meta.isPublic)
+      throw error
+    }
+  }
+
   /**
    * Direct upload, step 1 (see docs/design-notes.md#storage): the name's extension, the size and the tag's rules are checked
    * like an upload, then the browser gets a PUT URL to the primary S3 storage signed with that type and
@@ -570,11 +666,11 @@ export class StorageService {
    * break at once. The body stays there until `purgeDeleted` (the `audit.purge` job, past
    * `audit.retention_days`) removes body and row, so a mistaken delete can still be undone by hand.
    */
-  async remove(id: number): Promise<void> {
+  async remove(id: number, owner?: { bizTag: string; bizRef: string }): Promise<void> {
     await this.objects.manager.transaction(async (q) => {
       const obj = await q
         .getRepository(FsObject)
-        .findOne({ where: { id }, lock: { mode: 'pessimistic_write' } })
+        .findOne({ where: { id, ...owner }, lock: { mode: 'pessimistic_write' } })
       if (!obj) throw new NotFoundException()
       await softDeleteRows(q, 'fs_object', [id])
       if (obj.isPublic)
@@ -652,6 +748,17 @@ export class StorageService {
     const storage = await this.storages.findOneBy({ isPrimary: true, enabled: true })
     if (!storage) throw new Error('storage: no enabled primary storage (fs_storage)')
     return storage
+  }
+
+  /** `storage.max_size_mb` in bytes. */
+  private async maxBytes(): Promise<number> {
+    const mb = await this.params.int(
+      storageParams.maxSizeMb,
+      1,
+      2048,
+      STORAGE_MAX_SIZE_DEFAULT / 1024 / 1024,
+    )
+    return mb * 1024 * 1024
   }
 
   private async assertExt(ext: string): Promise<void> {

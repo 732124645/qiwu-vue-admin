@@ -1,0 +1,43 @@
+{
+  "wxoa": {
+    "qrcode": {
+      "entity": "二维码",
+      "col": {
+        "image": "二维码",
+        "scanCount": "扫码次数",
+        "subscribeCount": "扫码关注",
+        "expiresAt": "过期时间",
+        "qrUrl": "二维码内容"
+      },
+      "expired": "已过期",
+      "never": "永久有效",
+      "download": "下载",
+      "unit": {
+        "minute": "分钟",
+        "hour": "小时",
+        "day": "天"
+      },
+      "form": {
+        "validity": "有效期",
+        "sceneHint": "字母、数字、下划线或连字符，最多 64 个；同一账号内不能重复，创建后不可修改",
+        "expiryHint": "最短 {min} 秒，最长 {days} 天",
+        "permanentHint": "永久二维码数量有上限，在微信端无法删除，本系统删除后它仍然有效",
+        "tagHint": "扫码或扫码关注的粉丝会自动打上这个标签",
+        "noTag": "不打标签"
+      },
+      "stats": {
+        "action": "统计",
+        "title": "扫码统计：{name}",
+        "days": "最近 {days} 天",
+        "scans": "扫码",
+        "subscribes": "扫码关注",
+        "scansTotal": "扫码 {count} 次",
+        "subscribesTotal": "扫码关注 {count} 次"
+      },
+      "removeConfirm": {
+        "temporary": "删除二维码“{name}”？",
+        "permanent": "删除二维码“{name}”？只删除本系统的记录：永久二维码在微信端仍然有效、仍占用数量额度，之后扫码不再计数，也不再自动打标签。"
+      }
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "field": {
+    "wxoa": {
+      "template": {
+        "accountId": "Official account",
+        "refresh": "Refresh",
+        "fanIds": "Recipient fans",
+        "data": "Template data",
+        "url": "Link",
+        "miniprogram": "Mini program",
+        "appId": "Mini program AppID",
+        "pagePath": "Mini program page path"
+      }
+    }
+  }
+}

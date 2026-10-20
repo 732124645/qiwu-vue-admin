@@ -1,0 +1,19 @@
+{
+  "field": {
+    "wxoa": {
+      "account": {
+        "accountId": "Official account",
+        "label": "Account name",
+        "appId": "AppID",
+        "accountKind": "Account type",
+        "verified": "Verified",
+        "cryptoMode": "Message encryption",
+        "appSecret": "AppSecret",
+        "token": "Token",
+        "aesKey": "EncodingAESKey",
+        "enabled": "Enabled",
+        "note": "Note"
+      }
+    }
+  }
+}

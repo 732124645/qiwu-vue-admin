@@ -1,9 +1,11 @@
 import { Module } from '@nestjs/common'
+import { ConditionalModule } from '@nestjs/config'
 import { TerminusModule } from '@nestjs/terminus'
 import { CoreAuditModule } from './core/audit/audit.module.js'
 import { CoreAuthModule } from './core/auth/auth.module.js'
 import { CoreCaptchaModule } from './core/captcha/captcha.module.js'
 import { CoreConfigModule } from './core/config/config.module.js'
+import { wxoaOn } from './core/config/wxoa-switch.js'
 import { CoreContextModule } from './core/context/context.module.js'
 import { CoreCryptoModule } from './core/crypto/secret-box.js'
 import { CoreDbModule } from './core/db/db.module.js'
@@ -28,6 +30,7 @@ import { OauthModule } from './modules/platform/oauth/oauth.module.js'
 import { SchedulerModule } from './modules/platform/scheduler/scheduler.module.js'
 import { SettingsModule } from './modules/platform/settings/settings.module.js'
 import { StorageModule } from './modules/platform/storage/storage.module.js'
+import { WxoaModule } from './modules/platform/wxoa/wxoa.module.js'
 import { ProjectModule } from './modules/project.module.js'
 import { WorkflowModule } from './modules/workflow/workflow.module.js'
 
@@ -65,6 +68,9 @@ import { WorkflowModule } from './modules/workflow/workflow.module.js'
     TerminusModule,
     SettingsModule,
     StorageModule,
+    // 公众号模块只在 APP_WXOA 打开时加载：关闭时不注册路由、任务与回调，也不访问微信；
+    // 条件在 ConfigModule 把环境文件写入 process.env 之后才读取
+    ConditionalModule.registerWhen(WxoaModule, (env) => wxoaOn(env), { debug: false }),
     SchedulerModule,
     MessagingModule,
     AuditModule,

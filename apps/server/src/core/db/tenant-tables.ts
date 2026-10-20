@@ -46,6 +46,21 @@ export const GLOBAL_UNIQUE: Readonly<
   uk_iam_user_social_openid: { table: 'iam_user_social', release: 'row-delete' },
   uk_iam_user_social_user: { table: 'iam_user_social', release: 'none' },
   uk_fs_object_key: { table: 'fs_object', release: 'none' },
+  uk_wxoa_account_app_id: { table: 'wxoa_account', release: 'row-delete' },
+  uk_wxoa_account_callback_key: { table: 'wxoa_account', release: 'none' },
+  uk_wxoa_fan_open_id: { table: 'wxoa_fan', release: 'none' },
+  uk_wxoa_tag_tag_id: { table: 'wxoa_tag', release: 'none' },
+  uk_wxoa_message_dedup: { table: 'wxoa_message', release: 'none' },
+  uk_wxoa_reply_rule_sole: { table: 'wxoa_reply_rule', release: 'none' },
+  uk_wxoa_reply_rule_event_key: { table: 'wxoa_reply_rule', release: 'none' },
+  uk_wxoa_menu_default: { table: 'wxoa_menu', release: 'none' },
+  uk_wxoa_material_media_id: { table: 'wxoa_material', release: 'none' },
+  uk_wxoa_qrcode_scene: { table: 'wxoa_qrcode', release: 'none' },
+  uk_wxoa_draft_media_id: { table: 'wxoa_draft', release: 'none' },
+  uk_wxoa_publish_publish_id: { table: 'wxoa_publish', release: 'none' },
+  uk_wxoa_publish_article_id: { table: 'wxoa_publish', release: 'none' },
+  uk_wxoa_mass_client_msg_id: { table: 'wxoa_mass_job', release: 'none' },
+  uk_wxoa_inline_image_object: { table: 'wxoa_inline_image', release: 'none' },
 }
 
 /**
