@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import {
   clientCreate,
   OAUTH_GRANT_TYPES,
+  OAUTH_SCOPE_USER_READ,
   OAUTH_SCOPES,
   REDIRECT_URIS_MAX,
   type OAuthGrantType,
@@ -37,7 +38,8 @@ const { model, formRef, rules, loading, submitting, submit } = useCrudForm({
     logoUrl: '',
     grantTypes: ['authorization_code', 'refresh_token'] as OAuthGrantType[],
     redirectUris: [],
-    scopes: [...OAUTH_SCOPES],
+    // 智能体（MCP）范围默认不勾选：只有登记智能体客户端时才由管理员显式授予
+    scopes: [OAUTH_SCOPE_USER_READ] as (typeof OAUTH_SCOPES)[number][],
     autoApproveScopes: [],
     accessTtlSec: 1800,
     refreshTtlSec: 604_800,
@@ -107,6 +109,7 @@ watch(
       <el-checkbox-group v-model="model.scopes">
         <el-checkbox v-for="s in OAUTH_SCOPES" :key="s" :value="s">{{ scopeLabel(s) }}</el-checkbox>
       </el-checkbox-group>
+      <div class="client-form__hint">{{ t('oauth.client.mcpHint') }}</div>
     </el-form-item>
     <el-form-item
       :label="t('field.oauth.client.autoApproveScopes')"

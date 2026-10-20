@@ -21,9 +21,9 @@ export const RESERVED_NAME_LISTS = {
    */
   pages: `home login profile error lock register redirect iframe password-change password-reset sso password my not 403 404 503`,
   /** built-in domains (platform, workflow) and the built-in project domains `biz` and `demo` */
-  domains: `iam settings messaging audit storage scheduler oauth wf codegen monitor geo formkit apidocs demo biz im wxoa`,
+  domains: `iam settings messaging audit storage scheduler oauth wf codegen monitor geo formkit apidocs demo biz im wxoa mcp`,
   /** other API roots, and the paths the web server proxies or serves (`/api`, `/files`, `/assets`) */
-  apiRoots: `auth health excel docs oauth2 api files assets`,
+  apiRoots: `auth health excel docs oauth2 api files assets .well-known`,
   /** locale namespaces beside the domains' */
   namespaces: `menu crud layout field seed picker upload captcha code cron notify signin`,
 } as const

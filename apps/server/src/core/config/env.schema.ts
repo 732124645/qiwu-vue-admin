@@ -86,6 +86,11 @@ export const EnvSchema = z.preprocess(
        * the module is not loaded (its routes 404, no jobs, no calls to WeChat), its menus hidden
        */
       APP_WXOA: flag.default(false),
+      /**
+       * Agent access over MCP (see docs/mcp.md): read at startup only; off = the module is not loaded
+       * (/api/mcp and its admin routes 404), its menus hidden
+       */
+      APP_MCP: flag.default(false),
       STORAGE_LOCAL_ROOT: z.string().default(DEFAULT_UPLOAD_ROOT),
       /**
        * WeChat mini program sign-in (also param `auth.wx_mp.enabled`): the AppID and its

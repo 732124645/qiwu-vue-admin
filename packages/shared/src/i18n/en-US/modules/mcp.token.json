@@ -1,0 +1,15 @@
+{
+  "field": {
+    "mcp": {
+      "token": {
+        "name": "Token name",
+        "expiresInDays": "Valid for (days)",
+        "tools": "Allowed tools",
+        "allowWrite": "Allow write tools",
+        "userId": "Owner",
+        "state": "State",
+        "currentPassword": "Current password"
+      }
+    }
+  }
+}

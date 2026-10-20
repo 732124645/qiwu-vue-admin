@@ -4,6 +4,7 @@ import { TransactionHost } from '@nestjs-cls/transactional'
 import type { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm'
 import {
   AUDIT_RETENTION_PARAM,
+  MCP_PAUSED_PARAM,
   Err,
   type Page,
   PARAM_SECRET_MASK,
@@ -53,7 +54,8 @@ const shown = (p: Parameter): Parameter =>
   p.isSecret ? { ...p, paramValue: PARAM_SECRET_MASK } : p
 
 /**
- * Sign-up switch, role and dept, the WeChat sign-in switch and the audit retention are root-managed,
+ * Sign-up switch, role and dept, the WeChat sign-in switch, the audit retention and the agent access
+ * stop switch (`mcp.paused`: an emergency stop for every tenant) are root-managed,
  * root being the platform's super admin only (403 `grant_exceeds_own`; see docs/design-notes.md#permissions,
  * #tenancy): the retention purge is the one way rows nobody may delete (tenant enter / leave) go.
  */
@@ -63,6 +65,7 @@ const ROOT_ONLY: ReadonlySet<unknown> = new Set([
   signupParams.defaultDeptId,
   WX_MP_ENABLED_PARAM,
   AUDIT_RETENTION_PARAM,
+  MCP_PAUSED_PARAM,
 ])
 const assertWritable = (key: unknown): void => {
   if (ROOT_ONLY.has(key) && !clsGet('principal')?.root)

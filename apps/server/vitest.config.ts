@@ -15,6 +15,11 @@ export default defineConfig({
     root: './',
     include: ['src/**/*.spec.ts', 'test/**/*.spec.ts', 'test/**/*.e2e-spec.ts'],
     fileParallelism: false,
+    // eventsource-parser (imported by the MCP SDK's client) exports TypeScript under the `source`
+    // condition above: Vite resolves and transforms the client and it instead of Node loading the .ts file
+    server: {
+      deps: { inline: [/@modelcontextprotocol\/sdk\/dist\/esm\/client\//, 'eventsource-parser'] },
+    },
     // beforeAll boots the whole AppModule in most e2e files: explicit room over the 10 s default under load
     hookTimeout: 30_000,
     // an e2e case of ~10 requests takes 1-3 s alone, past the 5 s default when ci:local runs Playwright

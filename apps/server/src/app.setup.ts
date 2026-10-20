@@ -11,6 +11,13 @@ import { RedisIoAdapter } from './core/realtime/redis-io.adapter.js'
 
 export const DOCS_PATH = 'api/docs'
 
+/** Routes outside the `/api` prefix (McpWellKnownController). */
+const WELL_KNOWN = [
+  '.well-known/oauth-protected-resource',
+  '.well-known/oauth-protected-resource/api/mcp',
+  '.well-known/oauth-authorization-server',
+]
+
 /**
  * HTTP-level setup shared by `main.ts` and e2e specs (see docs/design-notes.md#layering, #security): `/api` prefix, `trust proxy`,
  * helmet, cookie-parser, public files at `/files` and, when `SWAGGER_ENABLED`, Swagger UI at `/api/docs`
@@ -26,7 +33,9 @@ export function setupApp(app: NestExpressApplication): NestExpressApplication {
   }
   // only the real reverse proxy may set X-Forwarded-For (throttler, IP locks and blacklist use req.ip)
   app.set('trust proxy', cfg.get('TRUST_PROXY'))
-  app.setGlobalPrefix('api')
+  // the discovery documents of OAuth2 / MCP clients live at the site root (RFC 8414, RFC 9728); they
+  // exist only while their module is loaded
+  app.setGlobalPrefix('api', { exclude: WELL_KNOWN })
 
   // helmet defaults everywhere; the Swagger UI page drops `upgrade-insecure-requests`, which would
   // turn its same-origin asset URLs into https:// ones on a plain-http dev/intranet host

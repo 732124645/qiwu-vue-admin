@@ -44,6 +44,7 @@ import { seedIam } from './iam/iam.seed.js'
 import { seedTenant } from './iam/tenant.seed.js'
 import { seedTenantDemo } from './iam/tenant-demo.seed.js'
 import { seedTenantMenus } from './iam/tenant-menus.seed.js'
+import { seedMcp } from './mcp/mcp.seed.js'
 import { seedMessaging } from './messaging/messaging.seed.js'
 import { seedDelivery } from './messaging/delivery.seed.js'
 import { seedMonitorGroup } from './monitor/monitor.seed.js'
@@ -89,6 +90,8 @@ const SEEDS: Record<string, Seed[]> = {
   monitor: [seedMonitorGroup, seedSession, seedMonitor],
   // the built-in console client and the consent param; the client pages hang under system
   oauth: [seedOauth, seedClient],
+  // the MCP tool and access token pages hang under system too
+  mcp: [seedMcp],
   scheduler: [seedScheduler, seedTask, seedRun],
   // before demo: its menu group holds the demo group
   codegen: [seedCodegen],

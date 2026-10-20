@@ -1,8 +1,28 @@
 # Changelog
 
-中文说明：本文件按功能区域汇总栖梧 / Qiwu 的用户可见变化，正文使用英文。`1.0.0` 于 2026-10-05 发布，`1.0.3` 于 2026-10-06 发布（`1.0.1`、`1.0.2` 未发布，内容并入 `1.0.3`），`1.1.0`（多租户）、`1.2.0`（手写 SQL 的数据权限）、`1.2.1`（修复）与 `1.3.0`（任务队列）于 2026-10-14 发布，`1.3.1`（开发调试开关）与 `1.4.0`（安全审查修复）于 2026-10-15 发布，`1.4.1`（界面细节）与 `1.5.0`（微信公众号管理，默认关闭）于 2026-10-20 发布。
+中文说明：本文件按功能区域汇总栖梧 / Qiwu 的用户可见变化，正文使用英文。`1.0.0` 于 2026-10-05 发布，`1.0.3` 于 2026-10-06 发布（`1.0.1`、`1.0.2` 未发布，内容并入 `1.0.3`），`1.1.0`（多租户）、`1.2.0`（手写 SQL 的数据权限）、`1.2.1`（修复）与 `1.3.0`（任务队列）于 2026-10-14 发布，`1.3.1`（开发调试开关）与 `1.4.0`（安全审查修复）于 2026-10-15 发布，`1.4.1`（界面细节）、`1.5.0`（微信公众号管理，默认关闭）与 `1.6.0`（MCP 智能体接入，默认关闭；下游合并改进）于 2026-10-20 发布。
 
 All notable product changes are recorded here in Keep a Changelog style. The initial release below summarizes the delivered features. Planned work is identified explicitly.
+
+## [1.6.0] - 2026-10-20
+
+### Added
+
+- Agent access over MCP (Model Context Protocol), off by default: set `APP_MCP=true` in the server environment to load it (restart required; see `docs/mcp.md`). Off, `/api/mcp`, its discovery documents and every admin route answer 404 and the two pages are hidden.
+  - A stateless Streamable HTTP endpoint `POST /api/mcp` (official SDK) serving `initialize`, `tools/list` and `tools/call`; tools are provider methods marked `@McpTool` (unique names, a shared permission code, zod input and optional output schemas), found at start-up.
+  - Two ways in, both running as the token's user with that user's permissions, data scope and tenant: personal access tokens (made in the personal center with the current password, shown once, stored as a digest, expiry up to 90 days, allowed tools and an explicit write permission, revocable; they end for good when the user is disabled, deleted, changes or resets the password, is signed out by an administrator, or the tenant is disabled) and OAuth2 tokens of a registered client with the new scopes `mcp` / `mcp.write` (RFC 8707 resource indicator checked; protected resource and authorization server metadata at `/.well-known/`).
+  - Guards for every call: the root-only emergency stop `mcp.paused`, a per-token rate limit, the platform's per-tool switch, the token's tool list and write permission, the tool's permission, argument validation, a time limit, masking of secret-named fields and a 64 KiB answer limit; one action log row per call (`mcp.tool` / `call`, marked as made by an agent, with the token and an argument digest).
+  - Sample tools: `iam.me.get`, `iam.user.search` (the user list's data scope), `cfg.dict.options` and the write tool `demo.book.create`; `docs/mcp.md` shows how to add your own.
+
+### Changed
+
+- Projects built from the template merge new template releases with fewer conflicts: the template's server tests no longer hard-code the template's own structure (the migration list is read from `src/db/migrations`, table and column counts became rules), and a project registers its own platform tables and global unique keys in `apps/server/src/db/project-tables.ts` instead of editing the template's list. A new guide, `docs/upgrade.md`, walks through taking a template release into a project.
+- Faster and clearer server tests: the migration round trip runs in one process (about twice as fast, more with many migrations); script timeouts are configurable with `QW_TEST_SCRIPT_TIMEOUT_MS` and a killed script fails at once with its name and time; `QW_TEST_REUSE_DB=1` reuses the test database locally while migrations, seeds and schema switches are unchanged (`pnpm ci:local` and CI always rebuild it).
+- A new check refuses migration files with duplicate or malformed timestamps; use the real current time, seconds included, for new migrations.
+
+### Upgrade notes
+
+- The token and tool switch tables are created by the migrations whether or not the module is switched on. A reverse proxy that blocks dot paths must forward `/.well-known/oauth-protected-resource` and `/.well-known/oauth-authorization-server` to the server for OAuth2 clients (`docs/deploy.md`).
 
 ## [1.5.0] - 2026-10-20
 

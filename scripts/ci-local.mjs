@@ -240,7 +240,9 @@ async function main(argv) {
   const parallel = argv.includes('--parallel') && !argv.includes('--serial')
   if (process.platform === 'win32' && parallel) throw new Error('use --serial on Windows')
   if (!dry) rmSync(fileTimes, { force: true })
-  const env = { ...process.env, QW_FILE_TIMES: fileTimes }
+  // 完整闸门每次重建测试库：本地快速模式的开关即使留在终端环境里也不带进去
+  const { QW_TEST_REUSE_DB: _reuse, ...inherited } = process.env
+  const env = { ...inherited, QW_FILE_TIMES: fileTimes }
   const results = []
   const failed = () => results.some(([, status]) => !['PASS', 'SKIP', 'planned'].includes(status))
   const serial = (steps) => {

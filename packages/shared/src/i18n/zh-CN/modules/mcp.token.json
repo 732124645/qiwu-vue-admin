@@ -1,0 +1,15 @@
+{
+  "field": {
+    "mcp": {
+      "token": {
+        "name": "令牌名称",
+        "expiresInDays": "有效天数",
+        "tools": "允许的工具",
+        "allowWrite": "允许写入类工具",
+        "userId": "所属用户",
+        "state": "状态",
+        "currentPassword": "当前密码"
+      }
+    }
+  }
+}

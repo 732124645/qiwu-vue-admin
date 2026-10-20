@@ -11,6 +11,7 @@ import {
   OAUTH_CONSENT_TTL_DAYS_DEFAULT,
   OAUTH_GRANT_TYPES,
   type OAuthGrantType,
+  OAUTH_SCOPE_MCP,
   oauthParams,
   type UserinfoVo,
 } from '@qiwu/shared'
@@ -25,9 +26,11 @@ import {
   TokenService,
 } from '../../../../core/auth/token.service.js'
 import { USER_LOOKUP, type UserLookup } from '../../../../core/auth/user-lookup.js'
+import { AppConfigService } from '../../../../core/config/config.module.js'
 import { clsGet } from '../../../../core/context/cls.js'
 import { tenantId } from '../../../../core/context/tenant.js'
 import { BizError } from '../../../../core/http/biz-error.js'
+import { mcpResource } from '../../../../core/mcp/mcp-resource.js'
 import { ParamService } from '../../../../core/settings/param.service.js'
 import { oauthModel } from './oauth-model.js'
 
@@ -64,6 +67,7 @@ export const tokenForm = z.object({
   scope: field.describe('space-separated; client_credentials: default = the client’s scopes'),
   client_id: field.describe('or HTTP Basic'),
   client_secret: field.describe('or HTTP Basic; required (confidential clients only)'),
+  resource: field.describe('RFC 8707: this site’s MCP endpoint URL, when sent'),
 })
 /** RFC 7662 introspection / RFC 7009 revocation request (form body). */
 export const tokenAuthForm = z.object({
@@ -111,8 +115,17 @@ export class OAuthProvider {
     private readonly permVersion: PermVersion,
     private readonly sessions: SessionCurrent,
     private readonly params: ParamService,
+    private readonly cfg: AppConfigService,
     @Inject(USER_LOOKUP) private readonly lookup: UserLookup,
   ) {}
+
+  /**
+   * RFC 8707 资源指示：发了 `resource` 就必须是本站的 MCP 端点（且 MCP 已启用），否则请求无效。令牌的
+   * 受众由 `mcp` 范围表示：只有带它的令牌被 MCP 端点接受，它在其余管理接口上照旧 401。
+   */
+  private resourceOk(resource: string | undefined, req: Request): boolean {
+    return resource === undefined || (this.cfg.get('APP_MCP') && resource === mcpResource(req))
+  }
 
   /**
    * The enabled, live client `clientId`; never a first-party id (`console`, `mobile`): a session of a
@@ -187,8 +200,8 @@ export class OAuthProvider {
    * needing the user's consent (not auto-approved, no live consent of the user's own tenant, where
    * `remember` stores them; all of them when consents are not remembered). Changes nothing.
    */
-  async preview(userId: number, q: AuthorizeQuery): Promise<AuthorizeVo> {
-    const { c, scopes } = await this.check(q)
+  async preview(userId: number, q: AuthorizeQuery, req: Request): Promise<AuthorizeVo> {
+    const { c, scopes } = await this.check(q, req)
     const granted = (await this.consentDays())
       ? (
           await this.txHost.tx.query<{ scope: string }[]>(
@@ -210,8 +223,13 @@ export class OAuthProvider {
    * to — the registered `redirect_uri` (its own query kept) with `code`, or `error=access_denied`, and
    * `state`. Approving covers every requested scope and remembers them for `oauth.consent_ttl_days`.
    */
-  async decide(userId: number, q: AuthorizeQuery, approve: boolean): Promise<AuthorizeRedirectVo> {
-    const { c, scopes } = await this.check(q)
+  async decide(
+    userId: number,
+    q: AuthorizeQuery,
+    approve: boolean,
+    req: Request,
+  ): Promise<AuthorizeRedirectVo> {
+    const { c, scopes } = await this.check(q, req)
     const url = new URL(q.redirect_uri)
     if (approve) {
       await this.remember(userId, c, scopes)
@@ -244,9 +262,13 @@ export class OAuthProvider {
    * An authorization request the provider serves (both /authorize): a live third-party client with the
    * authorization_code grant and `redirect_uri` registered verbatim (no normalisation, prefix or
    * wildcard: nothing is ever sent to an unverified URI) → else B4001; `response_type=code` and scopes
-   * (space-separated; absent = the client's) within the client's → else B4002. PKCE S256 is zod's.
+   * (space-separated; absent = the client's) within the client's, and a `resource` naming this site's
+   * MCP endpoint with scope `mcp` requested → else B4002. PKCE S256 is zod's.
    */
-  private async check(q: AuthorizeQuery): Promise<{ c: ClientRow; scopes: string[] }> {
+  private async check(
+    q: AuthorizeQuery,
+    req: Request,
+  ): Promise<{ c: ClientRow; scopes: string[] }> {
     const c = await this.client(q.client_id)
     if (!c || !c.grants.includes('authorization_code') || !c.redirectUris.includes(q.redirect_uri))
       throw new BizError(Err.OAUTH_CLIENT_INVALID)
@@ -254,6 +276,11 @@ export class OAuthProvider {
     const scopes =
       q.scope === undefined ? c.scopes : [...new Set(q.scope.split(' ').filter(Boolean))]
     if (!scopes.length || !scopes.every((s) => c.scopes.includes(s)))
+      throw new BizError(Err.OAUTH_REQUEST_INVALID)
+    if (
+      !this.resourceOk(q.resource, req) ||
+      (q.resource !== undefined && !scopes.includes(OAUTH_SCOPE_MCP))
+    )
       throw new BizError(Err.OAUTH_REQUEST_INVALID)
     return { c, scopes }
   }
@@ -285,6 +312,8 @@ export class OAuthProvider {
     // the library also serves `password` (it cannot be removed): refuse every other grant first
     if (grant !== undefined && !(OAUTH_GRANT_TYPES as readonly string[]).includes(grant))
       return void res.status(400).set(NO_STORE).json({ error: 'unsupported_grant_type' })
+    if (!this.resourceOk(body.data.resource, req))
+      return void res.status(400).set(NO_STORE).json({ error: 'invalid_target' })
     const server = new OAuth2Server({
       model: oauthModel(
         {

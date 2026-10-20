@@ -1,0 +1,29 @@
+{
+  "mcp": {
+    "tool": {
+      "intro": "Agents call these tools over MCP as the user their token belongs to, with that user's own permissions and data scope. Switching a tool off takes effect at once for every tenant and token.",
+      "endpoint": "MCP endpoint",
+      "docsHint": "Client setup, the two ways to authenticate (personal access token, OAuth2) and how to add tools: see docs/mcp.md in the project.",
+      "col": {
+        "name": "Tool",
+        "title": "Title",
+        "kind": "Kind",
+        "perm": "Permission",
+        "description": "Description",
+        "enabled": "Enabled"
+      },
+      "kind": {
+        "read": "Read",
+        "write": "Write"
+      },
+      "anyUser": "Any signed-in user",
+      "on": "On",
+      "off": "Off"
+    }
+  },
+  "menu": {
+    "mcp": {
+      "tool": "MCP tools"
+    }
+  }
+}

@@ -90,6 +90,16 @@
 - 进入期间目标租户里的操作日志记在目标租户，并记下操作者的租户；目标租户的管理员看得到这些行，标为“平台”，IP、地点、浏览器与部门已遮蔽，也删不掉、清空不掉。
 - 进入期间的每个请求（含查看）都写入 API 访问日志，不受访问日志参数与排除路径影响；完整的来源信息只在这里，只有平台能看。
 
+## 智能体接入（MCP）
+
+启用[智能体接入](mcp.md)（`APP_MCP=true`）时：
+
+- **令牌属于用户所在的租户**：个人访问令牌建在用户本人的租户里（平台人员进入别的租户期间新建的也一样），调用时只在该租户里运行，绝不读请求头选租户；绑定了域名的租户，其令牌只能在自己的域名或主域名上用，别的租户的域名回 401。OAuth2 令牌按授权码所属的租户。
+- **进入租户的状态不经 MCP 使用**：控制台会话不是 MCP 令牌；平台人员的个人令牌始终在默认租户里运行，看不到所进入租户的数据。
+- **权限**：令牌用户本人的权限点，非默认租户的用户按其套餐收窄；工具页“MCP 工具”是平台页（`@PlatformOnly()`），对全部租户生效；“访问令牌”页属于租户，租户管理员（套餐含该页即持有 `mcp.token.browse` / `mcp.token.revoke`）只看得到、吊销得了本租户的令牌，别的租户的令牌回 404。
+- **租户停用**：租户被停用或到期时间提前到当前之前时，其全部令牌随会话一起永久吊销；重新启用后须重新签发。
+- 令牌摘要全局唯一（服务端生成的随机值，不会跨租户冲突），不需要释放。
+
 ## 全局唯一值的释放
 
 租户不删除，所以全局唯一的值要逐项释放：
@@ -125,7 +135,7 @@
 
 以下规则开关关闭时同样成立：代码按多租户写，关闭开关只是让所有请求都在默认租户里运行。
 
-**新建的表默认是租户表**。迁移里带 `tenant_id bigint unsigned NOT NULL`，唯一键以它开头（`UNIQUE (tenant_id, order_no, alive)`），没有唯一键的表加 `KEY idx_<表名>_tenant (tenant_id)`；实体用 `@TenantColumn()` 映射这一列。ORM 对租户表的读、写、计数、子查询与 join 自动加当前租户的条件，插入时写入当前租户，root 与 `@SkipDataScope()` 都跳不过。确实由平台统一维护、所有租户共用的表，登记进 `apps/server/src/core/db/tenant-tables.ts` 的 `PLATFORM_TABLES`；必须全局唯一的键登记进同一文件的 `GLOBAL_UNIQUE`，并写明释放方式（`none`：值本身全局唯一，不会冲突；`row-delete`：删除该行才释放；`takeover`：写入方跨租户接管旧行）。生成器的约定见[代码生成指南](codegen.md#建表软删除与引用约定new-tables)。
+**新建的表默认是租户表**。迁移里带 `tenant_id bigint unsigned NOT NULL`，唯一键以它开头（`UNIQUE (tenant_id, order_no, alive)`），没有唯一键的表加 `KEY idx_<表名>_tenant (tenant_id)`；实体用 `@TenantColumn()` 映射这一列。ORM 对租户表的读、写、计数、子查询与 join 自动加当前租户的条件，插入时写入当前租户，root 与 `@SkipDataScope()` 都跳不过。确实由平台统一维护、所有租户共用的表，登记进项目自己的 `apps/server/src/db/project-tables.ts` 的 `PROJECT_PLATFORM_TABLES`；必须全局唯一的键登记进同一文件的 `PROJECT_GLOBAL_UNIQUE`，并写明释放方式（`none`：值本身全局唯一，不会冲突；`row-delete`：删除该行才释放；`takeover`：写入方跨租户接管旧行）。`core/db/tenant-tables.ts` 只放模板自己的表，把两边合并成 `PLATFORM_TABLES` / `GLOBAL_UNIQUE`；项目不改它，升级模板时也就不会在这里冲突（见[升级模板版本](upgrade.md)）。迁移测试按规则检查全部表：不是平台表的表必须有必填的 `tenant_id`，唯一键以它开头，除非登记为全局键；项目新增表与迁移不需要改模板的测试。生成器的约定见[代码生成指南](codegen.md#建表软删除与引用约定new-tables)。
 
 **原始 SQL 不经过 ORM**，须自己写租户条件，`pnpm verify` 的 `tenant-sql` 检查会报出漏写：
 

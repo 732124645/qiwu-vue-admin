@@ -21,8 +21,9 @@
 // What breaks rule 1 or 2 on purpose carries `qw:cross-tenant <reason>` on one of its lines or on a
 // comment line right above (the end of the statement above is not this one's); rule 3 has no such way
 // out.
-// Tenant tables: the tables of `CREATE TABLE` in the migrations minus PLATFORM_TABLES
-// (apps/server/src/core/db/tenant-tables.ts, read as text).
+// Tenant tables: the tables of `CREATE TABLE` in the migrations minus the platform tables
+// (TEMPLATE_PLATFORM_TABLES in apps/server/src/core/db/tenant-tables.ts and PROJECT_PLATFORM_TABLES in
+// apps/server/src/db/project-tables.ts, read as text).
 // Baseline: none (the file is gone, a missing one reads as `{}`), so every hit fails. Should one be
 // needed again, tenant-sql.baseline.json (beside this file) holds per-file counts of the rule 1
 // statements left to fix; more than that fails, fewer is fine. Rules 2 to 4 have no baseline: each of
@@ -40,6 +41,7 @@ import ts from 'typescript'
 const SRC = 'apps/server/src/'
 const MIGRATIONS = 'apps/server/src/db/migrations/'
 const TABLES_FILE = 'apps/server/src/core/db/tenant-tables.ts'
+const PROJECT_TABLES_FILE = 'apps/server/src/db/project-tables.ts'
 const BASELINE = 'scripts/arch/tenant-sql.baseline.json'
 const MARK = /qw:cross-tenant\s+(?!\*\/)\S/
 const CONCAT = /\/\/\s*arch-allow:\s*sql-concat\b/
@@ -291,11 +293,21 @@ function readSets({ files, read }) {
   for (const file of files(`${MIGRATIONS}*.ts`))
     for (const m of read(file).matchAll(/CREATE TABLE (?:IF NOT EXISTS )?`?([a-z][a-z0-9_]*)/g))
       tables.add(m[1])
-  const list = read(TABLES_FILE).match(/\bPLATFORM_TABLES\b[^=]*=\s*\[([^\]]*)\]/)
-  if (!list) throw new Error(`${TABLES_FILE}: PLATFORM_TABLES not found`)
-  const platform = new Set([...list[1].matchAll(/['"]([a-z][a-z0-9_]*)['"]/g)].map((m) => m[1]))
-  if (!platform.size) throw new Error(`${TABLES_FILE}: PLATFORM_TABLES is empty`)
+  const template = platformList(read(TABLES_FILE), TABLES_FILE, 'TEMPLATE_PLATFORM_TABLES')
+  if (!template.length) throw new Error(`${TABLES_FILE}: TEMPLATE_PLATFORM_TABLES is empty`)
+  // 项目登记可以为空（模板发布时就是空的），文件缺失按空处理
+  const project = files(PROJECT_TABLES_FILE).length
+    ? platformList(read(PROJECT_TABLES_FILE), PROJECT_TABLES_FILE, 'PROJECT_PLATFORM_TABLES')
+    : []
+  const platform = new Set([...template, ...project])
   return { known: tables, tenant: new Set([...tables].filter((t) => !platform.has(t))) }
+}
+
+/** 按文本读出 `name = [ … ]` 字面量里的表名；找不到该常量时报错，免得平台表被当成租户表。 */
+function platformList(text, file, name) {
+  const list = text.match(new RegExp(`\\b${name}\\b[^=]*=\\s*\\[([^\\]]*)\\]`))
+  if (!list) throw new Error(`${file}: ${name} not found`)
+  return [...list[1].matchAll(/['"]([a-z][a-z0-9_]*)['"]/g)].map((m) => m[1])
 }
 
 /**

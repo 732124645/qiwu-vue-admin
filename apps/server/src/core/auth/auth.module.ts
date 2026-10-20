@@ -60,6 +60,8 @@ export class CoreAuthModule {
         SessionCurrent,
         LoginTenantResolver,
         TenantActing,
+        // USER_LOOKUP / TENANT_LOOKUP for core modules that cannot import iam (core/mcp)
+        userLookup,
       ],
     }
   }

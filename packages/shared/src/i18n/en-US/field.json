@@ -189,6 +189,7 @@
     "state": "State",
     "code_challenge": "PKCE code challenge",
     "code_challenge_method": "PKCE code challenge method",
-    "approve": "Approve"
+    "approve": "Approve",
+    "resource": "Resource"
   }
 }

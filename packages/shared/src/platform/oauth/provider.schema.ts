@@ -24,8 +24,15 @@ export const OAUTH_GRANT_TYPES = [
 export type OAuthGrantType = (typeof OAUTH_GRANT_TYPES)[number]
 
 export const OAUTH_SCOPE_USER_READ = 'user.read'
-/** Scopes a client may register; v1 has only userinfo's. */
-export const OAUTH_SCOPES = [OAUTH_SCOPE_USER_READ] as const
+/**
+ * The MCP endpoint's scope (see docs/mcp.md): the token's audience is the MCP resource; only a token
+ * carrying it is accepted there, and it reaches nothing else of the admin API.
+ */
+export const OAUTH_SCOPE_MCP = 'mcp'
+/** With `mcp`: the token may call write tools too (without it, read tools only). */
+export const OAUTH_SCOPE_MCP_WRITE = 'mcp.write'
+/** Scopes a client may register: userinfo's and the MCP endpoint's. */
+export const OAUTH_SCOPES = [OAUTH_SCOPE_USER_READ, OAUTH_SCOPE_MCP, OAUTH_SCOPE_MCP_WRITE] as const
 
 export const oauthParams = {
   /** days a consent is remembered; 0 = ask every time */
@@ -37,7 +44,8 @@ export const OAUTH_CONSENT_TTL_DAYS_DEFAULT = 30
  * The authorization request (RFC 6749 §4.1.1 + RFC 7636), as the query string of GET and POST /authorize.
  * PKCE is required and only `S256` (an omitted method means `plain`, RFC 7636 §4.3): a challenge is
  * base64url(sha256), exactly 43 characters. `scope` is space-separated, absent = the client's scopes;
- * `state` is echoed when present. The server checks `response_type` and the client.
+ * `state` is echoed when present. `resource` (RFC 8707), when sent, must be this site's MCP endpoint with
+ * scope `mcp` among the requested ones. The server checks `response_type`, `resource` and the client.
  */
 export const authorizeQuery = z
   .object({
@@ -48,6 +56,7 @@ export const authorizeQuery = z
     state: z.string().max(512).optional(),
     code_challenge: z.string().regex(/^[\w-]{43}$/),
     code_challenge_method: z.literal('S256'),
+    resource: z.string().max(512).optional(),
   })
   .register(fieldDomains, { domain: 'oauth' })
 export type AuthorizeQuery = z.output<typeof authorizeQuery>

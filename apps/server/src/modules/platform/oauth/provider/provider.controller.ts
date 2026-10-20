@@ -106,8 +106,8 @@ export class ProviderController {
       'Authorization request check (consent page): the client, scopes, scopes needing consent',
   })
   @ApiEnvelope(authorizeVo)
-  preview(@Query({ schema: authorizeQuery }) q: AuthorizeQuery) {
-    return this.provider.preview(myId(), q)
+  preview(@Query({ schema: authorizeQuery }) q: AuthorizeQuery, @Req() req: Request) {
+    return this.provider.preview(myId(), q, req)
   }
 
   @Post('authorize')
@@ -124,8 +124,9 @@ export class ProviderController {
   decide(
     @Query({ schema: authorizeQuery }) q: AuthorizeQuery,
     @Body({ schema: authorizeBody }) body: AuthorizeBody,
+    @Req() req: Request,
   ) {
-    return this.provider.decide(myId(), q, body.approve)
+    return this.provider.decide(myId(), q, body.approve, req)
   }
 
   @Get('userinfo')

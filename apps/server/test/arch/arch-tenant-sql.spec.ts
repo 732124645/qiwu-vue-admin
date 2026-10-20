@@ -29,7 +29,7 @@ const SAMPLES: {
 
 const MIGRATION = 'apps/server/src/db/migrations/1-m.ts'
 const TABLES = `// fixture
-export const PLATFORM_TABLES: readonly string[] = [
+const TEMPLATE_PLATFORM_TABLES: readonly string[] = [
 ${SAMPLES.platformTables.map((t) => `  '${t}',`).join('\n')}
 ]
 `
@@ -89,6 +89,25 @@ describe.each(['native', 'windows'])('%s', (platform) => {
       rmSync(root, { recursive: true, force: true })
     }
   })
+})
+
+it("a project's own platform tables (db/project-tables.ts) are left alone like the template's", () => {
+  const { root, put } = tree(SAMPLES.migration.filter((l) => !l.includes('arch-allow')))
+  const file = 'apps/server/src/modules/demo/project.ts'
+  try {
+    put(file, "await q.query('SELECT id FROM t_user')\n")
+    const before = run(root, ['../../scripts/arch/run.mjs', '--only', 'tenant-sql'])
+    expect(Object.fromEntries(reported(before.stderr))).toEqual({ [file]: ['1 t_user'] })
+    put(
+      'apps/server/src/db/project-tables.ts',
+      "export const PROJECT_PLATFORM_TABLES: readonly string[] = ['t_user']\n",
+    )
+    const after = run(root, ['../../scripts/arch/run.mjs', '--only', 'tenant-sql'])
+    expect(after.stdout + after.stderr).not.toContain('check crashed')
+    expect(after.status).toBe(0)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
 })
 
 it('the baseline fails a file over its count, never one under it, counts raw SQL only; --update-baseline only lowers', () => {

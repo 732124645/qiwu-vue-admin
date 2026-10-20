@@ -1,0 +1,43 @@
+{
+  "mcp": {
+    "copy": "Copy",
+    "copied": "Copied",
+    "copyFailed": "Copying failed: select the text and copy it yourself",
+    "token": {
+      "intro": "An access token lets an agent (MCP client) call the system's tools as you, with your own permissions. Give it only to clients you trust and revoke it once it is no longer used.",
+      "col": {
+        "hint": "Ends with",
+        "write": "Write",
+        "expiresAt": "Expires",
+        "lastUsedAt": "Last used"
+      },
+      "state": {
+        "active": "Active",
+        "revoked": "Revoked",
+        "expired": "Expired"
+      },
+      "allTools": "All tools",
+      "never": "Never expires",
+      "neverUsed": "Never used",
+      "days": "{n} days",
+      "create": "New token",
+      "toolsHint": "None picked: all tools. Write tools need \"Allow write tools\" first.",
+      "toolsAllHint": "Every read tool you have the permission for; with \"Allow write tools\" the write tools too.",
+      "writeWarning": "With writes allowed, agents can add or change data on your behalf; with no tools picked, write tools added later are included automatically. Every call is recorded in the action log.",
+      "limitHint": "Your password is checked again first. At most {max} active tokens per user, valid for up to {days} days.",
+      "createdTitle": "Save the access token",
+      "once": "The token is shown this once only and cannot be seen again after closing: copy it now. If it is lost, revoke it and create a new one.",
+      "saved": "I have saved it",
+      "revokeConfirm": "Revoke the token \"{name}\"? Agents using it can no longer call at once; this cannot be undone.",
+      "revoked": "Revoked"
+    }
+  },
+  "menu": {
+    "mcp": {
+      "token": "Access tokens"
+    },
+    "action": {
+      "revoke": "Revoke"
+    }
+  }
+}

@@ -529,6 +529,7 @@ describe('soft delete: remove, the reference registry, link helpers', () => {
     ).toEqual({
       iam_position: ['iam_user_positions.position_id'],
       iam_user: [
+        'iam_access_token.user_id cascade',
         'iam_user_pref.user_id cascade',
         'iam_user_roles.user_id cascade',
         'iam_user_positions.user_id cascade',

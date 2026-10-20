@@ -8,6 +8,7 @@ import {
   DEFAULT_CAPTCHA_MODE,
   AUDIT_RETENTION_PARAM,
   DEFAULT_AUDIT_RETENTION_DAYS,
+  MCP_PAUSED_PARAM,
   DEFAULT_LOGIN_SECURITY,
   DEFAULT_PASSWORD_POLICY,
   DEFAULT_EXCEL_IMPORT_LIMITS,
@@ -314,6 +315,15 @@ const PARAMS: ParamSeed[] = [
       'zh-CN': '日志与记录保留天数（操作/登录/API/任务日志、消息记录、短信验证码、已删除文件）',
       'en-US':
         'Retention in days (action, sign-in, API and job logs, message records, SMS codes, deleted files)',
+    },
+  },
+  {
+    // root only (param page): the running stop switch of agent access, whatever APP_MCP says
+    key: MCP_PAUSED_PARAM,
+    value: 'false',
+    nameI18n: {
+      'zh-CN': '暂停智能体调用工具（true 时所有 MCP 工具调用立即被拒）',
+      'en-US': 'Pause agent tool calls (true: every MCP tool call is refused at once)',
     },
   },
   {

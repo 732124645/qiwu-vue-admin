@@ -130,7 +130,7 @@ UNIQUE (tenant_id, order_no, alive)
 
 `alive` 不映射到实体；软删除释放原唯一值。生成实体继承 `BaseEntity` 等基类，常规查询排除软删除行，删除经 `softDeleteRows()` 写删除时间和适用的审计信息。
 
-新表默认是租户表：有 `tenant_id` 且不在 [tenant-tables.ts](../apps/server/src/core/db/tenant-tables.ts) 的 `PLATFORM_TABLES` 里。生成实体用 `@TenantColumn()` 映射这一列，ORM 层对它的读写自动加当前租户的条件，插入时由服务端写入当前租户；`tenant_id` 按系统列处理，不进列表、表单、查询、DTO 与 Excel。唯一键以 `tenant_id` 开头，不同租户可以有相同的值；没有唯一键的表另加 `KEY idx_<表名>_tenant (tenant_id)`。没有 `tenant_id` 的项目表会被所有租户共享：任何租户都能读写它的全部行。只有确实由平台统一维护的表才登记进 `PLATFORM_TABLES`；平台表即使带 `tenant_id`，生成实体也不映射它。设计见[多租户设计说明](design-notes.md#tenancy)。
+新表默认是租户表：有 `tenant_id` 且不在 `PLATFORM_TABLES` 里（[tenant-tables.ts](../apps/server/src/core/db/tenant-tables.ts) 合并模板的登记与项目的 [project-tables.ts](../apps/server/src/db/project-tables.ts)）。生成实体用 `@TenantColumn()` 映射这一列，ORM 层对它的读写自动加当前租户的条件，插入时由服务端写入当前租户；`tenant_id` 按系统列处理，不进列表、表单、查询、DTO 与 Excel。唯一键以 `tenant_id` 开头，不同租户可以有相同的值；没有唯一键的表另加 `KEY idx_<表名>_tenant (tenant_id)`。没有 `tenant_id` 的项目表会被所有租户共享：任何租户都能读写它的全部行。只有确实由平台统一维护的表才登记为平台表，项目的表登记进 `project-tables.ts` 的 `PROJECT_PLATFORM_TABLES`；平台表即使带 `tenant_id`，生成实体也不映射它。设计见[多租户设计说明](design-notes.md#tenancy)。
 
 项目不用数据库外键。引用列保留普通索引，被引用表的 `options.referencedBy` 配置列出 `[{ table, column, label }]`，生成实体调用 `referencedBy()` 登记。配置页和 `PUT /api/codegen/tables/:id` 校验引用表/列以及该表的 `deleted_at`，无效配置返回 422 `C3009`。写入新的引用经 `assertReferencesLive()` 读父行 `FOR SHARE`：不存在或已删除返回 404；删除父行发现有效限制引用则 409 `in_use`。
 

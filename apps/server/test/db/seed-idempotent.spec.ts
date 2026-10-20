@@ -50,6 +50,7 @@ import {
   menuPerms,
   monitorPerms,
   OAUTH_CONSENT_TTL_DAYS_DEFAULT,
+  MCP_PAUSED_PARAM,
   oauthParams,
   paramPerms,
   passwordPolicyParams,
@@ -837,6 +838,8 @@ it('users: system group → user page (first) → one action per userPerms, assi
     'settings-app-version',
     'geo-area',
     'oauth-client',
+    'mcp-tool',
+    'mcp-token',
     'iam-tenant',
     'iam-tenant-package',
   ])
@@ -1241,6 +1244,8 @@ it('menu groups and pages follow the requested order', async () => {
     'audit',
     'storage',
     'oauth-client',
+    'mcp-tool',
+    'mcp-token',
     'iam-tenant',
     'iam-tenant-package',
   ])
@@ -2491,6 +2496,7 @@ it('dicts with labels in every language, params with defaults', async () => {
     [HTTP_TRACE_EXCLUDE_PARAM]: DEFAULT_HTTP_TRACE_EXCLUDE,
     [AUDIT_RETENTION_PARAM]: String(DEFAULT_AUDIT_RETENTION_DAYS),
     [oauthParams.consentTtlDays]: String(OAUTH_CONSENT_TTL_DAYS_DEFAULT),
+    [MCP_PAUSED_PARAM]: 'false',
     [WX_SUBSCRIBE_ENABLED_PARAM]: 'false',
     [WX_SUBSCRIBE_TEMPLATES_PARAM]: expect.any(String),
     [wxoaParams.copyInbound]: 'true',

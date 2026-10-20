@@ -69,6 +69,7 @@ pnpm.cmd dev
 | 入口                                                                 | 内容                                               |
 | -------------------------------------------------------------------- | -------------------------------------------------- |
 | [设计说明](docs/design-notes.md)                                     | 分层、会话、权限与公共契约                         |
+| [升级模板版本](docs/upgrade.md)                                      | 项目合并模板新版本的步骤、常见冲突与合并后检查     |
 | [部署](docs/deploy.md)                                               | 构建产物、nginx、CSP、文件目录、演示模式与可选 PM2 |
 | [代码生成](docs/codegen.md) / [黄金样板](docs/codegen-golden.md)     | 项目域与 CRUD 约定                                 |
 | [实时推送](docs/realtime.md) / [多实例部署](docs/scale-out.md)       | 推送、共享状态与扩容前置条件                       |
@@ -145,6 +146,7 @@ Tutorials and feature introductions are on the docs site [qiwuadmin.com](https:/
 - [Deployment](docs/deploy.md): build output, nginx, CSP, public files, demo mode and optional PM2. [Scale-out](docs/scale-out.md) and [realtime](docs/realtime.md): prerequisites and reliability limits.
 - [Job queues](docs/queue.md): background jobs on the existing Redis, retries, the tenant rule and the queue monitor.
 - [Design notes](docs/design-notes.md): layering, sessions, permissions and public contracts.
+- [Template upgrades](docs/upgrade.md): merging a new template release into a project built from it, the usual conflicts and the checks afterwards.
 - [Code generation](docs/codegen.md), [golden examples](docs/codegen-golden.md), [OAuth2](docs/oauth2.md), [BPMN](docs/workflow-bpmn.md), and [workflow timeouts](docs/workflow-timeout.md).
 
 `pnpm verify` runs static checks. `pnpm ci:local` runs the full local gate, including database tests, builds, Playwright and bounded smoke checks; prepare isolated test databases first. Deployment currently uses build artifacts and local git. Docker, compose and remote CI support are planned.

@@ -10,6 +10,7 @@ import {
   type ProfileVo,
 } from '@qiwu/shared'
 import { profileApi } from '@/api/platform/iam/profile'
+import { myTokenApi } from '@/api/platform/mcp'
 import { publicParamApi } from '@/api/platform/settings/public-param'
 import AvatarCropper from '@/core/components/AvatarCropper.vue'
 import PasswordChangeForm from '@/core/components/PasswordChangeForm.vue'
@@ -22,6 +23,7 @@ import { Icon } from '@/core/icons'
 import { ApiError } from '@/core/request/http'
 import { useAuthStore } from '@/core/stores/auth'
 import { useLocaleStore } from '@/core/stores/locale'
+import AccessTokens from './AccessTokens.vue'
 import SocialBindings from './SocialBindings.vue'
 
 /**
@@ -95,6 +97,12 @@ void (async () => {
       () => false,
     )) // the request layer showed it
 })()
+/** 访问令牌页签：只在服务端开着智能体接入（my-tokens 有应答）时显示，关闭时该接口 404。 */
+const tokensTab = ref(false)
+myTokenApi.list().then(
+  () => (tokensTab.value = true),
+  () => undefined,
+)
 profileApi
   .get()
   .then(show, () => undefined) // the request layer showed it
@@ -293,6 +301,10 @@ const initial = computed(() => [...(profile.value?.displayName ?? '')][0]?.toUpp
 
           <el-tab-pane v-if="socialsTab" :label="t('profile.tabs.socials')" name="socials" lazy>
             <SocialBindings />
+          </el-tab-pane>
+
+          <el-tab-pane v-if="tokensTab" :label="t('menu.mcp.token')" name="tokens" lazy>
+            <AccessTokens />
           </el-tab-pane>
 
           <el-tab-pane :label="t('profile.tabs.prefs')" name="prefs">

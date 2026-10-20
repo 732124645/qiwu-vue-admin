@@ -134,5 +134,15 @@
     "draft_unsynced": "草稿有未同步修改，请先同步",
     "cover_unavailable": "封面不是可用的永久图片素材",
     "mass_retry_expired": "该群发任务已超过可重发的时限（23 小时），请核对群发结果后新建任务"
+  },
+  "mcp": {
+    "token_limit": "每个用户最多保留 {max} 个有效的访问令牌，请先吊销不用的令牌",
+    "tool_unknown": "没有名为 {name} 的工具",
+    "write_not_allowed": "令牌未允许写入类工具：{name}",
+    "paused": "智能体接入已暂停，请稍后再试",
+    "tool_disabled": "该工具已停用",
+    "tool_not_allowed": "该令牌未允许调用此工具",
+    "output_too_large": "工具返回的内容超过 {max} 字节的上限，请缩小查询范围",
+    "timeout": "工具在 {seconds} 秒内没有完成"
   }
 }

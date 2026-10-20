@@ -43,6 +43,7 @@ export const PLATFORM_ONLY_ROUTES: readonly string[] = [
   'settings-app-version',
   'storage-config',
   'oauth-client',
+  'mcp-tool',
   'messaging-mail-account',
   'messaging-sms-channel',
   'messaging-inbox-template',

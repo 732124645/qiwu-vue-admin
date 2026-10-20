@@ -3,18 +3,15 @@
 // (drop every table, migrate from source, drop the tenant columns' defaults, seed: restoreTestSchema),
 // so every spec starts from the full schema and seed rows. E2e specs still reset the tables they write
 // in beforeAll (resetDb), and db-migrations restores the same state after its round trip.
-/// <reference types="vite/client" />
+// Local fast mode (QW_TEST_REUSE_DB=1; ci:local drops it, CI ignores it; see docs/getting-started.md): when the
+// fingerprint recorded in the database matches the current migrations, seeds and schema switches, the
+// drop is skipped; pending migrations, hardening and the idempotent seeds still run.
 import './load-env.js'
-import { DataSource, type MigrationInterface } from 'typeorm'
+import { DataSource } from 'typeorm'
 import { dataSourceOptions } from '../../src/db/data-source.js'
-import { restoreTestSchema } from './schema.js'
+import { SOURCE_MIGRATIONS } from './migrations.js'
+import { restoreTestSchema, schemaFingerprint, storedFingerprint } from './schema.js'
 import { assertTestChannel, holdTestRun } from './test-channel.js'
-
-const migrations = Object.values(
-  import.meta.glob<Record<string, new () => MigrationInterface>>('../../src/db/migrations/*.ts', {
-    eager: true,
-  }),
-).flatMap((mod) => Object.values(mod))
 
 export default async function setup(): Promise<() => Promise<void>> {
   if (!process.env.DB_NAME?.endsWith('_test'))
@@ -26,10 +23,15 @@ export default async function setup(): Promise<() => Promise<void>> {
   let release: (() => Promise<void>) | undefined
   try {
     release = await holdTestRun(lockDs)
-    const ds = new DataSource({ ...dataSourceOptions(), migrations })
+    const ds = new DataSource({ ...dataSourceOptions(), migrations: SOURCE_MIGRATIONS })
     await ds.initialize()
     try {
-      await ds.dropDatabase()
+      const reuse =
+        process.env.QW_TEST_REUSE_DB === '1' &&
+        !process.env.CI &&
+        (await storedFingerprint(ds)) === schemaFingerprint()
+      if (reuse) console.log(`globalSetup: QW_TEST_REUSE_DB=1, reusing ${process.env.DB_NAME}`)
+      else await ds.dropDatabase()
       await restoreTestSchema(ds)
     } finally {
       await ds.destroy()

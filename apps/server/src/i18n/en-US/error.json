@@ -134,5 +134,15 @@
     "draft_unsynced": "The draft has unsynced changes; sync it first",
     "cover_unavailable": "The cover is not an available permanent image material",
     "mass_retry_expired": "This mass job is past its retry window (23 hours). Check its outcome and create a new job if needed"
+  },
+  "mcp": {
+    "token_limit": "A user keeps at most {max} live access tokens. Revoke the ones you no longer use first",
+    "tool_unknown": "There is no tool named {name}",
+    "write_not_allowed": "The token does not allow write tools: {name}",
+    "paused": "Agent access is paused. Please try again later",
+    "tool_disabled": "This tool is switched off",
+    "tool_not_allowed": "The token does not allow this tool",
+    "output_too_large": "The tool's answer is over the {max}-byte limit. Narrow the request",
+    "timeout": "The tool did not finish within {seconds} seconds"
   }
 }

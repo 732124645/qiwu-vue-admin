@@ -1,7 +1,7 @@
 /**
  * Business error codes (see docs/design-notes.md#api-envelope). Every code has an HTTP status and an i18n key
  * `error.<domain>.<name>` translated by the server; clients branch on `code`, never on `msg`.
- * Ranges: A0xxx common · A1xxx auth · B1xxx iam · B2xxx settings · B3xxx messaging · B4xxx oauth ·
+ * Ranges: A0xxx common · A1xxx auth · B1xxx iam · B2xxx settings · B3xxx messaging · B4xxx oauth · B6xxx wxoa · B7xxx mcp ·
  * C1xxx storage · C2xxx scheduler · C3xxx codegen · D1xxx workflow · E1xxx+ biz.
  * Modules add their own codes later; codes are never renumbered.
  */
@@ -153,6 +153,23 @@ export const Err = {
   OAUTH_INSUFFICIENT_SCOPE: def('B4003', 403, 'error.oauth.insufficient_scope'),
   /** a built-in client (`console`) is read-only: change, enable/disable, reset secret, delete */
   OAUTH_CLIENT_BUILTIN: def('B4010', 422, 'error.oauth.client_builtin'),
+
+  /** Agent access over MCP (see docs/mcp.md): a user holds at most this many live tokens; params `{ max }` */
+  MCP_TOKEN_LIMIT: def('B7001', 422, 'error.mcp.token_limit'),
+  /** a token lists a name that is no registered tool; params `{ name }` */
+  MCP_TOOL_UNKNOWN: def('B7002', 422, 'error.mcp.tool_unknown'),
+  /** a token lists a write tool without allowing writes, or calls one; params `{ name }` */
+  MCP_WRITE_NOT_ALLOWED: def('B7003', 403, 'error.mcp.write_not_allowed'),
+  /** a tool call while `mcp.paused` is on */
+  MCP_PAUSED: def('B7010', 503, 'error.mcp.paused'),
+  /** a tool switched off on the platform's tool page */
+  MCP_TOOL_DISABLED: def('B7011', 403, 'error.mcp.tool_disabled'),
+  /** a tool the token does not list */
+  MCP_TOOL_NOT_ALLOWED: def('B7012', 403, 'error.mcp.tool_not_allowed'),
+  /** a tool's answer over the size limit; params `{ max }` (bytes) */
+  MCP_OUTPUT_TOO_LARGE: def('B7013', 413, 'error.mcp.output_too_large'),
+  /** a tool still running at its time limit; params `{ seconds }` */
+  MCP_TIMEOUT: def('B7014', 504, 'error.mcp.timeout'),
 
   /** WeChat Official Accounts gateway and account management errors. */
   WXOA_UPSTREAM: def('B6001', 502, 'error.wxoa.upstream'),

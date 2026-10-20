@@ -5,6 +5,7 @@ import { CoreAuditModule } from './core/audit/audit.module.js'
 import { CoreAuthModule } from './core/auth/auth.module.js'
 import { CoreCaptchaModule } from './core/captcha/captcha.module.js'
 import { CoreConfigModule } from './core/config/config.module.js'
+import { mcpOn } from './core/config/mcp-switch.js'
 import { wxoaOn } from './core/config/wxoa-switch.js'
 import { CoreContextModule } from './core/context/context.module.js'
 import { CoreCryptoModule } from './core/crypto/secret-box.js'
@@ -15,6 +16,8 @@ import { HealthController } from './core/health/health.controller.js'
 import { CoreHttpModule } from './core/http/http.module.js'
 import { CoreI18nModule } from './core/i18n/i18n.module.js'
 import { CoreLoggerModule } from './core/logger/logger.module.js'
+import { McpModule } from './core/mcp/mcp.module.js'
+import { CoreMcpTokenModule } from './core/mcp/token-revocation.js'
 import { CoreNotifyModule } from './core/notify/notify.js'
 import { CoreQueueModule } from './core/queue/queue.module.js'
 import { CoreRealtimeModule } from './core/realtime/realtime.module.js'
@@ -71,6 +74,10 @@ import { WorkflowModule } from './modules/workflow/workflow.module.js'
     // 公众号模块只在 APP_WXOA 打开时加载：关闭时不注册路由、任务与回调，也不访问微信；
     // 条件在 ConfigModule 把环境文件写入 process.env 之后才读取
     ConditionalModule.registerWhen(WxoaModule, (env) => wxoaOn(env), { debug: false }),
+    // access tokens end with their user's or tenant's sessions whatever APP_MCP says
+    CoreMcpTokenModule,
+    // 智能体接入只在 APP_MCP 打开时加载：关闭时 /api/mcp 与其管理接口不存在，工具不注册
+    ConditionalModule.registerWhen(McpModule, (env) => mcpOn(env), { debug: false }),
     SchedulerModule,
     MessagingModule,
     AuditModule,

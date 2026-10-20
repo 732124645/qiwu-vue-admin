@@ -11,6 +11,7 @@ import { IamUserLookup } from './iam-user-lookup.js'
 import { MenuModule } from './menu/menu.module.js'
 import { PositionModule } from './position/position.module.js'
 import { ProfileController } from './profile/profile.controller.js'
+import { ProfileMcpTools } from './profile/profile.mcp-tools.js'
 import { ProfileService } from './profile/profile.service.js'
 import { RoleModule } from './role/role.module.js'
 import { SessionModule } from './session/session.module.js'
@@ -83,6 +84,7 @@ referencedBy(
     TenantProvisioner,
     TenantService,
     ProfileService,
+    ProfileMcpTools,
     SignupService,
     WxMpGateway,
     WxMpService,

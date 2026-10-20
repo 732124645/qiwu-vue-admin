@@ -4,12 +4,14 @@ import { DeptModule } from '../dept/dept.module.js'
 import { SmsOtpModule } from '../../messaging/sms-otp/sms-otp.module.js'
 import { RoleModule } from '../role/role.module.js'
 import { UserController } from './user.controller.js'
+import { UserMcpTools } from './user.mcp-tools.js'
 import { User } from './user.entity.js'
 import { UserService } from './user.service.js'
 
 @Module({
   imports: [TypeOrmModule.forFeature([User]), DeptModule, RoleModule, SmsOtpModule],
   controllers: [UserController],
-  providers: [UserService],
+  // UserMcpTools: the iam.user.search agent tool (registered only while APP_MCP is on)
+  providers: [UserService, UserMcpTools],
 })
 export class UserModule {}

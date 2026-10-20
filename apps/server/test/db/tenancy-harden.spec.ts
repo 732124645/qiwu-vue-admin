@@ -3,13 +3,20 @@
 // migrating while multi-tenancy is on — not in the run that upgrades an existing database to tenancy, at
 // once on a new one. Columns are given their default back with SET DEFAULT to stand for a database not
 // hardened yet. Needs a fresh build (`pnpm --filter @qiwu/server build`).
-import { spawnSync } from 'node:child_process'
-import { existsSync, readdirSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { DataSource } from 'typeorm'
 import { PLATFORM_TABLES } from '../../src/core/db/tenant-tables.js'
 import { dataSourceOptions } from '../../src/db/data-source.js'
 import { Tenancy20261007100000 } from '../../src/db/migrations/20261007100000-tenant.js'
 import { hardenTenancy } from '../../src/db/tenancy-harden.js'
+import {
+  killed,
+  MIGRATION_NAMES,
+  MIGRATION_TABLES,
+  runScript,
+  SCRIPT_TIMEOUT_MS,
+  SOURCE_MIGRATIONS,
+} from '../setup/migrations.js'
 import { restoreTestSchema } from '../setup/schema.js'
 
 const TENANCY = new Tenancy20261007100000().name
@@ -17,15 +24,12 @@ const FAST = { seconds: 1, attempts: 2, pauseMs: 100 }
 
 let ds: DataSource
 
-// a hung script is killed (status null), so the case fails instead of the file timing out
-const node = (script: string, args: string[] = [], env: NodeJS.ProcessEnv = {}) =>
-  spawnSync(process.execPath, [script, ...args], {
-    encoding: 'utf8',
-    env: { ...process.env, ...env },
-    timeout: 120_000,
-  })
-const migrate = (command: 'run' | 'revert', multiTenant: boolean) => {
-  const r = node('dist/db/migrate.js', [command], { APP_MULTI_TENANT: String(multiTenant) })
+/** A case running dist scripts: room for each of them to use its whole timeout. */
+const SCRIPT_CASE_MS = SCRIPT_TIMEOUT_MS * 3
+
+// a hung script is killed (runScript fails the case at once and says so)
+const migrate = (multiTenant: boolean) => {
+  const r = runScript('dist/db/migrate.js', ['run'], { APP_MULTI_TENANT: String(multiTenant) })
   expect(r).toMatchObject({ status: 0 }) // a failure diff shows stderr
   return r.stdout + r.stderr
 }
@@ -44,6 +48,25 @@ const columns = async (which: 'all' | 'defaulted'): Promise<string[]> =>
       [PLATFORM_TABLES],
     )
   ).map((r: { c: string }) => r.c)
+/**
+ * 每张租户表（迁移建的、不是平台表的）的 `tenant_id` 加上 `aud_action_log.actor_tenant_id`：加固要处理的
+ * 全部列；`only` 只取这些表。缺 `tenant_id` 的非平台表也在里面，比对时就会失败。
+ */
+const expectedColumns = async (only?: Set<string>): Promise<string[]> => {
+  const present = new Set(
+    (
+      await ds.query(
+        'SELECT table_name AS t FROM information_schema.tables WHERE table_schema = DATABASE()',
+      )
+    ).map((r: { t: string }) => r.t),
+  )
+  return [
+    'aud_action_log.actor_tenant_id',
+    ...MIGRATION_TABLES.filter(
+      (t) => present.has(t) && !PLATFORM_TABLES.includes(t) && (!only || only.has(t)),
+    ).map((t) => `${t}.tenant_id`),
+  ].sort()
+}
 /** Gives the columns their migration default back, as on a database not hardened yet. */
 const giveDefaults = async (list: string[]) => {
   for (const column of list) {
@@ -56,18 +79,28 @@ const giveDefaults = async (list: string[]) => {
 beforeAll(async () => {
   if (!existsSync('dist/db/tenancy-harden.js') || !existsSync('dist/db/migrate.js'))
     throw new Error('dist is missing: pnpm --filter @qiwu/server build')
-  ds = await new DataSource(dataSourceOptions()).initialize()
+  ds = await new DataSource({ ...dataSourceOptions(), migrations: SOURCE_MIGRATIONS }).initialize()
+})
+
+// a script killed by its timeout may have left a migration half done: the later cases are skipped and
+// afterAll rebuilds the database
+beforeEach(({ skip }) => {
+  if (killed.script) skip(`${killed.script} was killed: the database is rebuilt in afterAll`)
 })
 
 afterAll(async () => {
   // back to the globalSetup state, whatever a failed case left
-  if (ds?.isInitialized) await restoreTestSchema(ds)
+  if (ds?.isInitialized) {
+    if (killed.script) await ds.dropDatabase()
+    await restoreTestSchema(ds)
+  }
   await ds?.destroy()
-})
+}, SCRIPT_CASE_MS)
 
 it('drops the default of every tenant column, the nullable sign-in one and the actor’s tenant too; a second run alters nothing', async () => {
   const all = await columns('all')
-  expect(all).toHaveLength(45) // tenant tables' tenant_id + aud_action_log.actor_tenant_id
+  // tenant tables' tenant_id + aud_action_log.actor_tenant_id: a tenant table without one fails here
+  expect(all).toEqual(await expectedColumns())
   expect(all).toEqual(
     expect.arrayContaining(['aud_action_log.actor_tenant_id', 'aud_signin_log.tenant_id']),
   )
@@ -147,7 +180,7 @@ it.each(['APP_SECRET', 'SEED_ADMIN_PASSWORD'] as const)(
     try {
       // an unreachable port must still give the credential error, before any DB operation
       for (const port of ['1', process.env.DB_PORT!]) {
-        const r = node('dist/db/tenancy-harden.js', [], {
+        const r = runScript('dist/db/tenancy-harden.js', [], {
           NODE_ENV: 'production',
           DB_PORT: port,
           APP_SECRET: secret,
@@ -165,7 +198,7 @@ it.each(['APP_SECRET', 'SEED_ADMIN_PASSWORD'] as const)(
         expect(await columns('defaulted')).toEqual(['demo_book.tenant_id'])
       }
       // the same command with test credentials does the work
-      const r = node('dist/db/tenancy-harden.js')
+      const r = runScript('dist/db/tenancy-harden.js')
       expect(r).toMatchObject({ status: 0 })
       expect(r.stdout).toContain('demo_book.tenant_id')
       expect(await columns('defaulted')).toEqual([])
@@ -173,62 +206,76 @@ it.each(['APP_SECRET', 'SEED_ADMIN_PASSWORD'] as const)(
       await hardenTenancy(ds)
     }
   },
+  SCRIPT_CASE_MS,
 )
 
-it('migrate run hardens after migrating with multi-tenancy on; off, the defaults stay', async () => {
-  const two = ['aud_action_log.actor_tenant_id', 'demo_book.tenant_id']
-  await giveDefaults(two)
-  try {
-    migrate('run', false)
-    expect(await columns('defaulted')).toEqual(two)
-    expect(migrate('run', true)).toContain('tenancy-harden: default dropped on')
-    expect(await columns('defaulted')).toEqual([])
-  } finally {
-    await hardenTenancy(ds)
-  }
-}, 60_000)
+it(
+  'migrate run hardens after migrating with multi-tenancy on; off, the defaults stay',
+  async () => {
+    const two = ['aud_action_log.actor_tenant_id', 'demo_book.tenant_id']
+    await giveDefaults(two)
+    try {
+      migrate(false)
+      expect(await columns('defaulted')).toEqual(two)
+      expect(migrate(true)).toContain('tenancy-harden: default dropped on')
+      expect(await columns('defaulted')).toEqual([])
+    } finally {
+      await hardenTenancy(ds)
+    }
+  },
+  SCRIPT_CASE_MS,
+)
 
-it('upgrading a database to tenancy with multi-tenancy on: that run keeps the defaults and says why; the next run hardens', async () => {
-  try {
-    // a database from before tenancy: the tenancy migration and every later one reverted
-    while ((await executed()).includes(TENANCY)) migrate('revert', false)
-    expect(await executed()).not.toHaveLength(0)
+it(
+  'upgrading a database to tenancy with multi-tenancy on: that run keeps the defaults and says why; the next run hardens',
+  async () => {
+    try {
+      // a database from before tenancy: the tenancy migration and every later one reverted (in this
+      // process, one by one)
+      while ((await executed()).includes(TENANCY))
+        await ds.undoLastMigration({ transaction: 'each' })
+      expect(await executed()).not.toHaveLength(0)
+      const before = new Set<string>(
+        (
+          await ds.query(
+            'SELECT table_name AS t FROM information_schema.tables WHERE table_schema = DATABASE()',
+          )
+        ).map((r: { t: string }) => r.t),
+      )
 
-    const said = migrate('run', true)
-    expect(await executed()).toContain(TENANCY)
-    expect(said).toContain('tenancy-harden: skipped')
-    expect(said).toContain('APP_MULTI_TENANT off')
-    const allColumns = await columns('all')
-    // The content migration creates its four tables with a required tenant_id and no transitional default.
-    expect(await columns('defaulted')).toEqual(
-      allColumns.filter(
-        (column) =>
-          !['wxoa_draft', 'wxoa_publish', 'wxoa_mass_job', 'wxoa_inline_image'].some((table) =>
-            column.startsWith(`${table}.`),
-          ),
-      ),
-    )
+      const said = migrate(true)
+      expect(await executed()).toContain(TENANCY)
+      expect(said).toContain('tenancy-harden: skipped')
+      expect(said).toContain('APP_MULTI_TENANT off')
+      // the tables there before keep the transitional default; tables created after the tenancy
+      // migration carry a required tenant_id from the start, without it
+      expect(await columns('defaulted')).toEqual(await expectedColumns(before))
 
-    expect(migrate('run', true)).toContain('tenancy-harden: default dropped on')
-    expect(await columns('defaulted')).toEqual([])
-  } finally {
-    await restoreTestSchema(ds) // the reverted platform flags and seed rows come back
-  }
-}, 120_000)
+      expect(migrate(true)).toContain('tenancy-harden: default dropped on')
+      expect(await columns('defaulted')).toEqual([])
+    } finally {
+      await restoreTestSchema(ds) // the reverted platform flags and seed rows come back
+    }
+  },
+  SCRIPT_CASE_MS,
+)
 
-it('a new database with multi-tenancy on: one run migrates and hardens', async () => {
-  try {
-    await ds.dropDatabase()
-    migrate('run', true)
-    expect(await executed()).toHaveLength(
-      readdirSync('src/db/migrations').filter((f) => f.endsWith('.ts')).length,
-    )
-    expect(await columns('all')).toHaveLength(45)
-    expect(await columns('defaulted')).toEqual([])
-  } finally {
-    await restoreTestSchema(ds) // the seed rows
-  }
-}, 120_000)
+it(
+  'a new database with multi-tenancy on: one run migrates and hardens',
+  async () => {
+    const all = await columns('all')
+    try {
+      await ds.dropDatabase()
+      migrate(true)
+      expect(await executed()).toEqual(MIGRATION_NAMES)
+      expect(await columns('all')).toEqual(all)
+      expect(await columns('defaulted')).toEqual([])
+    } finally {
+      await restoreTestSchema(ds) // the seed rows
+    }
+  },
+  SCRIPT_CASE_MS,
+)
 
 it('fails in bounded time while another session holds a tenant table, and finishes once it is released', async () => {
   const holder = ds.createQueryRunner()

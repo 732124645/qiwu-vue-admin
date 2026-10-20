@@ -24,6 +24,8 @@ type Source =
   | 'sign-in'
   /** the session of the presented token */
   | 'session'
+  /** the presented access token: a personal token's row, or an OAuth2 session with scope `mcp` */
+  | 'token'
   /** the OAuth2 grant: the code's tenant, the refresh token's session, the default one for clients */
   | 'grant'
   /** the resource row: the binding of a WeChat identity */
@@ -51,6 +53,14 @@ const PUBLIC_ROUTES: Record<string, Source> = {
   'GET /wxoa/callback/:key': 'row',
   'POST /wxoa/callback/:key': 'row',
   'POST /messaging/sms/receipt/:channel': 'channel',
+  'POST /mcp': 'token',
+  // 405 without reading anything (stateless MCP server)
+  'GET /mcp': 'platform',
+  'DELETE /mcp': 'platform',
+  // discovery documents: the request's own origin and code constants
+  'GET /.well-known/oauth-protected-resource': 'platform',
+  'GET /.well-known/oauth-protected-resource/api/mcp': 'platform',
+  'GET /.well-known/oauth-authorization-server': 'platform',
   'GET /health': 'platform',
   'GET /auth/captcha': 'platform',
   'POST /auth/captcha/check': 'platform',

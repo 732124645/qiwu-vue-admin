@@ -80,6 +80,10 @@ const lastMsg = (reason: string): ((sid: string) => RealtimeMessage) | undefined
 export class SessionRevoker {
   private readonly logger = new Logger(SessionRevoker.name)
   private readonly revokeUserHooks: Array<(userId: number, reason: string) => Promise<void>> = []
+  /** the hooks registered with `again`: they run a second time once credver has moved */
+  private readonly revokeUserAgain: Array<(userId: number, reason: string) => Promise<void>> = []
+  private readonly revokeTenantHooks: Array<(tenantId: number, reason: string) => Promise<void>> =
+    []
 
   constructor(
     @Inject(REDIS) private readonly redis: Redis,
@@ -90,10 +94,25 @@ export class SessionRevoker {
   /**
    * Runs first in every `revokeUser`, with its reason (modules clean up their own credentials, e.g. unused
    * SMS codes, or bindings made with a changed password), before credver moves: a sign-in that reads
-   * credver and then re-checks such a credential is refused or its session ended.
+   * credver and then re-checks such a credential is refused or its session ended. `again`: the hook runs
+   * once more right after credver moved, for credentials made outside sessions that compare credver
+   * only after they are stored (personal access tokens): one stored between the first run and the bump
+   * is caught by the second run, one stored later sees the moved credver itself.
    */
-  onRevokeUser(hook: (userId: number, reason: string) => Promise<void>): void {
+  onRevokeUser(
+    hook: (userId: number, reason: string) => Promise<void>,
+    opts: { again?: boolean } = {},
+  ): void {
     this.revokeUserHooks.push(hook)
+    if (opts.again) this.revokeUserAgain.push(hook)
+  }
+
+  /**
+   * Runs first in every `revokeTenant`, with its reason: modules end the tenant's own credentials that
+   * live outside sessions (personal access tokens).
+   */
+  onRevokeTenant(hook: (tenantId: number, reason: string) => Promise<void>): void {
+    this.revokeTenantHooks.push(hook)
   }
 
   /** Ends one session; returns it as it was, or null when it had already ended. */
@@ -122,7 +141,7 @@ export class SessionRevoker {
    * Every session of the user on every client (only `clientId`'s, when given), except `exceptSid`
    * (the caller's own, e.g. after a password change). Runs the hooks, then bumps `auth:credver:{id}`,
    * so a sign-in already past its password check cannot start a session afterwards (TokenService.issue
-   * refuses it). Call it after the change (password, reset, disable) is committed. Returns the sessions
+   * refuses it), then runs the `again` hooks a second time. Call it after the change (password, reset, disable) is committed. Returns the sessions
    * it ended; a failed hook throws once they have ended.
    */
   async revokeUser(
@@ -130,8 +149,11 @@ export class SessionRevoker {
     reason: string,
     opts: { exceptSid?: string; clientId?: string } = {},
   ): Promise<Session[]> {
-    const hooks = await Promise.allSettled(this.revokeUserHooks.map((hook) => hook(userId, reason)))
+    const first = await Promise.allSettled(this.revokeUserHooks.map((hook) => hook(userId, reason)))
     await this.redis.incr(redisKey('authCredVer', userId))
+    // 只在存好之后才比较 credver 的凭据（访问令牌）：在第一轮与递增之间存下的，由这第二轮吊销
+    const again = await Promise.allSettled(this.revokeUserAgain.map((hook) => hook(userId, reason)))
+    const hooks = [...first, ...again]
     if (!opts.clientId) {
       const index = redisKey('authUserCodes', userId)
       const codes = await this.redis.zRange(index, 0, -1)
@@ -171,14 +193,20 @@ export class SessionRevoker {
    * docs/design-notes.md#tenancy). Call it after the tenant row is committed, then `PermVersion.bumpAll()`:
    * a session issued meanwhile reloads and is refused. A session that does not name its tenant is of
    * the default one. Scans every `auth:online` member like `revokeClient`; index sessions by tenant if
-   * an install ever keeps far more online. Returns how many sessions it ended.
+   * an install ever keeps far more online. Runs the tenant hooks first; a failed hook throws once the
+   * sessions have ended. Returns how many sessions it ended.
    */
   async revokeTenant(tenantId: number, reason: string): Promise<number> {
+    const hooks = await Promise.allSettled(
+      this.revokeTenantHooks.map((hook) => hook(tenantId, reason)),
+    )
     const count = await this.revokeWhere(
       (s) => (s.tenantId ?? DEFAULT_TENANT_ID) === tenantId,
       reason,
     )
     this.logger.log({ tenantId, sessions: count, reason }, 'tenant sessions revoked')
+    const failed = hooks.find((h) => h.status === 'rejected')
+    if (failed) throw failed.reason
     return count
   }
 

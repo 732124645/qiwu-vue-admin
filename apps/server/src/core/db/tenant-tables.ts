@@ -1,12 +1,17 @@
+import { PROJECT_GLOBAL_UNIQUE, PROJECT_PLATFORM_TABLES } from '../../db/project-tables.js'
+
+/** How a taken value of a global unique key is freed again (see `GLOBAL_UNIQUE`). */
+export type GlobalUnique = { table: string; release: 'none' | 'row-delete' | 'takeover' }
+
 /**
  * Which tables belong to a tenant (see docs/design-notes.md#tenancy). Every table is a tenant table — its
- * rows carry `tenant_id` and are filtered by tenant — unless it is listed in `PLATFORM_TABLES`: run by the
- * default tenant (the platform operator) for every tenant, no automatic filter. A new table is a tenant
- * table by default; making it a platform table means adding it here in the same change (the
- * db-migrations spec fails on a table that is neither). Keep both lists plain literals: checks read them
- * as text.
+ * rows carry `tenant_id` and are filtered by tenant — unless it is a platform table: run by the default
+ * tenant (the platform operator) for every tenant, no automatic filter. A new table is a tenant table by
+ * default; making it a platform table means registering it in the same change — the template's own here,
+ * a project's in `db/project-tables.ts` (the db-migrations spec fails on a table that is neither). Keep
+ * the lists plain literals: checks read them as text.
  */
-export const PLATFORM_TABLES: readonly string[] = [
+const TEMPLATE_PLATFORM_TABLES: readonly string[] = [
   'meta_migrations',
   'iam_menu',
   'iam_tenant',
@@ -30,6 +35,13 @@ export const PLATFORM_TABLES: readonly string[] = [
   'msg_sms_channel',
   'aud_http_trace',
   'aud_http_fault',
+  'cfg_mcp_tool',
+]
+
+/** Every platform table: the template's and the project's (`db/project-tables.ts`). */
+export const PLATFORM_TABLES: readonly string[] = [
+  ...TEMPLATE_PLATFORM_TABLES,
+  ...PROJECT_PLATFORM_TABLES,
 ]
 
 /**
@@ -37,12 +49,10 @@ export const PLATFORM_TABLES: readonly string[] = [
  * its table and how a taken value is freed again, since tenants are never deleted (only disabled or
  * expired, their rows kept): `none` — the key holds a global id or a server-made globally unique value,
  * so no other tenant ever collides; `row-delete` — only deleting that row frees it; `takeover` — the
- * writer takes the old row over across tenants. A new global key is added here with its release in the
- * same change.
+ * writer takes the old row over across tenants. A new global key is registered with its release in the
+ * same change: the template's here, a project's in `db/project-tables.ts`.
  */
-export const GLOBAL_UNIQUE: Readonly<
-  Record<string, { table: string; release: 'none' | 'row-delete' | 'takeover' }>
-> = {
+const TEMPLATE_GLOBAL_UNIQUE: Readonly<Record<string, GlobalUnique>> = {
   uk_iam_user_social_openid: { table: 'iam_user_social', release: 'row-delete' },
   uk_iam_user_social_user: { table: 'iam_user_social', release: 'none' },
   uk_fs_object_key: { table: 'fs_object', release: 'none' },
@@ -61,6 +71,13 @@ export const GLOBAL_UNIQUE: Readonly<
   uk_wxoa_publish_article_id: { table: 'wxoa_publish', release: 'none' },
   uk_wxoa_mass_client_msg_id: { table: 'wxoa_mass_job', release: 'none' },
   uk_wxoa_inline_image_object: { table: 'wxoa_inline_image', release: 'none' },
+  uk_iam_access_token_digest: { table: 'iam_access_token', release: 'none' },
+}
+
+/** Every global unique key: the template's and the project's (`db/project-tables.ts`). */
+export const GLOBAL_UNIQUE: Readonly<Record<string, GlobalUnique>> = {
+  ...TEMPLATE_GLOBAL_UNIQUE,
+  ...PROJECT_GLOBAL_UNIQUE,
 }
 
 /**

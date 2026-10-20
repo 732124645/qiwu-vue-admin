@@ -44,7 +44,7 @@ async function run(svc: CodegenService, command: string, tables: string[], out?:
       alive: (h) =>
         `hint: ${h.tableName} unique key ${h.key} has no alive column; a deleted row's value stays taken (make it (..., alive))`,
       tenant_column: (h) =>
-        `hint: ${h.tableName} has no ${h.key} column; every tenant shares its rows (add tenant_id, or list it in PLATFORM_TABLES)`,
+        `hint: ${h.tableName} has no ${h.key} column; every tenant shares its rows (add tenant_id, or list it in PROJECT_PLATFORM_TABLES, src/db/project-tables.ts)`,
       tenant_key: (h) =>
         `hint: ${h.tableName} unique key ${h.key} does not start with tenant_id; a value is taken across all tenants (make it (tenant_id, ..., alive))`,
       parent_menu: (h) =>

@@ -189,6 +189,7 @@
     "state": "状态值（state）",
     "code_challenge": "PKCE 质询",
     "code_challenge_method": "PKCE 质询方式",
-    "approve": "是否同意"
+    "approve": "是否同意",
+    "resource": "资源标识"
   }
 }

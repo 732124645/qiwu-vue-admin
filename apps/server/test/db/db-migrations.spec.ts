@@ -1,96 +1,37 @@
-// Migration round trip through the compiled output (criterion c; see docs/adr/002-orm.md): spawns
-// `node dist/db/reset.js` (drop + run + tenancy-harden) and `node dist/db/migrate.js` run → revert one by one down to an
-// empty schema → run, checking the tables and `meta_migrations` rows after every step, plus the DDL
-// conventions (soft delete everywhere, no foreign keys; the soft-delete migration's down restores the old shape).
+// Migration round trip (criterion c; see docs/adr/002-orm.md): the compiled `node dist/db/reset.js` (drop +
+// run + tenancy-harden), one `node dist/db/migrate.js revert`, then back one by one to an empty schema
+// and up again one by one in this process, the newest migration again through `migrate.js run`: after
+// every step the `meta_migrations` rows and the schema the way down left at that step. Plus the DDL
+// conventions (soft delete everywhere, no foreign keys; the soft-delete migration's down restores the
+// old shape) and the tenancy rules over every table the migrations create.
+// Nothing here lists the migrations or their tables by hand: both are read from src/db/migrations
+// (test/setup/migrations.ts), so a project's own migrations and tables are covered as they are added.
 // Needs a fresh build (`pnpm db:reset` and ci:local build first).
-import { spawnSync } from 'node:child_process'
 import { existsSync, readdirSync } from 'node:fs'
 import { DataSource } from 'typeorm'
 import { GLOBAL_UNIQUE, PLATFORM_TABLES } from '../../src/core/db/tenant-tables.js'
 import { dataSourceOptions } from '../../src/db/data-source.js'
 import { Tenancy20261007100000 } from '../../src/db/migrations/20261007100000-tenant.js'
 import { tenantDefaults } from '../../src/db/tenancy-harden.js'
+import {
+  killed,
+  MIGRATION_NAMES as MIGRATIONS,
+  MIGRATION_TABLES,
+  runScript,
+  SCRIPT_TIMEOUT_MS,
+  SOURCE_MIGRATIONS,
+} from '../setup/migrations.js'
 import { restoreTestSchema } from '../setup/schema.js'
 
-/** Migrations in run order with the tables each creates. A new migration adds its line here. */
-const MIGRATIONS: [name: string, tables: string[]][] = [
-  [
-    'IamCore20260926100000',
-    [
-      'iam_dept',
-      'iam_menu',
-      'iam_role',
-      'iam_role_depts',
-      'iam_role_menus',
-      'iam_user',
-      'iam_user_roles',
-    ],
-  ],
-  ['Cfg20260926100100', ['cfg_dict', 'cfg_dict_entry', 'cfg_param']],
-  ['AudSignin20260926100200', ['aud_signin_log']],
-  ['AudAction20260926100300', ['aud_action_log']],
-  ['IamPosition20260927100000', ['iam_position', 'iam_user_positions']],
-  ['IamUserPref20260927110000', ['iam_user_pref']],
-  ['Fs20260927120000', ['fs_object', 'fs_storage']],
-  ['Cg20260927130000', ['cg_column', 'cg_table']],
-  ['DemoBook20260927130100', ['demo_book']],
-  ['DemoTopic20260927140000', ['demo_topic']],
-  ['IamMenuTree20260927150000', []],
-  ['IamMenuPath20260927150100', []],
-  ['MsgBulletin20260927160500', ['msg_bulletin', 'msg_bulletin_receipt']],
-  ['DemoInvoice20260927170000', ['demo_invoice', 'demo_invoice_line']],
-  ['AudHttp20260928100000', ['aud_http_fault', 'aud_http_trace']],
-  ['Job20260928110000', ['job_run', 'job_task']],
-  ['JobMisfire20260928120000', []],
-  [
-    'MsgNotify20260928130000',
-    [
-      'msg_inbox',
-      'msg_inbox_template',
-      'msg_mail_account',
-      'msg_mail_record',
-      'msg_mail_template',
-      'msg_sms_channel',
-      'msg_sms_otp',
-      'msg_sms_record',
-      'msg_sms_template',
-    ],
-  ],
-  ['MsgClaim20260928140000', []],
-  ['NotifyDispatchOn20260928140100', []],
-  ['SignupRoleId20260928150000', []],
-  ['SmsOtpUser20260928150100', []],
-  ['SoftDeleteAll20260929100000', []],
-  [
-    'Wf20260930100000',
-    ['biz_leave_request', 'wf_cc', 'wf_event', 'wf_instance', 'wf_model', 'wf_task', 'wf_version'],
-  ],
-  ['AudSigninUser20260930110000', []],
-  ['ProjectPaths20260930120000', []],
-  ['IamUserSocial20261001100000', ['iam_user_social']],
-  ['WfForm20261001110000', ['wf_form']],
-  ['WfBpmn20261001120000', []],
-  ['Oauth20261002100000', ['oauth_client', 'oauth_consent']],
-  ['CfgAppVersion20261002110000', ['cfg_app_version']],
-  ['DictSingleDefault20261002120000', []],
-  ['AuditUserType20261002120100', []],
-  ['WxoaAccounts20261006100000', ['wxoa_account', 'wxoa_fan', 'wxoa_tag', 'wxoa_message']],
-  [
-    'WxoaAutomation20261006100100',
-    ['wxoa_reply_rule', 'wxoa_menu', 'wxoa_material', 'wxoa_qrcode'],
-  ],
-  [
-    'Tenancy20261007100000',
-    ['iam_tenant', 'iam_tenant_domain', 'iam_tenant_package', 'iam_tenant_package_menus'],
-  ],
-  ['WxoaTenant20261018100000', []],
-  [
-    'WxoaContent20261018100100',
-    ['wxoa_draft', 'wxoa_publish', 'wxoa_mass_job', 'wxoa_inline_image'],
-  ],
-]
+/** 某个迁移在运行顺序里的位置；找不到就报错（迁移改名后用例不会悄悄失效）。 */
+const at = (name: string): number => {
+  const i = MIGRATIONS.indexOf(name)
+  if (i < 0) throw new Error(`migration ${name} not found in src/db/migrations`)
+  return i
+}
 /** Applied migrations once SoftDeleteAll is reverted: its down is checked there. */
-const BEFORE_SOFT_DELETE = MIGRATIONS.findIndex(([name]) => name === 'SoftDeleteAll20260929100000')
+const BEFORE_SOFT_DELETE = at('SoftDeleteAll20260929100000')
+const TENANCY_INDEX = at('Tenancy20261007100000')
 /** The foreign keys SoftDeleteAll dropped: its down puts them back. */
 const FOREIGN_KEYS = [
   'fk_cg_column_table',
@@ -104,20 +45,37 @@ const FOREIGN_KEYS = [
   'fk_msg_mail_template_account',
   'fk_msg_sms_template_channel',
 ]
-const ALL_TABLES = MIGRATIONS.flatMap(([, tables]) => tables)
+/** A case running dist scripts: room for each of them to use its whole timeout. */
+const SCRIPT_CASE_MS = SCRIPT_TIMEOUT_MS * 4
 
+/** The tables the migrations create (present in the migrated database at the start). */
+let ALL_TABLES: string[] = []
 let ds: DataSource
 
-// a hung script is killed (status null), so the case fails instead of the file timing out
-const node = (script: string, args: string[] = [], env: NodeJS.ProcessEnv = {}) =>
-  spawnSync(process.execPath, [script, ...args], {
-    encoding: 'utf8',
-    env: { ...process.env, ...env },
-    timeout: 60_000,
-  })
-const migrateOnce = (command: 'run' | 'revert') => {
-  const r = node('dist/db/migrate.js', [command])
+const migrateCli = (command: 'run' | 'revert') => {
+  const r = runScript('dist/db/migrate.js', [command])
   expect(r).toMatchObject({ status: 0 }) // a failure diff shows stderr
+}
+/** 回退最新的一个迁移（本进程内，与命令行相同的事务方式）。 */
+const undo = () => ds.undoLastMigration({ transaction: 'each' })
+/** 执行全部未执行的迁移（本进程内）。 */
+const runAll = () => ds.runMigrations({ transaction: 'each' })
+/** 逐个回退，直到只剩运行顺序里的前 `n` 个迁移。 */
+const revertTo = async (n: number) => {
+  while ((await executed()).length > n) await undo()
+}
+/**
+ * 只执行到运行顺序里的第 `n` 个迁移：TypeORM 没有“执行到某一个”的入口，这里在一次调用期间只让前 `n`
+ * 个迁移对 DataSource 可见（`migrations` 在类型上只读，运行时是普通数组），之后立即换回全部。
+ */
+const runTo = async (n: number) => {
+  const all = ds.migrations
+  Object.assign(ds, { migrations: all.slice(0, n) })
+  try {
+    await runAll()
+  } finally {
+    Object.assign(ds, { migrations: all })
+  }
 }
 const tables = async (): Promise<string[]> =>
   (
@@ -126,6 +84,34 @@ const tables = async (): Promise<string[]> =>
       [ALL_TABLES],
     )
   ).map((r: { t: string }) => r.t)
+/** Every base table of the schema, whoever created it. */
+const everyTable = async (): Promise<string[]> =>
+  (
+    await ds.query(
+      "SELECT table_name AS t FROM information_schema.tables WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE' ORDER BY table_name",
+    )
+  ).map((r: { t: string }) => r.t)
+/**
+ * 迁移建的表此刻的结构：每列（名、类型、可空）与每个索引列（索引名、是否唯一、位置、列名）。不含默认值：
+ * 重置会去掉租户列的默认值，逐个重跑的迁移不会。
+ */
+const schema = async (): Promise<string[]> =>
+  [
+    ...(
+      await ds.query(
+        `SELECT CONCAT(table_name, '.', column_name, ' ', column_type, ' ', is_nullable) AS c
+         FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name IN (?)`,
+        [ALL_TABLES],
+      )
+    ).map((r: { c: string }) => r.c),
+    ...(
+      await ds.query(
+        `SELECT CONCAT(table_name, '.', index_name, ' ', non_unique, ' ', seq_in_index, ' ', column_name) AS c
+         FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name IN (?)`,
+        [ALL_TABLES],
+      )
+    ).map((r: { c: string }) => `key ${r.c}`),
+  ].sort()
 const executed = async (): Promise<string[]> =>
   (await ds.query('SELECT name FROM meta_migrations ORDER BY id')).map(
     (r: { name: string }) => r.name,
@@ -136,14 +122,9 @@ const foreignKeys = async (): Promise<string[]> =>
       'SELECT constraint_name AS k FROM information_schema.referential_constraints WHERE constraint_schema = DATABASE() ORDER BY k',
     )
   ).map((r: { k: string }) => r.k)
-/** Expected state after the first `n` migrations. */
+/** Expected state after the first `n` migrations: their rows, in run order. */
 const expectApplied = async (n: number) => {
-  expect(await executed()).toEqual(MIGRATIONS.slice(0, n).map(([name]) => name))
-  expect(await tables()).toEqual(
-    MIGRATIONS.slice(0, n)
-      .flatMap(([, t]) => t)
-      .sort(),
-  )
+  expect(await executed()).toEqual(MIGRATIONS.slice(0, n))
 }
 
 beforeAll(async () => {
@@ -152,19 +133,32 @@ beforeAll(async () => {
     .filter((f) => !existsSync(`dist/db/migrations/${f.replace(/\.ts$/, '.js')}`))
   if (!existsSync('dist/db/reset.js') || stale.length)
     throw new Error(`dist is missing or stale (${stale}): pnpm --filter @qiwu/server build`)
-  ds = await new DataSource(dataSourceOptions()).initialize()
+  ds = await new DataSource({ ...dataSourceOptions(), migrations: SOURCE_MIGRATIONS }).initialize()
+  // globalSetup migrated everything: the tables the migrations name that exist (one created and
+  // dropped again by later migrations is none of them)
+  const present = new Set(await everyTable())
+  ALL_TABLES = MIGRATION_TABLES.filter((t) => present.has(t))
+})
+
+// a script killed by its timeout may have left a migration half done: the later cases of this file
+// would only fail on that state, so they are skipped and afterAll rebuilds the database
+beforeEach(({ skip }) => {
+  if (killed.script) skip(`${killed.script} was killed: the database is rebuilt in afterAll`)
 })
 
 afterAll(async () => {
   // leave the globalSetup state (migrated, hardened, seeded) behind, whatever a failed case reverted
-  if (ds?.isInitialized) await restoreTestSchema(ds)
+  if (ds?.isInitialized) {
+    if (killed.script) await ds.dropDatabase()
+    await restoreTestSchema(ds)
+  }
   await ds?.destroy()
-})
+}, SCRIPT_CASE_MS)
 
-it('lists every source migration', () => {
-  expect(readdirSync('src/db/migrations').filter((f) => f.endsWith('.ts'))).toHaveLength(
-    MIGRATIONS.length,
-  )
+it('every source migration file holds one migration, in timestamp order', () => {
+  const files = readdirSync('src/db/migrations').filter((f) => f.endsWith('.ts'))
+  expect(MIGRATIONS).toHaveLength(files.length)
+  expect(ALL_TABLES.length).toBeGreaterThan(0)
 })
 
 it.each(['APP_SECRET', 'SEED_ADMIN_PASSWORD'] as const)(
@@ -177,7 +171,7 @@ it.each(['APP_SECRET', 'SEED_ADMIN_PASSWORD'] as const)(
       for (const command of ['run', 'revert', 'show']) {
         // An unreachable port must still give the credential error, before any DB operation.
         for (const port of ['1', process.env.DB_PORT!]) {
-          const r = node('dist/db/migrate.js', [command], {
+          const r = runScript('dist/db/migrate.js', [command], {
             NODE_ENV: 'production',
             DB_PORT: port,
             APP_SECRET: secret,
@@ -196,36 +190,40 @@ it.each(['APP_SECRET', 'SEED_ADMIN_PASSWORD'] as const)(
         }
       }
     } finally {
-      migrateOnce('run')
+      if (!killed.script) await runAll()
     }
   },
+  SCRIPT_CASE_MS,
 )
 
 // a failure (or the timeout, which vitest does not stop: the body ends at its next step) migrates again in
-// `finally`, so no half-reverted qiwu_test is left to fail every later file
-it('dist reset.js drops and migrates; migrate.js reverts one by one to empty and runs again', async ({
-  signal,
-}) => {
-  try {
-    await roundTrip((command) => {
-      signal.throwIfAborted()
-      migrateOnce(command)
-    })
-  } finally {
-    node('dist/db/migrate.js', ['run'])
-  }
-  expect(await executed()).toEqual(MIGRATIONS.map(([name]) => name))
-  // one node process per migration and more: it grows with each new migration
-}, 180_000)
+// `finally`, so no half-reverted test database is left to fail every later file; after a killed script
+// nothing runs on the half-migrated database (afterAll rebuilds it)
+it(
+  'dist reset.js drops and migrates; back one by one to empty and up again, the command line first and last',
+  async ({ signal }) => {
+    try {
+      await roundTrip(() => signal.throwIfAborted())
+    } finally {
+      // the case's own failure is the one to report, not a follow-up error of this way back
+      if (!killed.script) await runAll().catch(() => undefined)
+    }
+    expect(await executed()).toEqual(MIGRATIONS)
+  },
+  SCRIPT_CASE_MS,
+)
 
-async function roundTrip(migrate: (command: 'run' | 'revert') => void) {
-  const reset = node('dist/db/reset.js')
+async function roundTrip(step: () => void) {
+  const N = MIGRATIONS.length
+  const reset = runScript('dist/db/reset.js')
   expect(reset).toMatchObject({ status: 0 })
-  await expectApplied(MIGRATIONS.length)
+  await expectApplied(N)
+  // after the drop only the migrations made tables: one the source scan cannot name fails here
+  expect(await everyTable()).toEqual([...ALL_TABLES, 'meta_migrations'].sort())
   expect(await tenantDefaults(ds)).toEqual([]) // reset hardens the tenant columns before seeding
 
-  migrate('run') // nothing pending: a no-op
-  await expectApplied(MIGRATIONS.length)
+  await runAll() // nothing pending: a no-op
+  await expectApplied(N)
   expect(await foreignKeys()).toEqual([])
 
   // SoftDeleteAll's down: soft-deleted rows of tables it made soft go for good (a live row may reuse
@@ -245,9 +243,15 @@ async function roundTrip(migrate: (command: 'run' | 'revert') => void) {
     [bulletin],
   )
 
-  for (let n = MIGRATIONS.length - 1; n >= 0; n--) {
-    migrate('revert')
+  // the schema after the first n migrations, as the way down leaves it
+  const states: string[][] = []
+  states[N] = await schema()
+  migrateCli('revert') // the command line reverts the newest one
+  for (let n = N - 1; n >= 0; n--) {
+    step()
+    if (n < N - 1) await undo()
     await expectApplied(n)
+    states[n] = await schema()
     if (n !== BEFORE_SOFT_DELETE) continue
     expect(await foreignKeys()).toEqual(FOREIGN_KEYS)
     expect(
@@ -263,16 +267,41 @@ async function roundTrip(migrate: (command: 'run' | 'revert') => void) {
     )
     expect(soft).toBe(4) // iam_user, iam_role, iam_dept, demo_book: soft-deleted before SoftDeleteAll
   }
-  migrate('revert') // nothing left: a no-op
+  await undo() // nothing left: a no-op
   await expectApplied(0)
+  expect(await tables()).toEqual([])
 
-  migrate('run')
-  await expectApplied(MIGRATIONS.length)
+  // up again one by one: each up gives back the schema its down took away
+  for (let n = 1; n < N; n++) {
+    step()
+    await runTo(n)
+    await expectApplied(n)
+    expect(await schema()).toEqual(states[n])
+  }
+  migrateCli('run') // the newest one through the command line again
+  await expectApplied(N)
+  expect(await schema()).toEqual(states[N])
   expect(await foreignKeys()).toEqual([])
-  // the migrations' own shape (multi-tenancy off keeps it; hardening drops the defaults): every tenant
-  // column and the operator's tenant default to 1
+
+  // the migrations' own shape (multi-tenancy off keeps it; hardening drops the defaults): the tenant
+  // column of every tenant table that existed once the tenancy migration ran, and the operator's
+  // tenant, default to 1; tables created later carry a required tenant_id without one
+  const afterTenancy = new Set(states[TENANCY_INDEX + 1].map((c) => c.split('.')[0]))
+  const required = await ds.query(
+    `SELECT table_name AS t FROM information_schema.columns
+      WHERE table_schema = DATABASE() AND table_name IN (?) AND column_name = 'tenant_id'`,
+    [ALL_TABLES],
+  )
   const defaulted = await tenantDefaults(ds)
-  expect(defaulted).toHaveLength(41)
+  expect([...defaulted].sort()).toEqual(
+    [
+      'aud_action_log.actor_tenant_id',
+      ...required
+        .map((r: { t: string }) => r.t)
+        .filter((t: string) => afterTenancy.has(t) && !PLATFORM_TABLES.includes(t))
+        .map((t: string) => `${t}.tenant_id`),
+    ].sort(),
+  )
   expect(
     await ds.query(
       `SELECT DISTINCT column_default AS d FROM information_schema.columns
@@ -284,9 +313,8 @@ async function roundTrip(migrate: (command: 'run' | 'revert') => void) {
 
 it('ProjectPaths moves the stored view paths of the moved views, down moves them back', async () => {
   // rows as a database before the move holds them (the migrations after ProjectPaths reverted first)
-  const after =
-    MIGRATIONS.length - MIGRATIONS.findIndex(([name]) => name === 'ProjectPaths20260930120000')
-  for (let n = 0; n < after; n++) migrateOnce('revert')
+  const before = at('ProjectPaths20260930120000')
+  await revertTo(before)
   const OLD = [
     'biz/demo/book/index',
     'biz/biz/leave/view',
@@ -329,21 +357,21 @@ it('ProjectPaths moves the stored view paths of the moved views, down moves them
       const rows = paths.map((p) => [p, '2026-01-01T00:00:00.000Z'])
       return [rows, rows]
     }
-    migrateOnce('run')
+    await runAll()
     expect(await stored()).toEqual(expected(NEW))
-    for (let n = 0; n < after; n++) migrateOnce('revert')
+    await revertTo(before)
     expect(await stored()).toEqual(expected(OLD))
   } finally {
     await ds.query('DELETE FROM iam_menu WHERE id IN (?)', [menus.length ? menus : [0]])
     await ds.query('DELETE FROM wf_model WHERE id IN (?)', [models.length ? models : [0]])
-    migrateOnce('run')
+    await runAll()
   }
   await expectApplied(MIGRATIONS.length)
 }, 120_000)
 
 it('dist reset.js refuses production and databases without a _dev/_test/_e2e suffix', () => {
   for (const env of [{ NODE_ENV: 'production' }, { DB_NAME: 'qiwu' }]) {
-    const r = node('dist/db/reset.js', [], env)
+    const r = runScript('dist/db/reset.js', [], env)
     expect(r.status).toBe(1)
     expect(r.stderr).toContain('db:reset refused')
   }
@@ -421,7 +449,15 @@ describe('DDL conventions', () => {
 })
 
 describe('Workflow tables', () => {
-  const WF_TABLES = MIGRATIONS.find(([name]) => name === 'Wf20260930100000')![1]
+  const WF_TABLES = [
+    'biz_leave_request',
+    'wf_cc',
+    'wf_event',
+    'wf_instance',
+    'wf_model',
+    'wf_task',
+    'wf_version',
+  ]
   const AUDIT = 'created_by created_at updated_by updated_at deleted_at'
 
   it('every workflow column, the later additions included, in order', async () => {
@@ -700,11 +736,9 @@ describe('Dict single default', () => {
   })
 
   it('upgrade keeps the lowest sort_no then id, leaves deleted defaults and other dicts alone; down removes the constraint', async () => {
-    const after =
-      MIGRATIONS.length -
-      MIGRATIONS.findIndex(([name]) => name === 'DictSingleDefault20261002120000')
+    const before = at('DictSingleDefault20261002120000')
     try {
-      for (let n = 0; n < after; n++) migrateOnce('revert')
+      await revertTo(before)
       const add = (
         dict: string,
         value: string,
@@ -737,10 +771,10 @@ describe('Dict single default', () => {
         { value: 'non-default', is_default: 0 },
         { value: 'single', is_default: 1 },
       ]
-      migrateOnce('run')
+      await runAll()
       expect(await stored()).toEqual(expected)
       // Revert later migrations first when new ones are appended.
-      for (let n = 0; n < after; n++) migrateOnce('revert')
+      await revertTo(before)
       expect(await column()).toEqual([])
       expect(await index()).toEqual([])
       expect(await stored()).toEqual(expected) // down does not restore cleared duplicates
@@ -748,7 +782,7 @@ describe('Dict single default', () => {
       await ds.query(
         "DELETE FROM cfg_dict_entry WHERE dict_code IN ('mig.upgrade', 'mig.upgrade.other')",
       )
-      migrateOnce('run')
+      await runAll()
     }
     await expectApplied(MIGRATIONS.length)
   }, 30_000)
@@ -826,12 +860,11 @@ describe('Audit user_type', () => {
   )
 
   it('upgrade makes live and deleted historic rows admin regardless of current user identity; down preserves rows', async () => {
-    const after =
-      MIGRATIONS.length - MIGRATIONS.findIndex(([name]) => name === 'AuditUserType20261002120100')
+    const before = at('AuditUserType20261002120100')
     const marker = 'mig-audit-upgrade'
     let userId = 0
     try {
-      for (let n = 0; n < after; n++) migrateOnce('revert')
+      await revertTo(before)
       // a member today: the historic rows still read admin (no back-fill from iam_user)
       ;({ insertId: userId } = await ds.query(
         "INSERT INTO iam_user (username, password_hash, display_name, user_type) VALUES (?, 'x', 'x', 'member')",
@@ -846,7 +879,7 @@ describe('Audit user_type', () => {
             [marker, userId, deleted],
           )
       }
-      migrateOnce('run')
+      await runAll()
       for (const { table } of logs)
         expect(
           await ds.query(
@@ -857,7 +890,7 @@ describe('Audit user_type', () => {
           { user_id: userId, user_type: 'admin', deleted: 0 },
           { user_id: userId, user_type: 'admin', deleted: 1 },
         ])
-      for (let n = 0; n < after; n++) migrateOnce('revert')
+      await revertTo(before)
       for (const { table } of logs) {
         expect(await column(table)).toEqual([])
         expect(
@@ -874,7 +907,7 @@ describe('Audit user_type', () => {
       for (const { table } of logs)
         await ds.query(`DELETE FROM ${table} WHERE trace_id = ?`, [marker])
       await ds.query('DELETE FROM iam_user WHERE username = ?', [marker])
-      migrateOnce('run')
+      await runAll()
     }
     await expectApplied(MIGRATIONS.length)
   }, 30_000)
@@ -942,9 +975,8 @@ describe('OAuth2 clients and consents', () => {
 
 describe('Tenancy', () => {
   const dup = { driverError: { code: 'ER_DUP_ENTRY' } }
-  const TENANT_TABLES = ALL_TABLES.filter((t) => !PLATFORM_TABLES.includes(t))
-  const TENANCY_INDEX = MIGRATIONS.findIndex(([name]) => name === 'Tenancy20261007100000')
-  const MIGRATIONS_AFTER_TENANCY = MIGRATIONS.length - TENANCY_INDEX - 1
+  /** Every table the migrations create but the registered platform ones. */
+  const tenantTables = () => ALL_TABLES.filter((t) => !PLATFORM_TABLES.includes(t))
   /** `tenant_id` of every table that has one: table → `type nullable`. */
   const tenantColumns = async (): Promise<Record<string, string>> =>
     Object.fromEntries(
@@ -999,19 +1031,23 @@ describe('Tenancy', () => {
     }
   }
 
-  it('every table but the platform ones has a non-null tenant_id (nullable on aud_signin_log); only three platform tables have a plain one', async () => {
+  it('every table but the platform ones has a non-null tenant_id (nullable on aud_signin_log); a platform table may have a plain one', async () => {
+    // a registered platform table exists (a misspelt name would leave the real table a tenant one)
     expect(
       PLATFORM_TABLES.filter((t) => t !== 'meta_migrations' && !ALL_TABLES.includes(t)),
     ).toEqual([])
-    expect(TENANT_TABLES).toHaveLength(44)
-    // their defaults: hardened or not, depending on what ran before (see the migration round trip)
-    expect(await tenantColumns()).toEqual({
-      ...Object.fromEntries(
-        TENANT_TABLES.map((t) => [
+    // a table that is neither a tenant table (tenant_id) nor a registered platform table fails here;
+    // the defaults: hardened or not, depending on what ran before (see the migration round trip)
+    const columns = await tenantColumns()
+    expect(Object.fromEntries(tenantTables().map((t) => [t, columns[t]]))).toEqual(
+      Object.fromEntries(
+        tenantTables().map((t) => [
           t,
           t === 'aud_signin_log' ? 'bigint unsigned YES' : 'bigint unsigned NO',
         ]),
       ),
+    )
+    expect(columns).toMatchObject({
       aud_http_fault: 'bigint unsigned YES',
       aud_http_trace: 'bigint unsigned YES',
       iam_tenant_domain: 'bigint unsigned NO',
@@ -1052,25 +1088,23 @@ describe('Tenancy', () => {
         ).map((r: { t: string }) => r.t),
       )
     const led = await tablesWhere("seq_in_index = 1 AND column_name = 'tenant_id'")
+    // join tables (a primary key of two or more columns) are read through one of their ids
     const joins = await tablesWhere("index_name = 'PRIMARY' AND seq_in_index = 2")
-    expect(joins.size).toBe(8)
-    expect(
-      [...TENANT_TABLES, 'aud_http_fault', 'aud_http_trace', 'iam_tenant_domain'].filter(
-        (t) => !joins.has(t) && !led.has(t),
-      ),
-    ).toEqual([])
+    expect(Object.keys(await tenantColumns()).filter((t) => !joins.has(t) && !led.has(t))).toEqual(
+      [],
+    )
 
     const uniques: { t: string; k: string; cols: string }[] = await ds.query(
       `SELECT table_name AS t, index_name AS k, GROUP_CONCAT(column_name ORDER BY seq_in_index) AS cols
          FROM information_schema.statistics
         WHERE table_schema = DATABASE() AND table_name IN (?) AND non_unique = 0 AND index_name <> 'PRIMARY'
         GROUP BY table_name, index_name`,
-      [TENANT_TABLES],
+      [tenantTables()],
     )
     expect(
       uniques.filter((u) => !Object.hasOwn(GLOBAL_UNIQUE, u.k) && !u.cols.startsWith('tenant_id,')),
     ).toEqual([])
-    expect(uniques.filter((u) => u.cols.startsWith('tenant_id,'))).toHaveLength(13)
+    expect(uniques.some((u) => u.cols.startsWith('tenant_id,'))).toBe(true)
     // every global key is a key of its table, each with how a taken value is freed
     expect(
       Object.fromEntries(
@@ -1129,39 +1163,35 @@ describe('Tenancy', () => {
 
   it('down refuses while a second tenant exists and changes nothing', async () => {
     // Tenancy 后面已有 WXOA 迁移：先只回退后续迁移，确保本用例实际测试 Tenancy.down 的拒绝逻辑。
-    for (let i = 0; i < MIGRATIONS_AFTER_TENANCY; i++) migrateOnce('revert')
+    await revertTo(TENANCY_INDEX + 1)
     const before = await tenancyState()
     const { insertId } = await ds.query(
       "INSERT INTO iam_tenant (code, name) VALUES ('mig-second', 'x')",
     )
     try {
-      const r = node('dist/db/migrate.js', ['revert'])
-      expect(r.status).toBe(1)
-      expect(r.stdout + r.stderr).toContain('Tenancy down refused')
+      await expect(undo()).rejects.toThrow('Tenancy down refused')
       await expectApplied(TENANCY_INDEX + 1)
       expect(await tenancyState()).toEqual(before)
     } finally {
-      migrateOnce('run') // back, had the down gone through
+      await runAll() // back, had the down gone through
       await ds.query('DELETE FROM iam_tenant WHERE id = ?', [insertId])
     }
   })
 
   it('the Official Account tenant migration refuses its down while a row of another tenant exists and changes nothing', async () => {
-    const at = MIGRATIONS.findIndex(([name]) => name === 'WxoaTenant20261018100000')
-    for (let i = at + 1; i < MIGRATIONS.length; i++) migrateOnce('revert')
+    const wxoa = at('WxoaTenant20261018100000')
+    await revertTo(wxoa + 1)
     const before = await tenancyState()
     const { insertId } = await ds.query(
       "INSERT INTO wxoa_tag (tenant_id, account_id, tag_id, name) VALUES (2, 999999, 1, 'mig-other')",
     )
     try {
-      const r = node('dist/db/migrate.js', ['revert'])
-      expect(r.status).toBe(1)
-      expect(r.stdout + r.stderr).toContain('WxoaTenant down refused')
-      await expectApplied(at + 1)
+      await expect(undo()).rejects.toThrow('WxoaTenant down refused')
+      await expectApplied(wxoa + 1)
       expect(await tenancyState()).toEqual(before)
     } finally {
       await ds.query('DELETE FROM wxoa_tag WHERE id = ?', [insertId])
-      migrateOnce('run')
+      await runAll()
     }
     await expectApplied(MIGRATIONS.length)
   })
@@ -1170,11 +1200,9 @@ describe('Tenancy', () => {
     const before = await tenancyState()
     try {
       // 后续迁移在真实的 Tenancy.up 失败时不会运行；先回退它们再模拟中途留下的 DDL。
-      for (let i = 0; i < MIGRATIONS_AFTER_TENANCY; i++) migrateOnce('revert')
+      await revertTo(TENANCY_INDEX + 1)
       // 模拟迁移执行到一半失败：记录未写入，但部分 DDL 已经落库。
-      await ds.query(
-        "DELETE FROM meta_migrations WHERE name IN ('Tenancy20261007100000', 'WxoaTenant20261018100000', 'WxoaContent20261018100100')",
-      )
+      await ds.query('DELETE FROM meta_migrations WHERE name = ?', [MIGRATIONS[TENANCY_INDEX]])
       await ds.query('ALTER TABLE wf_task DROP INDEX idx_wf_task_tenant')
       await ds.query(
         'ALTER TABLE wf_form DROP INDEX uk_wf_form_name, ADD UNIQUE KEY uk_wf_form_name (name, alive)',
@@ -1183,7 +1211,7 @@ describe('Tenancy', () => {
       await ds.query('ALTER TABLE iam_menu DROP COLUMN platform_only')
       expect(await tenancyState()).not.toEqual(before)
     } finally {
-      migrateOnce('run')
+      await runAll()
     }
     await expectApplied(MIGRATIONS.length)
     expect(await tenancyState()).toEqual(before)

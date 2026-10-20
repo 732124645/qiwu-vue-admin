@@ -53,6 +53,7 @@ const VERBS: [value: string, zh: string, en: string, tagType?: string][] = [
   ['enter', '进入租户', 'Enter tenant', 'warning'],
   ['leave', '退出租户', 'Leave tenant', 'info'],
   ['retry', '重试', 'Retry', 'warning'],
+  ['call', '智能体调用', 'Agent call', 'primary'],
 ]
 
 const DICTS: DictSeed[] = [

@@ -130,7 +130,21 @@ pnpm verify
 
 这只执行 lint、架构、类型、i18n、原创性与许可检查，不证明数据库、浏览器或生产部署已验收。完整本地闸门 `pnpm ci:local` 会使用并重置测试库，应先准备表中全部所需测试库；移动端安装与构建步骤见 [移动端](mobile.md)。测试加载器以 `.env.local` 为凭据底层，再叠加 `.env.test` / `.env.e2e`；不要把其中的测试 `APP_SECRET` 或管理员密码复制到正式部署，在 `NODE_ENV=production` 下，服务启动校验以及 `db:seed` / `db:migrate` 都会拒绝 `APP_SECRET` 或 `SEED_ADMIN_PASSWORD` 中的 `not-for-production` 标记（不区分大小写）；两个数据库命令在建立连接、执行写入之前即报错退出，错误不会输出凭据值。
 
-升级已有安装同样使用 migrate → seed；`pnpm db:reset` 会删除目标库所有表和视图再重建，**不是升级步骤**，不要对已有 `qiwu_dev` 执行裸 reset。PC 项目可按 [「只要 PC：删除移动端」](mobile.md#只要-pc删除移动端) 去掉 mobile；新业务代码与生成器使用方式见 [代码生成](codegen.md)。
+升级已有安装同样使用 migrate → seed；`pnpm db:reset` 会删除目标库所有表和视图再重建，**不是升级步骤**，不要对已有 `qiwu_dev` 执行裸 reset。从模板建的项目合并新的模板版本见[升级模板版本](upgrade.md)。PC 项目可按 [「只要 PC：删除移动端」](mobile.md#只要-pc删除移动端) 去掉 mobile；新业务代码与生成器使用方式见 [代码生成](codegen.md)。
+
+### 服务端测试
+
+```sh
+pnpm --filter @qiwu/server test              # 全部服务端用例
+pnpm --filter @qiwu/server test db-migrations # 只跑一个 spec（文件名的完整词干）
+```
+
+每次运行前，测试初始化会删掉测试库（`.env.test` 的 `qiwu_test`）里的全部表，再执行全部迁移、去掉租户列的默认值并写入种子。迁移多、数据库慢（如 Docker 里的 MySQL）时这一步可能要一两分钟，只跑一个 spec 也一样。
+
+- **本地快速模式**：设置 `QW_TEST_REUSE_DB=1` 后，测试库里记录的指纹（迁移、种子文件的内容，以及 `APP_MULTI_TENANT`、`APP_WXOA`、`APP_MCP`、`APP_DEMO_MODE` 开关）与当前代码一致时，跳过删库重建，只补跑未执行的迁移、加固租户列并重新写入种子（种子可重复执行）；指纹不一致时照常重建。复用的库可能留着上次运行写下的数据或中断时的半截状态，出现不相干的失败时去掉该变量完整跑一次。快速模式只用于本地反复调试；`pnpm ci:local` 会去掉该变量、CI 中忽略它，完整重建的运行才是检查结果。
+- **脚本超时**：迁移相关用例会运行编译后的 `dist/db/*.js` 脚本，每个脚本默认最多 300 秒，可用 `QW_TEST_SCRIPT_TIMEOUT_MS`（毫秒）放宽。脚本超时被终止时，该用例直接失败并写明 `script <脚本> killed after <N> ms (timeout)`；迁移用例（`db-migrations`、`tenancy-harden`）随后跳过同一文件里后面的用例，并在该文件结束时完整重建测试库，不会在迁移到一半的库上继续报出不相干的错误。
+
+PowerShell 用 `$env:QW_TEST_REUSE_DB = '1'` 设置，结束后用 `Remove-Item Env:QW_TEST_REUSE_DB` 清除。
 
 ## Windows（原生 PowerShell 5.1）
 

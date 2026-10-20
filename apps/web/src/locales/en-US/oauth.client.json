@@ -14,10 +14,13 @@
       "secretSaved": "I have saved it",
       "copy": "Copy",
       "copyFailed": "Copying failed: select the text and copy it yourself",
-      "resetConfirm": "The old secret stops working at once; apps using it need the new one. Reset the secret of {id}?"
+      "resetConfirm": "The old secret stops working at once; apps using it need the new one. Reset the secret of {id}?",
+      "mcpHint": "mcp and mcp.write are for agent clients only and start unticked: mcp lets the token call the read-only agent tools (MCP); only with mcp.write as well can it call write tools that add or change data for the user."
     },
     "scope": {
-      "user_read": "Read your basic profile (username, name and avatar)"
+      "user_read": "Read your basic profile (username, name and avatar)",
+      "mcp": "Call the read-only agent tools (MCP) as you",
+      "mcp_write": "Call the write agent tools (MCP) as you, adding or changing data"
     }
   },
   "menu": {
