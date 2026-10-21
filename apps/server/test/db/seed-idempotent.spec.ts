@@ -4,6 +4,13 @@
 import { spawnSync } from 'node:child_process'
 import bcrypt from 'bcryptjs'
 import {
+  AGENT_INSTRUCTIONS_PARAM,
+  AGENT_LIMIT_PARAMS,
+  AGENT_PAUSED_PARAM,
+  AGENT_TRUST_MODE_PARAM,
+  AGENT_WEB_DOMAINS_PARAM,
+  AGENT_WEB_MODE_PARAM,
+  agentPerms,
   applyFormCalc,
   APP_UPDATE_PARAMS,
   appVersionPerms,
@@ -16,6 +23,7 @@ import {
   bulletinPerms,
   clientPerms,
   codegenPerms,
+  customerPerms,
   compile,
   configPerms,
   fieldsFromFormSchema,
@@ -720,7 +728,7 @@ it('roles: system group → role page (before menu) → one action per rolePerms
   expect(held.map((a: { perms: string }) => a.perms)).toEqual([assignUsers])
 })
 
-it('demo: devtools group (+ the external docs link) → demo group → book, topic, invoice and realtime pages → one action per perm', async () => {
+it('demo: devtools group (+ the external docs link) → demo group → book, topic, invoice, realtime and customer pages → one action per perm', async () => {
   await runSeeds(ds)
   const menu = (routeName: string) =>
     one(
@@ -779,6 +787,7 @@ it('demo: devtools group (+ the external docs link) → demo group → book, top
     'demo-topic',
     'demo-invoice',
     'demo-realtime',
+    'demo-customer',
   ])
   const topicActions = await ds.query(
     'SELECT perms FROM iam_menu WHERE parent_id = ? AND kind = ? ORDER BY sort_no',
@@ -902,6 +911,7 @@ it('every module seeds its own menus once: one action per perm of each module, p
     bookPerms,
     topicPerms,
     invoicePerms,
+    customerPerms,
     demoRealtimePerms,
     dictPerms,
     dictEntryPerms,
@@ -929,6 +939,7 @@ it('every module seeds its own menus once: one action per perm of each module, p
     wfPerms.instance,
     wfPerms.task,
     wfPerms.data,
+    ...Object.values(agentPerms),
   ]
     .flatMap((p) => Object.values(p))
     .sort()
@@ -950,6 +961,7 @@ it('every module seeds its own menus once: one action per perm of each module, p
       WHERE h.kind = 'page' AND h.visible = 0 ORDER BY h.route_name, a.sort_no`,
   )
   expect(hidden).toEqual([
+    { route_name: 'agent-batch', parent: 'agent-chat', perms: agentPerms.batch.run },
     { route_name: 'biz-leave-new', parent: 'biz-leave', perms: null },
     { route_name: 'biz-leave-view', parent: 'biz-leave', perms: null },
     { route_name: 'codegen-table-edit', parent: 'codegen-table', perms: codegenPerms.modify },
@@ -1205,12 +1217,19 @@ it('menu groups and pages follow the requested order', async () => {
     (await one('SELECT id FROM iam_menu WHERE route_name = ?', [route])).id
   expect(await children(0)).toEqual([
     'home',
+    'agent',
     'workflow',
     'biz',
     'wxoa',
     'system',
     'monitor',
     'devtools',
+  ])
+  expect(await children(await id('agent'))).toEqual([
+    'agent-chat',
+    'agent-skill',
+    'agent-setting',
+    'agent-usage',
   ])
   expect(await children(await id('workflow'))).toEqual([
     'wf-start',
@@ -2497,6 +2516,18 @@ it('dicts with labels in every language, params with defaults', async () => {
     [AUDIT_RETENTION_PARAM]: String(DEFAULT_AUDIT_RETENTION_DAYS),
     [oauthParams.consentTtlDays]: String(OAUTH_CONSENT_TTL_DAYS_DEFAULT),
     [MCP_PAUSED_PARAM]: 'false',
+    // the in-app agent: running, bounded per turn, user and tenant; web search live
+    [AGENT_PAUSED_PARAM]: 'false',
+    [AGENT_LIMIT_PARAMS.turnSteps]: '20',
+    [AGENT_LIMIT_PARAMS.turnSeconds]: '300',
+    [AGENT_LIMIT_PARAMS.turnTokens]: '200000',
+    [AGENT_LIMIT_PARAMS.userDailyTokens]: '1000000',
+    [AGENT_LIMIT_PARAMS.tenantDailyTokens]: '10000000',
+    [AGENT_LIMIT_PARAMS.userConcurrentTurns]: '2',
+    [AGENT_TRUST_MODE_PARAM]: 'true',
+    [AGENT_INSTRUCTIONS_PARAM]: '',
+    [AGENT_WEB_MODE_PARAM]: 'live',
+    [AGENT_WEB_DOMAINS_PARAM]: '',
     [WX_SUBSCRIBE_ENABLED_PARAM]: 'false',
     [WX_SUBSCRIBE_TEMPLATES_PARAM]: expect.any(String),
     [wxoaParams.copyInbound]: 'true',

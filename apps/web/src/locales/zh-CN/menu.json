@@ -69,6 +69,14 @@
     "stat": "数据统计",
     "notice": "订阅通知"
   },
+  "agent": {
+    "title": "智能体",
+    "chat": "智能助手",
+    "skill": "技能管理",
+    "setting": "智能体设置",
+    "usage": "智能体用量",
+    "batch": "批次审批"
+  },
   "action": {
     "browse": "浏览",
     "view": "查看",
@@ -101,6 +109,9 @@
     "tagRemove": "删除标签",
     "enterTenant": "进入租户",
     "resetInitialPassword": "重置初始密码",
-    "retry": "重试任务"
+    "retry": "重试任务",
+    "use": "使用",
+    "batchRun": "批量执行",
+    "instructionModify": "修改租户说明"
   }
 }

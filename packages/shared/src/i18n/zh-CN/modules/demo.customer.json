@@ -1,0 +1,17 @@
+{
+  "field": {
+    "demo": {
+      "customer": {
+        "name": "客户名称",
+        "website": "官网",
+        "industry": "行业",
+        "city": "城市",
+        "scale": "规模",
+        "phone": "电话",
+        "address": "地址",
+        "intro": "简介",
+        "deptId": "所属部门"
+      }
+    }
+  }
+}

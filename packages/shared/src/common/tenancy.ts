@@ -44,6 +44,8 @@ export const PLATFORM_ONLY_ROUTES: readonly string[] = [
   'storage-config',
   'oauth-client',
   'mcp-tool',
+  // the in-app agent's models, search, external MCP servers, platform skills, tool policies
+  'agent-setting',
   'messaging-mail-account',
   'messaging-sms-channel',
   'messaging-inbox-template',

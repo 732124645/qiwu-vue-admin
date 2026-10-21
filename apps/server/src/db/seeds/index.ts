@@ -3,6 +3,7 @@ import { allTenants, DEFAULT_TENANT_ID, withTenant } from '../../core/context/te
 import { softDeleteWhere } from '../../core/db/references.js'
 import { seedLeave, seedTenantLeave } from '../../modules/biz/leave/leave.seed.js'
 import { seedBook } from '../../modules/demo/book/book.seed.js'
+import { seedCustomer } from '../../modules/demo/customer/customer.seed.js'
 import { seedInvoice } from '../../modules/demo/invoice/invoice.seed.js'
 import { seedDemoRealtime } from '../../modules/demo/realtime/realtime.seed.js'
 import { seedTopic } from '../../modules/demo/topic/topic.seed.js'
@@ -37,8 +38,10 @@ import { seedParameter } from '../../modules/platform/settings/param/param.seed.
 import { seedAppVersion } from '../../modules/platform/settings/app-version/app-version.seed.js'
 import { seedStorageConfig } from '../../modules/platform/storage/config/config.seed.js'
 import { seedStorageObject } from '../../modules/platform/storage/object.seed.js'
+import { seedAgent } from './agent/agent.seed.js'
 import { seedAudit } from './audit/audit.seed.js'
 import { seedCodegen } from './codegen/codegen.seed.js'
+import { seedCustomerSamples } from './demo/customer-sample.seed.js'
 import { seedDemo } from './demo/demo.seed.js'
 import { seedIam } from './iam/iam.seed.js'
 import { seedTenant } from './iam/tenant.seed.js'
@@ -92,10 +95,20 @@ const SEEDS: Record<string, Seed[]> = {
   oauth: [seedOauth, seedClient],
   // the MCP tool and access token pages hang under system too
   mcp: [seedMcp],
+  // the in-app agent's top-level group with its pages
+  agent: [seedAgent],
   scheduler: [seedScheduler, seedTask, seedRun],
   // before demo: its menu group holds the demo group
   codegen: [seedCodegen],
-  demo: [seedDemo, seedBook, seedTopic, seedInvoice, seedDemoRealtime],
+  demo: [
+    seedDemo,
+    seedBook,
+    seedTopic,
+    seedInvoice,
+    seedCustomer,
+    seedCustomerSamples,
+    seedDemoRealtime,
+  ],
   // approval processes and their OA leave sample; the staff role with its menus; the wf notification
   // templates; the leave process with its demo users (they hold role staff); the built-in process templates
   workflow: [

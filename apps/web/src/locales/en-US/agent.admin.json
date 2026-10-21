@@ -1,0 +1,169 @@
+{
+  "agent": {
+    "admin": {
+      "on": "On",
+      "off": "Off",
+      "default": "Default",
+      "close": "Close",
+      "keyStored": "Stored",
+      "keyMissing": "Not set",
+      "rootOnly": "Only the super administrator can change these settings; you can view them.",
+      "tab": {
+        "providers": "Models",
+        "search": "Web search",
+        "mcp": "External MCP",
+        "tools": "Tool policies",
+        "skills": "Platform skills",
+        "params": "Instructions & limits",
+        "prompts": "Prompt templates",
+        "instructions": "Instructions"
+      },
+      "scope": {
+        "platform": "Platform",
+        "tenant": "Tenant",
+        "user": "Personal"
+      },
+      "policy": {
+        "auto": "Run automatically",
+        "ask": "Ask",
+        "deny": "Deny"
+      },
+      "provider": {
+        "entity": "model provider"
+      },
+      "model": {
+        "id": "Model ID",
+        "label": "Display name",
+        "reasoning": "Reasoning",
+        "vision": "Vision",
+        "fast": "Fast",
+        "contextWindow": "Context window",
+        "required": "Add at least one model"
+      },
+      "search": {
+        "entity": "search provider",
+        "kind": {
+          "bocha": "Bocha",
+          "tavily": "Tavily"
+        }
+      },
+      "web": {
+        "mode": "Web access",
+        "live": "Live",
+        "off": "Off",
+        "domains": "Domains read directly",
+        "domainsHint": "Comma-separated, e.g. example.com; empty: only search results and links the user gives"
+      },
+      "mcp": {
+        "entity": "external MCP server",
+        "status": "Status",
+        "syncedAt": "Synced at",
+        "sync": "Sync",
+        "tools": "Tools",
+        "toolsOf": "Tools of {name}",
+        "toolCount": "{n} tools",
+        "readOnlyHint": "Server claims",
+        "claimsRead": "Read-only",
+        "claimsWrite": "May write",
+        "autoConfirm": "\"Read-only\" is only what the external server claims and cannot be verified. Let the agent call this tool without asking?",
+        "allowPrivateHint": "Allows a private or local address. Turn on only for a server you trust.",
+        "auth": {
+          "none": "None",
+          "header": "Header",
+          "oauth": "OAuth client credentials"
+        },
+        "field": {
+          "name": "Header name",
+          "value": "Header value",
+          "tokenUrl": "Token URL",
+          "clientId": "Client ID",
+          "clientSecret": "Client secret",
+          "scope": "Scope"
+        },
+        "state": {
+          "unknown": "Not synced",
+          "ok": "OK",
+          "error": "Failed"
+        }
+      },
+      "tool": {
+        "name": "Tool",
+        "title": "Title",
+        "kind": "Kind",
+        "source": "Source",
+        "perm": "Permission",
+        "policy": "Approval policy",
+        "description": "Description",
+        "reset": "Reset to default",
+        "anyUser": "Any signed-in user",
+        "kinds": {
+          "read": "Read",
+          "write": "Write"
+        },
+        "sources": {
+          "local": "This system",
+          "web": "Web"
+        }
+      },
+      "param": {
+        "paused": "Pause the agent",
+        "pausedHint": "New turns and tool calls are refused at once; running turns stop",
+        "pauseConfirm": "Pause the agent? New conversations and tool calls of every user are refused at once, and running turns stop.",
+        "trustMode": "Offer \"trust this thread\"",
+        "trustModeHint": "When off, the chat page no longer offers this approval mode",
+        "instructions": "Platform instructions",
+        "instructionsHint": "Put first into every system prompt, for every tenant.",
+        "limits": "Limits"
+      },
+      "limit": {
+        "turnSteps": "Steps per turn",
+        "turnSeconds": "Seconds per turn",
+        "turnTokens": "Tokens per turn",
+        "userDailyTokens": "Tokens per user per day",
+        "tenantDailyTokens": "Tokens per tenant per day",
+        "userConcurrentTurns": "Turns running at once per user"
+      },
+      "skill": {
+        "entity": "skill",
+        "nameHint": "Called with $name in the chat, e.g. fill-customer-info",
+        "preview": "Preview",
+        "importTitle": "Import SKILL.md",
+        "file": "Choose a file",
+        "pasteHint": "Choose a file or paste the content of a SKILL.md here (starting with the name, description fields)",
+        "imported": "Imported"
+      },
+      "prompt": {
+        "entity": "prompt template"
+      },
+      "instruction": {
+        "mine": "Personal instructions",
+        "mineHint": "Only for your own conversations, e.g. \"answer with tables\".",
+        "tenant": "Tenant instructions",
+        "tenantHint": "For every user of this tenant, after the platform instructions and before the personal ones."
+      },
+      "tone": {
+        "default": "Default",
+        "concise": "Concise",
+        "detailed": "Detailed",
+        "friendly": "Friendly",
+        "formal": "Formal"
+      },
+      "usage": {
+        "range": "Dates",
+        "groupBy": "Group by",
+        "by": {
+          "day": "Day",
+          "user": "User",
+          "model": "Model"
+        },
+        "key": "Group",
+        "calls": "Calls",
+        "promptTokens": "Input tokens",
+        "completionTokens": "Output tokens",
+        "totalTokens": "Total tokens",
+        "total": "Total",
+        "chart": "Agent token usage"
+      }
+    }
+  }
+}

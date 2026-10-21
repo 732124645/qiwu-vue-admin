@@ -110,5 +110,9 @@
   "tenantPackage": {
     "full": "示例套餐·全功能",
     "noWorkflow": "示例套餐·无审批"
+  },
+  "agentTemplate": {
+    "turnWaiting": "智能助手：等待确认",
+    "turnCompleted": "智能助手：任务完成"
   }
 }

@@ -34,6 +34,7 @@ CODEGEN_WRITE=false
 APP_DEMO_MODE=false
 APP_WXOA=false
 APP_MCP=false
+APP_AGENT=false
 STORAGE_LOCAL_ROOT=/srv/qiwu/uploads
 LOG_LEVEL=info
 ```
@@ -481,7 +482,7 @@ demo seed 给**新建**的种子管理员与 OA 示例用户免首登改密；�
 - `SWAGGER_ENABLED=true` 时服务端在 `/api/docs` 提供 Swagger UI（JSON：`/api/docs-json`）；默认 `false`，生产环境建议保持关闭。
 - `SWAGGER_ENABLED=false` 时不注册 Swagger UI / JSON 端点，菜单也自动隐藏；关闭后可人工检查两端点为 404。开发 `.env.example` 显式设为 `true`，正式部署须按本文设回 `false`。
 - 菜单"系统工具 → 系统接口"是 `link_type=iframe` 的页面，在布局内以 iframe 打开同源的 `/api/docs`（反向代理须把 `/api/` 转发到服务端）。
-- `SWAGGER_ENABLED=false` 时 `GET /api/auth/menus` 不下发该菜单（无论角色是否授权），前端也就不注册该路由。映射在 `apps/server/src/core/auth/menu-features.ts`（`route_name → 开关`；另有租户管理两页随 `APP_MULTI_TENANT`、「公众号」分组随 `APP_WXOA`、“MCP 工具”“访问令牌”两页随 `APP_MCP`）：新增"随服务端开关出现"的菜单时在此登记。
+- `SWAGGER_ENABLED=false` 时 `GET /api/auth/menus` 不下发该菜单（无论角色是否授权），前端也就不注册该路由。映射在 `apps/server/src/core/auth/menu-features.ts`（`route_name → 开关`；另有租户管理两页随 `APP_MULTI_TENANT`、「公众号」分组随 `APP_WXOA`、“MCP 工具”“访问令牌”两页随 `APP_MCP`、「智能体」分组随 `APP_AGENT`）：新增"随服务端开关出现"的菜单时在此登记。
 
 ## 公众号模块开关
 
@@ -496,6 +497,16 @@ demo seed 给**新建**的种子管理员与 OA 示例用户免首登改密；�
 - 资源标识按请求到达的域名计算（`https://<Host>/api/mcp`），所以代理须保留浏览器与客户端发来的 `Host` 与协议，同登录的 `Origin` 校验。
 - 端点按来源 IP 限流（每分钟 600 次）、每个令牌每分钟 60 次调用：`TRUST_PROXY` 须设成反向代理的地址。
 - 表始终由迁移创建，打开开关不需要额外的迁移。
+
+## 后台智能体（智能助手）
+
+`APP_AGENT` 默认 `false`，只在启动时读取，切换须全部实例重启。关闭时不加载该模块：`/api/agent/*` 回 404，不注册它的队列处理器，侧栏、角色授权树与租户套餐不显示「智能体」分组。打开后的配置与安全模型见[后台智能体](agent.md)。
+
+- 不需要新的服务：对话轮次在现有的 Redis [任务队列](queue.md)里执行（`maxmemory-policy noeviction` 等要求同上），实时进度走现有的 Socket.IO 推送；表始终由迁移创建，打开开关不需要额外的迁移。
+- 出站访问：服务端要能连到所配置的模型服务（如 `api.deepseek.com`、`dashscope.aliyuncs.com`、`api.moonshot.cn`、`open.bigmodel.cn`、`api.openai.com`，或内网的 Ollama）、搜索服务（`api.bochaai.com`、`api.tavily.com`）、智能体要读的公网网页（http/https 80/443 及网页自己的端口）与外部 MCP 服务器。出口防火墙按这些目标放行；联网读取与外部 MCP 直接连接检查过的地址，不经 HTTP 代理。
+- 模型、搜索与外部 MCP 的密钥在平台的“智能体设置”页填写，用 `APP_SECRET` 派生的密钥加密存库，不放进任何 env 文件；更换 `APP_SECRET` 后须重新填写。
+- 运行中的急停是系统参数 `agent.paused`（默认 `false`，只有 root 能改），经参数缓存失效对所有实例同时生效；成本与并发由 `agent.limit.*` 参数限制。
+- `ALLOW_PRIVATE_ENDPOINTS=true` 会同时放开联网读取与外部 MCP 的内网地址检查，生产环境保持 `false`。
 
 ## 实时推送（Socket.IO）
 

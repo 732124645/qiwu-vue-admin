@@ -144,5 +144,17 @@
     "tool_not_allowed": "该令牌未允许调用此工具",
     "output_too_large": "工具返回的内容超过 {max} 字节的上限，请缩小查询范围",
     "timeout": "工具在 {seconds} 秒内没有完成"
+  },
+  "agent": {
+    "paused": "智能助手已暂停，请稍后再试",
+    "not_configured": "还没有配置可用的模型，请联系平台管理员",
+    "limit": "已达到智能助手的使用上限：{reason}",
+    "provider_failed": "模型服务没有正常应答，请稍后再试",
+    "approval_closed": "这个确认请求已经处理过或已失效",
+    "url_not_allowed": "不能读取这个链接：只能读取公开网址，且必须来自本轮搜索结果或你给出的链接",
+    "mcp_server_failed": "外部 MCP 服务器连接失败：{reason}",
+    "skill_invalid": "技能文件格式不正确：{reason}",
+    "web_failed": "联网读取或搜索失败：{reason}",
+    "key_required": "改了地址或类型后需要重新填写密钥"
   }
 }

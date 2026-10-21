@@ -1,0 +1,169 @@
+{
+  "agent": {
+    "admin": {
+      "on": "已启用",
+      "off": "已停用",
+      "default": "默认",
+      "close": "关闭",
+      "keyStored": "已保存",
+      "keyMissing": "未设置",
+      "rootOnly": "这里的设置只有超级管理员能修改，你可以查看当前内容。",
+      "tab": {
+        "providers": "模型",
+        "search": "联网搜索",
+        "mcp": "外部 MCP",
+        "tools": "工具策略",
+        "skills": "平台技能",
+        "params": "说明与限额",
+        "prompts": "提示词模板",
+        "instructions": "说明"
+      },
+      "scope": {
+        "platform": "平台",
+        "tenant": "本租户",
+        "user": "个人"
+      },
+      "policy": {
+        "auto": "自动执行",
+        "ask": "询问",
+        "deny": "禁用"
+      },
+      "provider": {
+        "entity": "模型提供方"
+      },
+      "model": {
+        "id": "模型 ID",
+        "label": "显示名",
+        "reasoning": "推理",
+        "vision": "看图",
+        "fast": "快速档",
+        "contextWindow": "上下文窗口",
+        "required": "至少添加一个模型"
+      },
+      "search": {
+        "entity": "搜索提供方",
+        "kind": {
+          "bocha": "博查",
+          "tavily": "Tavily"
+        }
+      },
+      "web": {
+        "mode": "联网模式",
+        "live": "实时联网",
+        "off": "关闭联网",
+        "domains": "可直接读取的域名",
+        "domainsHint": "逗号分隔，如 example.com；留空则只读搜索结果与用户给出的链接"
+      },
+      "mcp": {
+        "entity": "外部 MCP 服务器",
+        "status": "连接状态",
+        "syncedAt": "同步时间",
+        "sync": "同步",
+        "tools": "工具",
+        "toolsOf": "{name} 的工具",
+        "toolCount": "{n} 个工具",
+        "readOnlyHint": "服务器声明",
+        "claimsRead": "只读",
+        "claimsWrite": "可能写入",
+        "autoConfirm": "该工具的“只读”只是外部服务器自己的声明，无法核实。确定让智能体不经确认直接调用它吗？",
+        "allowPrivateHint": "允许指向内网或本机地址。只在确认该服务器可信时打开。",
+        "auth": {
+          "none": "无",
+          "header": "请求头",
+          "oauth": "OAuth 客户端凭据"
+        },
+        "field": {
+          "name": "请求头名称",
+          "value": "请求头值",
+          "tokenUrl": "令牌地址",
+          "clientId": "客户端 ID",
+          "clientSecret": "客户端密钥",
+          "scope": "授权范围"
+        },
+        "state": {
+          "unknown": "未同步",
+          "ok": "正常",
+          "error": "连接失败"
+        }
+      },
+      "tool": {
+        "name": "工具名",
+        "title": "标题",
+        "kind": "类型",
+        "source": "来源",
+        "perm": "所需权限",
+        "policy": "审批策略",
+        "description": "说明",
+        "reset": "恢复默认",
+        "anyUser": "任何登录用户",
+        "kinds": {
+          "read": "只读",
+          "write": "写入"
+        },
+        "sources": {
+          "local": "本系统",
+          "web": "联网"
+        }
+      },
+      "param": {
+        "paused": "暂停智能体",
+        "pausedHint": "打开后立即拒绝新的对话轮次与工具调用，运行中的轮次停止",
+        "pauseConfirm": "确定暂停智能体吗？所有用户的新对话与工具调用会立即被拒绝，运行中的轮次也会停止。",
+        "trustMode": "允许“信任本会话”",
+        "trustModeHint": "关闭后对话页不再提供该审批模式",
+        "instructions": "平台说明",
+        "instructionsHint": "拼在每个系统提示的最前面，对所有租户生效。",
+        "limits": "限额"
+      },
+      "limit": {
+        "turnSteps": "每轮最多步数",
+        "turnSeconds": "每轮最长秒数",
+        "turnTokens": "每轮 token 上限",
+        "userDailyTokens": "每用户每日 token 上限",
+        "tenantDailyTokens": "每租户每日 token 上限",
+        "userConcurrentTurns": "每用户同时运行的轮次"
+      },
+      "skill": {
+        "entity": "技能",
+        "nameHint": "对话中用 $技能名 调用，如 补齐客户信息",
+        "preview": "预览",
+        "importTitle": "导入 SKILL.md",
+        "file": "选择文件",
+        "pasteHint": "选择文件，或在这里粘贴 SKILL.md 的内容（开头是 name、description 等字段）",
+        "imported": "导入成功"
+      },
+      "prompt": {
+        "entity": "提示词模板"
+      },
+      "instruction": {
+        "mine": "个人说明",
+        "mineHint": "只对你自己的对话生效，如“回答用表格”。",
+        "tenant": "租户说明",
+        "tenantHint": "对本租户所有用户的对话生效，排在平台说明之后、个人说明之前。"
+      },
+      "tone": {
+        "default": "默认",
+        "concise": "简洁",
+        "detailed": "详细",
+        "friendly": "亲切",
+        "formal": "正式"
+      },
+      "usage": {
+        "range": "日期范围",
+        "groupBy": "分组",
+        "by": {
+          "day": "按日",
+          "user": "按用户",
+          "model": "按模型"
+        },
+        "key": "分组",
+        "calls": "调用次数",
+        "promptTokens": "输入 token",
+        "completionTokens": "输出 token",
+        "totalTokens": "合计 token",
+        "total": "合计",
+        "chart": "智能体 token 用量"
+      }
+    }
+  }
+}

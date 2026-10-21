@@ -87,7 +87,7 @@ const file = (name: string, body: Readable | Buffer) => {
   return body instanceof Readable ? new StreamableFile(body, opts) : new StreamableFile(body, opts)
 }
 
-const cellText = (v: ExcelJS.CellValue): string => {
+export const cellText = (v: ExcelJS.CellValue): string => {
   if (v == null) return ''
   if (v instanceof Date) return v.toISOString()
   if (typeof v !== 'object') return String(v).trim()
@@ -111,7 +111,7 @@ async function* oneBatch(rows: object[]): AsyncGenerator<object[]> {
  * strings are known when rows arrive and nothing spills to disk; styles are kept for date cells.
  * Leaving the loop early stops parsing the file (`importParts` already inflated it once, within its budget).
  */
-async function* firstSheetRows(parts: Buffer[]): AsyncGenerator<ExcelJS.Row> {
+export async function* firstSheetRows(parts: Buffer[]): AsyncGenerator<ExcelJS.Row> {
   const reader = new ExcelJS.stream.xlsx.WorkbookReader(
     Readable.from(parts, { objectMode: false }),
     { styles: 'cache' },

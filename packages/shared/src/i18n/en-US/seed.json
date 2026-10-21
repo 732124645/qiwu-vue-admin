@@ -110,5 +110,9 @@
   "tenantPackage": {
     "full": "Sample package: everything",
     "noWorkflow": "Sample package: no approvals"
+  },
+  "agentTemplate": {
+    "turnWaiting": "Assistant: waiting for you",
+    "turnCompleted": "Assistant: task finished"
   }
 }

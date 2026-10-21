@@ -1,0 +1,17 @@
+{
+  "demo": {
+    "customer": {
+      "entity": "customer",
+      "enrich": {
+        "action": "Let the agent fill in",
+        "title": "Fill in customer details",
+        "confirm": "Run the skill \"{skill}\" on the {count} selected customers: one chat each, the agent searches the web and fills only empty fields. Every change is written only after you approve it on the batch review page."
+      }
+    }
+  },
+  "menu": {
+    "demo": {
+      "customer": "Sample customers"
+    }
+  }
+}

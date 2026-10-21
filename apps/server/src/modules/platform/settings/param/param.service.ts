@@ -3,6 +3,12 @@ import { Injectable } from '@nestjs/common'
 import { TransactionHost } from '@nestjs-cls/transactional'
 import type { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm'
 import {
+  AGENT_INSTRUCTIONS_PARAM,
+  AGENT_LIMIT_PARAMS,
+  AGENT_PAUSED_PARAM,
+  AGENT_TRUST_MODE_PARAM,
+  AGENT_WEB_DOMAINS_PARAM,
+  AGENT_WEB_MODE_PARAM,
   AUDIT_RETENTION_PARAM,
   MCP_PAUSED_PARAM,
   Err,
@@ -55,7 +61,8 @@ const shown = (p: Parameter): Parameter =>
 
 /**
  * Sign-up switch, role and dept, the WeChat sign-in switch, the audit retention and the agent access
- * stop switch (`mcp.paused`: an emergency stop for every tenant) are root-managed,
+ * stop switch (`mcp.paused`: an emergency stop for every tenant), the in-app agent's stop switch, limits,
+ * trust mode, platform instructions and web settings (they bound every tenant's cost and safety) are root-managed,
  * root being the platform's super admin only (403 `grant_exceeds_own`; see docs/design-notes.md#permissions,
  * #tenancy): the retention purge is the one way rows nobody may delete (tenant enter / leave) go.
  */
@@ -66,6 +73,12 @@ const ROOT_ONLY: ReadonlySet<unknown> = new Set([
   WX_MP_ENABLED_PARAM,
   AUDIT_RETENTION_PARAM,
   MCP_PAUSED_PARAM,
+  AGENT_PAUSED_PARAM,
+  ...Object.values(AGENT_LIMIT_PARAMS),
+  AGENT_TRUST_MODE_PARAM,
+  AGENT_INSTRUCTIONS_PARAM,
+  AGENT_WEB_MODE_PARAM,
+  AGENT_WEB_DOMAINS_PARAM,
 ])
 const assertWritable = (key: unknown): void => {
   if (ROOT_ONLY.has(key) && !clsGet('principal')?.root)

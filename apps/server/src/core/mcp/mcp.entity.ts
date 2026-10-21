@@ -1,3 +1,4 @@
+import type { AgentToolPolicy } from '@qiwu/shared'
 import { Column, Entity } from 'typeorm'
 import { BaseEntity } from '../db/base.entity.js'
 import { TenantColumn } from '../db/tenant-filter.js'
@@ -55,4 +56,8 @@ export class McpToolSwitch extends BaseEntity {
   /** 是否启用 */
   @Column({ type: 'boolean', default: true })
   enabled: boolean
+
+  /** 后台智能体里的审批策略（auto、ask、deny）；null 为按类型默认：只读 auto、写入 ask */
+  @Column({ name: 'agent_policy', type: 'varchar', length: 8, nullable: true })
+  agentPolicy: AgentToolPolicy | null
 }

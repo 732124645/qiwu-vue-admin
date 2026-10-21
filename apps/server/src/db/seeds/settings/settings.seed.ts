@@ -1,6 +1,12 @@
 // settings seed (see docs/design-notes.md#i18n): the dictionaries and runtime parameters.
 // Dict labels and param names are mode B (`*_i18n` JSON); the plain `label`/`name` column holds zh-CN.
 import {
+  AGENT_INSTRUCTIONS_PARAM,
+  AGENT_LIMIT_PARAMS,
+  AGENT_PAUSED_PARAM,
+  AGENT_TRUST_MODE_PARAM,
+  AGENT_WEB_DOMAINS_PARAM,
+  AGENT_WEB_MODE_PARAM,
   APP_UPDATE_PARAMS,
   CAPTCHA_IMAGE_TYPE_PARAM,
   CAPTCHA_MODE_PARAM,
@@ -324,6 +330,88 @@ const PARAMS: ParamSeed[] = [
     nameI18n: {
       'zh-CN': '暂停智能体调用工具（true 时所有 MCP 工具调用立即被拒）',
       'en-US': 'Pause agent tool calls (true: every MCP tool call is refused at once)',
+    },
+  },
+  // the in-app agent's params, root only (param page): they stop it or bound its cost and safety
+  {
+    key: AGENT_PAUSED_PARAM,
+    value: 'false',
+    nameI18n: {
+      'zh-CN': '暂停后台智能体（true 时拒绝新的对话轮次与工具调用，运行中的轮次停止）',
+      'en-US':
+        'Pause the in-app agent (true: new turns and tool calls are refused, running turns stop)',
+    },
+  },
+  {
+    key: AGENT_LIMIT_PARAMS.turnSteps,
+    value: 20,
+    nameI18n: { 'zh-CN': '智能体每轮最多步数', 'en-US': 'Agent steps per turn' },
+  },
+  {
+    key: AGENT_LIMIT_PARAMS.turnSeconds,
+    value: 300,
+    nameI18n: { 'zh-CN': '智能体每轮最长秒数', 'en-US': 'Agent seconds per turn' },
+  },
+  {
+    key: AGENT_LIMIT_PARAMS.turnTokens,
+    value: 200_000,
+    nameI18n: { 'zh-CN': '智能体每轮 token 上限', 'en-US': 'Agent tokens per turn' },
+  },
+  {
+    key: AGENT_LIMIT_PARAMS.userDailyTokens,
+    value: 1_000_000,
+    nameI18n: {
+      'zh-CN': '智能体每用户每日 token 上限（UTC 日）',
+      'en-US': 'Agent tokens per user per day (UTC)',
+    },
+  },
+  {
+    key: AGENT_LIMIT_PARAMS.tenantDailyTokens,
+    value: 10_000_000,
+    nameI18n: {
+      'zh-CN': '智能体每租户每日 token 上限（UTC 日）',
+      'en-US': 'Agent tokens per tenant per day (UTC)',
+    },
+  },
+  {
+    key: AGENT_LIMIT_PARAMS.userConcurrentTurns,
+    value: 2,
+    nameI18n: {
+      'zh-CN': '智能体每用户同时运行的轮次数',
+      'en-US': 'Agent turns running at once per user',
+    },
+  },
+  {
+    key: AGENT_TRUST_MODE_PARAM,
+    value: 'true',
+    nameI18n: {
+      'zh-CN': '智能体允许“信任本会话”审批模式（false 时不提供）',
+      'en-US': 'Agent offers the "trust this thread" approval mode (false: not offered)',
+    },
+  },
+  {
+    key: AGENT_INSTRUCTIONS_PARAM,
+    value: '',
+    nameI18n: {
+      'zh-CN': '智能体平台说明（拼在每个系统提示最前面）',
+      'en-US': 'Agent platform instructions (first in every system prompt)',
+    },
+  },
+  {
+    key: AGENT_WEB_MODE_PARAM,
+    value: 'live',
+    nameI18n: {
+      'zh-CN': '智能体联网搜索（live 联网 / off 关闭联网工具）',
+      'en-US': 'Agent web search (live / off: no web tools)',
+    },
+  },
+  {
+    key: AGENT_WEB_DOMAINS_PARAM,
+    value: '',
+    nameI18n: {
+      'zh-CN': '智能体可直接读取的网站域名（逗号分隔；空为只读搜索结果与用户给出的链接）',
+      'en-US':
+        'Domains the agent may read directly (comma-separated; empty: only search results and user links)',
     },
   },
   {

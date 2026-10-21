@@ -1,0 +1,254 @@
+{
+  "agent": {
+    "chat": {
+      "entry": "智能助手",
+      "title": "智能助手",
+      "messages": "对话内容",
+      "welcome": "有什么可以帮你？可以让我查数据、汇总，或在你确认后修改数据。",
+      "paused": "智能助手已被平台暂停，暂时不能开始新的对话。",
+      "notConfigured": "还没有配置可用的模型，请联系管理员在“智能体设置”中添加。",
+      "noThread": "请先开始一个会话",
+      "compacted": "已压缩较早的对话",
+      "fork": "从这里分叉成新会话",
+      "thinking": "正在思考…",
+      "plan": "计划",
+      "planStatus": {
+        "pending": "未开始",
+        "doing": "进行中",
+        "done": "已完成"
+      },
+      "thread": {
+        "list": "会话列表",
+        "new": "新会话",
+        "search": "搜索会话",
+        "showArchived": "只看已归档",
+        "group": {
+          "today": "今天",
+          "week": "最近 7 天",
+          "older": "更早",
+          "pinned": "置顶"
+        },
+        "rename": "改名",
+        "archive": "归档",
+        "restore": "恢复",
+        "archived": "已归档",
+        "restored": "已恢复",
+        "removeConfirm": "删除会话“{title}”及其全部消息？此操作不可恢复。",
+        "actions": "会话“{title}”的操作",
+        "untitled": "未命名会话",
+        "empty": "还没有会话",
+        "more": "加载更多",
+        "searchHint": "搜索标题与消息",
+        "menu": "会话操作",
+        "pin": "置顶",
+        "unpin": "取消置顶",
+        "pinned": "已置顶",
+        "unread": "{n} 条未读",
+        "view": {
+          "label": "视图",
+          "all": "全部",
+          "active": "进行中",
+          "unread": "未读",
+          "pinned": "置顶"
+        },
+        "readAll": "全部已读"
+      },
+      "turn": {
+        "running": "运行中",
+        "waiting": "等待你处理",
+        "completed": "已完成",
+        "failed": "失败",
+        "cancelled": "已中断"
+      },
+      "tool": {
+        "external": "外部内容",
+        "running": "执行中",
+        "done": "完成",
+        "failed": "失败",
+        "args": "参数",
+        "result": "结果",
+        "stopped": "已停止"
+      },
+      "approval": {
+        "title": "需要你确认",
+        "tool": "操作",
+        "target": "目标记录",
+        "field": "字段",
+        "from": "当前值",
+        "to": "改为",
+        "empty": "（空）",
+        "sources": "依据的来源",
+        "note": "说明（可选）",
+        "status": {
+          "running": "执行中",
+          "done": "已完成",
+          "failed": "失败",
+          "approved": "已确认",
+          "rejected": "已拒绝",
+          "expired": "已失效",
+          "answered": "已回答"
+        },
+        "keys": "焦点在卡片本身时 Enter 确认、Esc 拒绝",
+        "action": {
+          "approve": "确认执行",
+          "approve_session": "本会话内同意",
+          "reject": "拒绝",
+          "cancel": "取消本轮"
+        },
+        "decision": {
+          "approve": "已确认",
+          "approve_session": "本会话内已同意",
+          "reject": "已拒绝",
+          "cancel": "已取消"
+        },
+        "blocked": {
+          "permission": "你没有执行这项操作的权限（{perm}），请联系管理员授权后再试。",
+          "mode": "本会话是只读模式，不能修改数据；切换审批模式后重新提问。",
+          "policy": "平台不允许智能助手使用这个工具。"
+        }
+      },
+      "question": {
+        "title": "智能助手想确认几个问题",
+        "from": "来自 {name}",
+        "status": {
+          "answered": "已回答",
+          "closed": "已结束",
+          "declined": "已拒绝回答"
+        },
+        "other": "其他",
+        "otherLabel": "{header}：其他（请填写）",
+        "keys": "可按数字键选择选项",
+        "submit": "提交回答",
+        "sep": "、",
+        "none": "未回答",
+        "decline": "不回答",
+        "external": "这些问题来自外部服务器“{name}”，你的回答会发送给它，请不要填写不应外发的内容。"
+      },
+      "context": {
+        "from": "来自：{title}",
+        "selected": "已选 {n} 条"
+      },
+      "composer": {
+        "label": "输入消息",
+        "placeholder": "输入消息，Enter 发送，Shift+Enter 换行；$ 选技能，{'@'} 提及，/ 用命令，Ctrl+R 搜索发过的消息",
+        "queuePlaceholder": "本轮还在运行，现在发送的消息会排在当前步骤之后",
+        "suggestions": "补全建议",
+        "model": "模型",
+        "reasoning": "推理强度",
+        "approvalMode": "审批模式",
+        "stop": "停止",
+        "send": "发送",
+        "queue": "排到下一轮",
+        "queueHint": "本轮运行中：发送的消息会在当前步骤之后处理。",
+        "noVision": "当前模型不能看图片，请移除图片附件或换一个支持图片的模型。",
+        "promptPlaceholder": "输入名称筛选提示词模板，Enter 插入，Esc 取消",
+        "attach": "附件",
+        "prompts": "提示词模板",
+        "fast": "快速",
+        "plan": "计划模式",
+        "planHint": "只读，先列出计划，确认后再执行",
+        "context": "上下文 {percent}%",
+        "sendMode": "运行中发送方式",
+        "steer": "追加到本轮",
+        "historyPlaceholder": "输入文字搜索发过的消息，Enter 填入，Esc 取消"
+      },
+      "reasoning": {
+        "low": "低",
+        "medium": "中",
+        "high": "高"
+      },
+      "mode": {
+        "read_only": "只读",
+        "ask": "询问",
+        "trust": "信任本会话"
+      },
+      "slash": {
+        "new": "新建会话",
+        "compact": "压缩较早的对话",
+        "model": "切换模型",
+        "approvals": "切换审批模式",
+        "skills": "选择技能",
+        "mcp": "外部 MCP 服务器设置",
+        "status": "本轮用量与状态",
+        "clear": "清空并新建会话",
+        "noSetting": "没有“智能体设置”页面的权限",
+        "plan": "切换计划模式",
+        "prompts": "插入提示词模板"
+      },
+      "status": {
+        "title": "本轮状态",
+        "close": "关闭",
+        "state": "状态",
+        "steps": "步数",
+        "tokens": "Token 用量",
+        "tokenValue": "输入 {prompt} / 输出 {completion}",
+        "started": "开始时间",
+        "none": "本会话还没有运行过",
+        "context": "上下文",
+        "of": "{used} / {limit}",
+        "userToday": "本人今日",
+        "tenantToday": "本租户今日"
+      },
+      "action": {
+        "copy": "复制",
+        "copied": "已复制",
+        "copyFailed": "复制失败，请手动选择文字复制",
+        "edit": "编辑后重发",
+        "editing": "正在编辑上一条消息：发送后会分叉出新会话"
+      },
+      "feedback": {
+        "up": "有帮助",
+        "down": "没帮助",
+        "prompt": "可以补充说明（可选）",
+        "placeholder": "哪里好或哪里不对",
+        "send": "提交",
+        "thanks": "感谢反馈"
+      },
+      "queued": "已排队，下一轮处理",
+      "citations": "来源",
+      "thought": {
+        "title": "思考过程",
+        "running": "正在思考…"
+      },
+      "compaction": {
+        "auto": "较早的对话已自动压缩为摘要",
+        "manual": "较早的对话已压缩为摘要"
+      },
+      "revert": {
+        "title": "撤回最后一轮",
+        "action": "撤回",
+        "confirm": "撤回最后一轮的提问与回答？智能助手在这一轮里已经执行的修改不会回滚。"
+      },
+      "export": "导出 Markdown",
+      "share": {
+        "create": "复制分享链接",
+        "stop": "停止分享",
+        "title": "分享链接（已复制）",
+        "done": "知道了",
+        "stopped": "已停止分享",
+        "readonly": "只读分享"
+      },
+      "temporary": "临时会话",
+      "error": {
+        "generic": "出错了，请稍后再试",
+        "interrupted": "本轮已中断"
+      },
+      "mention": {
+        "skill": "技能",
+        "server": "服务器",
+        "record": "记录",
+        "serverHint": "外部 MCP 服务器",
+        "recordHint": "当前页面带来的记录"
+      },
+      "saveSkill": {
+        "action": "存成技能",
+        "working": "正在根据会话生成技能草稿…",
+        "done": "已生成技能草稿“{name}”（未启用），检查后再启用"
+      },
+      "planRun": {
+        "action": "执行此计划",
+        "text": "按计划执行"
+      }
+    }
+  }
+}

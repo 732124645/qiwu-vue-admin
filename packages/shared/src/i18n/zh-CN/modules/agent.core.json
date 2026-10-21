@@ -1,0 +1,85 @@
+{
+  "field": {
+    "agent": {
+      "thread": {
+        "title": "标题",
+        "status": "状态",
+        "providerId": "模型提供方",
+        "model": "模型",
+        "reasoning": "推理强度",
+        "approvalMode": "审批模式",
+        "context": "页面上下文",
+        "planMode": "计划模式",
+        "pinned": "置顶",
+        "temporary": "临时会话"
+      },
+      "message": {
+        "text": "消息",
+        "skill": "技能",
+        "fileIds": "附件",
+        "mode": "发送方式"
+      },
+      "approval": {
+        "decision": "决定",
+        "note": "备注"
+      },
+      "skill": {
+        "scope": "范围",
+        "name": "技能名",
+        "description": "何时使用",
+        "body": "技能正文",
+        "tools": "允许的工具",
+        "enabled": "启用",
+        "text": "SKILL.md 内容"
+      },
+      "instruction": {
+        "body": "说明",
+        "tone": "回答语气"
+      },
+      "batch": {
+        "skill": "技能",
+        "target": "目标类型",
+        "ids": "选中的记录"
+      },
+      "provider": {
+        "name": "名称",
+        "baseUrl": "接口地址",
+        "apiKey": "密钥",
+        "models": "模型",
+        "enabled": "启用",
+        "isDefault": "默认",
+        "sort": "排序"
+      },
+      "search": {
+        "kind": "类型",
+        "name": "名称",
+        "apiKey": "密钥",
+        "enabled": "启用",
+        "isDefault": "默认"
+      },
+      "mcpServer": {
+        "name": "名称",
+        "url": "地址",
+        "authKind": "鉴权方式",
+        "auth": "鉴权信息",
+        "allowPrivate": "允许内网地址",
+        "enabled": "启用"
+      },
+      "question": {
+        "answers": "回答",
+        "form": "表单",
+        "decline": "不回答"
+      },
+      "feedback": {
+        "itemId": "回答",
+        "rating": "评价",
+        "comment": "反馈内容"
+      },
+      "prompt": {
+        "scope": "范围",
+        "name": "模板名",
+        "body": "模板内容"
+      }
+    }
+  }
+}

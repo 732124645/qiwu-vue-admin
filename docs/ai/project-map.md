@@ -11,6 +11,7 @@
 | --- | --- | --- |
 | biz/leave | `LeaveModule`（leave.module.ts） |  |
 | demo/book | `BookMcpModule`（book.mcp-tools.ts）, `BookModule`（book.module.ts） |  |
+| demo/customer | `CustomerMcpModule`（customer.mcp-tools.ts）, `CustomerModule`（customer.module.ts） |  |
 | demo/invoice | `InvoiceModule`（invoice.module.ts） |  |
 | demo/realtime | `DemoRealtimeModule`（realtime.module.ts） |  |
 | demo/topic | `TopicModule`（topic.module.ts） |  |
@@ -52,7 +53,7 @@
 | platform/settings/dict | `DictModule`（dict.module.ts） |  |
 | platform/settings/dict-entry | `DictEntryModule`（dict-entry.module.ts） |  |
 | platform/settings/param | `ParameterModule`（param.module.ts） |  |
-| platform/storage | `StorageModule`（storage.module.ts） |  |
+| platform/storage | `AgentAttachmentsModule`（agent-attachments.ts）, `StorageModule`（storage.module.ts） |  |
 | platform/storage/config | `StorageConfigModule`（config.module.ts） |  |
 | platform/wxoa | `WxoaModule`（wxoa.module.ts） | APP_WXOA |
 | platform/wxoa/account | `WxoaAccountModule`（account.module.ts） | APP_WXOA |
@@ -78,6 +79,7 @@
 
 | 开关 | 只在开启时加载的模块 | 只在开启时显示的菜单（路由名） |
 | --- | --- | --- |
+| `APP_AGENT` | AgentModule（core/agent） | agent |
 | `APP_MCP` | McpModule（core/mcp） | mcp-token, mcp-tool |
 | `APP_MULTI_TENANT` |  | iam-tenant, iam-tenant-package |
 | `APP_WXOA` | WxoaModule（modules/platform/wxoa） | wxoa |
@@ -89,6 +91,20 @@
 
 | 表 | 实体 | 租户 | 软删除 | 文件 |
 | --- | --- | --- | --- | --- |
+| `agent_batch` | `AgentBatch` | 租户 | 是 | core/agent/entities/agent-thread.entity.ts |
+| `agent_feedback` | `AgentFeedback` | 租户 | 是 | core/agent/entities/agent-thread.entity.ts |
+| `agent_instruction` | `AgentInstruction` | 租户 | 是 | core/agent/entities/agent-skill.entity.ts |
+| `agent_item` | `AgentItem` | 租户 | 是 | core/agent/entities/agent-thread.entity.ts |
+| `agent_mcp_server` | `AgentMcpServer` | 平台 | 是 | core/agent/entities/agent-mcp.entity.ts |
+| `agent_mcp_tool` | `AgentMcpTool` | 平台 | 是 | core/agent/entities/agent-mcp.entity.ts |
+| `agent_platform_skill` | `AgentPlatformSkill` | 平台 | 是 | core/agent/entities/agent-skill.entity.ts |
+| `agent_prompt` | `AgentPrompt` | 租户 | 是 | core/agent/entities/agent-skill.entity.ts |
+| `agent_provider` | `AgentProvider` | 平台 | 是 | core/agent/provider/provider.entity.ts |
+| `agent_search_provider` | `AgentSearchProvider` | 平台 | 是 | core/agent/provider/provider.entity.ts |
+| `agent_skill` | `AgentSkill` | 租户 | 是 | core/agent/entities/agent-skill.entity.ts |
+| `agent_thread` | `AgentThread` | 租户 | 是 | core/agent/entities/agent-thread.entity.ts |
+| `agent_turn` | `AgentTurn` | 租户 | 是 | core/agent/entities/agent-thread.entity.ts |
+| `agent_usage` | `AgentUsage` | 租户 | 是 | core/agent/entities/agent-usage.entity.ts |
 | `aud_action_log` | `ActionLog` | 租户 | 是 | modules/platform/audit/action-log/action-log.entity.ts |
 | `aud_http_fault` | `HttpFault` | 平台 | 是 | modules/platform/audit/http-fault/http-fault.entity.ts |
 | `aud_http_trace` | `HttpTrace` | 平台 | 是 | modules/platform/audit/http-trace/http-trace.entity.ts |
@@ -102,6 +118,7 @@
 | `cg_column` | `CgColumn` | 平台 | 是 | modules/platform/codegen/cg-column.entity.ts |
 | `cg_table` | `CgTable` | 平台 | 是 | modules/platform/codegen/cg-table.entity.ts |
 | `demo_book` | `Book` | 租户 | 是 | modules/demo/book/book.entity.ts |
+| `demo_customer` | `Customer` | 租户 | 是 | modules/demo/customer/customer.entity.ts |
 | `demo_invoice` | `Invoice` | 租户 | 是 | modules/demo/invoice/invoice.entity.ts |
 | `demo_invoice_line` | `InvoiceLine` | 租户 | 是 | modules/demo/invoice/invoice-line.entity.ts |
 | `demo_topic` | `Topic` | 租户 | 是 | modules/demo/topic/topic.entity.ts |
@@ -158,6 +175,68 @@
 | `McpWellKnownController`（core/mcp/mcp.controller.ts） | GET | `/.well-known/oauth-protected-resource` |  | Public |
 |  | GET | `/.well-known/oauth-protected-resource/api/mcp` |  | Public |
 |  | GET | `/.well-known/oauth-authorization-server` |  | Public |
+| `AgentChatController`（core/agent/threads/threads.controller.ts） | GET | `/api/agent/options` | agent.chat.use |  |
+|  | GET | `/api/agent/shared/:token` | agent.chat.use |  |
+|  | POST | `/api/agent/feedback` | agent.chat.use | Idempotent |
+|  | GET | `/api/agent/prompts` | agent.chat.use |  |
+|  | POST | `/api/agent/prompts` | agent.chat.use | Idempotent |
+|  | PUT | `/api/agent/prompts/:id` | agent.chat.use |  |
+|  | DELETE | `/api/agent/prompts/:id` | agent.chat.use |  |
+|  | GET | `/api/agent/usage` | agent.usage.browse |  |
+| `AgentTurnController`（core/agent/runtime/agent-turn.controller.ts） | POST | `/api/agent/threads/:id/messages` | agent.chat.use | Idempotent |
+|  | POST | `/api/agent/threads/:id/cancel` | agent.chat.use |  |
+|  | POST | `/api/agent/threads/:id/compact` | agent.chat.use |  |
+|  | POST | `/api/agent/approvals/:itemId` | agent.chat.use |  |
+|  | POST | `/api/agent/questions/:itemId` | agent.chat.use |  |
+| `AgentBatchController`（core/agent/batch/batch.controller.ts） | POST | `/api/agent/batches` | agent.batch.run | Idempotent |
+|  | GET | `/api/agent/batches/:id` | agent.batch.run |  |
+|  | POST | `/api/agent/batches/:id/decide` | agent.batch.run |  |
+| `AgentInstructionController`（core/agent/skills/skill.controller.ts） | GET | `/api/agent/instructions/me` | chat.use |  |
+|  | PUT | `/api/agent/instructions/me` | chat.use |  |
+|  | GET | `/api/agent/instructions/tenant` | chat.use / skill.browse / instruction.modify |  |
+|  | PUT | `/api/agent/instructions/tenant` | instruction.modify |  |
+| `AgentMcpServerController`（core/agent/mcp-client/mcp-server.controller.ts） | GET | `/api/agent/mcp-servers` | agent.setting.browse | PlatformOnly |
+|  | POST | `/api/agent/mcp-servers` | agent.setting.modify | PlatformOnly(root), Idempotent |
+|  | PUT | `/api/agent/mcp-servers/:id` | agent.setting.modify | PlatformOnly(root) |
+|  | DELETE | `/api/agent/mcp-servers/:id` | agent.setting.modify | PlatformOnly(root) |
+|  | POST | `/api/agent/mcp-servers/:id/sync` | agent.setting.modify | PlatformOnly(root) |
+|  | PUT | `/api/agent/mcp-servers/:id/tools/:toolId` | agent.setting.modify | PlatformOnly(root) |
+| `AgentPlatformSkillController`（core/agent/skills/skill.controller.ts） | GET | `/api/agent/platform-skills` | setting.browse | PlatformOnly |
+|  | POST | `/api/agent/platform-skills` | setting.modify | PlatformOnly(root), Idempotent |
+|  | PUT | `/api/agent/platform-skills/:id` | setting.modify | PlatformOnly(root) |
+|  | DELETE | `/api/agent/platform-skills/:id` | setting.modify | PlatformOnly(root) |
+|  | POST | `/api/agent/platform-skills/import` | setting.modify | PlatformOnly(root), Idempotent |
+|  | GET | `/api/agent/platform-skills/:id/export` | setting.browse | PlatformOnly |
+| `AgentProviderController`（core/agent/provider/provider.controller.ts） | GET | `/api/agent/providers` | agent.setting.browse | PlatformOnly |
+|  | POST | `/api/agent/providers` | agent.setting.modify | PlatformOnly(root), Idempotent |
+|  | PUT | `/api/agent/providers/:id` | agent.setting.modify | PlatformOnly(root) |
+|  | DELETE | `/api/agent/providers/:id` | agent.setting.modify | PlatformOnly(root) |
+| `AgentSearchProviderController`（core/agent/provider/provider.controller.ts） | GET | `/api/agent/search-providers` | agent.setting.browse | PlatformOnly |
+|  | POST | `/api/agent/search-providers` | agent.setting.modify | PlatformOnly(root), Idempotent |
+|  | PUT | `/api/agent/search-providers/:id` | agent.setting.modify | PlatformOnly(root) |
+|  | DELETE | `/api/agent/search-providers/:id` | agent.setting.modify | PlatformOnly(root) |
+| `AgentSkillController`（core/agent/skills/skill.controller.ts） | GET | `/api/agent/skills` | chat.use / skill.browse |  |
+|  | POST | `/api/agent/skills` | chat.use / skill.create | Idempotent |
+|  | POST | `/api/agent/skills/import` | chat.use / skill.create | Idempotent |
+|  | POST | `/api/agent/skills/from-thread/:id` | chat.use | Idempotent |
+|  | PUT | `/api/agent/skills/:id` | chat.use / skill.modify |  |
+|  | DELETE | `/api/agent/skills/:id` | chat.use / skill.remove |  |
+|  | GET | `/api/agent/skills/:id/export` | chat.use / skill.browse |  |
+| `AgentThreadController`（core/agent/threads/threads.controller.ts） | GET | `/api/agent/threads` | agent.chat.use |  |
+|  | POST | `/api/agent/threads` | agent.chat.use | Idempotent |
+|  | PATCH | `/api/agent/threads/:id` | agent.chat.use |  |
+|  | DELETE | `/api/agent/threads/:id` | agent.chat.use |  |
+|  | GET | `/api/agent/threads/:id/items` | agent.chat.use |  |
+|  | POST | `/api/agent/threads/:id/fork` | agent.chat.use | Idempotent |
+|  | POST | `/api/agent/threads/read-all` | agent.chat.use |  |
+|  | POST | `/api/agent/threads/:id/read` | agent.chat.use |  |
+|  | POST | `/api/agent/threads/:id/revert` | agent.chat.use |  |
+|  | GET | `/api/agent/threads/:id/export` | agent.chat.use |  |
+|  | GET | `/api/agent/threads/:id/status` | agent.chat.use |  |
+|  | POST | `/api/agent/threads/:id/share` | agent.chat.use |  |
+|  | DELETE | `/api/agent/threads/:id/share` | agent.chat.use |  |
+| `AgentToolPolicyController`（core/agent/tools/tool-policy.ts） | GET | `/api/agent/tools` | agent.setting.browse | PlatformOnly |
+|  | PUT | `/api/agent/tools/:name/policy` | agent.setting.modify | PlatformOnly(root) |
 | `ActionLogController`（modules/platform/audit/action-log/action-log.controller.ts） | GET | `/api/audit/action-logs` | audit.actionLog.browse |  |
 |  | GET | `/api/audit/action-logs/export` | audit.actionLog.export |  |
 |  | GET | `/api/audit/action-logs/:id` | audit.actionLog.view |  |
@@ -220,6 +299,13 @@
 |  | PUT | `/api/demo/books/:id/enabled` | demo.book.modify |  |
 |  | DELETE | `/api/demo/books/:id` | demo.book.remove |  |
 |  | POST | `/api/demo/books/batch-delete` | demo.book.remove |  |
+| `CustomerController`（modules/demo/customer/customer.controller.ts） | GET | `/api/demo/customers` | demo.customer.browse |  |
+|  | GET | `/api/demo/customers/export` | demo.customer.export |  |
+|  | GET | `/api/demo/customers/:id` | demo.customer.view |  |
+|  | POST | `/api/demo/customers` | demo.customer.create | Idempotent |
+|  | PUT | `/api/demo/customers/:id` | demo.customer.modify |  |
+|  | DELETE | `/api/demo/customers/:id` | demo.customer.remove |  |
+|  | POST | `/api/demo/customers/batch-delete` | demo.customer.remove |  |
 | `InvoiceController`（modules/demo/invoice/invoice.controller.ts） | GET | `/api/demo/invoices` | demo.invoice.browse |  |
 |  | GET | `/api/demo/invoices/:id` | demo.invoice.view |  |
 |  | POST | `/api/demo/invoices` | demo.invoice.create | Idempotent |
@@ -642,12 +728,14 @@
 | 常量 | 权限码 | 文件 |
 | --- | --- | --- |
 | `actionLogPerms` | audit.actionLog.browse, audit.actionLog.view, audit.actionLog.export, audit.actionLog.remove | shared:platform/audit/action-log.schema.ts |
+| `agentPerms` | agent.chat.use, agent.batch.run, agent.skill.browse, agent.skill.create, agent.skill.modify, agent.skill.remove, agent.instruction.modify, agent.setting.browse, agent.setting.modify, agent.usage.browse | shared:platform/agent/agent.schema.ts |
 | `appVersionPerms` | settings.appVersion.browse, settings.appVersion.view, settings.appVersion.create, settings.appVersion.modify, settings.appVersion.remove | shared:platform/settings/app-version.schema.ts |
 | `bookPerms` | demo.book.browse, demo.book.view, demo.book.create, demo.book.modify, demo.book.remove, demo.book.export, demo.book.import | shared:demo/book.schema.ts |
 | `bulletinPerms` | messaging.bulletin.browse, messaging.bulletin.view, messaging.bulletin.create, messaging.bulletin.modify, messaging.bulletin.remove, messaging.bulletin.publish | shared:platform/messaging/bulletin.schema.ts |
 | `clientPerms` | oauth.client.browse, oauth.client.view, oauth.client.create, oauth.client.modify, oauth.client.remove, oauth.client.reset-secret | shared:platform/oauth/client.schema.ts |
 | `codegenPerms` | codegen.table.browse, codegen.table.view, codegen.table.import, codegen.table.modify, codegen.table.remove, codegen.table.generate, codegen.table.write | shared:platform/codegen/codegen-api.schema.ts |
 | `configPerms` | storage.config.browse, storage.config.view, storage.config.create, storage.config.modify, storage.config.remove | shared:platform/storage/config.schema.ts |
+| `customerPerms` | demo.customer.browse, demo.customer.view, demo.customer.create, demo.customer.modify, demo.customer.remove, demo.customer.export | shared:demo/customer.schema.ts |
 | `demoRealtimePerms` | demo.realtime.send, demo.realtime.broadcast | shared:demo/realtime.schema.ts |
 | `deptPerms` | iam.dept.browse, iam.dept.view, iam.dept.create, iam.dept.modify, iam.dept.remove | shared:platform/iam/dept.schema.ts |
 | `dictEntryPerms` | settings.dictEntry.browse, settings.dictEntry.view, settings.dictEntry.create, settings.dictEntry.modify, settings.dictEntry.remove, settings.dictEntry.export | shared:platform/settings/dict-entry.schema.ts |
@@ -687,6 +775,12 @@
 
 | 路由名 | 类型 | 开关 | 种子文件 |
 | --- | --- | --- | --- |
+| `agent` | group | APP_AGENT | db/seeds/agent/agent.seed.ts |
+| `agent-batch` | page |  | db/seeds/agent/agent.seed.ts |
+| `agent-chat` | page |  | db/seeds/agent/agent.seed.ts |
+| `agent-setting` | page |  | db/seeds/agent/agent.seed.ts |
+| `agent-skill` | page |  | db/seeds/agent/agent.seed.ts |
+| `agent-usage` | page |  | db/seeds/agent/agent.seed.ts |
 | `audit` | group |  | db/seeds/audit/audit.seed.ts |
 | `audit-action-log` | page |  | modules/platform/audit/action-log/action-log.seed.ts |
 | `audit-http-fault` | page |  | modules/platform/audit/http-fault/http-fault.seed.ts |
@@ -700,6 +794,7 @@
 | `codegen-table-edit` | page |  | db/seeds/codegen/codegen.seed.ts |
 | `demo` | group |  | db/seeds/demo/demo.seed.ts |
 | `demo-book` | page |  | modules/demo/book/book.seed.ts |
+| `demo-customer` | page |  | modules/demo/customer/customer.seed.ts |
 | `demo-invoice` | page |  | modules/demo/invoice/invoice.seed.ts |
 | `demo-realtime` | page |  | modules/demo/realtime/realtime.seed.ts |
 | `demo-topic` | page |  | modules/demo/topic/topic.seed.ts |
@@ -838,6 +933,17 @@
 
 | 参数键 | 种子文件 |
 | --- | --- |
+| `agent.instructions` | db/seeds/settings/settings.seed.ts |
+| `agent.limit.tenant_daily_tokens` | db/seeds/settings/settings.seed.ts |
+| `agent.limit.turn_seconds` | db/seeds/settings/settings.seed.ts |
+| `agent.limit.turn_steps` | db/seeds/settings/settings.seed.ts |
+| `agent.limit.turn_tokens` | db/seeds/settings/settings.seed.ts |
+| `agent.limit.user_concurrent_turns` | db/seeds/settings/settings.seed.ts |
+| `agent.limit.user_daily_tokens` | db/seeds/settings/settings.seed.ts |
+| `agent.paused` | db/seeds/settings/settings.seed.ts |
+| `agent.trust_mode` | db/seeds/settings/settings.seed.ts |
+| `agent.web.allowed_domains` | db/seeds/settings/settings.seed.ts |
+| `agent.web.mode` | db/seeds/settings/settings.seed.ts |
 | `app.update.enabled` | db/seeds/settings/settings.seed.ts |
 | `app.update.review_version` | db/seeds/settings/settings.seed.ts |
 | `audit.http_trace.exclude_paths` | db/seeds/settings/settings.seed.ts |
@@ -877,7 +983,10 @@
 
 ## 队列
 
-（无）
+| 队列 | 登记位置 | 处理器 |
+| --- | --- | --- |
+| `agent-cleanup` | core/agent/agent.module.ts | AgentCleanupProcessor（core/agent/runtime/turn.processor.ts） |
+| `agent-turn` | core/agent/agent.module.ts | AgentTurnProcessor（core/agent/runtime/turn.processor.ts） |
 
 ## 定时任务处理器
 
@@ -897,5 +1006,8 @@
 | --- | --- | --- | --- | --- |
 | `cfg.dict.options` | read | （只需登录） | SettingsMcpTools.options | modules/platform/settings/settings.mcp-tools.ts |
 | `demo.book.create` | write | `demo.book.create` | BookMcpTools.create | modules/demo/book/book.mcp-tools.ts |
+| `demo.customer.get` | read | `demo.customer.view` | CustomerMcpTools.get | modules/demo/customer/customer.mcp-tools.ts |
+| `demo.customer.search` | read | `demo.customer.browse` | CustomerMcpTools.search | modules/demo/customer/customer.mcp-tools.ts |
+| `demo.customer.update` | write | `demo.customer.modify` | CustomerMcpTools.update | modules/demo/customer/customer.mcp-tools.ts |
 | `iam.me.get` | read | （只需登录） | ProfileMcpTools.me | modules/platform/iam/profile/profile.mcp-tools.ts |
 | `iam.user.search` | read | `iam.user.browse` | UserMcpTools.search | modules/platform/iam/user/user.mcp-tools.ts |

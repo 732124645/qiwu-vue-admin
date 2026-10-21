@@ -24,6 +24,12 @@ import { bearer } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
 import { createTenant, inTenant1, type PeopledTenant, signInDirect } from '../setup/tenants.js'
 
+// before AppModule is imported: only the fixture queues of this spec are registered (the agent's own
+// queues come with APP_AGENT, on in the test env)
+vi.hoisted(() => {
+  process.env.APP_AGENT = 'false'
+})
+
 let app: NestExpressApplication
 let redis: Redis
 let queues: QueueService

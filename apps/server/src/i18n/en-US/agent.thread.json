@@ -1,0 +1,44 @@
+{
+  "agent": {
+    "thread": {
+      "batchMessage": "Work on this record with the skill: {label} ({target} #{id})",
+      "untitled": "New chat",
+      "forkTitle": "{title} (fork)",
+      "starter": {
+        "s1": "Find the records added this week and summarize them by department",
+        "s2": "Where should I start with this system?",
+        "s3": "Look up a company's website, industry and address on the web",
+        "s4": "Summarize my to-dos and pending approvals for today"
+      },
+      "starterFor": {
+        "demo-customer": {
+          "s1": "Find the customers with incomplete details and list what each one is missing",
+          "s2": "Look up the selected customers' website, industry and city on the web and fill the empty fields",
+          "s3": "Summarize the customers by city and industry"
+        },
+        "iam-user": {
+          "s1": "List the users who have not signed in for a month",
+          "s2": "Count the users per department",
+          "s3": "Which users have no role yet?"
+        },
+        "agent-chat": {
+          "s1": "What can you help me with?",
+          "s2": "Teach me to write a reusable skill"
+        }
+      },
+      "export": {
+        "user": "User",
+        "assistant": "Assistant",
+        "tool": "Tool",
+        "ok": "succeeded",
+        "failed": "failed",
+        "approval": "Approval",
+        "question": "Question",
+        "answer": "Answer",
+        "plan": "Plan",
+        "error": "Error",
+        "compaction": "Earlier messages were summarized"
+      }
+    }
+  }
+}

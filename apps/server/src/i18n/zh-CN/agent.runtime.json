@@ -1,0 +1,18 @@
+{
+  "agent": {
+    "runtime": {
+      "limit": {
+        "steps": "本轮步数已达上限",
+        "seconds": "本轮运行时间已达上限",
+        "turn_tokens": "本轮 token 用量已达上限",
+        "user_daily": "你今日的 token 用量已达上限",
+        "tenant_daily": "本租户今日的 token 用量已达上限",
+        "concurrency": "你同时运行的对话轮次已达上限，请等其中一轮结束"
+      },
+      "truncated": {
+        "length": "回答达到长度上限，被截断了",
+        "content_filter": "回答被服务商的内容过滤截断了"
+      }
+    }
+  }
+}

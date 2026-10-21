@@ -22,6 +22,7 @@ NestJS 12（ESM）+ Vue 3.5 + Vite + Element Plus + TypeScript + MySQL + Redis�
 - 服务端 `apps/server/src/modules/<domain>/<business>/`，在 `apps/server/src/modules/project.module.ts` 注册；
 - Web `apps/web/src/views/<domain>/<business>/`、`apps/web/src/api/<domain>/`；
 - shared `packages/shared/src/<domain>/`，在 `packages/shared/src/index.ts` 导出。
+- 后台智能体（智能助手）用的工具写在模块的 `<business>.mcp-tools.ts`（`@McpTool`，写入工具加 `preview` 给审批卡片），列表批量执行的目标用 `@AgentBatchTarget`，项目自带的技能写成 `SEEDS.project` 里的种子，见 [docs/ai/recipes/agent-skill.md](docs/ai/recipes/agent-skill.md)。
 
 `biz`、`demo` 是模板自带的示例领域，可改可删；本文与配方里引用的示例路径（`demo/book` 等）只是可模仿的写法，项目删掉示例后它们可能已不存在。包作用域保持 `@qiwu/*`，不需要全仓改名。哪些文件属于项目、哪些属于模板见 [docs/upgrade.md](docs/upgrade.md)：尽量不改模板文件，升级时冲突才少。
 

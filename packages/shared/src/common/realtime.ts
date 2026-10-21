@@ -1,3 +1,4 @@
+import type { AgentEvent } from '../platform/agent/agent.schema.js'
 import type { Locale } from './locale.js'
 
 /**
@@ -26,6 +27,8 @@ export const RT = {
   wfTask: 'wf:task',
   /** an inbound Official Account message for the selected account; the web reloads its conversation */
   wxoaMessage: 'wxoa:message',
+  /** an agent thread changed (an item, streamed text or the turn's status); to the thread owner only */
+  agentEvent: 'agent:event',
 } as const
 export type RealtimeType = (typeof RT)[keyof typeof RT]
 
@@ -53,6 +56,7 @@ export interface RealtimePayloads {
   'wf:task': { instanceId: number }
   /** ids only: never the content or the fan's openid */
   'wxoa:message': { accountId: number; messageId: number }
+  'agent:event': AgentEvent
 }
 
 /** `{type, payload}`; narrowing on `type` types the payload. */

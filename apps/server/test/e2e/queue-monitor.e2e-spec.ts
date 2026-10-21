@@ -33,6 +33,12 @@ import {
   signInDirect,
 } from '../setup/tenants.js'
 
+// before AppModule is imported: only the fixture queues of this spec are registered (the agent's own
+// queues come with APP_AGENT, on in the test env)
+vi.hoisted(() => {
+  process.env.APP_AGENT = 'false'
+})
+
 const PREFIX = 'qmon-'
 const URL = '/api/monitor/queues'
 

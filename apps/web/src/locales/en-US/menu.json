@@ -69,6 +69,14 @@
     "stat": "Statistics",
     "notice": "Subscription notices"
   },
+  "agent": {
+    "title": "Agent",
+    "chat": "Assistant",
+    "skill": "Skills",
+    "setting": "Agent settings",
+    "usage": "Agent usage",
+    "batch": "Batch review"
+  },
   "action": {
     "browse": "Browse",
     "view": "View",
@@ -101,6 +109,9 @@
     "tagRemove": "Delete tags",
     "enterTenant": "Enter tenant",
     "resetInitialPassword": "Reset initial password",
-    "retry": "Retry jobs"
+    "retry": "Retry jobs",
+    "use": "Use",
+    "batchRun": "Run on selected records",
+    "instructionModify": "Edit tenant instructions"
   }
 }

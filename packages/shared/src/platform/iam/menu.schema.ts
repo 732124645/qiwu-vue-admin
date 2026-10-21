@@ -59,6 +59,7 @@ export const MENU_GROUP_ROUTE_NAME = /^[a-z][a-z0-9-]{0,127}$/
  * group (db/seeds/project/menu-groups.seed.ts) is any other.
  */
 export const BUILTIN_MENU_GROUPS: readonly string[] = [
+  'agent',
   'workflow',
   'wf-admin',
   'biz',

@@ -1,0 +1,85 @@
+{
+  "field": {
+    "agent": {
+      "thread": {
+        "title": "Title",
+        "status": "Status",
+        "providerId": "Model provider",
+        "model": "Model",
+        "reasoning": "Reasoning effort",
+        "approvalMode": "Approval mode",
+        "context": "Page context",
+        "planMode": "Plan mode",
+        "pinned": "Pinned",
+        "temporary": "Temporary chat"
+      },
+      "message": {
+        "text": "Message",
+        "skill": "Skill",
+        "fileIds": "Attachments",
+        "mode": "Send mode"
+      },
+      "approval": {
+        "decision": "Decision",
+        "note": "Note"
+      },
+      "skill": {
+        "scope": "Scope",
+        "name": "Skill name",
+        "description": "When to use",
+        "body": "Skill body",
+        "tools": "Allowed tools",
+        "enabled": "Enabled",
+        "text": "SKILL.md content"
+      },
+      "instruction": {
+        "body": "Instructions",
+        "tone": "Tone"
+      },
+      "batch": {
+        "skill": "Skill",
+        "target": "Target type",
+        "ids": "Selected records"
+      },
+      "provider": {
+        "name": "Name",
+        "baseUrl": "Base URL",
+        "apiKey": "API key",
+        "models": "Models",
+        "enabled": "Enabled",
+        "isDefault": "Default",
+        "sort": "Sort order"
+      },
+      "search": {
+        "kind": "Kind",
+        "name": "Name",
+        "apiKey": "API key",
+        "enabled": "Enabled",
+        "isDefault": "Default"
+      },
+      "mcpServer": {
+        "name": "Name",
+        "url": "URL",
+        "authKind": "Authentication",
+        "auth": "Credentials",
+        "allowPrivate": "Allow private addresses",
+        "enabled": "Enabled"
+      },
+      "question": {
+        "answers": "Answers",
+        "form": "Form",
+        "decline": "Decline"
+      },
+      "feedback": {
+        "itemId": "Answer",
+        "rating": "Rating",
+        "comment": "Feedback"
+      },
+      "prompt": {
+        "scope": "Scope",
+        "name": "Template name",
+        "body": "Template text"
+      }
+    }
+  }
+}

@@ -27,6 +27,8 @@ import { inTenant1 } from '../setup/tenants.js'
 // before AppModule is imported: the module list reads the switch when the app module loads
 vi.hoisted(() => {
   process.env.APP_MCP = 'false'
+  // the in-app agent shares the tool registry: off too, so nothing registers tools
+  process.env.APP_AGENT = 'false'
 })
 
 const TOKEN = `qwmcp_${'s'.repeat(43)}`

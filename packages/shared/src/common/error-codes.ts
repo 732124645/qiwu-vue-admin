@@ -1,7 +1,7 @@
 /**
  * Business error codes (see docs/design-notes.md#api-envelope). Every code has an HTTP status and an i18n key
  * `error.<domain>.<name>` translated by the server; clients branch on `code`, never on `msg`.
- * Ranges: A0xxx common · A1xxx auth · B1xxx iam · B2xxx settings · B3xxx messaging · B4xxx oauth · B6xxx wxoa · B7xxx mcp ·
+ * Ranges: A0xxx common · A1xxx auth · B1xxx iam · B2xxx settings · B3xxx messaging · B4xxx oauth · B6xxx wxoa · B7xxx mcp · B8xxx agent ·
  * C1xxx storage · C2xxx scheduler · C3xxx codegen · D1xxx workflow · E1xxx+ biz.
  * Modules add their own codes later; codes are never renumbered.
  */
@@ -170,6 +170,26 @@ export const Err = {
   MCP_OUTPUT_TOO_LARGE: def('B7013', 413, 'error.mcp.output_too_large'),
   /** a tool still running at its time limit; params `{ seconds }` */
   MCP_TIMEOUT: def('B7014', 504, 'error.mcp.timeout'),
+  /** the agent is paused by the platform (`agent.paused`) */
+  AGENT_PAUSED: def('B8001', 503, 'error.agent.paused'),
+  /** no model provider is configured or enabled */
+  AGENT_NOT_CONFIGURED: def('B8002', 422, 'error.agent.not_configured'),
+  /** a turn, daily or concurrency limit was reached */
+  AGENT_LIMIT: def('B8003', 429, 'error.agent.limit'),
+  /** the model provider failed or did not answer */
+  AGENT_PROVIDER_FAILED: def('B8004', 502, 'error.agent.provider_failed'),
+  /** the approval was already decided or its turn ended */
+  AGENT_APPROVAL_CLOSED: def('B8005', 409, 'error.agent.approval_closed'),
+  /** a URL the web tools may not read (not public, or not from this turn's search results or the user) */
+  AGENT_URL_NOT_ALLOWED: def('B8006', 403, 'error.agent.url_not_allowed'),
+  /** an external MCP server could not be reached or answered with an error */
+  AGENT_MCP_SERVER_FAILED: def('B8007', 502, 'error.agent.mcp_server_failed'),
+  /** a skill file that is not a valid SKILL.md */
+  AGENT_SKILL_INVALID: def('B8008', 422, 'error.agent.skill_invalid'),
+  /** a web page could not be read or the web search failed (reason in the message) */
+  AGENT_WEB_FAILED: def('B8009', 502, 'error.agent.web_failed'),
+  /** the address or kind changed: the stored key is never sent to a new target, enter it again */
+  AGENT_KEY_REQUIRED: def('B8010', 422, 'error.agent.key_required'),
 
   /** WeChat Official Accounts gateway and account management errors. */
   WXOA_UPSTREAM: def('B6001', 502, 'error.wxoa.upstream'),

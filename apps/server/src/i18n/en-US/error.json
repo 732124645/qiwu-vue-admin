@@ -144,5 +144,17 @@
     "tool_not_allowed": "The token does not allow this tool",
     "output_too_large": "The tool's answer is over the {max}-byte limit. Narrow the request",
     "timeout": "The tool did not finish within {seconds} seconds"
+  },
+  "agent": {
+    "paused": "The assistant is paused. Please try again later.",
+    "not_configured": "No model is configured yet. Please contact the platform administrator.",
+    "limit": "The assistant's usage limit was reached: {reason}",
+    "provider_failed": "The model service did not answer properly. Please try again later.",
+    "approval_closed": "This confirmation was already handled or is no longer valid.",
+    "url_not_allowed": "This link cannot be read: only public addresses from this turn's search results or links you gave are allowed.",
+    "mcp_server_failed": "The external MCP server could not be reached: {reason}",
+    "skill_invalid": "The skill file is not valid: {reason}",
+    "web_failed": "Reading the web or searching failed: {reason}",
+    "key_required": "Enter the key again after changing the address or kind"
   }
 }

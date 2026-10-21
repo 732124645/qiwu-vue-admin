@@ -11,6 +11,8 @@ export interface RegisteredTool extends McpToolMeta {
   inputSchema: Record<string, unknown>
   outputSchema?: Record<string, unknown>
   run: (input: unknown) => unknown
+  /** the bound `preview` method, when the tool names one */
+  runPreview?: (input: unknown) => unknown
 }
 
 /** Every string under the shared `*Perms` constants (`userPerms`, `bookPerms`, a project's own…). */
@@ -61,13 +63,28 @@ export class McpRegistry implements OnModuleInit {
         if (typeof fn !== 'function') continue
         const meta = this.reflector.get<McpToolMeta | undefined>(MCP_TOOL, fn)
         if (!meta) continue
-        this.add(meta, fn.bind(instance) as RegisteredTool['run'], perms)
+        const pv = meta.preview === undefined ? undefined : target[meta.preview]
+        if (meta.preview !== undefined && typeof pv !== 'function')
+          throw new Error(`@McpTool('${meta.name}'): preview method '${meta.preview}' not found`)
+        this.add(
+          meta,
+          fn.bind(instance) as RegisteredTool['run'],
+          perms,
+          typeof pv === 'function'
+            ? ((pv as (input: unknown) => unknown).bind(instance) as RegisteredTool['runPreview'])
+            : undefined,
+        )
       }
     }
   }
 
-  /** 校验一个声明后登记；也供测试直接调用。 */
-  add(meta: McpToolMeta, run: RegisteredTool['run'], perms = knownPerms()): void {
+  /** 校验一个声明后登记；也供测试直接调用。`preview` 是工具声明的预览方法（已绑定）。 */
+  add(
+    meta: McpToolMeta,
+    run: RegisteredTool['run'],
+    perms = knownPerms(),
+    preview?: RegisteredTool['runPreview'],
+  ): void {
     const where = `@McpTool('${meta.name}')`
     if (!MCP_TOOL_NAME.test(meta.name) || meta.name.length > 96)
       throw new Error(`${where}: the name is not <domain>.<resource>.<verb>`)
@@ -88,6 +105,7 @@ export class McpRegistry implements OnModuleInit {
       inputSchema: jsonSchemaOf(meta.input, 'input'),
       outputSchema: meta.output && jsonSchemaOf(meta.output, 'output'),
       run,
+      ...(preview && { runPreview: preview }),
     })
   }
 

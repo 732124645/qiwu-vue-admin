@@ -40,6 +40,11 @@ export interface McpToolMeta {
    * which no tenant package narrows otherwise; a tool with a perm is narrowed by the package through the perm
    */
   feature?: string
+  /**
+   * the name of a method on the same provider that tells, for the same (validated) arguments, what a write
+   * would change: `{ target, fields: [{ field, from, to }] }`; the in-app agent shows it on the approval card
+   */
+  preview?: string
 }
 
 /**

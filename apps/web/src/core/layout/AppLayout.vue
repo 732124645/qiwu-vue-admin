@@ -9,6 +9,7 @@ import { useAuthStore } from '@/core/stores/auth'
 import { useMenuStore } from '@/core/stores/menu'
 import { useTagsStore } from '@/core/stores/tags'
 import IframeView from '@/views/iframe/IframeView.vue'
+import AgentEntry from '@/views/platform/agent/chat/AgentEntry.vue'
 import AppLogo from './AppLogo.vue'
 import HeaderBar from './HeaderBar.vue'
 import SettingsDrawer from './SettingsDrawer.vue'
@@ -160,6 +161,7 @@ const frames = computed(() =>
       </div>
     </div>
     <SettingsDrawer v-model="settingsOpen" />
+    <AgentEntry />
   </el-watermark>
 </template>
 

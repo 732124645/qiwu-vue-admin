@@ -1,0 +1,20 @@
+{
+  "agent": {
+    "batch": {
+      "title": "Batch review",
+      "summary": "Skill \"{skill}\": {total} records, {finished} done, {failed} failed",
+      "status": {
+        "running": "Running",
+        "completed": "Finished",
+        "cancelled": "Cancelled"
+      },
+      "approveAll": "Approve all ({count})",
+      "rejectAll": "Reject all",
+      "decided": "{count} approvals handled",
+      "queued": "Queued",
+      "open": "Open chat",
+      "missing": "This batch was not found",
+      "skipped": "{count} approvals change a record other than the row's own and were not decided: decide them one by one below"
+    }
+  }
+}

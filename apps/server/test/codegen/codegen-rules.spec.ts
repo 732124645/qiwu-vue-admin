@@ -590,20 +590,20 @@ describe('project domains', () => {
   const conflict = (table: string) => ({ err: Err.CODEGEN_NAME_CONFLICT, params: { table } })
 
   it('the same business in another domain: the domain in front of the class name', () => {
-    expect(qualifyNames(n('erp_customer'), [n('crm_customer')]).className).toBe('ErpCustomer')
-    expect(qualifyNames(n('erp_customer'), [n('iam_position')]).className).toBe('Customer')
+    expect(qualifyNames(n('erp_vendor'), [n('crm_vendor')]).className).toBe('ErpVendor')
+    expect(qualifyNames(n('erp_vendor'), [n('iam_position')]).className).toBe('Vendor')
     // a taken class name (edited) gets the domain in front too
-    const taken = { ...n('iam_position'), className: 'Customer' }
-    expect(qualifyNames(n('erp_customer'), [taken]).className).toBe('ErpCustomer')
+    const taken = { ...n('iam_position'), className: 'Vendor' }
+    expect(qualifyNames(n('erp_vendor'), [taken]).className).toBe('ErpVendor')
     // still taken → 422 naming the table
-    const twin = { ...n('crm_customer'), className: 'ErpCustomer' }
-    expect(() => qualifyNames(n('erp_customer'), [n('crm_customer'), twin])).toThrow(
-      expect.objectContaining(conflict('crm_customer')),
+    const twin = { ...n('crm_vendor'), className: 'ErpVendor' }
+    expect(() => qualifyNames(n('erp_vendor'), [n('crm_vendor'), twin])).toThrow(
+      expect.objectContaining(conflict('crm_vendor')),
     )
     // a table's derivation (not imported, or hand-written like iam_user) counts too, its class name not
     expect(qualifyNames(n('crm_user'), [], [n('iam_user')]).className).toBe('CrmUser')
-    expect(qualifyNames(n('crm_customer'), [], [n('erp_customer')]).className).toBe('CrmCustomer')
-    expect(qualifyNames(n('erp_customer'), [], [taken]).className).toBe('Customer')
+    expect(qualifyNames(n('crm_vendor'), [], [n('erp_vendor')]).className).toBe('CrmVendor')
+    expect(qualifyNames(n('erp_vendor'), [], [taken]).className).toBe('Vendor')
     // a table is no clash: only a config's names are taken (an unimported `course` beside `biz_course`)
     expect(qualifyNames(n('course'), [], [n('biz_course')]).className).toBe('Course')
     // the same module (domain + business) is never fixed by a prefix

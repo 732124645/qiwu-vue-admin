@@ -1,0 +1,18 @@
+{
+  "agent": {
+    "runtime": {
+      "limit": {
+        "steps": "the steps of this turn are used up",
+        "seconds": "this turn ran out of time",
+        "turn_tokens": "the tokens of this turn are used up",
+        "user_daily": "your tokens for today are used up",
+        "tenant_daily": "the tenant's tokens for today are used up",
+        "concurrency": "you have the most turns running at once; wait for one to finish"
+      },
+      "truncated": {
+        "length": "the answer hit the length limit and was cut off",
+        "content_filter": "the answer was cut off by the provider's content filter"
+      }
+    }
+  }
+}

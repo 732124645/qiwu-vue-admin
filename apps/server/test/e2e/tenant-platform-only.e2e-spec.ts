@@ -274,7 +274,8 @@ describe('@PlatformOnly() on the routes', () => {
     expect(marked.get('DictController.page')).toBe('platform')
     expect(marked.has('DictController.options')).toBe(false)
     expect(marked.get('MonitorController.server')).toBe('platform')
-    // exactly the API logs, the cache and queue monitors are root only, every other marked route 'platform'
+    // exactly the API logs, the cache and queue monitors and the agent settings are root only, every other
+    // marked route 'platform'
     const rootOnly = [...marked].filter(([, who]) => who === 'root').map(([key]) => key)
     expect(rootOnly.sort()).toEqual(
       [
@@ -294,6 +295,23 @@ describe('@PlatformOnly() on the routes', () => {
         'QueueMonitorController.jobs',
         'QueueMonitorController.retry',
         'QueueMonitorController.remove',
+        // the agent's settings: models, web search, external MCP servers, tool policies, platform skills
+        'AgentMcpServerController.create',
+        'AgentMcpServerController.remove',
+        'AgentMcpServerController.sync',
+        'AgentMcpServerController.update',
+        'AgentMcpServerController.updateTool',
+        'AgentPlatformSkillController.create',
+        'AgentPlatformSkillController.import',
+        'AgentPlatformSkillController.remove',
+        'AgentPlatformSkillController.update',
+        'AgentProviderController.create',
+        'AgentProviderController.remove',
+        'AgentProviderController.update',
+        'AgentSearchProviderController.create',
+        'AgentSearchProviderController.remove',
+        'AgentSearchProviderController.update',
+        'AgentToolPolicyController.set',
       ].sort(),
     )
     expect([...marked.values()].filter((who) => who !== 'root' && who !== 'platform')).toEqual([])

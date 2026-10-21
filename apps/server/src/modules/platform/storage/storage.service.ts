@@ -368,15 +368,35 @@ export class StorageService {
     )
       throw new NotFoundException()
     if (obj.size > want.maxBytes) throw new BizError(Err.PAYLOAD_TOO_LARGE)
-    const client = this.clientFor(await this.storages.findOneByOrFail({ id: obj.storageId }))
-    const cap = want.maxBytes + 1
-    const data =
-      client instanceof S3Storage
-        ? await client.read(obj.objectKey, obj.isPublic, cap)
-        : await readCapped(await client.read(obj.objectKey, obj.isPublic), cap)
+    const data = await this.readHead(obj, want.maxBytes + 1)
     if (!data) throw new NotFoundException()
     if (data.length > want.maxBytes) throw new BizError(Err.PAYLOAD_TOO_LARGE)
     return { data, mime: obj.mime, name: obj.originalName }
+  }
+
+  /**
+   * 读对象内容的前 `max` 个字节（不足时整个文件）；存储里已没有该文件时为 null。只读这么多，
+   * 大文件不会整个进内存。调用方负责先检查读取权限。
+   */
+  async readHead(obj: FsObject, max: number): Promise<Buffer | null> {
+    const client = this.clientFor(await this.storages.findOneByOrFail({ id: obj.storageId }))
+    return client instanceof S3Storage
+      ? client.read(obj.objectKey, obj.isPublic, max)
+      : readCapped(await client.read(obj.objectKey, obj.isPublic), max)
+  }
+
+  /**
+   * 调用者能否读取这个对象，与下载路由同一规则：公开的、上传人本人、root、有 `storage.object.view`，
+   * 或该业务标签登记的检查器放行。对象须已按调用者的租户查出（ORM 的租户条件）。
+   */
+  async canRead(obj: FsObject, p: Principal): Promise<boolean> {
+    return (
+      obj.isPublic ||
+      obj.uploaderId === p.userId ||
+      p.root === true ||
+      p.perms.includes(storageObjectPerms.view) ||
+      (await this.access.allows(obj, p))
+    )
   }
 
   private async storeBytes(
@@ -641,13 +661,7 @@ export class StorageService {
   async download(id: number, inline: boolean, p: Principal): Promise<Download> {
     const obj = await this.objects.findOneBy({ id })
     if (!obj) throw new NotFoundException()
-    const allowed =
-      obj.isPublic ||
-      obj.uploaderId === p.userId ||
-      p.root === true ||
-      p.perms.includes(storageObjectPerms.view) ||
-      (await this.access.allows(obj, p))
-    if (!allowed) throw new ForbiddenException()
+    if (!(await this.canRead(obj, p))) throw new ForbiddenException()
     const how = disposition(inline && isImage(obj.mime) ? 'inline' : 'attachment', obj.originalName)
     const client = this.clientFor(await this.storages.findOneByOrFail({ id: obj.storageId }))
     if (client instanceof S3Storage)
