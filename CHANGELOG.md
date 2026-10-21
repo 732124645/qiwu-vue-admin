@@ -14,6 +14,8 @@ All notable product changes are recorded here in Keep a Changelog style. The ini
   - `pnpm ai:map` writes `docs/ai/project-map.md` — modules and feature switches, tables, every API route with its permission and markers, permission codes, menus, dicts, system parameters, jobs and MCP tools — from a static parse of the code; `pnpm verify` fails when it is stale.
 - Every failure of the arch checks, `i18n:check`, `originality:check` and `license:check` now ends with a `fix:` line (what to change) and a `see:` link to the doc that explains the rule; a check without a valid hint fails. A new arch check, `ai-docs`, keeps the scripts, paths, links and anchors named in the AI docs real (mentions of a removed mobile client or sample domain are allowed).
 
+## [1.6.1] - 2026-10-21
+
 ### Changed
 
 - When the API does not answer while the admin loads (a page refresh or a new tab during a restart, a deploy or a stopped server), the address stays on the requested page and a "connecting" screen waits until the server is back, then opens the page by itself; it no longer gives up after about 20 s for a separate 503 page with retry and sign-in buttons. The load's failures no longer show as error toasts; an API that answers with its own server error for about 20 s still leads to the sign-in page.
