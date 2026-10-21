@@ -52,9 +52,21 @@ export async function watchPage(page: Page, baseURL = '') {
   return problems
 }
 
+/**
+ * Row buttons a list shows inline before its More menu, for every spec: the page flows click their row
+ * buttons directly. table-actions.spec.ts checks the More menu with the shipped default instead.
+ */
+export const E2E_ACTIONS_VISIBLE = 9
+
 export const test = base.extend({
   page: async ({ page, baseURL }, use) => {
     await page.setExtraHTTPHeaders({ 'X-Forwarded-For': clientIp() })
+    await page.addInitScript((visible) => {
+      const key = 'qw.app.settings'
+      const saved = JSON.parse(localStorage.getItem(key) ?? '{}')
+      if (saved.tableActionsVisible === undefined)
+        localStorage.setItem(key, JSON.stringify({ ...saved, tableActionsVisible: visible }))
+    }, E2E_ACTIONS_VISIBLE)
     const problems = await watchPage(page, baseURL)
     await use(page)
     expect(problems, 'CSP violations / page errors').toEqual([])

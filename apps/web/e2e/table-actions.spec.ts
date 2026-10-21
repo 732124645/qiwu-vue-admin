@@ -20,6 +20,12 @@ const PAGES = [
 test('actions columns are never clipped; More opens on hover and stays open on click', async ({
   page,
 }) => {
+  // the shipped default (the fixture widens it for the other specs)
+  await page.addInitScript(() => {
+    const key = 'qw.app.settings'
+    const saved = JSON.parse(localStorage.getItem(key) ?? '{}')
+    localStorage.setItem(key, JSON.stringify({ ...saved, tableActionsVisible: 2 }))
+  })
   await signIn(page, 'admin', PAGES[0])
   let mores = 0
   for (const path of PAGES) {
