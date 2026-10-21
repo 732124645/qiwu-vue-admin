@@ -42,6 +42,7 @@
     "showFooter": "显示页脚",
     "dynamicTitle": "浏览器标题显示页面名称",
     "watermark": "显示水印",
+    "tableActionsVisible": "表格行内操作按钮数",
     "sideTheme": "侧栏外观",
     "sideThemes": {
       "light": "浅色",

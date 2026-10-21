@@ -170,7 +170,6 @@ function openReceipts(row: BulletinVo) {
         :loading="loading"
         :filtered
         selection
-        :actions-width="200"
         @selection-change="onSelectionChange"
         @sort-change="onSortChange"
         @reset-filters="reset"

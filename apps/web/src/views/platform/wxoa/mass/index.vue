@@ -372,13 +372,7 @@ void loadTags()
           :searchable="false"
           @refresh="refresh"
         />
-        <QwTable
-          table-id="wxoa.mass"
-          :columns="columns"
-          :data="rows"
-          :loading="loading"
-          :actions-width="200"
-        >
+        <QwTable table-id="wxoa.mass" :columns="columns" :data="rows" :loading="loading">
           <template #cell-targetKind="{ row }"
             ><DictTag code="wxoa.mass_target" :value="row.targetKind"
           /></template>

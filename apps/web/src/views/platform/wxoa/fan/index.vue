@@ -384,7 +384,6 @@ async function setBlocked(fans: WxoaFanVo[], blocked: boolean) {
             :loading="loading"
             :filtered
             selection
-            :actions-width="180"
             @selection-change="onSelectionChange"
             @sort-change="onSortChange"
             @reset-filters="reset"

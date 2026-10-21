@@ -135,7 +135,6 @@ const openQuota = (id: number) =>
         :data="rows"
         :loading="loading"
         :filtered
-        :actions-width="320"
         @sort-change="onSortChange"
         @reset-filters="reset"
       >

@@ -218,7 +218,7 @@ function more(command: string, row: CgTableVo) {
         :data="rows"
         :loading="loading"
         :filtered
-        :actions-width="210"
+        :actions-visible="Infinity"
         selection
         @selection-change="onSelectionChange"
         @sort-change="onSortChange"

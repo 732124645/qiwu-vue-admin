@@ -138,6 +138,8 @@ schema 注册字段领域，派生 schema 也需注册；校验问题转换为�
 
 列表使用 `QwTable` 与 columns 数组，通过 `#cell-<prop>` 和 `#actions` 扩展单元格与操作；`TableToolbar` 使用同一列配置，`table-id` 为 `<domain>.<biz>`，用户列偏好由 `useTablePrefs` 保存。
 
+操作列只直接显示前几个按钮（页面设置里的“表格行内操作按钮数”，默认 2；单个表格用 `actions-visible` 覆盖），其余收进悬停（或键盘 Enter / 空格）展开的“更多”菜单，危险按钮（`type="danger"`）总排在最后；没有权限（`v-perm`）的按钮不占位。只拆分插槽里直接写的 `el-button`：包在其他组件里的按钮（如 `el-popconfirm` 的 `#reference`）、图标按钮和页面自带的下拉菜单保持原样留在行内，不计入按钮数；页面自带“更多”下拉时传 `:actions-visible="Infinity"`，避免出现两个“更多”。列宽按每行实际渲染出的操作内容测量（取最宽的一行，内容变化时重新测量），首帧先用按文字估算的宽度；显式的 `actions-width` 优先。
+
 新增与编辑表单是接收可选 id、发出 done/cancel 的对话框内容组件，使用 `useCrudForm`，通过 `openDialog` 打开。提交期间按钮显示 loading 且禁用；创建接口另有短时幂等保护。详见[黄金样板](codegen-golden.md)。
 
 <a id="codegen"></a>

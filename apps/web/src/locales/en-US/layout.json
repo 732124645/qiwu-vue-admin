@@ -42,6 +42,7 @@
     "showFooter": "Show footer",
     "dynamicTitle": "Page name in the browser title",
     "watermark": "Show watermark",
+    "tableActionsVisible": "Row buttons shown in tables",
     "sideTheme": "Sidebar appearance",
     "sideThemes": {
       "light": "Light",

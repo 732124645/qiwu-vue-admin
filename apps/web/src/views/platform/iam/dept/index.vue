@@ -109,7 +109,6 @@ async function setEnabled(row: DeptNode, enabled: boolean) {
         :loading="loading"
         :filtered
         :default-expand-all="expanded"
-        :actions-width="230"
         @reset-filters="reset"
       >
         <!-- seeded names are i18n keys (seed.dept.*) -->

@@ -147,7 +147,6 @@ void load()
         :data="rows"
         :loading="loading"
         row-key="name"
-        :actions-width="120"
       >
         <template v-for="prop in COUNTS" #[`cell-${prop}`]="{ row }" :key="prop">
           <el-button

@@ -278,7 +278,7 @@ function openImport() {
           :loading="loading"
           :filtered
           selection
-          :actions-width="210"
+          :actions-visible="Infinity"
           @selection-change="onSelectionChange"
           @sort-change="onSortChange"
           @reset-filters="reset"

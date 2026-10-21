@@ -165,14 +165,7 @@ watch(accountId, () => {
             >{{ t('wxoa.draft.pull.action') }}</el-button
           >
         </TableToolbar>
-        <QwTable
-          table-id="wxoa.draft"
-          :columns="columns"
-          :data="rows"
-          :loading="loading"
-          :filtered
-          :actions-width="200"
-        >
+        <QwTable table-id="wxoa.draft" :columns="columns" :data="rows" :loading="loading" :filtered>
           <template #cell-articleCount="{ row }">{{ row.articles.length }}</template>
           <template #cell-origin="{ row }">{{ t(`wxoa.draft.origin.${row.origin}`) }}</template>
           <template #cell-syncedAt="{ row }"

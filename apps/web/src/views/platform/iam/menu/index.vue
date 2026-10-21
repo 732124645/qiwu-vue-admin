@@ -196,7 +196,6 @@ async function setEnabled(row: Row, enabled: boolean) {
         :loading="loading"
         :filtered
         :default-expand-all="expanded"
-        :actions-width="230"
         @reset-filters="reset"
       >
         <template #cell-name="{ row }">

@@ -200,7 +200,6 @@ async function remove(row: WxoaQrcodeVo) {
           :data="rows"
           :loading="loading"
           :filtered
-          :actions-width="220"
           @sort-change="onSortChange"
           @reset-filters="reset"
         >

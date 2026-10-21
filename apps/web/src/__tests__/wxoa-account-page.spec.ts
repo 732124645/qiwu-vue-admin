@@ -14,6 +14,7 @@ import { dialogs } from '@/core/dialog'
 import { i18n, setLocale } from '@/core/i18n'
 import { vPerm } from '@/core/permission'
 import { accessToken } from '@/core/request/http'
+import { appSettings } from '@/core/stores/app'
 import { useAuthStore } from '@/core/stores/auth'
 import AccountPage from '@/views/platform/wxoa/account/index.vue'
 import AccountForm from '@/views/platform/wxoa/account/form.vue'
@@ -100,6 +101,8 @@ async function click(text: string) {
 beforeEach(() => {
   setActivePinia(createPinia())
   setLocale('en-US')
+  // every row button inline: these cases look for them in the row, not in the "More" menu
+  appSettings.value.tableActionsVisible = 9
   accessToken.value = 'at'
   localStorage.clear()
   useAuthStore().me = me(['*'])

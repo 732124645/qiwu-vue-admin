@@ -214,7 +214,6 @@ async function enter(row: TenantVo) {
         :data="rows"
         :loading="loading"
         :filtered
-        :actions-width="260"
         @sort-change="onSortChange"
         @reset-filters="reset"
       >

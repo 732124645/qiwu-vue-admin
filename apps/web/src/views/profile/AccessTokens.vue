@@ -92,13 +92,7 @@ async function revoke(row: AccessTokenVo) {
         {{ t('mcp.token.create') }}
       </el-button>
     </div>
-    <QwTable
-      table-id="mcp.myToken"
-      :columns="columns"
-      :data="rows"
-      :loading="loading"
-      :actions-width="100"
-    >
+    <QwTable table-id="mcp.myToken" :columns="columns" :data="rows" :loading="loading">
       <template #cell-tokenHint="{ row }">
         <code class="tokens__mono">…{{ row.tokenHint }}</code>
       </template>

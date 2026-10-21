@@ -203,7 +203,6 @@ async function kickSelected() {
         row-key="sid"
         selection
         :selectable="notCurrent"
-        :actions-width="190"
         @selection-change="onSelectionChange"
         @sort-change="onSortChange"
         @reset-filters="reset"

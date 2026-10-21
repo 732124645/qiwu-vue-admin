@@ -2,7 +2,7 @@
 // renumber the shown rows only); kept alive, it reloads when shown again (a model published meanwhile).
 // The process type column; 向导 for dynamic tree models only. The add / edit dialog's process
 // managers: changed only with `wf.model.managers`.
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent, h, KeepAlive, ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
@@ -12,6 +12,7 @@ import type { WfModelVo } from '@qiwu/shared'
 import { i18n, setLocale } from '@/core/i18n'
 import { vPerm } from '@/core/permission'
 import { accessToken } from '@/core/request/http'
+import { appSettings } from '@/core/stores/app'
 import { useAuthStore } from '@/core/stores/auth'
 import ModelPage from '@/views/workflow/admin/model.vue'
 import WfModelForm from '@/views/workflow/admin/WfModelForm.vue'
@@ -86,6 +87,8 @@ const arrows = () =>
 beforeEach(() => {
   setActivePinia(createPinia())
   setLocale('en-US')
+  // every row button inline: these cases look for them in the row, not in the "More" menu
+  appSettings.value.tableActionsVisible = 9
   accessToken.value = 'at'
   show.value = true
   answer = { items: ROWS, total: ROWS.length }
@@ -123,6 +126,36 @@ describe('model page', () => {
     expect(loads()).toBe(2)
     expect(host.findAll('.el-table__body .el-table__row')).toHaveLength(1)
     expect(host.find('.el-table__body').text()).toContain('Published')
+  })
+
+  it('the actions column is as wide as the rendered actions: the move arrows and More fit', async () => {
+    appSettings.value.tableActionsVisible = 2
+    // fake layout (happy-dom has none): every button 40px, the actions container their sum
+    const scroll = vi
+      .spyOn(HTMLElement.prototype, 'scrollWidth', 'get')
+      .mockImplementation(function (this: HTMLElement) {
+        return this.classList.contains('qw-table-actions')
+          ? this.querySelectorAll('button').length * 40
+          : 0
+      })
+    try {
+      await mountPage()
+      await new Promise((resolve) => requestAnimationFrame(resolve))
+      await flushPromises()
+      const cells = host.findAll('.el-table__body .qw-table-actions')
+      expect(cells.length).toBeGreaterThan(0)
+      for (const cell of cells) {
+        // both arrows, two inline buttons and the More trigger, all inside the measured container
+        expect(cell.findAll('.wf-model__move button')).toHaveLength(2)
+        expect(cell.find('.qw-table-more').exists()).toBe(true)
+      }
+      const content = Math.max(...cells.map((c) => c.element.scrollWidth))
+      const column = host.findAllComponents({ name: 'ElTableColumn' }).at(-1)!
+      // the cell's 16px padding a side
+      expect(Number(column.props('width'))).toBeGreaterThanOrEqual(content + 32)
+    } finally {
+      scroll.mockRestore()
+    }
   })
 
   it('the process type of each model; 向导 for a dynamic tree model only', async () => {

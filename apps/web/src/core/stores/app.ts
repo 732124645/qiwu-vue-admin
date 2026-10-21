@@ -39,6 +39,8 @@ export const appSettings = useStorage(
     size: 'default' as ComponentSize,
     sideCollapsed: false,
     sideTheme: 'dark' as SideTheme,
+    /** row buttons a `QwTable` shows inline before its "More" dropdown (a table's `actions-visible` wins) */
+    tableActionsVisible: 2,
   },
   undefined,
   { mergeDefaults: true },

@@ -229,7 +229,6 @@ async function remove(row: FsObjectRowVo) {
       <QwTable
         table-id="storage.object"
         :columns="columns"
-        :actions-width="200"
         :data="rows"
         :loading="loading"
         :filtered

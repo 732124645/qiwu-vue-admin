@@ -204,7 +204,6 @@ async function move(row: WfModelVo, delta: -1 | 1) {
         :loading="loading"
         :filtered
         :span-method="spanMethod"
-        :actions-width="340"
         @reset-filters="reset"
       >
         <template #cell-category="{ row }">

@@ -175,8 +175,10 @@ async function setEnabled(row: InboxTemplateVo, enabled: boolean) {
         </el-button>
       </TableToolbar>
 
+      <!-- the row has its own "More" dropdown: the table adds none -->
       <QwTable
         table-id="messaging.inboxTemplate"
+        :actions-visible="Infinity"
         :columns="columns"
         :data="rows"
         :loading="loading"

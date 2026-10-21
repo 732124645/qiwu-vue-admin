@@ -160,13 +160,7 @@ watch(accountId, () => {
             t('wxoa.publish.pull.action')
           }}</el-button>
         </TableToolbar>
-        <QwTable
-          table-id="wxoa.publish"
-          :columns="columns"
-          :data="rows"
-          :loading="loading"
-          :actions-width="120"
-        >
+        <QwTable table-id="wxoa.publish" :columns="columns" :data="rows" :loading="loading">
           <template #cell-publishState="{ row }"
             ><DictTag code="wxoa.publish_state" :value="row.publishState"
           /></template>

@@ -162,7 +162,6 @@ async function setPrimary(row: StorageConfigRowVo) {
       <QwTable
         table-id="storage.config"
         :columns="columns"
-        :actions-width="200"
         :data="rows"
         :loading="loading"
         :filtered

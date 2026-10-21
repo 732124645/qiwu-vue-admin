@@ -121,13 +121,7 @@ void load()
             t('wxoa.notice.add.action')
           }}</el-button>
         </TableToolbar>
-        <QwTable
-          table-id="wxoa.notice"
-          :columns="columns"
-          :data="rows"
-          :loading="loading"
-          :actions-width="160"
-        >
+        <QwTable table-id="wxoa.notice" :columns="columns" :data="rows" :loading="loading">
           <template #cell-content="{ row }"
             ><span class="wxoa-notice__content">{{ display(row) }}</span></template
           >

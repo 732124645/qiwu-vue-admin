@@ -231,10 +231,10 @@ describe('online users', () => {
   it('shows no sign-out controls without the kick perm', async () => {
     backend()
     await mountPage(['iam.session.browse'])
-    // the own session's row has no buttons at all
+    // the own session's row has no buttons at all; the table leaves out buttons the user may not use
     for (const r of rows().slice(1)) {
-      expect(button('End session', r)?.isVisible()).toBe(false)
-      expect(button('End all sessions', r)?.isVisible()).toBe(false)
+      expect(button('End session', r)).toBeUndefined()
+      expect(button('End all sessions', r)).toBeUndefined()
     }
   })
 })

@@ -228,7 +228,6 @@ function openDetail(row: TaskVo) {
       <QwTable
         table-id="scheduler.task"
         :columns="columns"
-        :actions-width="200"
         :data="rows"
         :loading="loading"
         :filtered

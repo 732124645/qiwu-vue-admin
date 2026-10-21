@@ -205,7 +205,6 @@ async function setState(row: HttpFaultVo, state: HttpFaultState) {
       <QwTable
         table-id="audit.httpFault"
         :columns="columns"
-        :actions-width="180"
         :data="rows"
         :loading="loading"
         :filtered

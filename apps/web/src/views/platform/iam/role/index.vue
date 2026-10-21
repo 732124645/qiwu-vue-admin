@@ -197,7 +197,7 @@ async function setEnabled(row: RoleVo, enabled: boolean) {
         :filtered
         selection
         :selectable="(row: RoleVo) => !row.isBuiltin"
-        :actions-width="210"
+        :actions-visible="Infinity"
         @selection-change="onSelectionChange"
         @sort-change="onSortChange"
         @reset-filters="reset"

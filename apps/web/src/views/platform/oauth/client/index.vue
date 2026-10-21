@@ -183,7 +183,6 @@ async function setEnabled(row: ClientVo, enabled: boolean) {
         :filtered
         selection
         :selectable="(row: ClientVo) => !row.isBuiltin"
-        :actions-width="200"
         @selection-change="onSelectionChange"
         @sort-change="onSortChange"
         @reset-filters="reset"

@@ -144,7 +144,6 @@ async function remove(row: WxoaTemplateVo) {
             :data="rows"
             :loading="loading"
             row-key="templateId"
-            :actions-width="140"
           >
             <template #cell-content="{ row }">
               <p class="wxoa-template__content">{{ row.content }}</p>

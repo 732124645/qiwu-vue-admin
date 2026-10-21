@@ -186,7 +186,6 @@ async function setEnabled(row: DictVo, enabled: boolean) {
         :loading="loading"
         :filtered
         selection
-        :actions-width="200"
         @selection-change="onSelectionChange"
         @sort-change="onSortChange"
         @reset-filters="reset"

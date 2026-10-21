@@ -69,6 +69,15 @@ const SWITCHES = [
           :aria-label="t(`layout.settings.${s}`)"
         />
       </el-form-item>
+      <el-form-item :label="t('layout.settings.tableActionsVisible')">
+        <el-input-number
+          v-model="app.settings.tableActionsVisible"
+          :min="1"
+          :max="6"
+          :step-strictly="true"
+          :aria-label="t('layout.settings.tableActionsVisible')"
+        />
+      </el-form-item>
       <el-form-item :label="t('common.tags.settings')" class="settings-drawer__switches">
         <el-radio-group v-model="tags.style" :aria-label="t('common.tags.style')">
           <el-radio-button value="card">{{ t('common.tags.styleCard') }}</el-radio-button>

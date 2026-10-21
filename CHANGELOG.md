@@ -1,8 +1,14 @@
 # Changelog
 
-中文说明：本文件按功能区域汇总栖梧 / Qiwu 的用户可见变化，正文使用英文。`1.0.0` 于 2026-10-05 发布，`1.0.3` 于 2026-10-06 发布（`1.0.1`、`1.0.2` 未发布，内容并入 `1.0.3`），`1.1.0`（多租户）、`1.2.0`（手写 SQL 的数据权限）、`1.2.1`（修复）与 `1.3.0`（任务队列）于 2026-10-14 发布，`1.3.1`（开发调试开关）与 `1.4.0`（安全审查修复）于 2026-10-15 发布，`1.4.1`（界面细节）、`1.5.0`（微信公众号管理，默认关闭）与 `1.6.0`（MCP 智能体接入，默认关闭；下游合并改进）于 2026-10-20 发布，`1.6.1`（后端连不上时停在原页面等待；README 更新）与 `1.7.0`（AI 编程友好：公开开发规则、任务配方、检查报错带修复提示、项目地图）于 2026-10-21 发布。
+中文说明：本文件按功能区域汇总栖梧 / Qiwu 的用户可见变化，正文使用英文。`1.0.0` 于 2026-10-05 发布，`1.0.3` 于 2026-10-06 发布（`1.0.1`、`1.0.2` 未发布，内容并入 `1.0.3`），`1.1.0`（多租户）、`1.2.0`（手写 SQL 的数据权限）、`1.2.1`（修复）与 `1.3.0`（任务队列）于 2026-10-14 发布，`1.3.1`（开发调试开关）与 `1.4.0`（安全审查修复）于 2026-10-15 发布，`1.4.1`（界面细节）、`1.5.0`（微信公众号管理，默认关闭）与 `1.6.0`（MCP 智能体接入，默认关闭；下游合并改进）于 2026-10-20 发布，`1.6.1`（后端连不上时停在原页面等待；README 更新）与 `1.7.0`（AI 编程友好：公开开发规则、任务配方、检查报错带修复提示、项目地图）于 2026-10-21 发布，`1.7.1`（列表操作列不再截断误点）于 2026-10-22 发布。
 
 All notable product changes are recorded here in Keep a Changelog style. The initial release below summarizes the delivered features. Planned work is identified explicitly.
+
+## [1.7.1] - 2026-10-22
+
+### Fixed
+
+- List actions no longer clip into an ellipsis that silently clicked a hidden button: only the first buttons show inline (page setting "表格行内操作按钮数", default 2; per table `actions-visible`), the rest open from a More menu on hover, danger buttons always come last, buttons the user lacks the permission for take no place, and the column width is measured from the rendered buttons (an explicit `actions-width` still wins). Pages dropped their hand-tuned widths; the generated tree page no longer hard-codes one.
 
 ## [1.7.0] - 2026-10-21
 

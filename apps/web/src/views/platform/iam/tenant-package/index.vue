@@ -133,7 +133,6 @@ async function setEnabled(row: TenantPackageVo, enabled: boolean) {
         :data="rows"
         :loading="loading"
         :filtered
-        :actions-width="140"
         @sort-change="onSortChange"
         @reset-filters="reset"
       >
