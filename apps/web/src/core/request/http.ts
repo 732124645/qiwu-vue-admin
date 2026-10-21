@@ -147,6 +147,11 @@ export function isTransient(e: unknown): boolean {
   return axios.isAxiosError(e) && !e.response && !axios.isCancel(e)
 }
 
+/** 页面首次加载时后端连不上，路由守卫正在等它恢复：App.vue 显示"正在连接服务器"遮罩。 */
+export const apiWaiting = ref(false)
+/** 路由守卫加载会话和菜单期间：失败由守卫处理（等待遮罩或去登录页），不弹错误提示。 */
+export const apiQuiet = ref(false)
+
 let refreshing: Promise<void> | null = null
 
 /** Single-flight in this tab, serialized across tabs (Web Locks) so each refresh sends the latest cookie. */
@@ -183,7 +188,7 @@ export async function refreshSettled() {
 
 const t = (key: string) => i18n.global.t(key)
 /** one toast per text: a burst of failing requests (the API restarting, the guard's retries) shows a count */
-const toast = (message: string) => ElMessage.error({ message, grouping: true })
+const toast = (message: string) => apiQuiet.value || ElMessage.error({ message, grouping: true })
 let expiredDialog = false
 
 /** Refresh failed while the user is on a page: keep the page (unsaved form) or sign in and come back. */

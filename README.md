@@ -1,19 +1,38 @@
+<div align="center">
+
 # 栖梧 / Qiwu — qiwu-vue-admin
 
-[中文](#中文) · [English](#english)
+**NestJS 12 + Vue 3.5 + Element Plus 全栈管理后台模板 · 开箱即用 · MIT 协议**
+
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/732124645/qiwu-vue-admin)](https://github.com/732124645/qiwu-vue-admin/releases)
+[![GitHub stars](https://img.shields.io/github/stars/732124645/qiwu-vue-admin?style=social)](https://github.com/732124645/qiwu-vue-admin)
+![Node](https://img.shields.io/badge/node-%E2%89%A522.22.1-339933)
+![NestJS](https://img.shields.io/badge/NestJS-12-E0234E)
+![Vue](https://img.shields.io/badge/Vue-3.5-42b883)
+
+[在线演示](https://demo.qiwuadmin.com) · [文档站](https://qiwuadmin.com) · [更新日志](CHANGELOG.md) · [English](#english)
+
+![栖梧工作台](https://qiwuadmin.com/screenshots/zh-home.webp)
+
+</div>
 
 ## 中文
 
 栖梧是一个 MIT 许可的管理后台模板，采用 NestJS 12、Vue 3.5、Element Plus、TypeScript、MySQL 和 Redis，使用 pnpm workspace 管理服务端、Web 与共享契约。品牌为「栖梧 / Qiwu」，项目名为 `qiwu-vue-admin`，内部包名为 `@qiwu/*`。
 
-当前实现包括：
+### 特性
 
-- 用户、角色、菜单、部门、岗位与五种数据权限范围；会话、个人中心、字典、参数、审计与监控。
-- 原创 CRUD、树、主子代码生成模板，Excel 导入导出、本地与 S3 存储、定时任务、站内信、邮件与短信。
-- 树形与 BPMN 流程设计、审批中心、业务表单与动态表单，以及 OAuth2 / SSO。
-- 中文与英文界面、Socket.IO 推送、Redis 共享限流与多服务实例支持；部署边界见 [多实例部署](docs/scale-out.md)。
+- **前后端一套校验**：zod 规则写在 `@qiwu/shared`，表单和接口共用，两边规则始终一致。
+- **权限与组织**：用户、角色、菜单、部门、岗位与五种数据权限范围（ORM 查询和手写 SQL 都覆盖）；会话、个人中心、字典、参数、审计与监控。
+- **代码生成**：原创 CRUD、树、主子表模板，同时生成前后端代码与端到端测试。
+- **工作流**：树形与 BPMN 流程设计、审批中心、业务表单与动态表单。
+- **常用能力**：Excel 导入导出、本地与 S3 存储、定时任务、基于 Redis 的任务队列、站内信、邮件与短信、OAuth2 / SSO、Socket.IO 推送、中英文界面。
+- **按开关启用**：[多租户](docs/multi-tenancy.md)、[微信公众号管理](docs/wxoa.md)、[MCP 智能体接入](docs/mcp.md)，默认关闭，关闭时模块不加载。
+- **移动端**：可选的 uni-app 员工端，可出 H5、App 与微信小程序；只做 PC 可整个删除。
+- **工程化**：`pnpm verify` 静态检查与 `pnpm ci:local` 完整本地闸门（单元、端到端、Playwright、冒烟）；Redis 共享限流与多服务实例支持，部署边界见 [多实例部署](docs/scale-out.md)。
 
-v1.0.0 已于 2026-10-05 发布，功能与已知边界见 [CHANGELOG.md](CHANGELOG.md)；这里不宣称生产容量或外部服务已实测。
+功能与已知边界见 [CHANGELOG.md](CHANGELOG.md)；这里不宣称生产容量或外部服务已实测。
 
 ### 在线演示
 
@@ -23,6 +42,16 @@ v1.0.0 已于 2026-10-05 发布，功能与已知边界见 [CHANGELOG.md](CHANGE
 - 版本：见 [Releases](https://github.com/732124645/qiwu-vue-admin/releases) 与 [CHANGELOG](CHANGELOG.md)；许可：[MIT](LICENSE)
 
 演示模式可浏览全部功能，写操作均拒绝并提示「演示模式下不能执行此操作」，访客 IP / UA 已脱敏，登录使用滑块验证码，请勿输入真实个人数据。
+
+### 界面预览
+
+| BPMN 流程设计                                                           | 代码生成                                                               |
+| ----------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| ![BPMN 流程设计](https://qiwuadmin.com/screenshots/zh-wf-bpmn.webp)     | ![代码生成](https://qiwuadmin.com/screenshots/zh-codegen-preview.webp) |
+| **角色与数据权限**                                                      | **租户管理**                                                           |
+| ![角色与数据权限](https://qiwuadmin.com/screenshots/zh-role-perms.webp) | ![租户管理](https://qiwuadmin.com/screenshots/zh-tenant-list.webp)     |
+
+更多截图（含移动端）见文档站。
 
 ```sh
 git clone https://github.com/732124645/qiwu-vue-admin.git
@@ -75,6 +104,8 @@ pnpm.cmd dev
 | [实时推送](docs/realtime.md) / [多实例部署](docs/scale-out.md)       | 推送、共享状态与扩容前置条件                       |
 | [任务队列](docs/queue.md)                                            | 后台任务、重试、租户规则与队列监控                 |
 | [OAuth2](docs/oauth2.md)                                             | 第三方接入与 SSO                                   |
+| [多租户](docs/multi-tenancy.md)                                      | 开关、数据隔离与租户感知的项目代码                 |
+| [MCP](docs/mcp.md) / [微信公众号](docs/wxoa.md)                      | 智能体接入与公众号管理（均默认关闭）               |
 | [BPMN](docs/workflow-bpmn.md) / [流程超时](docs/workflow-timeout.md) | 流程设计与处理边界                                 |
 | [移动端](docs/mobile.md)                                             | uni-app 员工客户端与「只要 PC」删除步骤            |
 
@@ -102,7 +133,9 @@ pnpm.cmd dev
 
 Qiwu is an MIT-licensed admin template built with NestJS 12, Vue 3.5, Element Plus, TypeScript, MySQL and Redis. A pnpm workspace contains the server, Web app and shared contracts. The display brand is **栖梧 / Qiwu**, the project name is `qiwu-vue-admin`, and internal packages use `@qiwu/*`.
 
-Implemented areas include identity and organization management, five data-scope modes, sessions, settings, auditing and monitoring; original CRUD/tree/master-detail generators; Excel, local/S3 storage, scheduling and messaging; workflow designers and approvals; OAuth2/SSO; Chinese/English interfaces; Socket.IO and shared Redis rate limiting. v1.0.0 was released on 2026-10-05. See the [changelog](CHANGELOG.md) and [scale-out boundaries](docs/scale-out.md) for features and limits; this README makes no production capacity or external-service validation claim.
+Implemented areas include identity and organization management, five data-scope modes, sessions, settings, auditing and monitoring; original CRUD/tree/master-detail generators; Excel, local/S3 storage, scheduling and messaging; workflow designers and approvals; OAuth2/SSO; Chinese/English interfaces; Socket.IO and shared Redis rate limiting; optional [multi-tenancy](docs/multi-tenancy.md), [WeChat Official Account management](docs/wxoa.md) and [agent access over MCP](docs/mcp.md), each off by default; an optional uni-app mobile client. See the [changelog](CHANGELOG.md) and [scale-out boundaries](docs/scale-out.md) for features and limits; this README makes no production capacity or external-service validation claim.
+
+![Qiwu dashboard](https://qiwuadmin.com/screenshots/en-home.webp)
 
 ### Live demo
 
@@ -147,7 +180,7 @@ Tutorials and feature introductions are on the docs site [qiwuadmin.com](https:/
 - [Job queues](docs/queue.md): background jobs on the existing Redis, retries, the tenant rule and the queue monitor.
 - [Design notes](docs/design-notes.md): layering, sessions, permissions and public contracts.
 - [Template upgrades](docs/upgrade.md): merging a new template release into a project built from it, the usual conflicts and the checks afterwards.
-- [Code generation](docs/codegen.md), [golden examples](docs/codegen-golden.md), [OAuth2](docs/oauth2.md), [BPMN](docs/workflow-bpmn.md), and [workflow timeouts](docs/workflow-timeout.md).
+- [Code generation](docs/codegen.md), [golden examples](docs/codegen-golden.md), [OAuth2](docs/oauth2.md), [multi-tenancy](docs/multi-tenancy.md), [MCP](docs/mcp.md), [WeChat Official Account](docs/wxoa.md), [BPMN](docs/workflow-bpmn.md), and [workflow timeouts](docs/workflow-timeout.md).
 
 `pnpm verify` runs static checks. `pnpm ci:local` runs the full local gate, including database tests, builds, Playwright and bounded smoke checks; prepare isolated test databases first. Deployment currently uses build artifacts and local git. Docker, compose and remote CI support are planned.
 

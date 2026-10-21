@@ -38,7 +38,7 @@
     "network": "网络异常，请稍后重试",
     "forbidden": "抱歉，你没有访问此页面的权限",
     "notFound": "页面不存在",
-    "unavailable": "服务器暂时无法连接，请稍后重试"
+    "unavailable": "正在连接服务器…恢复后自动打开页面"
   },
   "login": {
     "title": "登录",

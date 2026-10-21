@@ -38,7 +38,7 @@
     "network": "Network error. Please try again later.",
     "forbidden": "Sorry, you are not allowed to access this page",
     "notFound": "Page not found",
-    "unavailable": "The server is not responding right now. Please try again later."
+    "unavailable": "Connecting to the server… the page opens as soon as it is back"
   },
   "login": {
     "title": "Sign in",

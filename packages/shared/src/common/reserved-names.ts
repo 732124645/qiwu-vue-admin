@@ -53,7 +53,6 @@ export const WEB_STATIC_ROUTE_NAMES: readonly string[] = [
   'sso',
   '403',
   '404',
-  '503',
   'layout',
   'redirect',
   'profile',

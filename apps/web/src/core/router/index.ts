@@ -10,7 +10,16 @@ import {
 import type { I18nText, MePayload, MenuNode } from '@qiwu/shared'
 import { brandName, brandTitle } from '@/core/composables/use-brand'
 import { i18n, localized } from '@/core/i18n'
-import { api, isTransient, permVer, permVerAnswers, sessionEpoch } from '@/core/request/http'
+import {
+  api,
+  ApiError,
+  apiQuiet,
+  apiWaiting,
+  isTransient,
+  permVer,
+  permVerAnswers,
+  sessionEpoch,
+} from '@/core/request/http'
 import { appSettings } from '@/core/stores/app'
 import { useAuthStore } from '@/core/stores/auth'
 import { useMenuStore } from '@/core/stores/menu'
@@ -97,14 +106,6 @@ export const staticRoutes: RouteRecordRaw[] = [
     component: ErrorView,
     props: { status: 404 },
     meta: { public: true, title: '404' },
-  },
-  // the API did not answer the first load (a restart, a deploy): retry from here, no new sign-in
-  {
-    path: '/503',
-    name: '503',
-    component: ErrorView,
-    props: { status: 503 },
-    meta: { public: true, title: '503' },
   },
   {
     path: '/',
@@ -243,23 +244,34 @@ export function reloadOnPermChange(router: Router): WatchStopHandle {
   )
 }
 
-/** Waits between attempts while the API does not answer (a restart, a rolling deploy): about 20 s in all. */
-export const RETRY_MS = [1000, 1000, 2000, 2000, 3000, 3000, 4000, 4000]
-/** No new attempt after this, request time included: an API that hangs costs one 30 s timeout, not nine. */
-const RETRY_BUDGET_MS = RETRY_MS.reduce((a, b) => a + b)
+/** Waits between attempts while the API does not answer (a restart, a deploy, a stopped server); then 5 s each. */
+export const RETRY_MS = [1000, 1000, 2000, 2000, 3000, 3000, 4000, 4000, 5000]
+/** An API that answers with its own 5xx (a bug, not a restart) gets about 20 s, then the sign-in page. */
+const ERROR_BUDGET_MS = 20_000
+/** A later navigation took over: the waiting loop of the earlier one ends. */
+const SUPERSEDED = Symbol('superseded')
 
-/** Runs `step` again while it fails transiently (no answer, 429, 5xx); any other error at once. */
-async function patiently(step: () => Promise<void>) {
-  const deadline = Date.now() + RETRY_BUDGET_MS
-  for (const ms of RETRY_MS) {
+/** 后端不可达（无响应、429、502/503/504）：重启、部署或服务停了，值得一直等它回来。 */
+function unreachable(e: unknown) {
+  return isTransient(e) && (!(e instanceof ApiError) || [429, 502, 503, 504].includes(e.status))
+}
+
+/**
+ * 后端不可达时一直重试直到恢复，期间显示"正在连接服务器"遮罩（App.vue），地址栏保持原页面；
+ * 后端自己返回的 5xx 只在约 20 秒内重试；其他错误立即抛出。`live` 为假（已有新的导航）时退出。
+ */
+async function patiently(live: () => boolean, step: () => Promise<void>) {
+  const deadline = Date.now() + ERROR_BUDGET_MS
+  for (let i = 0; ; i++) {
     try {
       return await step()
     } catch (e) {
-      if (!isTransient(e) || Date.now() + ms > deadline) throw e
+      if (!unreachable(e) && !(isTransient(e) && Date.now() < deadline)) throw e
+      if (unreachable(e)) apiWaiting.value = true
     }
-    await new Promise((resolve) => setTimeout(resolve, ms))
+    await new Promise((resolve) => setTimeout(resolve, RETRY_MS[Math.min(i, RETRY_MS.length - 1)]))
+    if (!live()) throw SUPERSEDED
   }
-  return step()
 }
 
 let stopBrandTitle: WatchStopHandle | undefined
@@ -268,6 +280,7 @@ export function createAppRouter(
   history: RouterHistory = createWebHistory(import.meta.env.BASE_URL),
 ) {
   const router = createRouter({ history, routes: staticRoutes })
+  let navigations = 0
 
   router.beforeEach(async (to) => {
     const auth = useAuthStore()
@@ -281,32 +294,39 @@ export function createAppRouter(
     if (auth.mustChangePassword) return forceChange()
     if (to.meta.public) return true
     const menu = useMenuStore()
-    // only a rejected session signs in again; an API that still does not answer shows the retry page
-    const failed = (e: unknown) => ({
-      path: isTransient(e) ? '/503' : '/login',
-      query: { redirect: to.fullPath },
-    })
+    const mine = ++navigations
+    const live = () => mine === navigations
+    // only a rejected session (or an API failing for long) signs in again; an unreachable one is waited for
+    const failed = (e: unknown) =>
+      e === SUPERSEDED ? false : { path: '/login', query: { redirect: to.fullPath } }
+    // the load's own failures show as the waiting screen, not as toasts
+    apiQuiet.value = true
     try {
-      await patiently(async () => {
-        if (!auth.accessToken) await auth.refresh()
-        if (!auth.me) await auth.fetchMe()
-      })
-    } catch (e) {
-      return failed(e)
-    }
-    if (auth.mustChangePassword) return forceChange()
-    // public pages stay reachable while locked: signing in again unlocks as well
-    if (auth.locked && to.name !== 'lock') return { name: 'lock' }
-    if (!auth.locked && to.name === 'lock') return '/'
-    if (!menu.loaded) {
       try {
-        await patiently(menu.load)
+        await patiently(live, async () => {
+          if (!auth.accessToken) await auth.refresh()
+          if (!auth.me) await auth.fetchMe()
+        })
       } catch (e) {
         return failed(e)
       }
-      // a new sign-in (possibly another user) replaces the previous user's menu routes
-      syncMenuRoutes(router, menu.routes)
-      return to.fullPath // match again against the new routes
+      if (auth.mustChangePassword) return forceChange()
+      // public pages stay reachable while locked: signing in again unlocks as well
+      if (auth.locked && to.name !== 'lock') return { name: 'lock' }
+      if (!auth.locked && to.name === 'lock') return '/'
+      if (!menu.loaded) {
+        try {
+          await patiently(live, menu.load)
+        } catch (e) {
+          return failed(e)
+        }
+        // a new sign-in (possibly another user) replaces the previous user's menu routes
+        syncMenuRoutes(router, menu.routes)
+        return to.fullPath // match again against the new routes
+      }
+    } finally {
+      // only the latest navigation ends the waiting screen; an earlier one just stops
+      if (live()) apiWaiting.value = apiQuiet.value = false
     }
     if (to.name === LAYOUT) return menu.homePath || '/404'
     if (to.meta.perm && !auth.hasPerm(to.meta.perm)) return '/403'

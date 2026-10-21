@@ -1,16 +1,21 @@
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
 import { RouterView } from 'vue-router'
 import DialogHost from '@/core/dialog/DialogHost.vue'
 import { elementLocale } from '@/core/i18n'
+import { apiWaiting } from '@/core/request/http'
 import { useAppStore } from '@/core/stores/app'
 
 // applies the saved theme color, dark and grey mode from the first render
 const app = useAppStore()
+const { t } = useI18n()
 </script>
 
 <template>
   <el-config-provider :locale="elementLocale" :size="app.settings.size">
     <RouterView />
+    <!-- the first load waits for an API that does not answer; the page opens by itself once it does -->
+    <div v-loading.fullscreen="apiWaiting" :element-loading-text="t('common.error.unavailable')" />
     <!-- openDialog() dialogs, inside the providers so they share the app's config -->
     <DialogHost />
   </el-config-provider>

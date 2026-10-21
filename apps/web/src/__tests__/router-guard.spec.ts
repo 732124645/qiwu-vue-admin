@@ -3,11 +3,11 @@ import { AxiosError } from 'axios'
 import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, h, withDirectives } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
-import ElementPlus from 'element-plus'
+import ElementPlus, { ElMessage } from 'element-plus'
 import { createMemoryHistory, RouterView, type Router } from 'vue-router'
 import { i18n, setLocale } from '@/core/i18n'
 import { vPerm } from '@/core/permission'
-import { accessToken, api, permVer, setSessionHint } from '@/core/request/http'
+import { accessToken, api, apiWaiting, permVer, setSessionHint } from '@/core/request/http'
 import { buildRoutes } from '@/core/router/build-routes'
 import { createAppRouter, LAYOUT, reloadOnPermChange, RETRY_MS, safeRedirect } from '@/core/router'
 import { useAuthStore } from '@/core/stores/auth'
@@ -508,38 +508,95 @@ describe('router guard while the API does not answer (a restart, a rolling deplo
     expect(hint()).toBe('1')
   })
 
-  it('an API that hangs until the request times out is not tried again past the ~20 s budget', async () => {
+  it('an API that hangs: each attempt waits for its timeout, the next one follows, the toasts held back', async () => {
     vi.useFakeTimers()
+    let n = 0
     const calls = mockApi({
-      'POST /auth/refresh': async (config) => {
+      'POST /auth/refresh': ok({ accessToken: 'at-1', expiresIn: 900 }),
+      'GET /auth/me': async (config) => {
+        if (n++ === 2) return ok(me(['*']))
         await new Promise((resolve) => setTimeout(resolve, 30_000))
         throw new AxiosError('timeout of 30000ms exceeded', 'ECONNABORTED', config)
       },
+      'GET /auth/menus': seq(fail(503, 'B0001'), ok(tree)),
+    })
+    const toast = vi.spyOn(ElMessage, 'error')
+    try {
+      const nav = router.push('/settings/dicts')
+      await vi.advanceTimersByTimeAsync(31_000)
+      expect(apiWaiting.value).toBe(true)
+      await vi.runAllTimersAsync()
+      await nav
+      expect(router.currentRoute.value.name).toBe('SettingsDict')
+      expect(calls.filter((c) => c.url === '/auth/me')).toHaveLength(3)
+      expect(apiWaiting.value).toBe(false)
+      expect(toast).not.toHaveBeenCalled()
+    } finally {
+      toast.mockRestore()
+    }
+  })
+
+  it('an API that answers with its own 500 for long: the sign-in page after about 20 s', async () => {
+    vi.useFakeTimers()
+    const calls = mockApi({
+      'POST /auth/refresh': ok({ accessToken: 'at-1', expiresIn: 900 }),
+      'GET /auth/me': fail(500, 'B0001'),
     })
     const nav = router.push('/settings/dicts')
     await vi.runAllTimersAsync()
     await nav
-    expect(router.currentRoute.value.name).toBe('503')
-    expect(calls).toHaveLength(1)
+    expect(router.currentRoute.value.name).toBe('login')
+    expect(router.currentRoute.value.query.redirect).toBe('/settings/dicts')
+    expect(calls.length).toBeLessThan(15)
+    expect(apiWaiting.value).toBe(false)
   })
 
-  it('still no answer after the retries: the retry page, not the sign-in page; its button tries again', async () => {
+  it('a later navigation takes over the waiting: the earlier loop stops', async () => {
     vi.useFakeTimers()
-    const calls = mockApi({ 'POST /auth/refresh': fail(502, 'B0001') })
+    let down = true
+    const calls = mockApi({
+      'POST /auth/refresh': () =>
+        down ? fail(504, 'B0001') : ok({ accessToken: 'at-1', expiresIn: 900 }),
+      'GET /auth/me': ok(me(['*'])),
+      'GET /auth/menus': ok(tree),
+    })
+    void router.push('/settings/dicts').catch(() => undefined)
+    await vi.advanceTimersByTimeAsync(10_000)
     const nav = router.push('/settings/dicts?tab=2')
+    await vi.advanceTimersByTimeAsync(20_000)
+    // one loop left, every 5 s: about 12 attempts a minute, not two loops' 24
+    const before = calls.length
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(calls.length - before).toBeLessThanOrEqual(13)
+    expect(apiWaiting.value).toBe(true)
+    down = false
     await vi.runAllTimersAsync()
     await nav
-    expect(router.currentRoute.value.name).toBe('503')
-    expect(router.currentRoute.value.query.redirect).toBe('/settings/dicts?tab=2')
-    expect(calls).toHaveLength(RETRY_MS.length + 1)
-    expect(hint()).toBe('1')
-    vi.useRealTimers()
+    expect(router.currentRoute.value.fullPath).toBe('/settings/dicts?tab=2')
+    expect(apiWaiting.value).toBe(false)
+  })
 
-    // the API is back: "retry" goes to the page the load was for
-    signedIn()
-    const view = mount(RouterView, { global: { plugins: [router, i18n, ElementPlus] } })
-    await vi.waitFor(() => expect(view.text()).toContain('The server is not responding'))
-    await view.get('button').trigger('click')
-    await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe('/settings/dicts?tab=2'))
+  it('no answer for longer than the backoff: keeps the address, waits, and opens the page once the API is back', async () => {
+    vi.useFakeTimers()
+    let down = true
+    const calls = mockApi({
+      'POST /auth/refresh': () =>
+        down ? fail(502, 'B0001') : ok({ accessToken: 'at-1', expiresIn: 900 }),
+      'GET /auth/me': ok(me(['*'])),
+      'GET /auth/menus': ok(tree),
+    })
+    const nav = router.push('/settings/dicts?tab=2')
+    // two minutes down: still waiting, never the sign-in page or an error page
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(apiWaiting.value).toBe(true)
+    expect(router.currentRoute.value.name).not.toBe('login')
+    expect(calls.length).toBeGreaterThan(RETRY_MS.length)
+    expect(hint()).toBe('1')
+
+    down = false
+    await vi.runAllTimersAsync()
+    await nav
+    expect(router.currentRoute.value.fullPath).toBe('/settings/dicts?tab=2')
+    expect(apiWaiting.value).toBe(false)
   })
 })

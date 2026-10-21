@@ -1,8 +1,15 @@
 # Changelog
 
-中文说明：本文件按功能区域汇总栖梧 / Qiwu 的用户可见变化，正文使用英文。`1.0.0` 于 2026-10-05 发布，`1.0.3` 于 2026-10-06 发布（`1.0.1`、`1.0.2` 未发布，内容并入 `1.0.3`），`1.1.0`（多租户）、`1.2.0`（手写 SQL 的数据权限）、`1.2.1`（修复）与 `1.3.0`（任务队列）于 2026-10-14 发布，`1.3.1`（开发调试开关）与 `1.4.0`（安全审查修复）于 2026-10-15 发布，`1.4.1`（界面细节）、`1.5.0`（微信公众号管理，默认关闭）与 `1.6.0`（MCP 智能体接入，默认关闭；下游合并改进）于 2026-10-20 发布。
+中文说明：本文件按功能区域汇总栖梧 / Qiwu 的用户可见变化，正文使用英文。`1.0.0` 于 2026-10-05 发布，`1.0.3` 于 2026-10-06 发布（`1.0.1`、`1.0.2` 未发布，内容并入 `1.0.3`），`1.1.0`（多租户）、`1.2.0`（手写 SQL 的数据权限）、`1.2.1`（修复）与 `1.3.0`（任务队列）于 2026-10-14 发布，`1.3.1`（开发调试开关）与 `1.4.0`（安全审查修复）于 2026-10-15 发布，`1.4.1`（界面细节）、`1.5.0`（微信公众号管理，默认关闭）与 `1.6.0`（MCP 智能体接入，默认关闭；下游合并改进）于 2026-10-20 发布，`1.6.1`（后端连不上时停在原页面等待；README 更新）于 2026-10-21 发布。
 
 All notable product changes are recorded here in Keep a Changelog style. The initial release below summarizes the delivered features. Planned work is identified explicitly.
+
+## [1.6.1] - 2026-10-21
+
+### Changed
+
+- When the API does not answer while the admin loads (a page refresh or a new tab during a restart, a deploy or a stopped server), the address stays on the requested page and a "connecting" screen waits until the server is back, then opens the page by itself; it no longer gives up after about 20 s for a separate 503 page with retry and sign-in buttons. The load's failures no longer show as error toasts; an API that answers with its own server error for about 20 s still leads to the sign-in page.
+- README: a feature overview (multi-tenancy, WeChat Official Accounts, MCP, mobile client), screenshots and links to the queue, MCP and upgrade guides.
 
 ## [1.6.0] - 2026-10-20
 
