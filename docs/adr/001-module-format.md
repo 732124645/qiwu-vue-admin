@@ -19,6 +19,6 @@ Node 22 loads the selected CommonJS dependencies through its ESM interoperabilit
 
 ## Consequences
 
-Keep ESM and the explicit development runner. Dependency updates must preserve Nest dependency injection, metadata, locale loading and shared-change restarts. Use `pnpm --filter @qiwu/server test <full-spec-stem>` without an extra `--` to filter a server spec. Runtime checks use the bounded `pnpm smoke:boot`; the optional CJS probe is informational and does not promise compatibility with every dependency.
+Keep ESM and the explicit development runner. Dependency updates must preserve Nest dependency injection, metadata, locale loading and shared-change restarts. Use `pnpm --filter @qiwu/server test <full-spec-stem>` without an extra `--` to filter a server spec. Runtime checks use the bounded `pnpm smoke:boot`; the optional CJS probe is informational and does not promise compatibility with every dependency. Server source stays free of `import.meta` (paths come from `src/core/paths.ts`) and of top-level await, so a CommonJS fallback build needs no source changes; the arch check `cjs-safe` enforces it.
 
 See the [layering design](../design-notes.md#layering) and [getting-started guide](../getting-started.md).

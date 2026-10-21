@@ -1,10 +1,25 @@
 // Originality guard: reference-project names + `a:b:c` permission strings. Stdlib only, no exemptions.
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
+// Usage: node scripts/originality-check.mjs [--root <dir>] [--self-test]   (--root: the tree to scan)
+import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { helpLines, helpProblems } from './check-help.mjs'
 
-const root = fileURLToPath(new URL('..', import.meta.url))
-const ids = readFileSync(join(root, 'scripts/originality/reference-identifiers.txt'), 'utf8')
+const here = fileURLToPath(new URL('..', import.meta.url))
+const rootArg = process.argv.indexOf('--root')
+const root = rootArg >= 0 ? process.argv[rootArg + 1] : here
+const ids = readFileSync(join(here, 'scripts/originality/reference-identifiers.txt'), 'utf8')
   .split('\n')
   .map((l) => l.replace(/#.*/, '').trim())
   .filter(Boolean)
@@ -16,6 +31,19 @@ const idRe = new RegExp(
   'gi',
 )
 const permRe = /['"][a-z][a-z-]{2,}:[a-z][a-z-]{2,}:[a-z][a-z-]{2,}['"]/g
+
+// how to fix each kind of hit (scripts/check-help.mjs), printed after the hits
+const HELP = [
+  {
+    match: /permission string/,
+    fix: 'Write the permission as <domain>.<resource>.<verb> (iam.user.browse) and take it from the xxxPerms constants in packages/shared.',
+    doc: 'docs/design-notes.md#permissions',
+  },
+  {
+    fix: "Rename it in this project's own words (own table prefixes, names and texts); other admin projects are a reference for features only, never for code, names or strings.",
+    doc: 'docs/security.md#依赖许可与原创性检查',
+  },
+]
 
 const check = (line) => [
   ...[...line.matchAll(idRe)].map((m) => `reference identifier "${m[0]}"`),
@@ -40,6 +68,21 @@ if (process.argv.includes('--self-test')) {
   const bad = cases.filter(([s, fail]) => check(s).length > 0 !== fail)
   for (const [s, fail] of bad)
     console.error(`self-test: ${JSON.stringify(s)} should ${fail ? 'fail' : 'pass'}`)
+  // a hit ends with how to fix it and where the rule is explained
+  assert.deepEqual(helpProblems(HELP), [])
+  const tmp = mkdtempSync(join(tmpdir(), 'qw-originality-'))
+  try {
+    mkdirSync(join(tmp, 'apps/web/src'), { recursive: true })
+    mkdirSync(join(tmp, 'packages'))
+    writeFileSync(join(tmp, 'apps/web/src/a.ts'), "const p = 'system:user:list'\n")
+    const r = spawnSync(process.execPath, [fileURLToPath(import.meta.url), '--root', tmp], {
+      encoding: 'utf8',
+    })
+    assert.equal(r.status, 1, r.stdout + r.stderr)
+    assert.ok(r.stderr.includes(`  fix: ${HELP[0].fix}\n  see: ${HELP[0].doc}\n`), r.stderr)
+  } finally {
+    rmSync(tmp, { recursive: true, force: true })
+  }
   console.log(`originality self-test: ${cases.length - bad.length}/${cases.length} ok`)
   process.exit(bad.length ? 1 : 0)
 }
@@ -59,6 +102,7 @@ const files = dirs
   .sort()
 
 let hits = 0
+const reasons = []
 for (const file of files) {
   const buf = readFileSync(join(root, file))
   if (buf.includes(0)) continue // binary asset
@@ -68,9 +112,11 @@ for (const file of files) {
     .forEach((line, i) => {
       for (const reason of check(line)) {
         console.error(`${file}:${i + 1}: ${reason}`)
+        reasons.push(reason)
         hits++
       }
     })
 }
 console.log(`originality: ${files.length} files scanned, ${hits} hit(s)`)
+for (const line of helpLines(HELP, reasons)) console.error(line)
 process.exit(hits ? 1 : 0)

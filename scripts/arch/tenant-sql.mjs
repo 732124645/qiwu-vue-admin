@@ -38,6 +38,28 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import ts from 'typescript'
 
+export const help = [
+  {
+    match: / sql-concat: /,
+    fix: 'Extend the `arch-allow: sql-concat` comment with `tenant: <how the SQL stays in its tenant>`, or `qw:cross-tenant <reason>` when it crosses tenants on purpose.',
+    doc: 'docs/multi-tenancy.md#编写租户感知的项目代码',
+  },
+  {
+    match: /crosses tenants without/,
+    fix: 'Add a `qw:cross-tenant <reason>` comment on the withTenant()/allTenants() call or the line right above it.',
+    doc: 'docs/multi-tenancy.md#编写租户感知的项目代码',
+  },
+  {
+    match: /written outside core\/context/,
+    fix: 'Switch the tenant through withTenant()/allTenants() of apps/server/src/core/context/tenant.ts instead of writing tenantId, allTenants or actorTenantId into the request context.',
+    doc: 'docs/design-notes.md#tenancy',
+  },
+  {
+    fix: 'Give every tenant table its own `<alias>.tenant_id = ?` condition ANDed in WHERE (or in the ON of its join), list tenant_id in INSERTs, or use the ORM; a statement that crosses tenants on purpose carries `qw:cross-tenant <reason>`.',
+    doc: 'docs/multi-tenancy.md#编写租户感知的项目代码',
+  },
+]
+
 const SRC = 'apps/server/src/'
 const MIGRATIONS = 'apps/server/src/db/migrations/'
 const TABLES_FILE = 'apps/server/src/core/db/tenant-tables.ts'

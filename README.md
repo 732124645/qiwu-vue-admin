@@ -108,10 +108,15 @@ pnpm.cmd dev
 | [MCP](docs/mcp.md) / [微信公众号](docs/wxoa.md)                      | 智能体接入与公众号管理（均默认关闭）               |
 | [BPMN](docs/workflow-bpmn.md) / [流程超时](docs/workflow-timeout.md) | 流程设计与处理边界                                 |
 | [移动端](docs/mobile.md)                                             | uni-app 员工客户端与「只要 PC」删除步骤            |
+| [用 AI 开发](docs/ai.md)                                             | AI 编程工具的规则入口、项目规则、配方与完成线      |
 
 `apps/server` 是后端，`apps/web` 是 Web，`packages/shared` 是共享 schema、类型与 i18n；`mobile/` 是独立于根 workspace 的可选移动端，PC 项目可按移动端文档删除。业务代码放项目域目录，保留 `@qiwu/*` 包 scope，不需要全仓替换模板内部命名。
 
 `pnpm verify` 是静态任务检查；`pnpm ci:local` 是含数据库、构建、测试、Playwright 与冒烟的完整本地闸门，须先准备独立测试库。当前采用本地 git 与构建产物部署，暂不提供 Docker、compose 和远端 CI，相关支持计划中。
+
+### 用 AI 开发
+
+用 Claude Code、Codex、Cursor、Copilot 等 AI 编程工具开发时，各工具的入口都指向根目录的 [AGENTS.md](AGENTS.md)：目录与分层、命名、API、多租户、安全默认与完成标准都在里面；项目自己的规则写进 `docs/project-rules.md`，AI 会先读它。说明见 [用 AI 开发](docs/ai.md)。
 
 ### 许可与原创性
 
@@ -180,9 +185,14 @@ Tutorials and feature introductions are on the docs site [qiwuadmin.com](https:/
 - [Job queues](docs/queue.md): background jobs on the existing Redis, retries, the tenant rule and the queue monitor.
 - [Design notes](docs/design-notes.md): layering, sessions, permissions and public contracts.
 - [Template upgrades](docs/upgrade.md): merging a new template release into a project built from it, the usual conflicts and the checks afterwards.
+- [AI-assisted development](docs/ai.md): the rule file AI coding tools read, project rules, recipes and the finish line.
 - [Code generation](docs/codegen.md), [golden examples](docs/codegen-golden.md), [OAuth2](docs/oauth2.md), [multi-tenancy](docs/multi-tenancy.md), [MCP](docs/mcp.md), [WeChat Official Account](docs/wxoa.md), [BPMN](docs/workflow-bpmn.md), and [workflow timeouts](docs/workflow-timeout.md).
 
 `pnpm verify` runs static checks. `pnpm ci:local` runs the full local gate, including database tests, builds, Playwright and bounded smoke checks; prepare isolated test databases first. Deployment currently uses build artifacts and local git. Docker, compose and remote CI support are planned.
+
+### AI-assisted development
+
+AI coding tools such as Claude Code, Codex, Cursor and Copilot all start from [AGENTS.md](AGENTS.md) at the repository root (in Chinese): layout and layering, naming, API, multi-tenancy, security defaults and the definition of done. Put your project's own rules in `docs/project-rules.md`; the tools read it first. See [AI-assisted development](docs/ai.md) (in Chinese).
 
 ### License and originality
 

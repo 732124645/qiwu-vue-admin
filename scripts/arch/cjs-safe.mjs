@@ -3,6 +3,12 @@
 // Top-level await = `await` / `for await` / `[export] const|let|var x = await` /
 // `export default await` starting at column 0. Prettier indents everything inside a function,
 // so column 0 means module scope; an unformatted file could hide one (lint-staged runs prettier).
+
+export const help = {
+  fix: 'Resolve paths through the helpers of apps/server/src/core/paths.ts instead of import.meta, and move top-level await into a function (bootstrap or an async provider factory).',
+  doc: 'docs/adr/001-module-format.md#consequences',
+}
+
 const TLA = /^(export\s+default\s+|(export\s+)?(const|let|var)\s+[^=]+=\s*)?(for\s+)?await\b/
 
 export default function ({ lines }) {

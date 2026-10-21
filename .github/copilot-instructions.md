@@ -1,0 +1,5 @@
+# qiwu-vue-admin 开发约定
+
+- 做任何改动之前，先读仓库根目录的 `AGENTS.md`；`docs/project-rules.md` 存在时先读它，它与 `AGENTS.md` 冲突时以它为准。
+- 常见任务按 `docs/ai/recipes/` 的配方做，能用生成器（`pnpm gen`）的不手写。
+- 结束前运行 `pnpm verify`，必须通过。

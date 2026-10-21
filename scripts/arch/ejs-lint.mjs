@@ -2,6 +2,12 @@
 // for `include(…)`; every other value goes through `<%= %>`, whose escape function (codegen/render.ts
 // `emit`) prints only plain tokens and the helpers' output (str / json / comment) and throws on the rest.
 // `<%%` is ejs's literal `<%` and not a tag.
+
+export const help = {
+  fix: "Print the value with <%= %> through str()/json()/comment() of the generator's render helpers; keep <%- %> only for include('<literal path>').",
+  doc: 'docs/design-notes.md#codegen',
+}
+
 const RAW = /<%(?!%)-([\s\S]*?)[-_]?%>/g
 // the whole expression is one include of a literal path (no `include(…) + value`)
 const WHITELIST = /^\s*include\(\s*(['"])[\w./-]+\1\s*\)\s*$/

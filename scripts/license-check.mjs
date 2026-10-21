@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import assert from 'node:assert/strict'
+import { helpLines, helpProblems } from './check-help.mjs'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const WORKSPACE = ['@qiwu/server', '@qiwu/web', '@qiwu/shared']
@@ -95,6 +96,34 @@ function registrations({ name, version, license }, ex) {
   )
   return { alias, lic, exception, election }
 }
+
+// how to fix each kind of failure (scripts/check-help.mjs), printed after the FAIL lines
+const HELP = [
+  {
+    match: /hard-banned/,
+    fix: 'Remove the package: it is banned from this template; pick a maintained, permissively licensed alternative.',
+    doc: 'docs/security.md#依赖许可与原创性检查',
+  },
+  {
+    match: /icon set/,
+    fix: 'Check the license of the icon set, then add its name to iconSets in license-exceptions.json.',
+    doc: 'docs/security.md#依赖许可与原创性检查',
+  },
+  {
+    match: /OR expression/,
+    fix: 'Add an entry to elections in license-exceptions.json (package, versionRange, expression, the elected whitelisted license, reason).',
+    doc: 'docs/security.md#依赖许可与原创性检查',
+  },
+  {
+    match: /SPDX|unknown license|custom license/,
+    fix: "Read the package's license; when it is a permissive one written oddly, register a package@version alias (from, to, reason) in license-exceptions.json, otherwise replace the package.",
+    doc: 'docs/security.md#依赖许可与原创性检查',
+  },
+  {
+    fix: 'Replace the package with a permissively licensed one (MIT, ISC, BSD, Apache-2.0, ...); register an exception in license-exceptions.json only after reading its license, with the reason.',
+    doc: 'docs/security.md#依赖许可与原创性检查',
+  },
+]
 
 // Returns ['fail'|'note'|'ok', message].
 function check(pkg, ex) {
@@ -372,6 +401,20 @@ function selfTest() {
   } finally {
     rmSync(temp, { recursive: true, force: true })
   }
+  // a failure ends with how to fix it and where the rule is explained
+  assert.deepEqual(helpProblems(HELP), [])
+  const audited = new Map()
+  collect(audited, [{ name: 'xlsx', version: '0.18.5', license: 'Apache-2.0' }], ex, 'fixture')
+  collect(audited, [{ name: 'ok', version: '1.0.0', license: 'MIT' }], ex, 'fixture')
+  assert.deepEqual(report(audited), {
+    lines: [
+      'FAIL xlsx@0.18.5  Apache-2.0  hard-banned  [fixture]',
+      `  fix: ${HELP[0].fix}`,
+      `  see: ${HELP[0].doc}`,
+      'license-check: 2 packages, 1 violation(s)',
+    ],
+    fails: 1,
+  })
   console.log(`license-check self-test: ${lines.length} cases ok`)
   console.log(
     `license-check real-config self-test: ${windowsPackages.join(', ')} ok; ${realEx.binaryExceptions.length} binary exceptions mentioned in notices`,
@@ -379,6 +422,23 @@ function selfTest() {
   console.log(
     'license-check notices self-test: collection, licenses, preservation, markers, refusal and repeatability ok',
   )
+}
+
+/** 审计结果的输出行：FAIL / note 行、失败的修复提示与汇总行；fails 为失败的包数。 */
+function report(pkgs) {
+  const lines = []
+  const failed = []
+  for (const [key, p] of sorted(pkgs)) {
+    const [kind, msg] = check(p, p.ex)
+    if (kind === 'fail') failed.push(msg)
+    if (kind !== 'ok')
+      lines.push(
+        `${kind === 'fail' ? 'FAIL' : 'note'} ${key}  ${p.license}  ${msg}${p.where.length ? `  [${p.where.join(', ')}]` : ''}`,
+      )
+  }
+  lines.push(...helpLines(HELP, failed))
+  lines.push(`license-check: ${pkgs.size} packages, ${failed.length} violation(s)`)
+  return { lines, fails: failed.length }
 }
 
 function main(argv) {
@@ -429,16 +489,8 @@ function main(argv) {
     const ex = exFor(cwd)
     collect(pkgs, pnpmLicenses(args, cwd), ex, args[1] ?? (relative(ROOT, cwd) || '.'))
   }
-  let fails = 0
-  for (const [key, p] of sorted(pkgs)) {
-    const [kind, msg] = check(p, p.ex)
-    if (kind === 'fail') fails++
-    if (kind !== 'ok')
-      console.log(
-        `${kind === 'fail' ? 'FAIL' : 'note'} ${key}  ${p.license}  ${msg}${p.where.length ? `  [${p.where.join(', ')}]` : ''}`,
-      )
-  }
-  console.log(`license-check: ${pkgs.size} packages, ${fails} violation(s)`)
+  const { lines, fails } = report(pkgs)
+  for (const line of lines) console.log(line)
   if (fails) {
     process.exitCode = 1
     return

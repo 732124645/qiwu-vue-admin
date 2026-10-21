@@ -5,6 +5,28 @@ import { existsSync, lstatSync } from 'node:fs'
 import { join } from 'node:path'
 import ts from 'typescript'
 
+export const help = [
+  {
+    match: /symlink/,
+    fix: 'Replace the symlink with a regular file (copy the content); symlinks break Windows checkouts.',
+    doc: 'docs/getting-started.md#windows原生-powershell-51',
+  },
+  {
+    match: /^\.gitattributes/,
+    fix: 'Keep `* text=auto eol=lf` as the first line of .gitattributes and `*.png binary` in it.',
+    doc: 'docs/getting-started.md#windows原生-powershell-51',
+  },
+  {
+    match: /Windows section|Windows example/,
+    fix: 'Keep a Windows heading with a powershell code block in the guide, written in PowerShell 5.1 syntax (one command per line, $env: variables, $LASTEXITCODE checks).',
+    doc: 'docs/getting-started.md#windows原生-powershell-51',
+  },
+  {
+    fix: 'Start Node tools through process.execPath and their JavaScript bin file, not pnpm/npm/npx or .bin shims; a launch through the package manager needs a fixed shell command.',
+    doc: 'docs/getting-started.md#windows原生-powershell-51',
+  },
+]
+
 const COMMAND = /^(?:pnpm|npm|npx)(?:\.cmd)?$/
 const LAUNCH = /^(?:spawn|spawnSync|execFile|execFileSync)$/
 const literal = (n) => n && (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n))

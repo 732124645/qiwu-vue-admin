@@ -13,6 +13,18 @@
 import { readdirSync } from 'node:fs'
 import { basename, join } from 'node:path'
 
+export const help = [
+  {
+    match: /WEB_STATIC_ROUTE_NAMES|static route|staticRoutes/,
+    fix: 'Keep WEB_STATIC_ROUTE_NAMES in packages/shared/src/common/reserved-names.ts equal to the static route names of apps/web/src/core/router/index.ts, each with a reserved first segment.',
+    doc: 'docs/codegen.md#名称父菜单与路径',
+  },
+  {
+    fix: 'Put project code under a project-domain directory named after the first table-name segment (lowercase letters and digits, e.g. modules/erp/), with its controller root and locale namespace named after that domain; template code adds its name to packages/shared/src/common/reserved-names.ts.',
+    doc: 'docs/codegen.md#名称父菜单与路径',
+  },
+]
+
 const LISTS = 'packages/shared/src/common/reserved-names.ts'
 const DOMAIN = /^[a-z][a-z0-9]{0,31}$/
 const CONTROLLER = /@Controller\(\s*['"`]\/?([^'"`/]*)/g

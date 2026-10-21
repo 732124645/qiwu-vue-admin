@@ -130,6 +130,8 @@ UNIQUE (tenant_id, order_no, alive)
 
 `alive` 不映射到实体；软删除释放原唯一值。生成实体继承 `BaseEntity` 等基类，常规查询排除软删除行，删除经 `softDeleteRows()` 写删除时间和适用的审计信息。
 
+原始 SQL 与按表名的 QueryBuilder join 不经过实体，要为读到的每张表自己写 `<别名>.deleted_at IS NULL`；确需包含已删除行的语句（清理、缓存扫描、种子按自然键查找）在语句上或上一行写 `qw:include-deleted`。架构检查 `soft-delete-sql` 报出漏写。
+
 新表默认是租户表：有 `tenant_id` 且不在 `PLATFORM_TABLES` 里（[tenant-tables.ts](../apps/server/src/core/db/tenant-tables.ts) 合并模板的登记与项目的 [project-tables.ts](../apps/server/src/db/project-tables.ts)）。生成实体用 `@TenantColumn()` 映射这一列，ORM 层对它的读写自动加当前租户的条件，插入时由服务端写入当前租户；`tenant_id` 按系统列处理，不进列表、表单、查询、DTO 与 Excel。唯一键以 `tenant_id` 开头，不同租户可以有相同的值；没有唯一键的表另加 `KEY idx_<表名>_tenant (tenant_id)`。没有 `tenant_id` 的项目表会被所有租户共享：任何租户都能读写它的全部行。只有确实由平台统一维护的表才登记为平台表，项目的表登记进 `project-tables.ts` 的 `PROJECT_PLATFORM_TABLES`；平台表即使带 `tenant_id`，生成实体也不映射它。设计见[多租户设计说明](design-notes.md#tenancy)。
 
 项目不用数据库外键。引用列保留普通索引，被引用表的 `options.referencedBy` 配置列出 `[{ table, column, label }]`，生成实体调用 `referencedBy()` 登记。配置页和 `PUT /api/codegen/tables/:id` 校验引用表/列以及该表的 `deleted_at`，无效配置返回 422 `C3009`。写入新的引用经 `assertReferencesLive()` 读父行 `FOR SHARE`：不存在或已删除返回 404；删除父行发现有效限制引用则 409 `in_use`。
@@ -161,7 +163,7 @@ ID、计数和外部系统 bigint 不应超过安全整数范围。MySQL 支持�
 
 生成的整数输入 schema 使用 `z.number().int()`（`crud.ts` 的 `zodOf()`）；Zod 4 的 `.int()` 只接受安全整数，因此生成 API 的写入已拒绝大于 `2^53 - 1`（`Number.MAX_SAFE_INTEGER`）的值，数据库自身仍允许其列类型范围内的更大值。
 
-15 位是 number 路径的保守上限，不保证二进制浮点能精确表达每个小数（如 `0.1`）。金额等业务若需要精确运算，应明确舍入规则或采用十进制字符串/运算方案。当前宽 decimal 已有字符串路径；若还需要完整 bigint 或新的精确计算合同，应另立 CR，同步 schema、API、实体、筛选、表单、导入导出与调用者。
+15 位是 number 路径的保守上限，不保证二进制浮点能精确表达每个小数（如 `0.1`）。金额等业务若需要精确运算，应明确舍入规则或采用十进制字符串/运算方案。当前宽 decimal 已有字符串路径；若还需要完整 bigint 或新的精确计算合同，应作为单独的变更设计，同步 schema、API、实体、筛选、表单、导入导出与调用者。
 
 ## 模板能力与公共控件
 

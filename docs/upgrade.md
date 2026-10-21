@@ -42,6 +42,7 @@ git merge v1.4.0
 - **迁移**：迁移文件各自独立，通常不冲突。模板发布过的迁移不要修改或改名（已安装的数据库按名字记录它）。项目迁移与模板迁移时间戳相同时，`pnpm verify` 的架构检查会报出这两个文件：改项目自己的迁移（文件名与类名换成当前时间）。如果那个项目迁移已经在某些库上执行过，还要在这些库上把记录改成新名字，例如 `UPDATE meta_migrations SET name = 'CrmOrder20261020153817', timestamp = 261020153817 WHERE name = 'CrmOrder20261018100000'`（`timestamp` 是类名末尾 13 位数字的数值）。
 - **执行顺序**：已有的库只执行尚未执行的迁移，按时间戳先后；时间戳早于项目迁移的模板新迁移，会在这次升级时排在后面执行。模板迁移不依赖项目的表；项目迁移若要用到模板新版本改过的表结构，它的时间戳必须晚于对应的模板迁移。
 - **`package.json` 与 `pnpm-lock.yaml`**：先按两边的依赖合并 `package.json`，锁文件不要手工合并，取模板一侧后执行 `pnpm i` 重新生成；项目新增的依赖同样要在 `pnpm-workspace.yaml` 的 `allowBuilds` 里登记需要构建脚本的包。
+- **项目地图 `docs/ai/project-map.md`**：它由 `pnpm ai:map` 从源码生成，不要手工解决其中的冲突。先解决其他文件，再运行 `pnpm ai:map` 重新生成并提交；没有冲突时合并后也运行一次，因为模板与项目两边的改动都会让它过期（`pnpm verify` 会检查它与源码是否一致）。
 - **模板的测试**：迁移测试从迁移目录读取清单、按规则检查每张表，项目不需要改模板的测试。项目改过的模板测试如有冲突，优先采用模板的新版本，再补回项目确实需要的断言。
 
 ## 4. 合并后的检查
@@ -49,6 +50,7 @@ git merge v1.4.0
 ```sh
 pnpm i
 pnpm --filter @qiwu/shared build
+pnpm ai:map
 pnpm verify
 pnpm --filter @qiwu/server build
 pnpm --filter @qiwu/server test

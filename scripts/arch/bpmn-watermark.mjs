@@ -5,6 +5,12 @@
 // scanned: the Playwright specs in apps/web/e2e have to locate the logo to assert it. Comment-only lines pass.
 // A line heuristic; a selector built at runtime from parts slips through, the Playwright watermark
 // test (visibility, hit-test, opacity chain, pixel self-compare) is the backstop.
+
+export const help = {
+  fix: 'Remove the selector or import: nothing may style, hide, cover or select the bpmn.io watermark (.bjs-powered-by, its link and image) or load bpmn-embedded.css.',
+  doc: 'docs/workflow-bpmn.md#bpmnio-水印义务',
+}
+
 const BPMN_VIEWS = /^apps\/web\/src\/views\/workflow\/bpmn\//
 
 const BAD = [

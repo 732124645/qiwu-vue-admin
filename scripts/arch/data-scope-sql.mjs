@@ -15,6 +15,18 @@
 import ts from 'typescript'
 import { calleeName, literalText, tableRefs, tokenize } from './tenant-sql.mjs'
 
+export const help = [
+  {
+    match: /query builder/,
+    fix: 'Query the entity through scopedQb() of its service instead of a table-name string, or add a `qw:no-data-scope <reason>` comment when the read does not act for the caller.',
+    doc: 'docs/data-scope.md#手写-sql',
+  },
+  {
+    fix: "Call dataScopeSql()/dataScopeSqlFor() in the same function and interpolate `${scope.sql}` into this template literal (its params at the matching position), or add a `qw:no-data-scope <reason>` comment for a system query that does not read on the caller's behalf.",
+    doc: 'docs/data-scope.md#手写-sql',
+  },
+]
+
 const SRC = 'apps/server/src/'
 const MIGRATIONS = 'apps/server/src/db/migrations/'
 const MARK = /qw:no-data-scope\s+(?!\*\/)\S/

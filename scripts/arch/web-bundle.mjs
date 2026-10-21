@@ -11,6 +11,23 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+export const help = [
+  {
+    match: /wangeditor/,
+    fix: 'Import @form-create/designer by its bare name only, so the vite alias builds it from source without the old editor.',
+    doc: 'docs/adr/004-form-create.md#technical-findings-and-consequences',
+  },
+  {
+    match: /dist missing/,
+    fix: 'Build the web app first: pnpm --filter @qiwu/web build.',
+    doc: 'docs/adr/004-form-create.md#schema-function-strings-and-the-built-bundle',
+  },
+  {
+    fix: 'Keep code that calls eval or Function out of the web bundle; only after proving it can never run attacker text, add its exact shape to ALLOW in scripts/arch/web-bundle.mjs.',
+    doc: 'docs/adr/004-form-create.md#schema-function-strings-and-the-built-bundle',
+  },
+]
+
 const DIST = 'apps/web/dist'
 const WANGEDITOR_V4 =
   /\b(uploadImgServer|uploadImgShowBase64|uploadImgMaxSize|pasteFilterStyle|onchangeTimeout|zIndexFullScreen)\b/

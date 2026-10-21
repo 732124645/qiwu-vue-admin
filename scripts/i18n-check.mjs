@@ -17,6 +17,7 @@ import { spawnSync } from 'node:child_process'
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import assert from 'node:assert/strict'
+import { helpLines, helpProblems } from './check-help.mjs'
 
 const LANGS = ['zh-CN', 'en-US']
 const args = process.argv.slice(2)
@@ -37,6 +38,34 @@ const NO_CJK_EXEMPT =
 // the uni-app client, skipped when absent; PC-only: remove with mobile/ (docs/mobile.md)
 const MOBILE = 'mobile/src/'
 const errors = []
+// how to fix each kind of error (scripts/check-help.mjs), printed after the errors
+const HELP = [
+  {
+    match: /en-US TODO/,
+    fix: 'Translate the empty en-US values and remove the reviewed entries from __todo.json.',
+    doc: 'docs/i18n.md#todo-与验收',
+  },
+  {
+    match: /CJK literal/,
+    fix: "Move the text into the zh-CN and en-US locale files and reference it with t('<namespace>.<key>'); shared validation returns validation.* keys and field labels use field.<domain>.<prop>.",
+    doc: 'docs/i18n.md#在哪里新增词条',
+  },
+  {
+    match:
+      /^apps\/server\/src\/(db\/seeds\/|modules\/.*\.seed\.ts)|i18n literal without|upsertTemplates|: template |seed templates through/,
+    fix: 'Seeds store menu.*/seed.* keys present in both languages and labelI18n/nameI18n objects with zh-CN and en-US text; message templates go through upsertTemplates() of apps/server/src/db/seeds/messaging/templates.ts.',
+    doc: 'docs/i18n.md#数据库键与用户文本',
+  },
+  {
+    match: /locale file missing|present in|also defined|invalid JSON/,
+    fix: 'Give every locale file a counterpart with the same keys in the other language and define each key in one file only (shared keys only in packages/shared/src/i18n).',
+    doc: 'docs/i18n.md#在哪里新增词条',
+  },
+  {
+    fix: 'Add the key to the zh-CN and en-US locale files of that side (web, server, shared or mobile), or correct the key in the t() call.',
+    doc: 'docs/i18n.md#在哪里新增词条',
+  },
+]
 const err = (file, line, msg) => errors.push(`${file}${line ? `:${line}` : ''}: ${msg}`)
 const rel = (p) => relative(ROOT, p).split('\\').join('/')
 const lineAt = (s, i) => s.slice(0, i).split('\n').length
@@ -341,6 +370,7 @@ function main() {
 
   if (errors.length) {
     for (const e of errors) console.error(e)
+    for (const line of helpLines(HELP, errors)) console.error(line)
     console.error(`i18n:check failed: ${errors.length} error(s)`)
     process.exit(1)
   }
@@ -450,6 +480,9 @@ function selfTest() {
     assert.ok(rejected.stderr.includes(`${MOBILE}locales: en-US TODO 'login.slogan'`))
     assert.match(rejected.stderr, /apps\/web\/src\/locales: en-US TODO 'login.motto'/)
     assert.ok(rejected.stderr.includes(`${MOBILE}locales: en-US TODO 'login.motto'`))
+    // every failure ends with how to fix it and where the rule is explained
+    assert.deepEqual(helpProblems(HELP), [])
+    assert.ok(rejected.stderr.includes(`  fix: ${HELP[0].fix}\n  see: ${HELP[0].doc}\n`))
   } finally {
     rmSync(tmp, { recursive: true })
   }

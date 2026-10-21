@@ -3,6 +3,11 @@
 // so the typecheck rejects Node globals (process, Buffer, __dirname, …). Specs are exempt.
 import { importsOf } from './web-deps.mjs'
 
+export const help = {
+  fix: 'packages/shared imports only zod and its own files and keeps "types": [] in its tsconfig: move Node or Vue code to apps/server or apps/web.',
+  doc: 'docs/design-notes.md#layering',
+}
+
 export default function ({ files, read }) {
   const out = []
   const types = JSON.parse(read('packages/shared/tsconfig.json')).compilerOptions?.types

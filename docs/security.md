@@ -91,6 +91,15 @@
 
 表中的"认证安全回归矩阵"和"输入安全回归矩阵"是服务端专项回归用例，位于[安全测试目录](../apps/server/test/security/)。底层与 browser spec 分别位于 `apps/server/test/{core,e2e,storage,workflow}`、`packages/shared/src/platform/formkit`、`apps/web/{src/__tests__,e2e}`；表中其余名字均为完整 spec stem。
 
+## 依赖许可与原创性检查
+
+`pnpm verify` 用四项检查守住依赖与原创性：
+
+- `license:check` 审计各包的生产依赖：许可须在 `scripts/license-check.mjs` 的允许列表里（MIT、ISC、BSD、Apache-2.0 等），禁用包一律失败。许可写法不规范、双许可或确需的例外，读过其许可后登记到根目录 `license-exceptions.json`：`aliases`（某版本的非标准写法映射到 SPDX 标识）、`elections`（双许可选定其一）、`exceptions` / `binaryExceptions`（写明理由）、`iconSets`（`@iconify-json/<图标集>`）。用模板开发的项目可以自行调整允许列表。
+- 架构检查 `web-deps`：Web 源码导入的包必须在 `apps/web/package.json` 的 `dependencies` 里。许可审计只看生产依赖，放在 `devDependencies` 的包会被打进产物却逃过审计。
+- 架构检查 `single-version`：TypeScript、Vite、Vue、Element Plus 与 Vitest 在整个 workspace 只解析出一个版本：版本只在 `pnpm-workspace.yaml` 的 catalog 里声明，各 `package.json` 写 `catalog:`。
+- `originality:check`：源码不得出现 `scripts/originality/reference-identifiers.txt` 列出的其他后台项目的标识，权限码用 `<domain>.<resource>.<verb>`（如 `iam.user.browse`），不用冒号分隔的三段式。参考其他项目只限功能与架构，代码、命名与文案自己写。
+
 ## 存储目标变更必须重填密钥
 
 更新 S3 配置时，服务在事务锁定行后比较 `endpoint`、`bucket`、`accessKey`。只要其中一项改变，就不能用缺失、空白或掩码 `secretKey` 保留旧凭据；否则 HTTP 422、`C1010`，整次更新不写入，也不对新目标发起外部调用。显式提交新明文后用 SecretBox 加密保存；目标不变时可以保留旧密文。`region`、`forcePathStyle` 不属于本次绑定字段。

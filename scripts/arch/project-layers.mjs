@@ -8,12 +8,18 @@
 import { dirname, posix } from 'node:path'
 import { reservedLists } from './reserved-names.mjs'
 
+export const help = {
+  fix: 'Platform and workflow code may not import a project domain (biz, demo or your own) or modules/project.module.ts: move the shared part into core or platform, or let the project domain register itself with the platform.',
+  doc: 'docs/design-notes.md#layering',
+}
+
 const LISTS = 'packages/shared/src/common/reserved-names.ts'
 const SOURCES = [
   'apps/server/src/modules/{platform,workflow}/**/*.ts',
   'apps/web/src/{views,api}/{platform,workflow}/**/*.{ts,vue}',
   'packages/shared/src/{platform,workflow}/**/*.ts',
 ]
+
 const ROOTS = [
   'apps/server/src/modules/',
   'apps/web/src/views/',

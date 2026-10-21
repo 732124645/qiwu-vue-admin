@@ -4,6 +4,11 @@
 // in test files (__tests__/, *.spec.ts) vitest, @vue/test-utils and Vite build tests are exempt.
 import { builtinModules } from 'node:module'
 
+export const help = {
+  fix: 'Move the package to "dependencies" of apps/web/package.json (pnpm --filter @qiwu/web add <name>) so the license check sees what ships in the bundle.',
+  doc: 'docs/security.md#依赖许可与原创性检查',
+}
+
 const STATIC = /\b(?:import|export)\s+(type\s+)?(?:[^'"`;]*?\s+from\s+)?['"]([^'"]+)['"]/g
 const DYNAMIC = /\bimport\s*\(\s*['"]([^'"]+)['"]/g
 const TEST_ONLY = new Set(['vitest', '@vue/test-utils', 'vite'])

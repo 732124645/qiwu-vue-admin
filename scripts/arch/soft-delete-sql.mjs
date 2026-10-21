@@ -15,6 +15,19 @@
 // A heuristic over literals: SQL assembled from several literals, table names in variables and
 // query-builder `from`/`update` by table name are not seen; entity repositories and query builders
 // filter deleted rows by themselves.
+
+export const help = [
+  {
+    match: /baseline\.json allows/,
+    fix: 'Lower the count of that file in scripts/arch/soft-delete-sql.baseline.json to the number found (drop the entry at 0).',
+    doc: 'docs/codegen.md#建表软删除与引用约定new-tables',
+  },
+  {
+    fix: 'Add `<alias>.deleted_at IS NULL` for every soft-deleted table the SQL or the join reads, or mark a statement that must see deleted rows (purge, cache sweep) with `qw:include-deleted`.',
+    doc: 'docs/codegen.md#建表软删除与引用约定new-tables',
+  },
+]
+
 const MIGRATIONS = 'apps/server/src/db/migrations/'
 const BASELINE = 'scripts/arch/soft-delete-sql.baseline.json'
 const MARK = /qw:include-deleted/

@@ -11,6 +11,18 @@
 // controller, is not seen; code review and data-scope e2e specs cover those.
 import ts from 'typescript'
 
+export const help = [
+  {
+    match: /auth:\* keys/,
+    fix: 'End sessions through SessionRevoker; only apps/server/src/core/auth may name the auth Redis namespaces.',
+    doc: 'docs/design-notes.md#auth-sessions',
+  },
+  {
+    fix: 'Route the write through a service method that calls lockScopedIds(ids) in the transaction before changing the rows (BaseCrudService update/remove already do).',
+    doc: 'docs/data-scope.md#查询锁与写入后的范围',
+  },
+]
+
 const SOURCES = 'apps/server/{src,test/fixtures}/**/*.ts'
 const BASE_FILE = 'apps/server/src/core/db/base-crud.service.ts'
 const WRITE = new Set(['Post', 'Put', 'Patch', 'Delete'])

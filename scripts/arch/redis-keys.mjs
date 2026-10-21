@@ -3,6 +3,12 @@
 // argument is a string/template literal: redis.get('dict:x'), this.redis.set(`param:${k}`, v).
 // Event methods take event names, not keys; Lua's redis.call/pcall take a command name. Receiver-name heuristic; a client stored under
 // another name, sendCommand([...]) or multi() chains are not seen (the ACL still rejects non-qw: keys).
+
+export const help = {
+  fix: 'Build the key with redisKey() (scan patterns with keyPattern()) from apps/server/src/core/redis/cache-namespaces.ts, declaring a namespace with its tenant dimension there when none fits.',
+  doc: 'docs/multi-tenancy.md#编写租户感知的项目代码',
+}
+
 const CALL = /\b\w*redis\w*\s*\.\s*(\w+)\s*\(\s*['"`]/gi
 const NOT_KEYS = new Set([
   'on',

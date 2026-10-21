@@ -1,10 +1,18 @@
 # Changelog
 
-中文说明：本文件按功能区域汇总栖梧 / Qiwu 的用户可见变化，正文使用英文。`1.0.0` 于 2026-10-05 发布，`1.0.3` 于 2026-10-06 发布（`1.0.1`、`1.0.2` 未发布，内容并入 `1.0.3`），`1.1.0`（多租户）、`1.2.0`（手写 SQL 的数据权限）、`1.2.1`（修复）与 `1.3.0`（任务队列）于 2026-10-14 发布，`1.3.1`（开发调试开关）与 `1.4.0`（安全审查修复）于 2026-10-15 发布，`1.4.1`（界面细节）、`1.5.0`（微信公众号管理，默认关闭）与 `1.6.0`（MCP 智能体接入，默认关闭；下游合并改进）于 2026-10-20 发布，`1.6.1`（后端连不上时停在原页面等待；README 更新）于 2026-10-21 发布。
+中文说明：本文件按功能区域汇总栖梧 / Qiwu 的用户可见变化，正文使用英文。`1.0.0` 于 2026-10-05 发布，`1.0.3` 于 2026-10-06 发布（`1.0.1`、`1.0.2` 未发布，内容并入 `1.0.3`），`1.1.0`（多租户）、`1.2.0`（手写 SQL 的数据权限）、`1.2.1`（修复）与 `1.3.0`（任务队列）于 2026-10-14 发布，`1.3.1`（开发调试开关）与 `1.4.0`（安全审查修复）于 2026-10-15 发布，`1.4.1`（界面细节）、`1.5.0`（微信公众号管理，默认关闭）与 `1.6.0`（MCP 智能体接入，默认关闭；下游合并改进）于 2026-10-20 发布，`1.6.1`（后端连不上时停在原页面等待；README 更新）与 `1.7.0`（AI 编程友好：公开开发规则、任务配方、检查报错带修复提示、项目地图）于 2026-10-21 发布。
 
 All notable product changes are recorded here in Keep a Changelog style. The initial release below summarizes the delivered features. Planned work is identified explicitly.
 
-## [1.6.1] - 2026-10-21
+## [1.7.0] - 2026-10-21
+
+### Added
+
+- AI-assisted development (`docs/ai.md`): the repository now ships its development rules for AI coding tools and for people.
+  - An agent rules file at the repository root: the conventions a project built on the template follows — layout and layering, naming, API, i18n, multi-tenancy and data scope, security defaults, the CRUD kit, migrations and seeds, generator first, tests and the definition of done, commands, and what each gate failure means — with entry points for the common coding tools (listed in `docs/ai.md`). A project keeps its own rules in `docs/project-rules.md` (not shipped, so template upgrades never conflict with it).
+  - Step-by-step recipes in `docs/ai/recipes/` with their check commands: a new module through the generator, tables and migrations, permissions and menus, dicts and system parameters, data scope, tenant-aware SQL, queue and scheduled jobs, MCP tools, i18n strings and API tests; a matching skill for each recipe (`qiwu-*`).
+  - `pnpm ai:map` writes `docs/ai/project-map.md` — modules and feature switches, tables, every API route with its permission and markers, permission codes, menus, dicts, system parameters, jobs and MCP tools — from a static parse of the code; `pnpm verify` fails when it is stale.
+- Every failure of the arch checks, `i18n:check`, `originality:check` and `license:check` now ends with a `fix:` line (what to change) and a `see:` link to the doc that explains the rule; a check without a valid hint fails. A new arch check, `ai-docs`, keeps the scripts, paths, links and anchors named in the AI docs real (mentions of a removed mobile client or sample domain are allowed).
 
 ### Changed
 

@@ -6,6 +6,12 @@
 //  3. any template literal with `${` whose text contains SQL keywords (prebuilt SQL strings).
 // Escape hatch (almost never, e.g. an alias/identifier the code itself chose, never a value):
 // `// arch-allow: sql-concat <reason>` on the flagged line or the line directly above it.
+
+export const help = {
+  fix: 'Pass one SQL literal with ? or :name placeholders and the values as parameters; only for an identifier the code itself chose add `// arch-allow: sql-concat <reason> tenant: <how it stays in its tenant>` on or above the line.',
+  doc: 'docs/design-notes.md#security',
+}
+
 const CALL =
   /\.(query|where|andWhere|orWhere|having|orderBy|addOrderBy|groupBy|select|addSelect)\s*\(\s*/g
 const SQL_WORDS = /\b(select|insert|update|delete|where|from|join|values|order\s+by|group\s+by)\b/i

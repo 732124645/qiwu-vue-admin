@@ -7,6 +7,18 @@
 // verb (use the platform one).
 import ts from 'typescript'
 
+export const help = [
+  {
+    match: / verb /,
+    fix: 'Use a verb from VERBS in apps/server/src/db/seeds/audit/audit.seed.ts as a string literal, or register a kebab-case verb (at most 32 characters, not repeating a platform one) in PROJECT_ACTION_VERBS of apps/server/src/db/seeds/project/action-verbs.seed.ts.',
+    doc: 'docs/design-notes.md#audit',
+  },
+  {
+    fix: "Add @ActionLog({ domain: '<domain>.<resource>', verb: '<verb>' }) to the controller method, or @SkipActionLog() when the write needs no action log entry.",
+    doc: 'docs/design-notes.md#audit',
+  },
+]
+
 const WRITE = new Set(['Post', 'Put', 'Patch', 'Delete', 'All'])
 const MARKS = new Set(['ActionLog', 'SkipActionLog'])
 

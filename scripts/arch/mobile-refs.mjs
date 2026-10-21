@@ -7,6 +7,11 @@
 import { statSync } from 'node:fs'
 import { join } from 'node:path'
 
+export const help = {
+  fix: 'Keep mobile/ self-contained: drop the reference, or reach the mobile client only through the root package.json mobile:* scripts and the whitelisted path constants.',
+  doc: 'docs/design-notes.md#可选员工移动端',
+}
+
 export const REF = new RegExp(
   [
     String.raw`(?:\.\.\/)+mobile\b`,
@@ -40,6 +45,7 @@ const PATTERNS = [
   '.*',
   '.husky/*',
 ]
+
 const SKIP = /(^|\/)(dist|coverage)\/|^pnpm-lock\.yaml$|^\.git$/
 const COMMENT = /^\s*(\/\/|\/\*|\*|#)/
 

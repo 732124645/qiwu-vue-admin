@@ -38,6 +38,11 @@ const before = [
   ['build', 'pnpm -r build'],
   // the arch run inside verify precedes the build: scan the fresh apps/web/dist
   ['web bundle', 'node scripts/arch/run.mjs --only web-bundle'],
+  // the self-tests of verify's own checks: rules, fix hints with their doc links, failure output
+  [
+    'check self-tests',
+    'node scripts/check-help.mjs --self-test && node scripts/i18n-check.mjs --self-test && node scripts/originality-check.mjs --self-test && node scripts/license-check.mjs --self-test',
+  ],
   // Playwright only sees the build: import every .vue module and lazy dep under the Vite dev server,
   // then render the form designer
   ['web dev smoke', 'pnpm smoke:web-dev'],

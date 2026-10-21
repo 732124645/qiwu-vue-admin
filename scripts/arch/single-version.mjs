@@ -5,6 +5,11 @@ import assert from 'node:assert/strict'
 import { execSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
+export const help = {
+  fix: 'Declare the package once in the catalog of pnpm-workspace.yaml and use "catalog:" in every package.json that depends on it, then run pnpm i.',
+  doc: 'docs/security.md#依赖许可与原创性检查',
+}
+
 const NAMES = ['vitest', '@vitest/coverage-v8', 'typescript', 'vite', 'vue', 'element-plus']
 
 // pnpm 11 `why -r --json a b …` prints one top-level entry per resolved instance: [{ name, version, … }].

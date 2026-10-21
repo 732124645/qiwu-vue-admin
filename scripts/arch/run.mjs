@@ -1,12 +1,14 @@
 // Source guards ("源码守卫"): runs every other scripts/arch/*.mjs.
-// A check is a module whose default export is `(ctx) => string[] | Promise<string[]>` (violations).
-// New checks (scoped-access, action-log, …) are just new files here.
+// A check is a module whose default export is `(ctx) => string[] | Promise<string[]>` (violations) and
+// whose `help` export says how to fix them and which doc explains the rule (scripts/check-help.mjs); a
+// check without a valid help fails. New checks (scoped-access, action-log, …) are just new files here.
 // Usage: node scripts/arch/run.mjs [--root <dir>] [--only name1,name2] [--update-baseline]
 // (--update-baseline: a check with a per-file baseline lowers it to what it found, e.g. tenant-sql)
 import { globSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { parseArgs } from 'node:util'
+import { helpLines, helpProblems } from '../check-help.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const { values } = parseArgs({
@@ -45,13 +47,17 @@ let total = 0
 for (const name of names) {
   console.log(`arch: ${name}`)
   let violations
+  let hints = []
   try {
-    const { default: check } = await import(pathToFileURL(join(here, `${name}.mjs`)).href)
-    violations = await check(ctx)
+    const { default: check, help } = await import(pathToFileURL(join(here, `${name}.mjs`)).href)
+    const found = await check(ctx)
+    hints = helpLines(help, found)
+    violations = [...found, ...helpProblems(help).map((p) => `${name}: ${p}`)]
   } catch (e) {
     violations = [`check crashed: ${e.message}`]
   }
   for (const v of violations) console.error(`  x ${v}`)
+  for (const line of hints) console.error(line)
   total += violations.length
 }
 console.log(total ? `arch: ${total} violation(s)` : `arch: ${names.length} checks ok`)

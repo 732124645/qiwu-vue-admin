@@ -4,6 +4,12 @@
 // taking the template's time would run in an order nobody chose), and the migration class (and its
 // `name`, when set) ends with the file's timestamp. Use the real current time, seconds included, for a
 // new migration; never rename a released one (databases record its name).
+
+export const help = {
+  fix: 'Name the file <14-digit timestamp>-<kebab-name>.ts with the real current time (seconds included), end the class name (and its name =) with that timestamp, and never rename a released migration.',
+  doc: 'docs/new-project.md#7-项目自己的表迁移与模板升级',
+}
+
 const DIR = 'apps/server/src/db/migrations/'
 const FILE = /^(\d{14})-[a-z0-9][a-z0-9-]*\.ts$/
 const CLASS = /\bexport\s+class\s+([A-Za-z_$][\w$]*)/g

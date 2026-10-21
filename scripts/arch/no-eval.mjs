@@ -1,5 +1,11 @@
 // docs/design-notes.md#security: no dynamic code execution in app/package sources (oxlint no-eval is the first line;
 // this also catches `Function('…')` and the `vm` module). Member calls like `redis.eval(` (Lua) are allowed.
+
+export const help = {
+  fix: 'Remove the dynamic code execution: parse data with JSON.parse or a lookup table of functions written in code instead of eval, new Function or the vm module.',
+  doc: 'docs/design-notes.md#security',
+}
+
 const BAD = [
   [/(^|[^.\w$])eval\s*\(/, 'eval('],
   [/\bnew\s+Function\b/, 'new Function('],
