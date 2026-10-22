@@ -9,6 +9,7 @@ import { toastRest } from '@/core/composables/use-crud'
 import type { QwColumn } from '@/core/composables/use-table-prefs'
 import { usePerm } from '@/core/permission'
 import { useAuthStore } from '@/core/stores/auth'
+import { toolTitle, toolPermission, toolDescription } from '../tool-presentation'
 import { useList } from './use-list'
 
 /**
@@ -23,11 +24,15 @@ const auth = useAuthStore()
 const canModify = computed(() => auth.platformRoot && perm.has(agentPerms.setting.modify))
 const { rows, loading, refresh } = useList(agentToolApi.list)
 const columns: QwColumn[] = [
-  { prop: 'name', label: 'agent.admin.tool.name', width: 220, showOverflowTooltip: true },
-  { prop: 'title', label: 'agent.admin.tool.title', minWidth: 160, showOverflowTooltip: true },
+  { prop: 'name', label: 'agent.admin.tool.name', minWidth: 240 },
+  {
+    prop: 'description',
+    label: 'agent.admin.tool.description',
+    minWidth: 220,
+  },
   { prop: 'kind', label: 'agent.admin.tool.kind', width: 90 },
   { prop: 'source', label: 'agent.admin.tool.source', width: 90 },
-  { prop: 'perm', label: 'agent.admin.tool.perm', width: 200, showOverflowTooltip: true },
+  { prop: 'perm', label: 'agent.admin.tool.perm', width: 180 },
   { prop: 'policy', label: 'agent.admin.tool.policy', width: 150 },
   { prop: 'enabled', label: 'agent.admin.tool.enabled', width: 90 },
 ]
@@ -78,8 +83,12 @@ async function setEnabled(row: AgentToolVo, enabled: boolean) {
       row-key="name"
     >
       <template #cell-name="{ row }">
-        <code class="tool-tab__mono">{{ row.name }}</code>
+        <strong>{{ toolTitle(row.name, row.title) }}</strong>
+        <div class="tool-tab__muted tool-tab__mono">{{ row.name }}</div>
       </template>
+      <template #cell-description="{ row }">{{
+        toolDescription(row.name, t('agent.tools.unknownDescription'))
+      }}</template>
       <template #cell-kind="{ row }">
         <el-tag size="small" :type="row.kind === 'write' ? 'warning' : 'info'" disable-transitions>
           {{ t(`agent.admin.tool.kinds.${row.kind}`) }}
@@ -87,7 +96,7 @@ async function setEnabled(row: AgentToolVo, enabled: boolean) {
       </template>
       <template #cell-source="{ row }">{{ t(`agent.admin.tool.sources.${row.source}`) }}</template>
       <template #cell-perm="{ row }">
-        <code v-if="row.perm" class="tool-tab__mono">{{ row.perm }}</code>
+        <span v-if="row.perm" :title="row.perm">{{ toolPermission(row.perm) }}</span>
         <span v-else class="tool-tab__muted">{{ t('agent.admin.tool.anyUser') }}</span>
       </template>
       <template #cell-policy="{ row }">
@@ -117,6 +126,9 @@ async function setEnabled(row: AgentToolVo, enabled: boolean) {
           :aria-label="t('agent.admin.tool.enabledToggle', { name: row.name })"
           @change="setEnabled(row, $event as boolean)"
         />
+        <el-tag v-else size="small" :type="row.enabled ? 'success' : 'info'" disable-transitions>
+          {{ t(row.enabled ? 'agent.admin.on' : 'agent.admin.off') }}
+        </el-tag>
       </template>
       <template #actions="{ row }">
         <el-button

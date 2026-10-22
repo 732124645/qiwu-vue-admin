@@ -1,20 +1,23 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, shallowRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   AGENT_REASONING,
   AGENT_SKILL_BODY_MAX,
   type AgentOptionsVo,
+  type McpToolVo,
   type AgentProfileSave,
   agentProfileSave,
 } from '@qiwu/shared'
+import { myToolApi } from '@/api/platform/mcp'
+import { toolTitle } from '../tool-presentation'
 import { agentProfileApi } from '@/api/platform/agent-memory'
 import { useCrudForm } from '@/core/composables/use-crud'
 
 /**
  * 配置方案的新增 / 编辑表单（`openDialog(ProfileForm, { id, canTenant, options })`）：范围（新增时；全租户
  * 共用要 `agent.skill.modify`，由 `canTenant` 决定）、名称、模型（空为平台默认）、推理强度、审批模式（只列
- * 平台此刻提供的）、允许的工具（每行一个，空为不限）、额外说明、是否默认。
+ * 平台此刻提供的）、允许的工具（多选，空为不限）、额外说明、是否默认。
  */
 defineOptions({ name: 'AgentProfileForm' })
 const {
@@ -58,16 +61,26 @@ const reasoningModel = computed(
       .find((p) => p.id === model.providerId)
       ?.models.find((m) => m.id === model.model)?.reasoning ?? false,
 )
-/** 工具清单在文本框里每行一个；全空为不限（null）。 */
-const toolsText = computed({
-  get: () => (model.tools ?? []).join('\n'),
-  set: (v: string) => {
-    const names = v
-      .split(/[\n,]+/)
-      .map((s) => s.trim())
-      .filter(Boolean)
-    model.tools = names.length ? names : null
-  },
+const tools = shallowRef<McpToolVo[]>([])
+const toolsFailed = ref(false)
+// 只请求本人的工具清单；载入失败或工具已移除时保留旧选择，不扩大权限接口。
+void myToolApi.list({ silent: true }).then(
+  (list) => (tools.value = list),
+  () => (toolsFailed.value = true),
+)
+const selectedTools = computed({
+  get: () => model.tools ?? [],
+  set: (names: string[]) => (model.tools = names.length ? names : null),
+})
+const toolOptions = computed(() => {
+  const known = tools.value.map((tool) => ({ name: tool.name, title: tool.title }))
+  const names = new Set(known.map((tool) => tool.name))
+  return [
+    ...known,
+    ...(model.tools ?? [])
+      .filter((name) => !names.has(name))
+      .map((name) => ({ name, title: name })),
+  ]
 })
 const instructions = computed({
   get: () => model.instructions ?? '',
@@ -76,7 +89,7 @@ const instructions = computed({
 </script>
 
 <template>
-  <el-form ref="formRef" v-loading="loading" :model="model" :rules="rules" label-position="left">
+  <el-form ref="formRef" v-loading="loading" :model="model" :rules="rules" label-position="top">
     <el-form-item v-if="id == null" :label="t('field.agent.profile.scope')" prop="scope">
       <el-radio-group v-model="model.scope">
         <el-radio value="user">{{ t('agent.admin.scope.user') }}</el-radio>
@@ -130,11 +143,29 @@ const instructions = computed({
       </el-select>
     </el-form-item>
     <el-form-item :label="t('field.agent.profile.tools')" prop="tools">
-      <el-input
-        v-model="toolsText"
-        type="textarea"
-        :rows="3"
+      <el-select
+        v-model="selectedTools"
+        multiple
+        filterable
+        allow-create
+        default-first-option
+        collapse-tags
+        collapse-tags-tooltip
+        :aria-label="t('field.agent.profile.tools')"
         :placeholder="t('agent.profile.toolsAll')"
+      >
+        <el-option
+          v-for="tool in toolOptions"
+          :key="tool.name"
+          :value="tool.name"
+          :label="toolTitle(tool.name, tool.title)"
+        />
+      </el-select>
+      <el-alert
+        v-if="toolsFailed"
+        type="warning"
+        :closable="false"
+        :title="t('agent.profile.toolsLoadFailed')"
       />
       <p class="agent-profile-form__hint">{{ t('agent.profile.toolsHint') }}</p>
     </el-form-item>

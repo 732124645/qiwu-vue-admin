@@ -97,7 +97,7 @@ describe('items', () => {
     expect(user!.find('button[aria-label="Fork a new conversation from here"]').exists()).toBe(true)
 
     expect(tool!.find('details').exists()).toBe(true)
-    expect(tool!.find('summary').text()).toContain('Web search')
+    expect(tool!.find('summary').text()).toContain('Search the web')
     expect(tool!.find('summary').text()).toContain('External content')
     expect(tool!.find('summary').text()).toContain('Done')
     expect(tool!.text()).toContain('"q": "Acme"')
@@ -154,7 +154,7 @@ describe('items', () => {
       }),
     ])
     w = mount(ChatItem, { props: { row: row! }, global })
-    expect(w.find('summary').text()).toContain('demo.customer.get')
+    expect(w.find('summary').text()).toContain('Read a customer')
     expect(w.find('summary').text()).toContain('Running')
     expect(w.text()).not.toContain('External content')
   })
@@ -376,7 +376,7 @@ describe('approval card', () => {
       },
       global,
     })
-    expect(w.find('.el-alert').text()).toContain('demo.customer.modify')
+    expect(w.find('.el-alert').text()).toContain('Sample customers · Edit')
     expect(button('Approve')).toBeUndefined()
     w.unmount()
     w = mount(ApprovalCard, { props: { item: approval(), readonly: true }, global })

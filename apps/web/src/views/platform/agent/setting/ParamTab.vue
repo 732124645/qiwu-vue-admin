@@ -58,7 +58,7 @@ async function setPaused(paused: boolean) {
 <template>
   <div v-loading="loading" class="param-tab">
     <p v-if="!isRoot" class="param-tab__hint">{{ t('agent.admin.rootOnly') }}</p>
-    <el-form label-position="left" @submit.prevent>
+    <el-form label-position="top" @submit.prevent>
       <el-form-item :label="t('agent.admin.param.paused')">
         <el-switch
           class="param-tab__paused"
@@ -105,7 +105,7 @@ async function setPaused(paused: boolean) {
     </el-button>
 
     <h3 class="param-tab__title">{{ t('agent.admin.param.limits') }}</h3>
-    <el-form label-position="left" class="param-tab__limits" @submit.prevent>
+    <el-form label-position="top" class="param-tab__limits" @submit.prevent>
       <el-form-item
         v-for="[name, key] in LIMITS"
         :key="key"
@@ -137,6 +137,11 @@ async function setPaused(paused: boolean) {
 <style scoped>
 .param-tab {
   max-width: 760px;
+}
+.param-tab__limits {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  column-gap: 24px;
 }
 .param-tab__title {
   margin: 24px 0 4px;

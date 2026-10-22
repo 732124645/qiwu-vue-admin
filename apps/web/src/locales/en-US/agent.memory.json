@@ -8,8 +8,9 @@
       "none": "No profile",
       "default": "Default",
       "toolsAll": "Any",
-      "toolsHint": "One tool name per line, empty for any; read-only built-in tools always stay, write tools (\"Remember\" too) must be listed.",
-      "modelDefault": "Platform default model"
+      "toolsHint": "Leave empty to allow all tools. Select your available system tools or enter another tool identifier. Existing selections are preserved.",
+      "modelDefault": "Platform default model",
+      "toolsLoadFailed": "Could not load tools. Existing selections are preserved; close and retry."
     },
     "memory": {
       "title": "My memories",

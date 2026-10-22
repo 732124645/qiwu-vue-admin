@@ -39,7 +39,7 @@ const { model, formRef, rules, loading, submitting, submit } = useCrudForm({
 </script>
 
 <template>
-  <el-form ref="formRef" v-loading="loading" :model="model" :rules="rules" label-position="left">
+  <el-form ref="formRef" v-loading="loading" :model="model" :rules="rules" label-position="top">
     <el-form-item v-if="!platform && id == null" :label="t('field.agent.skill.scope')" prop="scope">
       <el-radio-group v-model="model.scope">
         <el-radio value="user">{{ t('agent.admin.scope.user') }}</el-radio>
@@ -94,7 +94,7 @@ const { model, formRef, rules, loading, submitting, submit } = useCrudForm({
 <style scoped>
 .skill-form__body {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
   width: 100%;
 }
@@ -118,5 +118,10 @@ const { model, formRef, rules, loading, submitting, submit } = useCrudForm({
   color: var(--qw-text);
   white-space: pre-wrap;
   word-break: break-word;
+}
+@media (max-width: 640px) {
+  .skill-form__body {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 </style>

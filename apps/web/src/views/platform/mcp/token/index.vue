@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { toolTitle } from '../../agent/tool-presentation'
 import { ACCESS_TOKEN_STATES, mcpPerms, type AccessTokenAdminVo } from '@qiwu/shared'
 import { mcpTokenApi, tokenState } from '@/api/platform/mcp'
 import DictTag from '@/core/components/DictTag.vue'
@@ -110,7 +111,11 @@ async function revoke(row: AccessTokenAdminVo) {
           <code class="mcp-token__mono">…{{ row.tokenHint }}</code>
         </template>
         <template #cell-tools="{ row }">
-          {{ row.tools ? row.tools.join(', ') : t('mcp.token.allTools') }}
+          {{
+            row.tools
+              ? row.tools.map((name: string) => toolTitle(name)).join(', ')
+              : t('mcp.token.allTools')
+          }}
         </template>
         <template #cell-allowWrite="{ row }">
           <DictTag code="core.yes_no" :value="row.allowWrite" />

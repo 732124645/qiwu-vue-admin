@@ -20,7 +20,7 @@ import { useList } from './use-list'
  * 同步按钮重新连接并列出其工具，“工具”打开逐个启用与设策略的对话框。只有 root 能改，其他人只读。
  */
 defineOptions({ name: 'AgentMcpTab' })
-const { t } = useI18n()
+const { t, te } = useI18n()
 const perm = usePerm()
 const modify = agentPerms.setting.modify
 const auth = useAuthStore()
@@ -36,6 +36,13 @@ const columns: QwColumn[] = [
 ]
 /** 正在同步的服务器 id：同步按钮加载并禁用 */
 const syncing = ref<number>()
+/** 已知连接失败原因按页面语言显示，未知服务端错误保留原文。 */
+function reasonText(code: string) {
+  const http = /^http_(\d{3})$/.exec(code)
+  if (http) return t('agent.admin.diag.reason.http', { status: http[1] })
+  const key = `agent.admin.diag.reason.${code}`
+  return te(key) ? t(key) : code
+}
 
 /** 新增（无 id）或编辑服务器，保存后重新载入。 */
 async function openForm(id?: number) {
@@ -107,7 +114,7 @@ async function openTools(row: AgentMcpServerVo) {
           {{ t('agent.admin.mcp.toolCount', { n: row.tools.length }) }}
         </span>
         <span v-if="row.lastError" class="mcp-tab__error" :title="row.lastError">
-          {{ row.lastError }}
+          {{ reasonText(row.lastError) }}
         </span>
       </template>
       <template #cell-syncedAt="{ row }">

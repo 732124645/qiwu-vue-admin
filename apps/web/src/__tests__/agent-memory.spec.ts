@@ -1,6 +1,6 @@
 // Profiles and memories on the chat page: "My memories" lists the own entries with their source, adds one and
-// forgets everything only after the current password is entered; the profile form sends the tool list one
-// name per line (empty: any tool); the header bar picks the default profile for a new chat and brings its
+// forgets everything only after the current password is entered; the profile form sends selected tool identifiers
+// (empty: any tool); the header bar picks the default profile for a new chat and brings its
 // settings into the composer, "no profile" clears it, and an open chat switches its memory on and off (not
 // shown for temporary chats).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -122,14 +122,21 @@ describe('my memories', () => {
 })
 
 describe('profiles', () => {
-  it('sends the tool list one name per line, empty for any tool', async () => {
+  it('sends selected tool identifiers, empty for any tool', async () => {
     const calls = mockApi({
       'POST /agent/profiles': [201, { code: 0, msg: 'ok', data: profile({ id: 4 }) }],
+      'GET /mcp/my-tools': ok([
+        { name: 'demo.customer.get', title: 'Read a customer' },
+        { name: 'demo.customer.search', title: 'Search customers' },
+      ]),
     })
     await show(ProfileForm)
     await w.find('input[maxlength="64"]').setValue('Readers')
-    const [tools] = w.findAll('textarea')
-    await tools!.setValue('demo.customer.get\n\n demo.customer.search ')
+    const tools = w
+      .findAllComponents({ name: 'ElSelect' })
+      .find((select) => select.props('multiple') === true)!
+    tools.vm.$emit('update:modelValue', ['demo.customer.get', 'demo.customer.search'])
+    await flushPromises()
     await button(t('crud.action.save'))!.trigger('click')
     await flushPromises()
     expect(sent(calls, 'post', '/agent/profiles')[0]).toMatchObject({
@@ -141,10 +148,48 @@ describe('profiles', () => {
       tools: ['demo.customer.get', 'demo.customer.search'],
       instructions: null,
     })
-    await tools!.setValue('  ')
+    tools.vm.$emit('update:modelValue', [])
+    await flushPromises()
     await button(t('crud.action.save'))!.trigger('click')
     await flushPromises()
     expect(sent(calls, 'post', '/agent/profiles')[1]).toMatchObject({ tools: null })
+  })
+
+  it('allows other tool identifiers for a new profile without an administration request', async () => {
+    const calls = mockApi({
+      'GET /mcp/my-tools': ok([]),
+      'POST /agent/profiles': [201, { code: 0, msg: 'ok', data: profile({ id: 4 }) }],
+    })
+    await show(ProfileForm)
+    await w.find('input[maxlength="64"]').setValue('Custom tools')
+    const tools = w
+      .findAllComponents({ name: 'ElSelect' })
+      .find((select) => select.props('multiple') === true)!
+    expect(tools.props('allowCreate')).toBe(true)
+    expect(tools.props('defaultFirstOption')).toBe(true)
+    tools.vm.$emit('update:modelValue', ['plan.update', 'ext.crm.lookup'])
+    await flushPromises()
+    await button(t('crud.action.save'))!.trigger('click')
+    await flushPromises()
+    expect(sent(calls, 'post', '/agent/profiles')[0]).toMatchObject({
+      tools: ['plan.update', 'ext.crm.lookup'],
+    })
+    expect(calls.some((call) => call.url === '/agent/tools')).toBe(false)
+  })
+
+  it('preserves existing unavailable tools when the personal tool list fails', async () => {
+    const calls = mockApi({
+      'GET /agent/profiles': ok([profile({ tools: ['ext.crm.lookup', 'plan.update'] })]),
+      'GET /mcp/my-tools': [503, { code: 1, msg: 'unavailable', data: null }],
+      'PUT /agent/profiles/1': ok(profile({})),
+    })
+    await show(ProfileForm, { id: 1 })
+    expect(w.text()).toContain(t('agent.profile.toolsLoadFailed'))
+    await button(t('crud.action.save'))!.trigger('click')
+    await flushPromises()
+    expect(sent(calls, 'put', '/agent/profiles/1')[0]).toMatchObject({
+      tools: ['ext.crm.lookup', 'plan.update'],
+    })
   })
 
   it('picks the default profile for a new chat and brings its settings; no profile clears it', async () => {

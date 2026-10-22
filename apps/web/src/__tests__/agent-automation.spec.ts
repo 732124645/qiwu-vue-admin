@@ -108,7 +108,7 @@ describe('automation list', () => {
     await show(AutomationPage)
     const text = w.text()
     expect(text).toContain(`${t('agent.automation.preset.daily9')} (Asia/Shanghai)`)
-    expect(text).toContain('demo.customer · create')
+    expect(text).toContain('Sample customers · Add')
     expect(text).toContain(t('agent.automation.sharedTag'))
     expect(text).toContain('alice')
     // one row of actions: the shared row of another owner has none
@@ -237,7 +237,7 @@ describe('automation form', () => {
       'PUT /agent/automations/5': ok(saved),
     })
     await show(AutomationForm, { id: 5 })
-    expect(w.text()).toContain('Update a customer')
+    expect(w.text()).toContain('Fill in customer details')
     expect(w.find('input[name="currentPassword"]').exists()).toBe(false)
     // tick the second tool: the password field shows up and is sent
     const boxes = w.findAll('.el-checkbox-group .el-checkbox input')

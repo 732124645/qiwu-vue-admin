@@ -38,7 +38,7 @@ const { model, row, formRef, rules, loading, submitting, submit } = useCrudForm(
 </script>
 
 <template>
-  <el-form ref="formRef" v-loading="loading" :model="model" :rules="rules" label-position="left">
+  <el-form ref="formRef" v-loading="loading" :model="model" :rules="rules" label-position="top">
     <el-form-item :label="t('field.agent.search.kind')" prop="kind">
       <el-radio-group v-model="model.kind">
         <el-radio v-for="k in AGENT_SEARCH_KINDS" :key="k" :value="k">

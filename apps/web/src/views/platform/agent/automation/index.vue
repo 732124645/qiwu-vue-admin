@@ -25,7 +25,7 @@ import RunHistory from './RunHistory.vue'
  * 进收件箱，运行历史里可以打开隐藏会话查看。
  */
 defineOptions({ name: 'AgentAutomation' })
-const { t } = useI18n()
+const { t, te } = useI18n()
 const perm = usePerm()
 const canShare = computed(() => perm.has(agentAutomationPerms.share))
 const columns: QwColumn[] = [
@@ -47,7 +47,11 @@ function triggerText(row: AgentAutomationVo): string {
     const when = p ? t(`agent.automation.preset.${p.id}`) : (row.cron ?? '')
     return `${when} (${row.timezone ?? ''})`
   }
-  if (row.trigger === 'event' && row.event) return `${row.event.domain} · ${row.event.verb}`
+  if (row.trigger === 'event' && row.event) {
+    const domain = `menu.${row.event.domain}`
+    const verb = `menu.action.${row.event.verb}`
+    return `${te(domain) ? t(domain) : row.event.domain} · ${te(verb) ? t(verb) : row.event.verb}`
+  }
   return t('agent.automation.trigger.manual')
 }
 const time = (v: string | null) => (v ? dayjs(v).format('YYYY-MM-DD HH:mm') : '-')
@@ -194,8 +198,10 @@ const remove = (row: AgentAutomationVo) => confirmRemove(() => agentAutomationAp
 
 <style scoped>
 .automation__hint {
-  margin: 0 0 12px;
+  padding: 16px 16px 0;
+  margin: 0;
   font-size: 12px;
+  line-height: 1.6;
   color: var(--qw-text-3);
 }
 </style>

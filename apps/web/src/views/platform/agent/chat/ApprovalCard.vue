@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { toolTitle, toolPermission } from '../tool-presentation'
 import dayjs from 'dayjs'
 import type { AgentApprovalDecide, AgentItemVo } from '@qiwu/shared'
 import { agentApi } from '@/api/platform/agent'
@@ -102,7 +103,7 @@ function onKey(e: KeyboardEvent) {
     </header>
     <dl class="agent-card__fields">
       <dt>{{ t('agent.chat.approval.tool') }}</dt>
-      <dd>{{ item.payload.title || item.payload.tool }}</dd>
+      <dd>{{ toolTitle(item.payload.tool, item.payload.title) }}</dd>
       <template v-if="item.payload.changes">
         <dt>{{ t('agent.chat.approval.target') }}</dt>
         <dd>{{ item.payload.changes.target }}</dd>
@@ -157,7 +158,11 @@ function onKey(e: KeyboardEvent) {
       type="warning"
       :closable="false"
       show-icon
-      :title="t(`agent.chat.approval.blocked.${blocked.reason}`, { perm: blocked.perm ?? '' })"
+      :title="
+        t(`agent.chat.approval.blocked.${blocked.reason}`, {
+          perm: blocked.perm ? toolPermission(blocked.perm) : '',
+        })
+      "
     />
     <template v-else-if="open">
       <el-input

@@ -53,7 +53,7 @@ const { model, row, formRef, rules, loading, submitting, submit } = useCrudForm(
 </script>
 
 <template>
-  <el-form ref="formRef" v-loading="loading" :model="model" :rules="rules" label-position="left">
+  <el-form ref="formRef" v-loading="loading" :model="model" :rules="rules" label-position="top">
     <el-form-item :label="t('field.agent.mcpServer.name')" prop="name">
       <el-input v-model="model.name" maxlength="64" />
     </el-form-item>

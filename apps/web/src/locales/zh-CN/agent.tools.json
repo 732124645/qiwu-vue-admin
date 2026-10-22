@@ -1,0 +1,75 @@
+{
+  "agent": {
+    "tools": {
+      "iam_me_get": {
+        "title": "我的账户信息",
+        "description": "读取当前登录用户的基本信息。"
+      },
+      "iam_user_search": {
+        "title": "查询用户",
+        "description": "按关键词查询权限范围内的用户。"
+      },
+      "cfg_dict_options": {
+        "title": "查询字典选项",
+        "description": "读取指定字典的可用选项。"
+      },
+      "demo_customer_search": {
+        "title": "查询客户",
+        "description": "查找权限范围内的示例客户。"
+      },
+      "demo_customer_get": {
+        "title": "查看客户详情",
+        "description": "读取一个可访问客户的详细信息。"
+      },
+      "demo_customer_update": {
+        "title": "补充客户资料",
+        "description": "更新可访问客户的资料，执行前按审批策略确认。"
+      },
+      "demo_book_create": {
+        "title": "新建图书",
+        "description": "创建示例图书，执行前按审批策略确认。"
+      },
+      "web_search": {
+        "title": "搜索网页",
+        "description": "通过已配置的搜索服务查找公开网页信息。"
+      },
+      "web_fetch": {
+        "title": "阅读网页",
+        "description": "读取允许访问的网页正文。"
+      },
+      "plan_update": {
+        "title": "更新计划",
+        "description": "展示并更新当前任务的步骤与进度。"
+      },
+      "ask_user": {
+        "title": "向我提问",
+        "description": "在需要补充信息或选择时向你提问。"
+      },
+      "skill_load": {
+        "title": "加载技能",
+        "description": "读取已配置技能的操作说明。"
+      },
+      "memory_save": {
+        "title": "保存记忆",
+        "description": "按你的要求保存个人记忆。"
+      },
+      "agent_delegate": {
+        "title": "分配子任务",
+        "description": "把只读子任务分给子智能体处理并汇总。"
+      },
+      "chart_render": {
+        "title": "生成图表",
+        "description": "将数据展示为受支持的图表或表格。"
+      },
+      "report_write": {
+        "title": "撰写报告",
+        "description": "整理内容和来源，生成可导出的报告。"
+      },
+      "image_generate": {
+        "title": "生成图片",
+        "description": "使用已配置的图片模型生成图片并保存到文件存储。"
+      },
+      "unknownDescription": "暂无用途说明"
+    }
+  }
+}

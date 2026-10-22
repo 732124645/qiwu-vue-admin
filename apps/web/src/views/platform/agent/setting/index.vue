@@ -35,7 +35,7 @@ const tabs = computed(() =>
 <template>
   <div class="qw-page">
     <el-card class="qw-table-panel">
-      <el-tabs v-model="tab">
+      <el-tabs v-model="tab" class="agent-setting-tabs">
         <el-tab-pane
           v-for="[name, component] in tabs"
           :key="name"
@@ -56,5 +56,24 @@ const tabs = computed(() =>
   margin: 0 0 12px;
   font-size: 12px;
   color: var(--qw-text-3);
+}
+</style>
+
+<style scoped>
+.agent-setting-tabs :deep(.el-tabs__header) {
+  padding: 0 16px;
+  margin: 0;
+}
+.agent-setting-tabs :deep(.param-tab),
+.agent-setting-tabs :deep(.agent-diag) {
+  padding: 16px;
+}
+.agent-setting-tabs :deep(.search-tab__web) {
+  padding: 16px 16px 0;
+}
+.agent-setting-tabs :deep(.agent-setting__hint),
+.agent-setting-tabs :deep(.skill-list__hint) {
+  padding: 16px 16px 0;
+  margin-bottom: 0;
 }
 </style>

@@ -10,6 +10,7 @@ import {
   type McpToolVo,
 } from '@qiwu/shared'
 import { myTokenApi, myToolApi } from '@/api/platform/mcp'
+import { toolTitle } from '../platform/agent/tool-presentation'
 import { toastRest } from '@/core/composables/use-crud'
 import { revalidateOnLocale, zodRules } from '@/core/form/zod-rules'
 
@@ -123,7 +124,7 @@ async function submit() {
           <el-option
             v-for="x in tools"
             :key="x.name"
-            :label="`${x.title} (${x.name})`"
+            :label="toolTitle(x.name, x.title)"
             :value="x.name"
             :disabled="x.kind === 'write' && !model.allowWrite"
           />

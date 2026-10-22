@@ -22,7 +22,7 @@ const { model, formRef, rules, loading, submitting, submit } = useCrudForm({
 </script>
 
 <template>
-  <el-form ref="formRef" v-loading="loading" :model="model" :rules="rules" label-position="left">
+  <el-form ref="formRef" v-loading="loading" :model="model" :rules="rules" label-position="top">
     <el-form-item v-if="id == null" :label="t('field.agent.prompt.scope')" prop="scope">
       <el-radio-group v-model="model.scope">
         <el-radio value="user">{{ t('agent.admin.scope.user') }}</el-radio>

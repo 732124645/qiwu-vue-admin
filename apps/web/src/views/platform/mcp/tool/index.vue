@@ -10,6 +10,7 @@ import { toastRest } from '@/core/composables/use-crud'
 import type { QwColumn } from '@/core/composables/use-table-prefs'
 import { Icon } from '@/core/icons'
 import { usePerm } from '@/core/permission'
+import { toolTitle, toolDescription, toolPermission } from '../../agent/tool-presentation'
 
 /**
  * 平台页“MCP 工具”：列出已注册的智能体工具（类型、所需权限、启用状态），有修改权限时可逐个停用；
@@ -21,16 +22,14 @@ const { t } = useI18n()
 const rows = shallowRef<McpToolVo[]>([])
 const loading = ref(false)
 const columns: QwColumn[] = [
-  { prop: 'name', label: 'mcp.tool.col.name', width: 200, showOverflowTooltip: true },
-  { prop: 'title', label: 'mcp.tool.col.title', width: 180, showOverflowTooltip: true },
+  { prop: 'name', label: 'mcp.tool.col.name', minWidth: 240 },
   { prop: 'kind', label: 'mcp.tool.col.kind', width: 100 },
-  { prop: 'perm', label: 'mcp.tool.col.perm', width: 200, showOverflowTooltip: true },
+  { prop: 'perm', label: 'mcp.tool.col.perm', width: 180 },
   { prop: 'enabled', label: 'mcp.tool.col.enabled', width: 100 },
   {
     prop: 'description',
     label: 'mcp.tool.col.description',
     minWidth: 240,
-    showOverflowTooltip: true,
   },
 ]
 const perm = usePerm()
@@ -109,8 +108,12 @@ async function copyEndpoint() {
         row-key="name"
       >
         <template #cell-name="{ row }">
-          <code class="mcp-tool__mono">{{ row.name }}</code>
+          <strong>{{ toolTitle(row.name, row.title) }}</strong>
+          <div class="mcp-tool__muted mcp-tool__mono">{{ row.name }}</div>
         </template>
+        <template #cell-description="{ row }">{{
+          toolDescription(row.name, row.description)
+        }}</template>
         <template #cell-kind="{ row }">
           <el-tag
             size="small"
@@ -121,7 +124,7 @@ async function copyEndpoint() {
           </el-tag>
         </template>
         <template #cell-perm="{ row }">
-          <code v-if="row.perm" class="mcp-tool__mono">{{ row.perm }}</code>
+          <span v-if="row.perm" :title="row.perm">{{ toolPermission(row.perm) }}</span>
           <span v-else class="mcp-tool__muted">{{ t('mcp.tool.anyUser') }}</span>
         </template>
         <template #cell-enabled="{ row }">

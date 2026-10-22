@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, shallowRef } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { toolTitle } from '../tool-presentation'
 import {
   AGENT_AUTOMATION_CRON_PRESETS,
   AGENT_MESSAGE_MAX,
@@ -103,14 +104,7 @@ const password = computed({
 </script>
 
 <template>
-  <el-form
-    ref="formRef"
-    v-loading="loading"
-    :model="model"
-    :rules="rules"
-    label-position="left"
-    label-width="120px"
-  >
+  <el-form ref="formRef" v-loading="loading" :model="model" :rules="rules" label-position="top">
     <el-form-item :label="t('field.agent.automation.name')" prop="name">
       <el-input v-model="model.name" maxlength="100" />
     </el-form-item>
@@ -211,9 +205,14 @@ const password = computed({
     </el-form-item>
     <template v-if="model.writeMode === 'pre_approved'">
       <el-form-item :label="t('field.agent.automation.preApproved')" prop="preApproved">
-        <el-checkbox-group v-if="tools.length" v-model="model.preApproved">
+        <el-checkbox-group
+          class="automation-form__tools"
+          v-if="tools.length"
+          v-model="model.preApproved"
+        >
           <el-checkbox v-for="tool in tools" :key="tool.name" :value="tool.name">
-            {{ tool.title }} <code class="automation-form__mono">{{ tool.name }}</code>
+            {{ toolTitle(tool.name, tool.title) }}
+            <code class="automation-form__mono">{{ tool.name }}</code>
             <el-tag v-if="stale.has(tool.name)" size="small" type="warning" disable-transitions>
               {{ t('agent.automation.stale') }}
             </el-tag>
@@ -265,6 +264,19 @@ const password = computed({
 </template>
 
 <style scoped>
+.automation-form__tools {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+}
+.automation-form__tools :deep(.el-checkbox) {
+  height: auto;
+  min-height: 32px;
+  margin-right: 0;
+  white-space: normal;
+}
+
 .automation-form__hint {
   width: 100%;
   margin-top: 4px;

@@ -17,8 +17,8 @@ const tab = ref<'skills' | 'prompts' | 'instructions'>('skills')
 <template>
   <div class="qw-page">
     <el-card class="qw-table-panel">
-      <el-tabs v-model="tab">
-        <el-tab-pane name="skills" :label="t('agent.admin.tab.skills')" lazy>
+      <el-tabs v-model="tab" class="agent-skill-tabs">
+        <el-tab-pane name="skills" :label="t('agent.admin.skill.entity')" lazy>
           <SkillList />
         </el-tab-pane>
         <el-tab-pane name="prompts" :label="t('agent.admin.tab.prompts')" lazy>
@@ -31,3 +31,13 @@ const tab = ref<'skills' | 'prompts' | 'instructions'>('skills')
     </el-card>
   </div>
 </template>
+
+<style scoped>
+.agent-skill-tabs :deep(.el-tabs__header) {
+  padding: 0 16px;
+  margin: 0;
+}
+.agent-skill-tabs :deep(.instruction-panel) {
+  padding: 16px;
+}
+</style>

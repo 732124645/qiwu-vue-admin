@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { toolTitle } from '../tool-presentation'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { agentApi } from '@/api/platform/agent'
 import IconButton from '@/core/components/IconButton.vue'
@@ -121,7 +122,9 @@ async function rate(itemId: number, value: 1 | -1) {
   <details v-if="row.kind === 'tool'" class="agent-card agent-tool">
     <summary class="agent-tool__summary">
       <Icon icon="lucide:wrench" class="agent-tool__icon" />
-      <span class="agent-card__title">{{ row.call.payload.title || row.call.payload.tool }}</span>
+      <span class="agent-card__title">{{
+        toolTitle(row.call.payload.tool, row.call.payload.title)
+      }}</span>
       <el-tag v-if="row.result?.payload.untrusted" size="small" type="warning">
         {{ t('agent.chat.tool.external') }}
       </el-tag>

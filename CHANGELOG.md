@@ -4,6 +4,16 @@
 
 All notable product changes are recorded here in Keep a Changelog style. The initial release below summarizes the delivered features. Planned work is identified explicitly.
 
+## [1.9.1] - 2026-10-22
+
+### Fixed
+
+- MCP and assistant tools show localized names, purposes and permission labels, with stable protocol identifiers kept as secondary information. Known system tools have Chinese descriptions; external tools retain the provider's text.
+- Assistant configuration forms use aligned labels and responsive layouts. Profile tools can be selected from the user's available tools instead of requiring manually entered identifiers. Existing selections remain intact when tools cannot be loaded.
+- Tool policies, token scopes, approval cards and automation tool choices share readable tool names. Tool availability is shown for every source, and known connection failures have translated explanations.
+
+- Restored page tabs refresh their titles, icons and cache names from the currently authorized routes. Assistant tab headers and configuration content have consistent spacing, and the personal skills tab is labeled separately from platform skills.
+
 ## [1.9.0] - 2026-10-22
 
 ### Added

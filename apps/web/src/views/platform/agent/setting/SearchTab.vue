@@ -54,7 +54,7 @@ async function openForm(id?: number) {
 <template>
   <div>
     <section v-loading="paramsLoading" class="search-tab__web">
-      <el-form label-position="left" @submit.prevent>
+      <el-form label-position="top" @submit.prevent>
         <el-form-item :label="t('agent.admin.web.mode')">
           <el-radio-group
             :model-value="params[AGENT_WEB_MODE_PARAM]?.paramValue"

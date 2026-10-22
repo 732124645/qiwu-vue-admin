@@ -1,0 +1,75 @@
+{
+  "agent": {
+    "tools": {
+      "iam_me_get": {
+        "title": "Current user",
+        "description": "Read the current signed-in user’s basic information."
+      },
+      "iam_user_search": {
+        "title": "Search users",
+        "description": "Search users visible to the current user."
+      },
+      "cfg_dict_options": {
+        "title": "Dictionary options",
+        "description": "Read the available options of a dictionary."
+      },
+      "demo_customer_search": {
+        "title": "Search customers",
+        "description": "Find sample customers within the current user’s data scope."
+      },
+      "demo_customer_get": {
+        "title": "Read a customer",
+        "description": "Read details of an accessible sample customer."
+      },
+      "demo_customer_update": {
+        "title": "Fill in customer details",
+        "description": "Update an accessible customer, subject to the approval policy."
+      },
+      "demo_book_create": {
+        "title": "Create a book",
+        "description": "Create a sample book, subject to the approval policy."
+      },
+      "web_search": {
+        "title": "Search the web",
+        "description": "Search public web information with the configured search provider."
+      },
+      "web_fetch": {
+        "title": "Read a web page",
+        "description": "Read the contents of an allowed web page."
+      },
+      "plan_update": {
+        "title": "Update the plan",
+        "description": "Display and update the steps and progress of the current task."
+      },
+      "ask_user": {
+        "title": "Ask the user",
+        "description": "Ask for missing information or a choice."
+      },
+      "skill_load": {
+        "title": "Load a skill",
+        "description": "Read the instructions of a configured skill."
+      },
+      "memory_save": {
+        "title": "Remember",
+        "description": "Save personal memory at your request."
+      },
+      "agent_delegate": {
+        "title": "Delegate subtasks",
+        "description": "Delegate read-only subtasks and collect their results."
+      },
+      "chart_render": {
+        "title": "Show a chart",
+        "description": "Display data as a supported chart or table."
+      },
+      "report_write": {
+        "title": "Write a report",
+        "description": "Organize content and sources into an exportable report."
+      },
+      "image_generate": {
+        "title": "Generate an image",
+        "description": "Generate an image with a configured model and save it to file storage."
+      },
+      "unknownDescription": "No purpose description provided"
+    }
+  }
+}

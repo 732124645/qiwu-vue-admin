@@ -52,7 +52,7 @@ async function submit() {
 </script>
 
 <template>
-  <el-form ref="formRef" :model="model" :rules="rules" label-position="left">
+  <el-form ref="formRef" :model="model" :rules="rules" label-position="top">
     <el-form-item v-if="!platform" :label="t('field.agent.skill.scope')" prop="scope">
       <el-radio-group v-model="model.scope">
         <el-radio value="user">{{ t('agent.admin.scope.user') }}</el-radio>

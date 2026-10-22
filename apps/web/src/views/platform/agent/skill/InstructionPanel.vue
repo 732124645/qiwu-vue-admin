@@ -63,7 +63,7 @@ async function save(which: 'mine' | 'tenant') {
     <section class="instruction-panel__block">
       <h3 class="instruction-panel__title">{{ t('agent.admin.instruction.mine') }}</h3>
       <p class="instruction-panel__hint">{{ t('agent.admin.instruction.mineHint') }}</p>
-      <el-form label-position="left" @submit.prevent>
+      <el-form label-position="top" @submit.prevent>
         <el-form-item :label="t('field.agent.instruction.tone')">
           <el-select v-model="mine.tone" class="instruction-panel__tone">
             <el-option
@@ -121,7 +121,7 @@ async function save(which: 'mine' | 'tenant') {
 <style scoped>
 .instruction-panel {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
   gap: 24px;
 }
 .instruction-panel__title {

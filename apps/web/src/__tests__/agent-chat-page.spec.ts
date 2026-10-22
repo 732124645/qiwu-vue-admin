@@ -318,7 +318,7 @@ describe('conversation', () => {
     })
     await flushPromises()
     expect(w.find('.agent-msg--assistant').text()).toBe('Acme is a company.')
-    expect(w.find('summary').text()).toContain('Web search')
+    expect(w.find('summary').text()).toContain('Search the web')
     push({
       threadId: 7,
       type: 'item',

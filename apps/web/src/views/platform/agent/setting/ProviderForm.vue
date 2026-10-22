@@ -67,7 +67,7 @@ const modelColumns = [
 </script>
 
 <template>
-  <el-form ref="formRef" v-loading="loading" :model="model" :rules="rules" label-position="left">
+  <el-form ref="formRef" v-loading="loading" :model="model" :rules="rules" label-position="top">
     <el-form-item :label="t('field.agent.provider.name')" prop="name">
       <el-input v-model="model.name" maxlength="64" />
     </el-form-item>

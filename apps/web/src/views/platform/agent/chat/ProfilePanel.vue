@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { toolTitle } from '../tool-presentation'
 import { agentPerms, type AgentOptionsVo, type AgentProfileVo } from '@qiwu/shared'
 import { agentProfileApi } from '@/api/platform/agent-memory'
 import QwTable from '@/core/components/QwTable.vue'
@@ -92,7 +93,10 @@ const remove = (row: AgentProfileVo) =>
         t(`agent.chat.mode.${row.approvalMode}`)
       }}</template>
       <template #cell-tools="{ row }">
-        {{ row.tools?.join(', ') ?? t('agent.profile.toolsAll') }}
+        {{
+          row.tools?.map((name: string) => toolTitle(name)).join(', ') ??
+          t('agent.profile.toolsAll')
+        }}
       </template>
       <template #actions="{ row }">
         <template v-if="row.editable">
