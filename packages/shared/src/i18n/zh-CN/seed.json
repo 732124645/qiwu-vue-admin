@@ -113,6 +113,11 @@
   },
   "agentTemplate": {
     "turnWaiting": "智能助手：等待确认",
-    "turnCompleted": "智能助手：任务完成"
+    "turnCompleted": "智能助手：任务完成",
+    "automationResult": "智能助手：自动化结果",
+    "automationStopped": "智能助手：自动化已停用"
+  },
+  "agentSkill": {
+    "deepResearch": "深度研究：先列计划，再多来源检索与阅读，最后写成带引用、可导出的研究报告"
   }
 }

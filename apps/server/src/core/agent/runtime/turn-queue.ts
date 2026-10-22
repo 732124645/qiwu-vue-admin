@@ -1,8 +1,13 @@
-import { Injectable, Logger } from '@nestjs/common'
+import {
+  type BeforeApplicationShutdown,
+  Injectable,
+  Logger,
+  type OnModuleInit,
+} from '@nestjs/common'
 import { InjectDataSource } from '@nestjs/typeorm'
 import { AGENT_LIMIT_PARAMS, AGENT_PAUSED_PARAM } from '@qiwu/shared'
 import { DataSource, type EntityManager, In, IsNull, LessThan, Not } from 'typeorm'
-import { allTenants } from '../../context/tenant.js'
+import { allTenants, withTenant } from '../../context/tenant.js'
 import { RedisLock } from '../../guard/redis-lock.js'
 import { QueueService } from '../../queue/queue.service.js'
 import { redisKey } from '../../redis/cache-namespaces.js'
@@ -35,9 +40,11 @@ export const openCards = (turnId: number) => [
  * 按先后补上。
  */
 @Injectable()
-export class TurnQueue {
+export class TurnQueue implements OnModuleInit, BeforeApplicationShutdown {
   private readonly logger = new Logger(TurnQueue.name)
   private readonly released: ((userId: number) => Promise<void>)[] = []
+  /** 急停开关变动后的补名额，依次做（关闭时等最后一个做完） */
+  private refilling: Promise<void> = Promise.resolve()
 
   constructor(
     private readonly queues: QueueService,
@@ -46,6 +53,56 @@ export class TurnQueue {
     private readonly params: ParamService,
     private readonly lock: RedisLock,
   ) {}
+
+  /** 急停开关一变就看一眼：解除了就主动补名额（急停期间排队的消息与等名额的续跑不必等下一次让出名额）。 */
+  onModuleInit(): void {
+    this.params.onInvalidate((keys) => {
+      if (!keys.includes(AGENT_PAUSED_PARAM)) return
+      this.refilling = this.refilling
+        .then(() => this.refillAll())
+        .catch((e: unknown) => this.logger.error(e, 'agent turn slots not refilled after resume'))
+    })
+  }
+
+  async beforeApplicationShutdown(): Promise<void> {
+    await this.refilling
+  }
+
+  /**
+   * 急停解除后：各租户里有等名额的续跑（waiting 的轮次）或排队消息（还没开始的用户消息）的用户，逐个在其
+   * 租户里补名额（{@link fill}）。仍在急停时什么也不做。
+   */
+  async refillAll(): Promise<void> {
+    if (await this.paused()) return
+    // qw:cross-tenant lists only who has queued work per tenant; each user is refilled inside their own tenant
+    const users = await allTenants(async () => {
+      const waiting = await this.ds.getRepository(AgentTurn).find({
+        where: { status: 'waiting' },
+        select: { id: true, userId: true, tenantId: true },
+      })
+      const queued = await this.ds
+        .getRepository(AgentThread)
+        .createQueryBuilder('t')
+        .innerJoin(AgentItem, 'i', 'i.threadId = t.id')
+        .select(['t.id', 't.userId', 't.tenantId'])
+        .where("i.kind = 'user' AND i.status = 'pending' AND i.turnId IS NULL")
+        .getMany()
+      const out = new Map<string, { userId: number; tenantId: number }>()
+      for (const r of [...waiting, ...queued])
+        out.set(`${r.tenantId}:${r.userId}`, {
+          userId: Number(r.userId),
+          tenantId: Number(r.tenantId),
+        })
+      return [...out.values()]
+    })
+    for (const u of users)
+      try {
+        // qw:cross-tenant each user's slots are refilled in the tenant the user belongs to
+        await withTenant(u.tenantId, () => this.fill(u.userId))
+      } catch (e) {
+        this.logger.error(e, 'agent turn slots not refilled')
+      }
+  }
 
   /** 让一轮（开始或继续）跑起来；任务失败（多为另一个实例还握着这一轮）时稍后重试。 */
   async kick(turnId: number): Promise<void> {
@@ -89,13 +146,28 @@ export class TurnQueue {
 
   /**
    * 占着本人并发名额的轮次数：running 的，加上在一次工具调用里等外部服务器表单的 waiting（那个任务仍在
-   * 执行，调用标为 running）；等审批、等反问回答的不占名额。
+   * 执行，调用标为 running）；等审批、等反问回答的不占名额，子智能体的轮次也不占（父轮占着）。
    */
   async busy(userId: number, m: EntityManager = this.ds.manager): Promise<number> {
-    const turns = await m.getRepository(AgentTurn).find({
+    const active = await m.getRepository(AgentTurn).find({
       where: { userId, status: ACTIVE_TURN },
-      select: { id: true, status: true },
+      select: { id: true, status: true, threadId: true },
     })
+    // 子智能体的轮次不另占名额：它们在父轮的调用里推进，父轮已经占着一个
+    const children = active.length
+      ? new Set(
+          (
+            await m.getRepository(AgentThread).find({
+              where: {
+                id: In([...new Set(active.map((t) => Number(t.threadId)))]),
+                parentThreadId: Not(IsNull()),
+              },
+              select: { id: true },
+            })
+          ).map((t) => Number(t.id)),
+        )
+      : new Set<number>()
+    const turns = active.filter((t) => !children.has(Number(t.threadId)))
     const waiting = turns.filter((t) => t.status === 'waiting').map((t) => Number(t.id))
     const inCall = waiting.length
       ? await m.getRepository(AgentItem).find({
@@ -186,7 +258,7 @@ export class TurnQueue {
 
   /**
    * 补名额：先按先后续跑等名额的轮次（waiting、卡片都已处理、不在调用里），再开本人各会话里排队的消息，
-   * 直到名额用完。急停时什么也不做（急停解除后，下一次让出名额时再补）。
+   * 直到名额用完。急停时什么也不做（急停解除时由 {@link refillAll} 补上）。
    */
   async fill(userId: number): Promise<void> {
     if (await this.paused()) return

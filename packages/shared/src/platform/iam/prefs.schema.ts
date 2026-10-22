@@ -5,7 +5,9 @@ import { fieldDomains } from '../../validation/zod-i18n.js'
  * Per-user UI preferences (`iam_user_pref`), `/api/iam/profile/prefs/:key`: always the
  * signed-in user's own. Keys are dotted `<family>.<…>`; the only family is `table` (column settings of
  * a list page, `table.<domain>.<name>`), so the key regex admits nothing else (400). A second family
- * adds its prefix here and a key → value-schema check in the service.
+ * adds its prefix here and a key → value-schema check in the service. The key `agent.notify` (the agent's
+ * notification settings) is written by the agent through its own route; outside the regex, the profile
+ * routes can neither read nor write it.
  */
 
 /** `table.iam.position`: `table` + 2–4 lowercase kebab segments, ASCII ≤ 96 (the column size). */

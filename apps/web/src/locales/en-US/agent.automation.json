@@ -1,0 +1,89 @@
+{
+  "menu": {
+    "agent": {
+      "automation": "Automations"
+    },
+    "action": {
+      "share": "Share with the tenant"
+    }
+  },
+  "agent": {
+    "automation": {
+      "entity": "automation",
+      "hint": "Runs a skill or a prompt in the background as you, on a schedule, after a business action or by hand; results go to your inbox, and the run history opens each run's conversation.",
+      "lastRunAt": "Last run",
+      "nextRunAt": "Next run",
+      "owner": "Owner",
+      "sharedTag": "Shared",
+      "on": "On",
+      "off": "Off",
+      "runNow": "Run now",
+      "runs": "Runs",
+      "runsTitle": "Runs: {name}",
+      "started": "Started; see the run history for the result",
+      "openThread": "Open conversation",
+      "trigger": {
+        "schedule": "Schedule",
+        "event": "Business event",
+        "manual": "Manual"
+      },
+      "preset": {
+        "label": "Common schedules",
+        "every30m": "Every 30 minutes",
+        "hourly": "Every hour",
+        "daily9": "Daily at 9:00",
+        "weekdays9": "Weekdays at 9:00",
+        "monday9": "Mondays at 9:00",
+        "monthly1": "Monthly on the 1st at 9:00",
+        "custom": "Custom"
+      },
+      "cronHint": "5-field cron: minute hour day month weekday, at most every 5 minutes",
+      "eventHint": "Choose the action to listen to",
+      "writeMode": {
+        "read_only": "Read only",
+        "ask": "Ask",
+        "pre_approved": "Pre-approved",
+        "auto_review": "Auto review"
+      },
+      "writeModeHint": {
+        "read_only": "Read only: no write tools are offered.",
+        "ask": "Ask: a write stops and its approval card goes to your inbox; it goes on once you confirm it in the conversation.",
+        "pre_approved": "Pre-approved: the write tools ticked here run at once, other writes still wait for you; a change of permissions, a tool switched off or denied ends the approval.",
+        "auto_review": "Auto review: writes allowed for automatic review go to the review model, other writes wait for you."
+      },
+      "noTools": "You have no write tools to pre-approve right now",
+      "sharedHint": "Everyone in the tenant sees it; it runs as you and only you can change it.",
+      "notifyInbox": "Inbox",
+      "notifyMail": "Mail",
+      "status": {
+        "running": "Running",
+        "waiting": "Waiting",
+        "completed": "Completed",
+        "failed": "Failed",
+        "cancelled": "Cancelled",
+        "skipped": "Skipped"
+      },
+      "run": {
+        "status": "Status",
+        "trigger": "Trigger",
+        "startedAt": "Started",
+        "endedAt": "Ended",
+        "summary": "Result"
+      },
+      "error": {
+        "paused": "The assistant is paused by the platform",
+        "owner_inactive": "The owner was disabled or deleted",
+        "owner_forbidden": "The owner lacks the permissions to run it",
+        "daily_limit": "Today's runs are used up",
+        "not_configured": "No model is available",
+        "thread_gone": "The conversation was deleted",
+        "turn_failed": "The run failed",
+        "mode_unavailable": "The write mode is not available now",
+        "profile_missing": "The profile was gone; ran with the defaults",
+        "overlap": "Skipped: the previous run had not ended yet"
+      },
+      "stale": "No longer valid",
+      "staleHint": "Pre-approvals that no longer hold must be ticked again with the current password"
+    }
+  }
+}

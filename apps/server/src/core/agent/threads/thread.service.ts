@@ -1,8 +1,9 @@
 import { randomBytes } from 'node:crypto'
-import { Injectable, NotFoundException } from '@nestjs/common'
+import { Inject, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common'
 import { TransactionHost } from '@nestjs-cls/transactional'
 import type { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm'
 import {
+  AGENT2_PARAMS,
   AGENT_LIMIT_PARAMS,
   AGENT_TRUST_MODE_PARAM,
   type AgentFeedbackSave,
@@ -14,11 +15,12 @@ import {
   type AgentThreadQuery,
   type AgentThreadUpdate,
   type AgentThreadVo,
+  DEFAULT_LOCALE,
   Err,
   type Page,
 } from '@qiwu/shared'
 import { I18nService } from 'nestjs-i18n'
-import { In, LessThanOrEqual, MoreThan, type ObjectLiteral, type Repository } from 'typeorm'
+import { In, IsNull, LessThanOrEqual, MoreThan, type ObjectLiteral, type Repository } from 'typeorm'
 import type { Principal } from '../../auth/principal.js'
 import { clsGet } from '../../context/cls.js'
 import { contains, paginate } from '../../db/page.js'
@@ -26,14 +28,26 @@ import { BizError } from '../../http/biz-error.js'
 import { currentLocale } from '../../i18n/locale.js'
 import { ParamService } from '../../settings/param.service.js'
 import {
+  AGENT_IMAGE_STORE,
+  type AgentImageStore,
+  type AgentRunProfile,
+  PROFILE_SOURCE,
+  type ProfileSource,
+} from '../agent-ports.js'
+import {
   AgentFeedback,
   AgentItem,
   AgentThread,
   AgentTurn,
 } from '../entities/agent-thread.entity.js'
 import { AgentUsage } from '../entities/agent-usage.entity.js'
+import { REDIS, type Redis } from '../../redis/redis.module.js'
+import { copyMemoryMark } from '../memory/memory-extract.js'
 import { ProviderSettingsService } from '../provider/provider-settings.service.js'
-import { parseTrust } from '../runtime/turn-tools.js'
+import { AgentExtensions, runThread } from '../runtime/agent-extensions.js'
+import { parseReviewModel } from '../runtime/auto-reviewer.js'
+import { contextMessage } from '../runtime/turn-prompt.js'
+import { parseTrust, subagentCallOf } from '../runtime/turn-tools.js'
 import {
   fulltextTerms,
   itemVo,
@@ -87,7 +101,13 @@ export class AgentThreadService {
     private readonly providers: ProviderSettingsService,
     private readonly params: ParamService,
     private readonly i18n: I18nService,
+    private readonly ext: AgentExtensions,
+    @Inject(REDIS) private readonly redis: Redis,
+    @Optional() @Inject(PROFILE_SOURCE) private readonly profiles?: ProfileSource,
+    @Optional() @Inject(AGENT_IMAGE_STORE) private readonly images?: AgentImageStore,
   ) {}
+
+  private readonly logger = new Logger(AgentThreadService.name)
 
   private repo<E extends ObjectLiteral>(e: new () => E): Repository<E> {
     return this.txHost.tx.getRepository(e)
@@ -143,10 +163,20 @@ export class AgentThreadService {
     return reasoning
   }
 
-  /** “信任本会话”模式被平台参数关闭时不能选（400）。 */
-  private async assertMode(mode: AgentThread['approvalMode'] | undefined): Promise<void> {
-    if (mode !== 'trust') return
-    if (!trustModeOn(await this.params.get(AGENT_TRUST_MODE_PARAM)))
+  /**
+   * 平台此刻是否提供这个审批模式：“信任本会话”被平台参数关闭时不提供，“自动审查”在平台没有指定有效的
+   * 审查模型时不提供（与输入框选项里的判断相同）。
+   */
+  private async modeOffered(mode: AgentThread['approvalMode']): Promise<boolean> {
+    if (mode === 'trust') return trustModeOn(await this.params.get(AGENT_TRUST_MODE_PARAM))
+    if (mode === 'auto_review')
+      return !!parseReviewModel(await this.params.get(AGENT2_PARAMS.reviewModel))
+    return true
+  }
+
+  /** 新建与修改会话时选了平台此刻不提供的审批模式：400；自动化开隐藏会话与保存时也经它校验。 */
+  async assertMode(mode: AgentThread['approvalMode'] | undefined): Promise<void> {
+    if (mode !== undefined && !(await this.modeOffered(mode)))
       throw new BizError(Err.VALIDATION_FAILED)
   }
 
@@ -194,6 +224,8 @@ export class AgentThreadService {
       .addSelect('t.shareToken')
       .where('t.userId = :uid', { uid: p.userId })
       .andWhere('t.temporary = 0')
+      // 子智能体与自动化开的隐藏会话不进列表
+      .andWhere('t.parentThreadId IS NULL AND t.automationRunId IS NULL')
       .andWhere('t.status = :status', { status: q.status ?? 'active' })
     if (q.view === 'pinned') qb.andWhere('t.pinned = 1')
     if (q.view === 'active')
@@ -225,10 +257,54 @@ export class AgentThreadService {
     return { items: await this.extras(page.items), total: page.total }
   }
 
-  /** 新建会话：提供方与模型不给取默认；临时会话不进列表；页面上下文原样记下交给智能体。 */
+  /** 本人可用的一个配置方案；不存在、别人的个人方案、别的租户的一律 404。 */
+  private async profileOf(p: Principal, id: number): Promise<AgentRunProfile> {
+    const found = await this.profiles?.find(p, id)
+    if (!found) throw new NotFoundException()
+    return found
+  }
+
+  /**
+   * 新建会话时带入配置方案：给了 `profileId` 用它，null 为不用方案，不给用本人的默认方案。请求里给了的字段
+   * 优先（审批模式也是：只有请求没给时才取方案的），方案的审批模式平台此刻不允许（如关掉了“信任本会话”）
+   * 就退回 `ask`；方案的模型已停用时退回平台默认模型，推理强度只给支持它的模型。工具清单与额外说明在运行时
+   * 按方案生效。
+   */
+  private async withProfile(p: Principal, dto: AgentThreadCreate) {
+    const profile =
+      dto.profileId === null
+        ? null
+        : dto.profileId !== undefined
+          ? await this.profileOf(p, dto.profileId)
+          : ((await this.profiles?.defaultFor(p)) ?? null)
+    if (!profile)
+      return {
+        profile,
+        mode: dto.approvalMode ?? 'ask',
+        choice: await this.choose(dto.providerId, dto.model),
+        reasoning: dto.reasoning,
+      }
+    const mode =
+      dto.approvalMode ??
+      ((await this.modeOffered(profile.approvalMode)) ? profile.approvalMode : 'ask')
+    const own = dto.providerId !== undefined || dto.model !== undefined
+    const choice = own
+      ? await this.choose(dto.providerId, dto.model)
+      : await this.choose(profile.providerId ?? undefined, profile.model ?? undefined).catch(() =>
+          this.choose(),
+        )
+    const reasoning =
+      dto.reasoning ?? (choice?.model.reasoning ? (profile.reasoning ?? undefined) : undefined)
+    return { profile, mode, choice, reasoning }
+  }
+
+  /**
+   * 新建会话：提供方与模型不给取默认（或配置方案的，见 {@link withProfile}）；临时会话不进列表；页面上下文
+   * 原样记下交给智能体；记忆默认开。
+   */
   async create(p: Principal, dto: AgentThreadCreate): Promise<AgentThreadVo> {
-    await this.assertMode(dto.approvalMode)
-    const choice = await this.choose(dto.providerId, dto.model)
+    const { profile, mode, choice, reasoning } = await this.withProfile(p, dto)
+    await this.assertMode(mode)
     const row = await this.repo(AgentThread).save(
       this.repo(AgentThread).create({
         userId: p.userId,
@@ -236,9 +312,11 @@ export class AgentThreadService {
         status: 'active',
         providerId: choice?.providerId ?? null,
         model: choice?.model.id ?? null,
-        reasoning: this.reasoningFor(choice, dto.reasoning),
-        approvalMode: dto.approvalMode,
+        reasoning: this.reasoningFor(choice, reasoning),
+        approvalMode: mode,
         planMode: dto.planMode,
+        profileId: profile?.id ?? null,
+        memoryEnabled: dto.memoryEnabled,
         pinned: false,
         temporary: dto.temporary,
         readSeq: 0,
@@ -257,7 +335,8 @@ export class AgentThreadService {
 
   /**
    * 修改会话：改提供方或模型时对照启用的提供方校验（只改提供方取它的第一个模型）；推理强度只给支持的
-   * 模型，换成不支持的模型时清掉原值；从“信任本会话”换到别的模式时清掉已信任的工具与目标。
+   * 模型，换成不支持的模型时清掉原值；从“信任本会话”换到别的模式时清掉已信任的工具与目标；可逐会话关掉
+   * 记忆、换用或去掉配置方案（别人的方案 404）。
    */
   async update(p: Principal, id: number, dto: AgentThreadUpdate): Promise<AgentThreadVo> {
     return this.txHost.withTransaction(async () => {
@@ -272,6 +351,10 @@ export class AgentThreadService {
         set.trusted = null
       if (dto.planMode !== undefined) set.planMode = dto.planMode
       if (dto.pinned !== undefined) set.pinned = dto.pinned
+      if (dto.memoryEnabled !== undefined) set.memoryEnabled = dto.memoryEnabled
+      // 换配置方案只换工具清单与额外说明（运行时生效）；模型与模式照旧可单独改
+      if (dto.profileId !== undefined)
+        set.profileId = dto.profileId === null ? null : (await this.profileOf(p, dto.profileId)).id
       const modelChanged = dto.providerId !== undefined || dto.model !== undefined
       if (modelChanged || dto.reasoning) {
         const providerId = dto.providerId ?? row.providerId ?? undefined
@@ -295,16 +378,66 @@ export class AgentThreadService {
     })
   }
 
-  /** 删除会话：会话、它的轮次与条目一起软删（分享链接随之失效）。 */
+  /** 删除会话：会话、它的轮次与条目一起软删（分享链接随之失效），提交之后再删它生成的图片。 */
   async remove(p: Principal, id: number): Promise<null> {
     await this.txHost.withTransaction(async () => {
       await this.own(p, id, { lock: true })
+      await this.dropSubagents(id)
       await this.repo(AgentItem).softDelete({ threadId: id })
       await this.repo(AgentTurn).softDelete({ threadId: id })
       await this.repo(AgentThread).update(id, { shareToken: null })
       await this.repo(AgentThread).softDelete({ id })
     })
+    await this.dropImages(id)
     return null
+  }
+
+  /**
+   * 删除自动化时：它的运行开的隐藏会话连同轮次、条目、子会话一起软删，再删这些会话生成的图片。会话里还在
+   * 跑的轮次（调用方已先中断）随后发现会话已删，安静地停下。
+   */
+  async dropHidden(threadIds: number[]): Promise<void> {
+    if (!threadIds.length) return
+    await this.txHost.withTransaction(async () => {
+      for (const id of threadIds) await this.dropSubagents(id)
+      await this.repo(AgentItem).softDelete({ threadId: In(threadIds) })
+      await this.repo(AgentTurn).softDelete({ threadId: In(threadIds) })
+      await this.repo(AgentThread).softDelete({ id: In(threadIds) })
+    })
+    for (const id of threadIds) await this.dropImages(id)
+  }
+
+  /**
+   * 删掉会话生成的图片（`callIds` 给出时只删这些调用的），在会话或那一轮已删之后调用：图片文件私有、记在
+   * 本人名下，留着就成了找不到出处的文件。失败只记日志（记录已经删了，下次不会再来删，由管理员在文件页清理）。
+   */
+  private async dropImages(threadId: number, callIds?: string[]): Promise<void> {
+    try {
+      await this.images?.drop(threadId, callIds)
+    } catch (e) {
+      this.logger.warn(
+        { threadId, err: e instanceof Error ? e.name : 'Error' },
+        'agent images not removed',
+      )
+    }
+  }
+
+  /**
+   * 软删会话分派出的子智能体的会话及其轮次与条目（`callIds` 给出时只删这些调用分派出的）：子会话只能从父会话
+   * 的卡片打开，父会话或那一轮没了，它们也不该留下。还在运行的子轮次随后发现会话已删，安静地停下。
+   */
+  private async dropSubagents(parentId: number, callIds?: Set<string>): Promise<void> {
+    const kids = await this.repo(AgentThread).find({
+      where: { parentThreadId: parentId },
+      select: { id: true, targetRef: true },
+    })
+    const ids = kids
+      .filter((k) => !callIds || callIds.has(subagentCallOf(k.targetRef) ?? ''))
+      .map((k) => num(k.id))
+    if (!ids.length) return
+    await this.repo(AgentItem).softDelete({ threadId: In(ids) })
+    await this.repo(AgentTurn).softDelete({ threadId: In(ids) })
+    await this.repo(AgentThread).softDelete({ id: In(ids) })
   }
 
   /** 最新一轮（没有为 null）。 */
@@ -337,6 +470,12 @@ export class AgentThreadService {
   async fork(p: Principal, id: number, seq: number): Promise<AgentThreadVo> {
     return this.txHost.withTransaction(async () => {
       const src = await this.own(p, id, { lock: true })
+      // 自动化与子智能体的隐藏会话不能分叉：分叉出的是一个能继续发消息的普通会话，会带着隐藏会话里的
+      // 事件数据与（预先同意的）技能绑定继续跑
+      if (src.automationRunId !== null || src.parentThreadId !== null)
+        throw new BizError(Err.CONFLICT)
+      // 分叉（含编辑后重发）照抄审批模式；此刻平台不再提供的模式不借分叉带过去，降为逐次询问
+      const approvalMode = (await this.modeOffered(src.approvalMode)) ? src.approvalMode : 'ask'
       const items = (
         await this.repo(AgentItem).find({
           where: { threadId: id, seq: LessThanOrEqual(seq) },
@@ -352,8 +491,10 @@ export class AgentThreadService {
           providerId: src.providerId,
           model: src.model,
           reasoning: src.reasoning,
-          approvalMode: src.approvalMode,
+          approvalMode,
           planMode: src.planMode,
+          profileId: src.profileId,
+          memoryEnabled: src.memoryEnabled,
           pinned: false,
           temporary: src.temporary,
           readSeq: items.at(-1)?.seq ?? 0,
@@ -382,6 +523,8 @@ export class AgentThreadService {
           ),
           { chunk: 200 },
         )
+      // 复制过来的条目已提炼过的部分不再提炼一次
+      await copyMemoryMark(this.redis, id, num(copy.id), items.at(-1)?.seq ?? 0)
       return threadVo(copy, { unread: 0, turnStatus: null })
     })
   }
@@ -422,6 +565,7 @@ export class AgentThreadService {
    * （否则模型还会从摘要里看到撤回的内容），下一轮需要时再重新压缩。
    */
   async revert(p: Principal, id: number): Promise<null> {
+    let callIds: string[] = []
     await this.txHost.withTransaction(async () => {
       const thread = await this.own(p, id, { lock: true })
       const turn = await this.repo(AgentTurn).findOne({
@@ -437,6 +581,13 @@ export class AgentThreadService {
         status: 'running',
       })
       if (inCall) throw new BizError(Err.CONFLICT)
+      // 这一轮分派出的子会话随这一轮一起撤回
+      const calls = await this.repo(AgentItem).find({
+        where: { turnId: turn.id, kind: 'tool_call' },
+        select: { id: true, payload: true },
+      })
+      callIds = calls.map((c) => String((c.payload as { callId?: unknown }).callId))
+      await this.dropSubagents(id, new Set(callIds))
       const kept = (thread.trusted ?? []).filter((e) => parseTrust(e).turnId !== num(turn.id))
       if (kept.length !== (thread.trusted ?? []).length)
         await this.repo(AgentThread).update(id, { trusted: kept.length ? kept : null })
@@ -453,6 +604,8 @@ export class AgentThreadService {
       }
       await this.repo(AgentTurn).softDelete({ id: num(turn.id) })
     })
+    // 这一轮生成的图片随这一轮一起撤回
+    await this.dropImages(id, callIds)
     return null
   }
 
@@ -467,11 +620,12 @@ export class AgentThreadService {
   }
 
   /**
-   * `/status`：下一次调用模型约占多少上下文（摘要 + 摘要之后条目的字符数 ÷ 3.5）与模型窗口、最新一轮，
-   * 以及今天（UTC）本人与本租户的 token 用量和限额。
+   * `/status`：下一次调用模型约占多少上下文（上下文贡献者的各段 + 摘要 + 摘要之后条目的字符数 ÷ 3.5）与
+   * 模型窗口、最新一轮，以及今天（UTC）本人与本租户的 token 用量和限额。
    */
   async status(p: Principal, id: number): Promise<AgentStatusVo> {
     const row = await this.own(p, id)
+    const contributed = await this.contributedChars(p, row)
     const chars = await this.repo(AgentItem)
       .createQueryBuilder('i')
       .select('COALESCE(SUM(CHAR_LENGTH(COALESCE(i.text, CAST(i.payload AS CHAR)))), 0)', 'n')
@@ -495,7 +649,9 @@ export class AgentThreadService {
     return {
       threadId: id,
       model: row.model ?? model?.id ?? null,
-      contextUsed: Math.ceil(((row.summary?.length ?? 0) + num(chars?.n ?? 0)) / CHARS_PER_TOKEN),
+      contextUsed: Math.ceil(
+        (contributed + (row.summary?.length ?? 0) + num(chars?.n ?? 0)) / CHARS_PER_TOKEN,
+      ),
       contextWindow: model?.contextWindow ?? 0,
       turn: turn && turnVo(turn),
       today: {
@@ -517,11 +673,34 @@ export class AgentThreadService {
     }
   }
 
-  /** 开启只读分享：随机 32 位令牌（已分享的沿用原令牌）；临时会话不能分享（409）。 */
+  /**
+   * 上下文贡献者此刻会给出的各段的字符数（与运行时拼进请求的消息同一形状）：用最新一条已发出的用户消息
+   * 挑选内容，没有轮次（turnId 为 null）。没有登记贡献者时为 0、不查库。
+   */
+  private async contributedChars(p: Principal, row: AgentThread): Promise<number> {
+    if (!this.ext.hasContributors()) return 0
+    const last = await this.repo(AgentItem).findOne({
+      where: { threadId: row.id, kind: 'user', status: IsNull() },
+      order: { seq: 'DESC' },
+    })
+    const parts = await this.ext.contextParts({
+      principal: p,
+      thread: runThread(row),
+      turnId: null,
+      // 与运行时同一种取法：发起人自己的语言，没有时用默认语言（不看这次请求的语言头）
+      lang: p.locale ?? DEFAULT_LOCALE,
+      signal: new AbortController().signal,
+      userText: last ? String((last.payload as { text?: unknown }).text ?? '') : null,
+    })
+    return parts.reduce((n, part) => n + String(contextMessage(part).content).length, 0)
+  }
+
+  /** 开启只读分享：随机 32 位令牌（已分享的沿用原令牌）；临时会话、自动化与子智能体的会话不能分享（409）。 */
   async share(p: Principal, id: number): Promise<{ token: string }> {
     return this.txHost.withTransaction(async () => {
       const row = await this.own(p, id, { lock: true, token: true })
-      if (row.temporary) throw new BizError(Err.CONFLICT)
+      if (row.temporary || row.automationRunId !== null || row.parentThreadId !== null)
+        throw new BizError(Err.CONFLICT)
       if (row.shareToken) return { token: row.shareToken }
       const token = randomBytes(16).toString('hex')
       await this.repo(AgentThread).update(id, { shareToken: token })

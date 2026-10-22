@@ -1,0 +1,26 @@
+{
+  "field": {
+    "agent": {
+      "automation": {
+        "name": "名称",
+        "enabled": "启用",
+        "shared": "共享",
+        "trigger": "触发方式",
+        "cron": "cron 表达式",
+        "timezone": "时区",
+        "event": "业务事件",
+        "skill": "技能",
+        "prompt": "提示词",
+        "profileId": "配置方案",
+        "writeMode": "写入模式",
+        "preApproved": "预先同意的工具",
+        "currentPassword": "当前密码",
+        "notify": "通知方式"
+      }
+    }
+  },
+  "validation": {
+    "agentCronTooOften": "{field}最短间隔 5 分钟",
+    "agentPreApprovedSource": "{field}：预先同意写入时只能用本人的技能和配置方案，或平台技能"
+  }
+}

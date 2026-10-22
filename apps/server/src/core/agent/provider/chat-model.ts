@@ -89,6 +89,20 @@ export interface ChatCompletion {
   finishReason: ChatFinishReason
 }
 
+/** One generated image (`image()`): the picture's sizes the agent may ask for. */
+export const IMAGE_SIZES = ['1024x1024', '1536x1024', '1024x1536'] as const
+export interface ImageRequest {
+  model: string
+  prompt: string
+  size?: (typeof IMAGE_SIZES)[number]
+  signal?: AbortSignal
+}
+/** The image's bytes and the usage the provider reported (null when it reports none). */
+export interface ImageResult {
+  data: Buffer
+  usage: ChatUsage | null
+}
+
 /**
  * A chat model. Failures are `BizError(Err.AGENT_PROVIDER_FAILED, { reason })` with a short safe
  * `reason` (`timeout`, `network`, `http_<status>`, `bad_response`): never the key, never the upstream
@@ -98,4 +112,6 @@ export interface ChatModel {
   stream(req: ChatRequest): AsyncIterable<ChatEvent>
   /** one answer without streaming (summaries, titles) */
   complete(req: ChatRequest): Promise<ChatCompletion>
+  /** one image through the OpenAI-compatible images API (adapters that cannot leave it out) */
+  image?(req: ImageRequest): Promise<ImageResult>
 }

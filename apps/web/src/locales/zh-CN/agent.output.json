@@ -1,0 +1,45 @@
+{
+  "agent": {
+    "admin": {
+      "model": {
+        "image": "图片"
+      }
+    },
+    "output": {
+      "export": {
+        "xlsx": "导出 Excel"
+      },
+      "chart": {
+        "title": "图表"
+      },
+      "image": {
+        "title": "生成的图片",
+        "download": "下载",
+        "failed": "图片加载失败",
+        "shared": "分享视图不显示图片"
+      },
+      "report": {
+        "label": "研究报告",
+        "markdown": "导出 Markdown",
+        "print": "打印为 PDF",
+        "table": "导出表格",
+        "tableN": "导出表格 {n}",
+        "sources": "来源",
+        "unverified": "未核实"
+      },
+      "subagent": {
+        "title": "子任务",
+        "open": "查看子会话",
+        "summary": "摘要",
+        "status": {
+          "queued": "排队中",
+          "running": "进行中",
+          "waiting": "等待中",
+          "completed": "已完成",
+          "failed": "失败",
+          "cancelled": "已停止"
+        }
+      }
+    }
+  }
+}

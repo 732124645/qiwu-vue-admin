@@ -22,9 +22,9 @@ const tools = ref<AgentExternalToolVo[]>([...server.tools])
 /** 正在保存的工具 id：其控件加载并禁用，防止重复提交 */
 const busy = ref<number>()
 
-/** 一个工具可选的策略：声明只读的才有“自动”。 */
+/** 一个工具可选的策略：声明只读的才有“自动”；都可设“自动审查”（外部工具一律当作可能写入）。 */
 const policies = (tool: AgentExternalToolVo): AgentToolPolicy[] =>
-  tool.readOnlyHint ? ['auto', 'ask', 'deny'] : ['ask', 'deny']
+  tool.readOnlyHint ? ['auto', 'ask', 'review', 'deny'] : ['ask', 'review', 'deny']
 
 /** 保存一个工具的启用或策略；选“自动”先确认。成功后以服务端应答替换该行。 */
 async function update(

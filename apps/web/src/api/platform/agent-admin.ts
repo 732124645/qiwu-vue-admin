@@ -1,4 +1,5 @@
 import type {
+  AgentDiagnosticsVo,
   AgentExternalToolVo,
   AgentInstructionSave,
   AgentMcpServerSave,
@@ -84,6 +85,9 @@ export const agentToolApi = {
   list: () => api.get<AgentToolVo[]>('/agent/tools'),
   setPolicy: (name: string, policy: AgentToolPolicy | null) =>
     api.put(`/agent/tools/${encodeURIComponent(name)}/policy`, { policy }),
+  /** 内置工具的启停（本系统其他工具在 MCP 工具页） */
+  setEnabled: (name: string, enabled: boolean) =>
+    api.put(`/agent/tools/${encodeURIComponent(name)}/enabled`, { enabled }),
 }
 
 /** /api/agent/skills：本人、本租户与平台技能（技能管理页），含 SKILL.md 导入导出。 */
@@ -124,4 +128,18 @@ export const agentParamApi = {
   // PUT 只改所发字段（paramUpdate 是部分更新），这里只发值
   save: (row: Pick<ParameterVo, 'id'>, value: string) =>
     paramApi.update(row.id, { paramValue: value } satisfies ParameterUpdate as ParameterCreate),
+}
+
+/** 连通测试的结果：用时（毫秒），失败时带简短的原因码。 */
+export interface AgentProbeResult {
+  ok: boolean
+  ms: number
+  error?: string
+}
+
+/** /api/agent/diagnostics：诊断概况；连通测试只有 root 能调用。 */
+export const agentDiagnosticsApi = {
+  get: () => api.get<AgentDiagnosticsVo>('/agent/diagnostics'),
+  test: (kind: 'provider' | 'search' | 'mcp', id: number) =>
+    api.post<AgentProbeResult>(`/agent/diagnostics/test-${kind}/${id}`),
 }

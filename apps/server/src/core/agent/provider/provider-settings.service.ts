@@ -198,6 +198,7 @@ const providerVo = (r: AgentProvider): AgentProviderVo => ({
     vision: m.vision ?? false,
     fast: m.fast ?? false,
     contextWindow: m.contextWindow,
+    ...(m.image && { image: true }),
   })),
   enabled: r.enabled,
   isDefault: r.isDefault,

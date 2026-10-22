@@ -1,6 +1,7 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common'
 import { InjectDataSource } from '@nestjs/typeorm'
 import {
+  type AgentNotifySettings,
   type AvatarVo,
   changePasswordBody,
   Err,
@@ -326,7 +327,11 @@ export class ProfileService {
    * Insert or replace; a value over `PREF_VALUE_MAX_BYTES` → 413, a new key once the user keeps
    * `PREF_KEYS_MAX` → 409. Counted under the user's row lock, so parallel writes never pass the cap.
    */
-  async setPref(userId: number, key: string, value: TableColumnsPref): Promise<void> {
+  async setPref(
+    userId: number,
+    key: string,
+    value: TableColumnsPref | AgentNotifySettings,
+  ): Promise<void> {
     const json = JSON.stringify(value)
     if (Buffer.byteLength(json) > PREF_VALUE_MAX_BYTES) throw new BizError(Err.PAYLOAD_TOO_LARGE)
     await this.ds.transaction(async (m) => {

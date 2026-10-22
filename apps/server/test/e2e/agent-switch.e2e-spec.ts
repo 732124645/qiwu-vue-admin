@@ -13,6 +13,8 @@ import type { NestExpressApplication } from '@nestjs/platform-express'
 import { Test } from '@nestjs/testing'
 import { getDataSourceToken } from '@nestjs/typeorm'
 import {
+  AGENT2_PARAMS,
+  excelImportParams,
   AGENT_INSTRUCTIONS_PARAM,
   AGENT_LIMIT_PARAMS,
   AGENT_PAUSED_PARAM,
@@ -39,6 +41,7 @@ import { McpService } from '../../src/core/mcp/mcp.service.js'
 import { ToolHost } from '../../src/core/mcp/tool-host.js'
 import { REDIS, type Redis } from '../../src/core/redis/redis.module.js'
 import { insertRow } from '../../src/db/seeds/upsert.js'
+import { ParameterService } from '../../src/modules/platform/settings/param/param.service.js'
 import { logOf } from '../setup/audit.js'
 import { bearer, signIn } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
@@ -52,7 +55,14 @@ vi.hoisted(() => {
 })
 
 const PREFIX = 'agent_switch_'
-const AGENT_ROUTES = ['agent', 'agent-chat', 'agent-skill', 'agent-setting', 'agent-usage']
+const AGENT_ROUTES = [
+  'agent',
+  'agent-chat',
+  'agent-skill',
+  'agent-setting',
+  'agent-usage',
+  'agent-automation',
+]
 
 /** An app of the switched-off AppModule plus `extra` modules, its config parsed from `env`. */
 async function boot(env: Record<string, string>, extra: Type[] = []) {
@@ -153,8 +163,8 @@ describe('off', () => {
 
   it('the side menu and the grant tree leave the agent group out; the menu management lists it', async () => {
     const menus = await agentMenus(ds)
-    // the group, four pages, the hidden batch review page and their ten actions
-    expect(menus).toHaveLength(16)
+    // the group, five pages, the hidden batch review page and their twelve actions
+    expect(menus).toHaveLength(19)
     const http = () => request(app.getHttpServer())
     const side = (await http().get('/api/auth/menus').set(bearer(root)).expect(200)).body
       .data as MenuNode[]
@@ -310,10 +320,17 @@ describe('on, MCP off', () => {
     const keys = [
       AGENT_PAUSED_PARAM,
       ...Object.values(AGENT_LIMIT_PARAMS),
+      AGENT2_PARAMS.automationsPerUser,
+      AGENT2_PARAMS.automationRunsPerDay,
       AGENT_TRUST_MODE_PARAM,
       AGENT_INSTRUCTIONS_PARAM,
       AGENT_WEB_MODE_PARAM,
       AGENT_WEB_DOMAINS_PARAM,
+      AGENT2_PARAMS.reviewModel,
+      AGENT2_PARAMS.memoryExtract,
+      AGENT2_PARAMS.memoryPerTurn,
+      AGENT2_PARAMS.researchSteps,
+      AGENT2_PARAMS.researchSeconds,
     ]
     expect([...params.keys()].sort()).toEqual([...keys].sort())
     const id = await inTenant1(() =>
@@ -349,6 +366,27 @@ describe('on, MCP off', () => {
       expect((await setParam(key, '1', editor).expect(403)).body.code).toBe(
         Err.IAM_GRANT_EXCEEDS_OWN.code,
       )
+    // renaming an ordinary param to a root-only key counts as writing that key (the PUT body drops the
+    // key; the service refuses it on its own as well)
+    const [plain] = await ds.query<{ id: number }[]>(
+      'SELECT id FROM cfg_param WHERE param_key = ? AND deleted_at IS NULL',
+      [excelImportParams.maxMb],
+    )
+    const cls = app.get(ClsService)
+    for (const key of keys)
+      await expect(
+        cls.run(() => {
+          cls.set('principal', principal(id, ['settings.param.modify']))
+          return inTenant1(() =>
+            app.get(ParameterService).update(Number(plain!.id), { paramKey: key }),
+          )
+        }),
+      ).rejects.toMatchObject({ err: Err.IAM_GRANT_EXCEEDS_OWN })
+    const [after] = await ds.query<{ param_key: string }[]>(
+      'SELECT param_key FROM cfg_param WHERE id = ?',
+      [plain!.id],
+    )
+    expect(after!.param_key).toBe(excelImportParams.maxMb)
   })
 })
 

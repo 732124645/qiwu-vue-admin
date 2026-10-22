@@ -505,7 +505,7 @@ demo seed 给**新建**的种子管理员与 OA 示例用户免首登改密；�
 - 不需要新的服务：对话轮次在现有的 Redis [任务队列](queue.md)里执行（`maxmemory-policy noeviction` 等要求同上），实时进度走现有的 Socket.IO 推送；表始终由迁移创建，打开开关不需要额外的迁移。
 - 出站访问：服务端要能连到所配置的模型服务（如 `api.deepseek.com`、`dashscope.aliyuncs.com`、`api.moonshot.cn`、`open.bigmodel.cn`、`api.openai.com`，或内网的 Ollama）、搜索服务（`api.bochaai.com`、`api.tavily.com`）、智能体要读的公网网页（http/https 80/443 及网页自己的端口）与外部 MCP 服务器。出口防火墙按这些目标放行；联网读取与外部 MCP 直接连接检查过的地址，不经 HTTP 代理。
 - 模型、搜索与外部 MCP 的密钥在平台的“智能体设置”页填写，用 `APP_SECRET` 派生的密钥加密存库，不放进任何 env 文件；更换 `APP_SECRET` 后须重新填写。
-- 运行中的急停是系统参数 `agent.paused`（默认 `false`，只有 root 能改），经参数缓存失效对所有实例同时生效；成本与并发由 `agent.limit.*` 参数限制。
+- 运行中的暂停开关是系统参数 `agent.paused`（默认 `false`，只有 root 能改），经参数缓存失效对所有实例同时生效；成本与并发由 `agent.limit.*` 参数限制。
 - `ALLOW_PRIVATE_ENDPOINTS=true` 会同时放开联网读取与外部 MCP 的内网地址检查，生产环境保持 `false`。
 
 ## 实时推送（Socket.IO）

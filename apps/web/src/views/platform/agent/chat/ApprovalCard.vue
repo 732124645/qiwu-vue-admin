@@ -15,6 +15,7 @@ type Decision = AgentApprovalDecide['decision']
  * 卡片本身获得焦点时 Enter 确认、Esc 拒绝（焦点在按钮、链接或说明框上时不拦截，免得 Tab 到“拒绝”按 Enter
  * 却成了确认）。平台关闭“信任本会话”时不给“本会话内同意”。请求进行中按钮都不可再点，防止重复提交；决定后显示结果。
  * 被权限、会话模式或平台策略拦下时不给按钮，只说明怎样才能做。服务端仍校验只有本人能决定（已决定的返回 409）。
+ * 经过自动审查的卡片显示审查结论（已通过、驳回或交给人）与理由。
  */
 defineOptions({ name: 'AgentApprovalCard' })
 const {
@@ -45,6 +46,11 @@ const blocked = computed(() => item.payload.blocked)
 const open = computed(() => !readonly && item.status === 'pending' && !sent.value && !blocked.value)
 /** 已作出的决定：服务端记录的优先，推送到达前用本页刚提交的 */
 const decided = computed(() => item.payload.decision ?? sent.value)
+/**
+ * 自动审查的结论（通过、驳回或交给人）与理由；理由只当文字显示。放行与驳回的理由是审查模型写的，注明
+ * “审查模型的说法”；交给人的说明可能是系统自己的（出错、超时、额度），只写“说明”。
+ */
+const review = computed(() => (item.payload.auto?.by === 'review' ? item.payload.auto : null))
 
 /** 提交决定；失败时恢复可点，成功后交给页面补齐最新状态。 */
 async function decide(decision: Decision) {
@@ -134,6 +140,18 @@ function onKey(e: KeyboardEvent) {
         </li>
       </ul>
     </div>
+    <p
+      v-if="review"
+      class="agent-approval__review"
+      :class="`agent-approval__review--${review.verdict}`"
+      role="status"
+    >
+      <strong>{{ t(`agent.review.card.${review.verdict}`) }}</strong>
+      <span class="agent-approval__review-said">{{
+        t(review.verdict === 'escalate' ? 'agent.review.card.note' : 'agent.review.card.said')
+      }}</span>
+      <span>{{ review.reason }}</span>
+    </p>
     <el-alert
       v-if="blocked"
       type="warning"
@@ -171,3 +189,41 @@ function onKey(e: KeyboardEvent) {
     </p>
   </section>
 </template>
+
+<style scoped>
+.agent-approval__review {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: var(--qw-radius-sm);
+  font-size: 13px;
+  color: var(--qw-text-2);
+  background: var(--qw-neutral-weak);
+}
+.agent-approval__review strong {
+  font-weight: 600;
+}
+.agent-approval__review-said {
+  color: var(--qw-text-3);
+}
+.agent-approval__review--approve {
+  background: var(--qw-success-weak);
+}
+.agent-approval__review--approve strong {
+  color: var(--qw-success);
+}
+.agent-approval__review--reject {
+  background: var(--qw-danger-weak);
+}
+.agent-approval__review--reject strong {
+  color: var(--qw-danger);
+}
+.agent-approval__review--escalate {
+  background: var(--qw-warning-weak);
+}
+.agent-approval__review--escalate strong {
+  color: var(--qw-warning);
+}
+</style>

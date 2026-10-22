@@ -16,7 +16,8 @@
         "skills": "平台技能",
         "params": "说明与限额",
         "prompts": "提示词模板",
-        "instructions": "说明"
+        "instructions": "说明",
+        "diagnostics": "诊断"
       },
       "scope": {
         "platform": "平台",
@@ -163,6 +164,63 @@
         "totalTokens": "合计 token",
         "total": "合计",
         "chart": "智能体 token 用量"
+      },
+      "diag": {
+        "queue": "轮次队列",
+        "turns": "轮次（所有租户）",
+        "sweeps": "孤儿轮次清理",
+        "providers": "模型提供方",
+        "search": "搜索服务商",
+        "mcp": "外部 MCP 服务器",
+        "failures": "最近失败的轮次",
+        "name": "名称",
+        "enabled": "启用",
+        "key": "密钥",
+        "status": "连接状态",
+        "lastError": "最近错误",
+        "result": "测试结果",
+        "test": "测试",
+        "ok": "成功（{ms} 毫秒）",
+        "failed": "失败：{error}（{ms} 毫秒）",
+        "never": "尚未运行",
+        "q": {
+          "waiting": "等待",
+          "active": "执行中",
+          "failed": "失败",
+          "delayed": "延迟"
+        },
+        "turn": {
+          "running": "运行中",
+          "waiting": "等人处理",
+          "failedToday": "今天失败"
+        },
+        "sweep": {
+          "lastAt": "最近一次",
+          "requeued": "重新入队",
+          "failed": "置为失败"
+        },
+        "f": {
+          "turnId": "轮次",
+          "tenantId": "租户",
+          "code": "原因码",
+          "message": "说明",
+          "at": "时间"
+        },
+        "reason": {
+          "timeout": "超时",
+          "network": "连不上（网络错误）",
+          "auth": "鉴权失败",
+          "key_unreadable": "已保存的密钥无法解密，请重新填写",
+          "address": "地址不允许（内网或无法解析）",
+          "too_large": "应答过大",
+          "protocol": "协议错误",
+          "bad_response": "应答格式不对",
+          "answer": "应答格式不对",
+          "no_model": "没有配置模型",
+          "search_not_configured": "没有可用的密钥",
+          "failed": "失败",
+          "http": "HTTP {status}"
+        }
       }
     }
   }

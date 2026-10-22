@@ -1,0 +1,24 @@
+{
+  "field": {
+    "agent": {
+      "profile": {
+        "scope": "Scope",
+        "name": "Name",
+        "providerId": "Model provider",
+        "model": "Model",
+        "reasoning": "Reasoning",
+        "approvalMode": "Approval mode",
+        "tools": "Allowed tools",
+        "instructions": "Instructions",
+        "isDefault": "Default"
+      },
+      "memory": {
+        "content": "Content",
+        "source": "Source",
+        "createdAt": "Saved at",
+        "lastUsedAt": "Last used",
+        "currentPassword": "Current password"
+      }
+    }
+  }
+}

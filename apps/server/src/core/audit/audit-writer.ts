@@ -97,6 +97,18 @@ export interface ActionLogEntry {
   context?: { tenantId: number; actor: ActionActor }
 }
 
+/** What an action listener hears of a successful action (see {@link AuditWriter.onAction}). */
+export interface ActionHeard {
+  domain: string
+  verb: string
+  bizId: string | null
+  tenantId: number
+  userId: number | null
+  traceId: string | null
+  /** written by the in-app agent on someone's behalf (`params.agent`) */
+  byAgent: boolean
+}
+
 /** Who an action log row names. */
 export type ActionActor = Pick<Principal, 'userType' | 'username' | 'deptName'> & {
   userId: number | null
@@ -215,8 +227,18 @@ const name = (n?: string, v?: string) => (n ? `${n}${v ? ` ${v}` : ''}`.slice(0,
 @Injectable()
 export class AuditWriter {
   private readonly logger = new Logger(AuditWriter.name)
+  private readonly listeners: ((a: ActionHeard) => void)[] = []
 
   constructor(@InjectDataSource() private readonly ds: DataSource) {}
+
+  /**
+   * 登记一个操作监听：每条成功的操作日志写入时同步调用一次（失败的操作不通知）。监听者自己不得阻塞或抛错
+   * （抛出的只记日志）；它拿到的只有领域、动作、业务 id、租户与操作人，不含请求参数与结果。供 core 里的
+   * 功能（智能体的事件自动化）挂在操作之后，而不必让业务模块知道它们。
+   */
+  onAction(fn: (a: ActionHeard) => void): void {
+    this.listeners.push(fn)
+  }
 
   /** `created_at` is written from the app clock (never the DB's default): see `lastSignIn`. */
   signin(e: SigninLogEntry): void {
@@ -307,6 +329,23 @@ export class AuditWriter {
       e.costMs,
     ]
     const actor = e.context ? tid : (clsGet('actorTenantId') ?? tid)
+    if (!e.errorKey && this.listeners.length) {
+      const heard: ActionHeard = {
+        domain: e.domain,
+        verb: e.verb,
+        bizId: e.bizId?.slice(0, 64) ?? null,
+        tenantId: tid,
+        userId: p?.userId ?? null,
+        traceId: (row[0] as string | null) ?? null,
+        byAgent: (e.params as { agent?: unknown } | null | undefined)?.agent === true,
+      }
+      for (const fn of this.listeners)
+        try {
+          fn(heard)
+        } catch (err) {
+          this.logger.error(err, 'action listener failed')
+        }
+    }
     void ipLocator
       .location(e.ip)
       .then((location) =>

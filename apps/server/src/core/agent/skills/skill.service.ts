@@ -12,16 +12,19 @@ import {
   type AgentSkillScope,
   type AgentSkillVo,
   agentPerms,
+  DEFAULT_LOCALE,
   Err,
 } from '@qiwu/shared'
+import { I18nService } from 'nestjs-i18n'
 import { In } from 'typeorm'
 import type { Principal } from '../../auth/principal.js'
 import { BaseCrudService } from '../../db/base-crud.service.js'
 import { BizError } from '../../http/biz-error.js'
+import { currentLocale } from '../../i18n/locale.js'
 import { redisKey } from '../../redis/cache-namespaces.js'
 import { REDIS, type Redis } from '../../redis/redis.module.js'
 import { ParamService } from '../../settings/param.service.js'
-import type { SkillSource } from '../agent-ports.js'
+import type { AgentSkillRef, LoadedSkill, SkillLookup, SkillSource } from '../agent-ports.js'
 import { AgentPlatformSkill, AgentSkill } from '../entities/agent-skill.entity.js'
 import { AgentItem, AgentThread } from '../entities/agent-thread.entity.js'
 import { ProviderRegistry } from '../provider/provider-registry.js'
@@ -47,15 +50,23 @@ const manages = (p: Principal) =>
 
 const iso = (d: Date) => new Date(d).toISOString()
 
+/**
+ * 技能描述的显示文字：内置的平台技能以 `seed.` 键存描述（种子里写一次，各语言在 seed.json），按语言译出；
+ * 其余原样（see docs/design-notes.md#i18n）。
+ */
+const describe = (i18n: I18nService, text: string, lang: string) =>
+  text.startsWith('seed.') ? String(i18n.translate(text, { lang })) : text
+
 const skillVo = (
   r: AgentSkill | AgentPlatformSkill,
   scope: AgentSkillScope,
   editable: boolean,
+  i18n: I18nService,
 ): AgentSkillVo => ({
   id: Number(r.id),
   scope,
   name: r.name,
-  description: r.description,
+  description: describe(i18n, r.description, currentLocale()),
   body: r.body,
   tools: r.tools,
   enabled: r.enabled,
@@ -83,6 +94,7 @@ export class AgentSkillService extends BaseCrudService<AgentSkill> implements Sk
     private readonly params: ParamService,
     private readonly usage: UsageBook,
     @Inject(REDIS) private readonly redis: Redis,
+    private readonly i18n: I18nService,
   ) {
     super(txHost, AgentSkill)
   }
@@ -121,11 +133,11 @@ export class AgentSkillService extends BaseCrudService<AgentSkill> implements Sk
     return [
       ...rows
         .filter((r) => Number(r.ownerUserId) === p.userId)
-        .map((r) => skillVo(r, 'user', true)),
+        .map((r) => skillVo(r, 'user', true, this.i18n)),
       ...rows
         .filter((r) => Number(r.ownerUserId) === 0 && (manager || r.enabled))
-        .map((r) => skillVo(r, 'tenant', can(p, agentPerms.skill.modify))),
-      ...plat.map((r) => skillVo(r, 'platform', false)),
+        .map((r) => skillVo(r, 'tenant', can(p, agentPerms.skill.modify), this.i18n)),
+      ...plat.map((r) => skillVo(r, 'platform', false, this.i18n)),
     ]
   }
 
@@ -142,7 +154,7 @@ export class AgentSkillService extends BaseCrudService<AgentSkill> implements Sk
       tools: dto.tools,
       enabled: dto.enabled,
     })
-    return skillVo(row, ownerUserId ? 'user' : 'tenant', true)
+    return skillVo(row, ownerUserId ? 'user' : 'tenant', true, this.i18n)
   }
 
   /** 修改技能内容（范围不随修改变化）；全租户技能需 `agent.skill.modify`。 */
@@ -158,7 +170,7 @@ export class AgentSkillService extends BaseCrudService<AgentSkill> implements Sk
       enabled: dto.enabled,
     })
     const saved = await this.visible(p, id)
-    return skillVo(saved, Number(saved.ownerUserId) ? 'user' : 'tenant', true)
+    return skillVo(saved, Number(saved.ownerUserId) ? 'user' : 'tenant', true, this.i18n)
   }
 
   /** 删除技能；全租户技能需 `agent.skill.remove`。 */
@@ -288,26 +300,37 @@ export class AgentSkillService extends BaseCrudService<AgentSkill> implements Sk
   /** 运行时：调用者可用的技能（启用的个人、租户、平台技能），同名只留最近的一个。 */
   async listFor(
     p: Principal,
+    opts: SkillLookup = {},
   ): Promise<{ name: string; description: string; scope: AgentSkillScope }[]> {
-    return (await this.effective(p)).map(({ row, scope }) => ({
+    return (await this.effective(p, opts)).map(({ row, scope }) => ({
       name: row.name,
-      description: row.description,
+      description: describe(this.i18n, row.description, p.locale ?? DEFAULT_LOCALE),
       scope,
     }))
   }
 
-  /** 运行时：按名字取一个可用技能的正文（个人 > 租户 > 平台）；没有为 null。 */
-  async load(
-    p: Principal,
-    name: string,
-  ): Promise<{ name: string; body: string; tools: string[] | null } | null> {
-    const hit = (await this.effective(p)).find((e) => e.row.name === name)
-    return hit ? { name: hit.row.name, body: hit.row.body, tools: hit.row.tools } : null
+  /** 运行时：按名字取一个可用技能的正文与来源范围（个人 > 租户 > 平台）；没有为 null。 */
+  async load(p: Principal, name: string, opts: SkillLookup = {}): Promise<LoadedSkill | null> {
+    const hit = (await this.effective(p, opts)).find((e) => e.row.name === name)
+    return hit ? loaded(hit.row, hit.scope) : null
   }
 
-  /** 启用的技能按名字去重：个人优先，其次租户，最后平台。 */
+  /**
+   * 运行时（自动化的预先同意）：按 id 与范围取技能，不按名字——别人建的同名租户技能遮不住它。个人的须是
+   * 本人的、启用的；平台的须启用。
+   */
+  async loadRef(p: Principal, ref: AgentSkillRef): Promise<LoadedSkill | null> {
+    const row =
+      ref.scope === 'user'
+        ? await this.repo.findOneBy({ id: ref.id, ownerUserId: p.userId, enabled: true })
+        : await this.platform.findOneBy({ id: ref.id, enabled: true })
+    return row ? loaded(row, ref.scope) : null
+  }
+
+  /** 启用的技能按名字去重：个人优先，其次租户（`noTenant` 时跳过），最后平台。 */
   private async effective(
     p: Principal,
+    opts: SkillLookup = {},
   ): Promise<{ row: AgentSkill | AgentPlatformSkill; scope: AgentSkillScope }[]> {
     const rows = (await this.mine(p)).filter((r) => r.enabled)
     const plat = await this.platform.find({ where: { enabled: true }, order: { name: 'ASC' } })
@@ -316,11 +339,20 @@ export class AgentSkillService extends BaseCrudService<AgentSkill> implements Sk
       if (!out.has(row.name)) out.set(row.name, { row, scope })
     }
     for (const r of rows) if (Number(r.ownerUserId) === p.userId) put(r, 'user')
-    for (const r of rows) if (Number(r.ownerUserId) === 0) put(r, 'tenant')
+    if (!opts.noTenant) for (const r of rows) if (Number(r.ownerUserId) === 0) put(r, 'tenant')
     for (const r of plat) put(r, 'platform')
     return [...out.values()].sort((a, b) => a.row.name.localeCompare(b.row.name))
   }
 }
+
+/** 技能行 → 运行时用的形状。 */
+const loaded = (row: AgentSkill | AgentPlatformSkill, scope: AgentSkillScope): LoadedSkill => ({
+  id: Number(row.id),
+  name: row.name,
+  body: row.body,
+  tools: row.tools,
+  scope,
+})
 
 /** 模型起草的 JSON：取第一个 `{` 到最后一个 `}`；三个字段都得是字符串，否则 AGENT_SKILL_INVALID。 */
 function parseDraft(text: string): { name: string; description: string; body: string } {
@@ -355,14 +387,17 @@ function skillName(raw: string, threadId: number): string {
 /** 平台技能（`agent_platform_skill`，平台表，所有租户可用）：平台页“智能体设置 · 技能”，改动只有 root。 */
 @Injectable()
 export class AgentPlatformSkillService extends BaseCrudService<AgentPlatformSkill> {
-  constructor(txHost: TransactionHost<TransactionalAdapterTypeOrm>) {
+  constructor(
+    txHost: TransactionHost<TransactionalAdapterTypeOrm>,
+    private readonly i18n: I18nService,
+  ) {
     super(txHost, AgentPlatformSkill)
   }
 
   /** 全部平台技能（含停用）。 */
   async list(): Promise<AgentSkillVo[]> {
     const rows = await this.repo.find({ order: { name: 'ASC' } })
-    return rows.map((r) => skillVo(r, 'platform', true))
+    return rows.map((r) => skillVo(r, 'platform', true, this.i18n))
   }
 
   /** 新建（id 为 null）或修改一个平台技能；`scope` 字段不用；重名 409。 */
@@ -377,7 +412,7 @@ export class AgentPlatformSkillService extends BaseCrudService<AgentPlatformSkil
     await this.assertUnique('name', dto.name, id ?? undefined)
     if (id === null) id = Number((await this.create(fields)).id)
     else await this.update(id, fields)
-    return skillVo(await this.get(id), 'platform', true)
+    return skillVo(await this.get(id), 'platform', true, this.i18n)
   }
 
   async removeOne(id: number): Promise<null> {

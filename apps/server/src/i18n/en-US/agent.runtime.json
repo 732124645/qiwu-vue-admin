@@ -12,6 +12,9 @@
       "truncated": {
         "length": "the answer hit the length limit and was cut off",
         "content_filter": "the answer was cut off by the provider's content filter"
+      },
+      "review": {
+        "not_entitled": "this approval may not decide the call on its own; please decide"
       }
     }
   }

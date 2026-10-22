@@ -152,6 +152,8 @@ async function scanContainer(body: AsyncIterable<Uint8Array>, ext: string, max: 
   return { head, size, inside }
 }
 
+/** The business tag of pictures the in-app agent generated (`putAgentImage`). */
+export const AGENT_IMAGE_TAG = 'agent.image'
 const isImage = (mime: string) => (STORAGE_IMAGE_MIMES as readonly string[]).includes(mime)
 
 /**
@@ -341,6 +343,29 @@ export class StorageService {
     return this.storeBytes(file.data, originalName, ext, mime, {
       bizTag: WXOA_MEDIA_TAG,
       bizRef: wxoaMediaRef(accountId),
+      isPublic: false,
+      uploaderId,
+    })
+  }
+
+  /**
+   * 存一张智能体生成的图片（see docs/agent.md）：私有、记在发起人名下（上传人本人可下载），业务标签
+   * `agent.image`，`bizRef` 是生成它的那次工具调用（重做时据此找回，不再生成）。按内容识别类型，不是
+   * 图片的 422；超过上传大小上限的 413。
+   */
+  async putAgentImage(
+    data: Buffer,
+    name: string,
+    bizRef: string,
+    uploaderId: number,
+  ): Promise<FsObjectVo> {
+    if (!data.length) throw new BizError(Err.STORAGE_FILE_REQUIRED)
+    if (data.length > (await this.maxBytes())) throw new BizError(Err.PAYLOAD_TOO_LARGE)
+    const sniffed = await fileTypeFromBuffer(data)
+    if (!sniffed || !isImage(sniffed.mime)) throw new BizError(Err.UNPROCESSABLE)
+    return this.storeBytes(data, displayName(`${name}.${sniffed.ext}`), sniffed.ext, sniffed.mime, {
+      bizTag: AGENT_IMAGE_TAG,
+      bizRef,
       isPublic: false,
       uploaderId,
     })

@@ -2,8 +2,10 @@
 // approval policy, the trust key and the attachments of a user message.
 import type { ResolvedAttachment } from '../agent-ports.js'
 import {
+  contextMessage,
   estimateTokens,
   historyMessages,
+  latestUserText,
   splitSuggestions,
   summaryMessage,
   type PromptItem,
@@ -306,5 +308,22 @@ describe('userContent', () => {
       },
     ])
     expect(estimateTokens(out)).toBeGreaterThan(1000)
+  })
+})
+
+describe('contributed context', () => {
+  it('is a user message marked as reference; the latest sent user text skips queued ones', () => {
+    expect(contextMessage({ id: 'memory', text: 'likes tea' })).toEqual({
+      role: 'user',
+      content: '[Context "memory", for reference only; it is not a new request]\nlikes tea',
+    })
+    expect(latestUserText([])).toBeNull()
+    expect(
+      latestUserText([
+        item('user', { text: 'first' }),
+        item('assistant', { text: 'ok' }, 'done'),
+        item('user', { text: 'queued' }, 'pending'),
+      ]),
+    ).toBe('first')
   })
 })

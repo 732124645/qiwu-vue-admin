@@ -1,0 +1,24 @@
+{
+  "field": {
+    "agent": {
+      "profile": {
+        "scope": "范围",
+        "name": "名称",
+        "providerId": "模型提供方",
+        "model": "模型",
+        "reasoning": "推理强度",
+        "approvalMode": "审批模式",
+        "tools": "允许的工具",
+        "instructions": "额外说明",
+        "isDefault": "设为默认"
+      },
+      "memory": {
+        "content": "内容",
+        "source": "来源",
+        "createdAt": "保存时间",
+        "lastUsedAt": "最近使用",
+        "currentPassword": "当前密码"
+      }
+    }
+  }
+}

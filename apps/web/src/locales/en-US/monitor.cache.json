@@ -40,6 +40,9 @@
         "lock": "Locks",
         "jobLock": "Job locks",
         "jobFire": "Job runs",
+        "agentSweep": "Agent orphan sweep stats",
+        "agentWaitMail": "Agent waiting-mail marks",
+        "agentMemoryMark": "Agent memory distilling progress",
         "queue": "Job queues"
       }
     }

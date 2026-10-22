@@ -8,13 +8,14 @@ import { toastRest } from '@/core/composables/use-crud'
 import { Icon } from '@/core/icons'
 import ApprovalCard from './ApprovalCard.vue'
 import { MarkdownText } from './markdown'
+import OutputCard from './OutputCard.vue'
 import QuestionCard from './QuestionCard.vue'
 import { show, type ChatRow } from './thread-state'
 
 /**
  * 对话里的一行：用户气泡（附件、排队标记）、助手回答（Markdown 安全子集、编号来源、后续建议）、
  * 可折叠的“思考”、压缩分隔线、工具调用与结果合成的折叠卡（轮次结束仍没有结果的显示“已停止”）、审批卡、
- * 反问卡、计划清单、错误提示（显示翻译后的说明，不显示错误码）。
+ * 反问卡、计划清单、图表 / 图片 / 报告 / 子任务卡片（OutputCard）、错误提示（显示翻译后的说明，不显示错误码）。
  * 消息上的操作：复制、从这里分叉、编辑最后一条用户消息重发、给回答点赞 / 点踩（可附说明）；计划模式下
  * 最后一条回答可“执行此计划”。
  */
@@ -325,6 +326,17 @@ async function rate(itemId: number, value: 1 | -1) {
         </li>
       </ul>
     </section>
+
+    <OutputCard
+      v-else-if="
+        row.item.kind === 'chart' ||
+        row.item.kind === 'image' ||
+        row.item.kind === 'report' ||
+        row.item.kind === 'subagent'
+      "
+      :item="row.item"
+      :readonly
+    />
 
     <el-alert
       v-else-if="row.item.kind === 'error'"

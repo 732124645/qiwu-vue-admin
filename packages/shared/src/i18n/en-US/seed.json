@@ -113,6 +113,11 @@
   },
   "agentTemplate": {
     "turnWaiting": "Assistant: waiting for you",
-    "turnCompleted": "Assistant: task finished"
+    "turnCompleted": "Assistant: task finished",
+    "automationResult": "Assistant: automation result",
+    "automationStopped": "Assistant: automation switched off"
+  },
+  "agentSkill": {
+    "deepResearch": "Deep research: plan first, search and read several sources, then write a cited report you can export"
   }
 }

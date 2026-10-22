@@ -1,0 +1,30 @@
+{
+  "agent": {
+    "profile": {
+      "title": "Profiles",
+      "entity": "profile",
+      "hint": "Pick a profile for a new conversation: it brings its model, reasoning and approval mode, limits the tools the assistant may use and adds its instructions.",
+      "pick": "Profile",
+      "none": "No profile",
+      "default": "Default",
+      "toolsAll": "Any",
+      "toolsHint": "One tool name per line, empty for any; read-only built-in tools always stay, write tools (\"Remember\" too) must be listed.",
+      "modelDefault": "Platform default model"
+    },
+    "memory": {
+      "title": "My memories",
+      "entity": "memory",
+      "hint": "In conversations with memory on, the assistant takes the entries most relevant to your question into account; temporary conversations neither read nor write them. Passwords, keys and the like are masked before saving.",
+      "use": "Use memory",
+      "keyword": "Search memories",
+      "source": {
+        "chat": "Saved in a chat",
+        "extract": "Distilled",
+        "manual": "Added by hand"
+      },
+      "forgetAll": "Forget everything",
+      "forgetPrompt": "Enter your current password to delete all your memories. This cannot be undone.",
+      "forgotten": "{n} memories deleted"
+    }
+  }
+}

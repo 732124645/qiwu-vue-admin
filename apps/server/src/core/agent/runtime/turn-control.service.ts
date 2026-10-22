@@ -75,6 +75,10 @@ export class TurnControlService implements TurnControl {
     const limits = await this.runner.limits()
     const res = await this.store.tx(async (w) => {
       const thread = await this.own(w, p, threadId)
+      // 自动化开的会话只跑这次运行的那一轮、子智能体的会话只跑分派时的那一轮：不能再发消息（新的一轮、
+      // 追加、排队都不行），审批与提问照常
+      if (thread.automationRunId !== null || thread.parentThreadId !== null)
+        throw new BizError(Err.CONFLICT)
       const turns = w.m.getRepository(AgentTurn)
       const active = await turns.findOne({ where: { threadId, status: ACTIVE_TURN } })
       if (active) {

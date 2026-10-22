@@ -12,6 +12,9 @@
       "truncated": {
         "length": "回答达到长度上限，被截断了",
         "content_filter": "回答被服务商的内容过滤截断了"
+      },
+      "review": {
+        "not_entitled": "这次放行没有自动放行的资格，需要你确认"
       }
     }
   }

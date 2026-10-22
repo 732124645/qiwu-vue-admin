@@ -1,8 +1,10 @@
 // Root-only agent platform settings with multi-tenancy OFF (see docs/agent.md): model and search
 // providers, external MCP servers and their tools, tool policies and platform skills decide every tenant's
-// outbound targets and what runs without a confirmation, so a user granted agent.setting.modify who is not
-// root is refused (403) on every change even though `@PlatformOnly('root')` alone lets everyone pass while
-// the switch is off; reading the pages stays open to agent.setting.browse.
+// outbound targets and what runs without a confirmation, and the diagnostics' overview (turn counts of
+// every tenant) and connectivity tests (outbound calls with the stored keys) are root's too, so a user
+// granted agent.setting.modify who is not root is refused (403) on every one of them even though
+// `@PlatformOnly('root')` alone lets everyone pass while the switch is off; reading the settings pages
+// stays open to agent.setting.browse.
 import { ConfigService } from '@nestjs/config'
 import type { NestExpressApplication } from '@nestjs/platform-express'
 import { Test } from '@nestjs/testing'
@@ -105,6 +107,7 @@ const changes: [string, string, object][] = [
   ['POST', '/api/agent/mcp-servers/1/sync', {}],
   ['PUT', '/api/agent/mcp-servers/1/tools/1', { enabled: true, policy: 'auto' }],
   ['PUT', '/api/agent/tools/web.search/policy', { policy: 'deny' }],
+  ['PUT', '/api/agent/tools/plan.update/enabled', { enabled: false }],
   [
     'POST',
     '/api/agent/platform-skills',
@@ -113,11 +116,17 @@ const changes: [string, string, object][] = [
   ['PUT', '/api/agent/platform-skills/1', { name: `${PREFIX}k`, description: 'd', body: 'b' }],
   ['DELETE', '/api/agent/platform-skills/1', {}],
   ['POST', '/api/agent/platform-skills/import', { text: skillMd }],
+  ['GET', '/api/agent/diagnostics', {}],
+  ['POST', '/api/agent/diagnostics/test-provider/1', {}],
+  ['POST', '/api/agent/diagnostics/test-search/1', {}],
+  ['POST', '/api/agent/diagnostics/test-mcp/1', {}],
 ]
 
 const send = (method: string, url: string, body: object, token: string) => {
-  const req = http()[method.toLowerCase() as 'post' | 'put' | 'delete'](url).set(bearer(token))
-  return method === 'DELETE' ? req : req.send(body)
+  const req = http()
+    [method.toLowerCase() as 'get' | 'post' | 'put' | 'delete'](url)
+    .set(bearer(token))
+  return method === 'DELETE' || method === 'GET' ? req : req.send(body)
 }
 
 describe('agent platform settings while multi-tenancy is off', () => {

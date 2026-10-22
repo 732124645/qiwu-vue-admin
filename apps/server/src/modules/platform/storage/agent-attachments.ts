@@ -1,20 +1,24 @@
 import { extname } from 'node:path'
-import { Global, Injectable, Logger, Module } from '@nestjs/common'
+import { Global, Injectable, Logger, Module, NotFoundException } from '@nestjs/common'
 import { InjectRepository, TypeOrmModule } from '@nestjs/typeorm'
 import { Err, STORAGE_IMAGE_MIMES } from '@qiwu/shared'
-import { In, type Repository } from 'typeorm'
+import { In, Like, type Repository } from 'typeorm'
 import {
+  AGENT_IMAGE_STORE,
   ATTACHMENT_SOURCE,
+  type AgentImageStore,
+  type AgentStoredImage,
   type AttachmentSource,
   type ResolvedAttachment,
 } from '../../../core/agent/agent-ports.js'
+import { imageSize } from '../../../core/agent/runtime/image-size.js'
 import type { Principal } from '../../../core/auth/principal.js'
 import { importParts } from '../../../core/excel/excel.js'
 import { cellText, firstSheetRows } from '../../../core/excel/excel.service.js'
 import { BizError } from '../../../core/http/biz-error.js'
 import { FsObject } from './fs-object.entity.js'
 import { StorageModule } from './storage.module.js'
-import { StorageService } from './storage.service.js'
+import { AGENT_IMAGE_TAG, StorageService } from './storage.service.js'
 
 /** 一条消息最多附带的文件数。 */
 export const ATTACH_MAX_FILES = 10
@@ -126,6 +130,68 @@ export class AgentAttachments implements AttachmentSource {
 }
 
 /**
+ * 智能体生成的图片的存储侧实现（see docs/agent.md）：私有文件，上传人是发起人本人（按下载路由的规则只有本人、
+ * root 与有 `storage.object.view` 的人能读），`bizRef` 是调用键；查找带租户条件（ORM）并限定本人。
+ */
+@Injectable()
+export class AgentImages implements AgentImageStore {
+  constructor(
+    @InjectRepository(FsObject) private readonly objects: Repository<FsObject>,
+    private readonly storage: StorageService,
+  ) {}
+
+  /** 按调用键找本人已存的那张图片（调用重做时复用），宽高从文件头读出。 */
+  async find(p: Principal, key: string): Promise<AgentStoredImage | null> {
+    const obj = await this.objects.findOneBy({
+      bizTag: AGENT_IMAGE_TAG,
+      bizRef: refOf(key),
+      uploaderId: p.userId,
+    })
+    if (!obj) return null
+    const head = await this.storage.readHead(obj, IMAGE_HEAD).catch(() => null)
+    const size = head && imageSize(head)
+    return { fileId: Number(obj.id), ...(size && { size }) }
+  }
+
+  /** 存一张图片，记在本人名下（不是图片的 422，不建文件）。 */
+  async save(
+    p: Principal,
+    key: string,
+    image: { data: Buffer; name: string },
+  ): Promise<AgentStoredImage> {
+    const vo = await this.storage.putAgentImage(image.data, image.name, refOf(key), p.userId)
+    const size = imageSize(image.data)
+    return { fileId: vo.id, ...(size && { size }) }
+  }
+
+  /**
+   * 会话被删除或撤回一轮时删掉它生成的图片（软删，与文件页删除同一条路径）：调用键 `<会话 id>:<调用 id>`，
+   * 给出 `callIds` 时只删这些调用的。会话 id 与冒号里没有 LIKE 通配符；查找带租户条件（ORM）。已被别处删掉的跳过。
+   */
+  async drop(threadId: number, callIds?: string[]): Promise<void> {
+    if (callIds && !callIds.length) return
+    const bizRef = callIds
+      ? In(callIds.map((c) => refOf(`${threadId}:${c}`)))
+      : Like(`${refOf(`${threadId}:`)}%`)
+    const rows = await this.objects.find({
+      where: { bizTag: AGENT_IMAGE_TAG, bizRef },
+      select: { id: true, bizRef: true },
+    })
+    for (const o of rows)
+      await this.storage
+        .remove(Number(o.id), { bizTag: AGENT_IMAGE_TAG, bizRef: o.bizRef ?? '' })
+        .catch((e: unknown) => {
+          if (!(e instanceof NotFoundException)) throw e
+        })
+  }
+}
+
+/** 读图片宽高时最多看的文件头字节数。 */
+const IMAGE_HEAD = 64 * 1024
+/** 调用键 → `biz_ref`（最长 64）。 */
+const refOf = (key: string) => `agent:${key}`.slice(0, 64)
+
+/**
  * xlsx 第一张表 → CSV 文本，最多 {@link ATTACH_TEXT_MAX} 个字符（超出截断并注明）。先过导入的 zip 检查
  * （压缩炸弹、宏、外部链接），不合格返回 null；表格按流读取，够长就停，不会整本载入内存。
  */
@@ -148,13 +214,18 @@ async function sheetCsv(buf: Buffer): Promise<string | null> {
 }
 
 /**
- * 把附件来源以全局令牌提供给智能体（core 不引用 modules，见分层规则）：AgentModule 以 `@Optional()`
+ * 把附件来源与图片存放处以全局令牌提供给智能体（core 不引用 modules，见分层规则）：AgentModule 以 `@Optional()`
  * 注入 `ATTACHMENT_SOURCE`，没有本模块时消息不能带文件。
  */
 @Global()
 @Module({
   imports: [TypeOrmModule.forFeature([FsObject]), StorageModule],
-  providers: [AgentAttachments, { provide: ATTACHMENT_SOURCE, useExisting: AgentAttachments }],
-  exports: [ATTACHMENT_SOURCE],
+  providers: [
+    AgentAttachments,
+    { provide: ATTACHMENT_SOURCE, useExisting: AgentAttachments },
+    AgentImages,
+    { provide: AGENT_IMAGE_STORE, useExisting: AgentImages },
+  ],
+  exports: [ATTACHMENT_SOURCE, AGENT_IMAGE_STORE],
 })
 export class AgentAttachmentsModule {}

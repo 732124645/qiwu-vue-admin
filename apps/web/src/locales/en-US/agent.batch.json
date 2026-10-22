@@ -12,7 +12,7 @@
       "rejectAll": "Reject all",
       "decided": "{count} approvals handled",
       "queued": "Queued",
-      "open": "Open chat",
+      "open": "Open conversation",
       "missing": "This batch was not found",
       "skipped": "{count} approvals change a record other than the row's own and were not decided: decide them one by one below"
     }

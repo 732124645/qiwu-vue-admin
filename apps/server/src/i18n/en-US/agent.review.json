@@ -1,0 +1,14 @@
+{
+  "agent": {
+    "review": {
+      "escalate": {
+        "unconfigured": "Automatic review is unavailable (the review model set by the platform is disabled or gone); please confirm",
+        "limit": "The token quota of this turn or of today is used up, so no automatic review was done; please confirm",
+        "failed": "The automatic review reached no verdict (an error, a timeout or an invalid answer); please confirm",
+        "truncated": "The arguments or changes of this write are too large for the automatic review to see in full; please confirm",
+        "turn_limit": "This turn has reached its limit of automatic reviews; please confirm",
+        "rejected_twice": "The automatic review already rejected this tool twice in this turn; please confirm"
+      }
+    }
+  }
+}

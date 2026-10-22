@@ -55,6 +55,7 @@ export class ProviderRegistry {
         vision: m.vision ?? false,
         fast: m.fast ?? false,
         contextWindow: m.contextWindow,
+        image: m.image ?? false,
       },
       chat: this.connect({
         baseUrl: row.baseUrl,
@@ -62,6 +63,18 @@ export class ProviderRegistry {
         models: row.models,
       }),
     }
+  }
+
+  /**
+   * 生成图片用的模型：启用的提供方里第一个标了图片能力的模型（默认提供方在前，同 {@link resolve} 的顺序）；
+   * 没有为 null（此时不提供 `image.generate`）。
+   */
+  async resolveImage(): Promise<ResolvedModel | null> {
+    for (const row of (await this.providers.rows()).filter((r) => r.enabled)) {
+      const m = row.models.find((x) => x.image)
+      if (m) return this.resolve(Number(row.id), m.id)
+    }
+    return null
   }
 
   /** 按配置建真实的 OpenAI 兼容模型客户端（测试的替换点）。 */

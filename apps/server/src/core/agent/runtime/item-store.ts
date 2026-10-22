@@ -9,8 +9,9 @@ import {
   type AgentTurnVo,
   RT,
 } from '@qiwu/shared'
-import type { DataSource, EntityManager } from 'typeorm'
+import { type DataSource, type EntityManager, LessThan } from 'typeorm'
 import { RealtimeService } from '../../realtime/realtime.service.js'
+import type { AgentSkillRef } from '../agent-ports.js'
 import { AgentItem, AgentThread, AgentTurn } from '../entities/agent-thread.entity.js'
 
 /** The thread was deleted while something still wrote to it (a running turn stops quietly). */
@@ -34,7 +35,10 @@ export interface ItemInternal {
   /** the full (capped) tool output the model got; `preview` is what the page shows */
   content?: string
   sources?: { title: string; url: string }[]
-  /** URLs a `web.search` returned: readable by `web.fetch` for the rest of the turn */
+  /**
+   * URLs a `web.search` returned (or a subagent read or found): readable by `web.fetch` for the rest of the
+   * turn; on a subagent's task message, the parent turn's readable URLs, the only ones its thread starts with
+   */
   urls?: string[]
   /** `<tool>|<target>`: what `approve_session` trusts */
   key?: string
@@ -52,6 +56,45 @@ export interface ItemInternal {
   reasoning?: string
   /** the model that produced `reasoning`: it is sent back only to that same model */
   reasoningModel?: string
+  /**
+   * `<callId>#<n>`: the n-th item a built-in tool call added; a repeated call (restart, lost lock) replaces it
+   * instead of adding another
+   */
+  byCall?: string
+  /** a subagent's task message: the tools its thread may use (the parent's at the delegation) */
+  tools?: string[]
+  /**
+   * an automation run's message under a pre-approval: the skill it was saved with, by id and scope (the turn
+   * loads that one, never another of the same name)
+   */
+  skillRef?: AgentSkillRef
+  /**
+   * an event automation's message: where the event line (domain, verb, record id) starts in its text; the
+   * line is data about the event, not the owner's words (the automatic review leaves it out)
+   */
+  eventFrom?: number
+}
+
+/**
+ * 这条用户消息是不是原样照抄了它之前最近一条完整回答里的某个后续建议（点了建议发出的）：建议是模型写的，
+ * 可能被网页等外部内容带偏，里面的话与链接都不能当成用户本人给的。
+ */
+export async function copiesSuggestion(
+  m: EntityManager,
+  threadId: number,
+  u: Pick<AgentItem, 'seq' | 'payload'>,
+): Promise<boolean> {
+  const before = await m.getRepository(AgentItem).findOne({
+    where: { threadId, kind: 'assistant', status: 'done', seq: LessThan(u.seq) },
+    order: { seq: 'DESC' },
+  })
+  const text = String((u.payload as { text?: unknown } | null)?.text ?? '').trim()
+  return (
+    !!before &&
+    ((before.payload as AgentItemPayloads['assistant']).suggestions ?? []).some(
+      (s) => s.trim() === text,
+    )
+  )
 }
 
 /** The page's view of an item: the internal part left out. */

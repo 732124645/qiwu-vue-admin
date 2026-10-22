@@ -1,8 +1,25 @@
 # Changelog
 
-中文说明：本文件按功能区域汇总栖梧 / Qiwu 的用户可见变化，正文使用英文。`1.0.0` 于 2026-10-05 发布，`1.0.3` 于 2026-10-06 发布（`1.0.1`、`1.0.2` 未发布，内容并入 `1.0.3`），`1.1.0`（多租户）、`1.2.0`（手写 SQL 的数据权限）、`1.2.1`（修复）与 `1.3.0`（任务队列）于 2026-10-14 发布，`1.3.1`（开发调试开关）与 `1.4.0`（安全审查修复）于 2026-10-15 发布，`1.4.1`（界面细节）、`1.5.0`（微信公众号管理，默认关闭）与 `1.6.0`（MCP 智能体接入，默认关闭；下游合并改进）于 2026-10-20 发布，`1.6.1`（后端连不上时停在原页面等待；README 更新）与 `1.7.0`（AI 编程友好：公开开发规则、任务配方、检查报错带修复提示、项目地图）于 2026-10-21 发布，`1.7.1`（列表操作列不再截断误点）与 `1.8.0`（后台智能助手，默认关闭）于 2026-10-22 发布。
+中文说明：本文件按功能区域汇总栖梧 / Qiwu 的用户可见变化，正文使用英文。`1.0.0` 于 2026-10-05 发布，`1.0.3` 于 2026-10-06 发布（`1.0.1`、`1.0.2` 未发布，内容并入 `1.0.3`），`1.1.0`（多租户）、`1.2.0`（手写 SQL 的数据权限）、`1.2.1`（修复）与 `1.3.0`（任务队列）于 2026-10-14 发布，`1.3.1`（开发调试开关）与 `1.4.0`（安全审查修复）于 2026-10-15 发布，`1.4.1`（界面细节）、`1.5.0`（微信公众号管理，默认关闭）与 `1.6.0`（MCP 智能体接入，默认关闭；下游合并改进）于 2026-10-20 发布，`1.6.1`（后端连不上时停在原页面等待；README 更新）与 `1.7.0`（AI 编程友好：公开开发规则、任务配方、检查报错带修复提示、项目地图）于 2026-10-21 发布，`1.7.1`（列表操作列不再截断误点）、`1.8.0`（后台智能助手，默认关闭）与 `1.9.0`（智能助手：自动化、记忆、配置方案、自动审查、子智能体与深度研究）于 2026-10-22 发布。
 
 All notable product changes are recorded here in Keep a Changelog style. The initial release below summarizes the delivered features. Planned work is identified explicitly.
+
+## [1.9.0] - 2026-10-22
+
+### Added
+
+- Assistant automations (`agent.automation.use`; shared ones `agent.automation.share`): a skill or a prompt that runs on a 5-field schedule with a time zone (at most every 5 minutes), after a business action is logged (when the creator can see the record), or on demand, in a hidden conversation as its creator, re-checked on every run. Write modes: read only (default), ask (the cards wait in the inbox) and pre-approved write tools chosen one by one with the current password; a pre-approval holds only while the creator's permission, data scope, department, the tool's switch and the bound personal or platform skill and personal profile are unchanged, otherwise the write waits for a person. Run history, results in the inbox and optional mail; limits per user and per day; one run at a time per automation.
+- Profiles: named sets of model, reasoning, approval mode, allowed tools and extra instructions, personal or tenant-wide (tenant-wide ones only read-only or ask), picked for a new conversation or as the default.
+- Personal memory: “remember …” saves after the user confirms, an optional background distiller reads only the user's own messages; masked before saving, never in temporary conversations, off per conversation; list, edit, delete and forget all (current password).
+- Automatic review: a write tool set to `review` and a conversation in auto-review mode let a review model (root parameter `agent.review.model`) approve, reject or hand over each write; anything unclear, truncated or failed goes to a person; at most 10 reviews per turn.
+- Sub-agents (`agent.delegate`, 1–3 read-only tasks in parallel), a deep research platform skill with its own step and time limits and a cited report, charts (bar, line, pie, table), image generation for models marked `image`, and xlsx, Markdown and print exports.
+- Diagnostics page (root): model, search and external MCP connectivity tests, turn counts, recent failures and orphan sweeps. Personal notification settings (inbox always, mail optional), custom chat shortcuts and opening a conversation in a new window.
+- For projects: extension points for built-in tools, context contributors and approval reviewers; recipe `docs/ai/recipes/agent-extension.md` with its skill `qiwu-agent-extension`.
+
+### Changed
+
+- Agent notices no longer carry the conversation title; older inbox templates show the conversation number instead.
+- Memory and message bodies are masked in the action log.
 
 ## [1.8.0] - 2026-10-22
 

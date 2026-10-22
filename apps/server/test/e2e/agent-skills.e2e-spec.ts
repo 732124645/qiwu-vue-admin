@@ -284,7 +284,25 @@ describe('skills', () => {
       (await inTenant1(() => source.listFor(principal(memberId)))).filter(
         (s) => s.name === `${PREFIX}same`,
       )
-    expect(await load()).toEqual({ name: `${PREFIX}same`, body: 'own body', tools: null })
+    expect(await load()).toEqual({
+      id: own.body.data.id,
+      name: `${PREFIX}same`,
+      body: 'own body',
+      tools: null,
+      scope: 'user',
+    })
+    // by id and scope the platform one is found although the member's own shadows it by name; another
+    // user's personal skill is not
+    const byRef = (userId: number, ref: { id: number; scope: 'user' | 'platform' }) =>
+      inTenant1(() => source.loadRef(principal(userId), ref))
+    expect(await byRef(memberId, { id: plat.body.data.id, scope: 'platform' })).toMatchObject({
+      body: 'platform body',
+      scope: 'platform',
+    })
+    expect(await byRef(memberId, { id: own.body.data.id, scope: 'user' })).toMatchObject({
+      body: 'own body',
+    })
+    expect(await byRef(managerId, { id: own.body.data.id, scope: 'user' })).toBeNull()
     expect(await listed()).toEqual([
       { name: `${PREFIX}same`, description: 'When same is needed', scope: 'user' },
     ])
@@ -292,12 +310,12 @@ describe('skills', () => {
       .put(`/api/agent/skills/${own.body.data.id}`)
       .set(bearer(member))
       .send(body('same', { body: 'own body', enabled: false }))
-    expect((await load())?.body).toBe('tenant body')
+    expect(await load()).toMatchObject({ body: 'tenant body', scope: 'tenant' })
     await http()
       .put(`/api/agent/skills/${wide.body.data.id}`)
       .set(bearer(manager))
       .send(body('same', { body: 'tenant body', enabled: false }))
-    expect((await load())?.body).toBe('platform body')
+    expect(await load()).toMatchObject({ body: 'platform body', scope: 'platform' })
     expect((await listed())[0]?.scope).toBe('platform')
     // another tenant sees only the platform one
     expect((await withOther(() => source.load(principal(memberId), `${PREFIX}same`)))?.body).toBe(

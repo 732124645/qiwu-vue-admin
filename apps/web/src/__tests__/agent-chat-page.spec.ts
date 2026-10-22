@@ -57,6 +57,10 @@ const thread = (id: number, p: Partial<AgentThreadVo> = {}): AgentThreadVo => ({
   unread: 0,
   shared: false,
   forkedFromId: null,
+  profileId: null,
+  memoryEnabled: true,
+  parentThreadId: null,
+  automationRunId: null,
   batchId: null,
   turnStatus: 'completed',
   lastActiveAt: NOW,
@@ -493,6 +497,29 @@ describe('conversation', () => {
     await w.findAll('.agent-chat__examples button')[1]!.trigger('click')
     await flushPromises()
     expect(textarea().element.value).toBe('Find customers without a phone')
+  })
+
+  it('on a narrow screen folds the header tools behind More', async () => {
+    vi.stubGlobal('matchMedia', (media: string) => ({
+      media,
+      matches: media === '(max-width: 640px)',
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    }))
+    try {
+      mockApi(BASE)
+      await show()
+      const tools = w.find('#agent-chat-tools')
+      expect(tools.isVisible()).toBe(false)
+      const more = w.find('button[aria-controls="agent-chat-tools"]')
+      expect(more.attributes('aria-expanded')).toBe('false')
+      await more.trigger('click')
+      expect(tools.isVisible()).toBe(true)
+      expect(more.attributes('aria-expanded')).toBe('true')
+      expect(tools.find('[aria-label="Keyboard shortcuts"]').exists()).toBe(true)
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })
 

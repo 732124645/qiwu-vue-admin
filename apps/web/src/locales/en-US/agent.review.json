@@ -1,0 +1,30 @@
+{
+  "agent": {
+    "chat": {
+      "mode": {
+        "auto_review": "Auto review"
+      }
+    },
+    "admin": {
+      "policy": {
+        "review": "Auto review"
+      },
+      "tool": {
+        "sources": {
+          "builtin": "Built-in"
+        },
+        "enabled": "Enabled",
+        "enabledToggle": "Enable {name}"
+      }
+    },
+    "review": {
+      "card": {
+        "approve": "Approved by automatic review",
+        "reject": "Rejected by automatic review",
+        "escalate": "Automatic review left it to you",
+        "said": "What the review model said:",
+        "note": "Note:"
+      }
+    }
+  }
+}

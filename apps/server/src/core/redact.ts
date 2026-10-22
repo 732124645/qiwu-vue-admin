@@ -162,3 +162,102 @@ export const stackFrames = (stack: string | undefined): string | null =>
     ?.split('\n')
     .filter((l) => /^\s+at /.test(l))
     .join('\n') || null
+
+// ---- free text a user or a model wrote (agent memories): secrets and personal numbers ----
+
+/** a PEM block (private keys, certificates) whole */
+const PEM = /-----BEGIN [A-Z0-9 ]+-----[\s\S]*?-----END [A-Z0-9 ]+-----/g
+/** a complete JWT: three base64url parts, the first a JSON header (`eyJ`) */
+const JWT = /\beyJ[\w-]+\.[\w-]+\.[\w-]+/g
+/**
+ * tokens with a known prefix and 20+ characters after it (masked only when they hold a digit): `sk-` style
+ * keys, GitHub `ghp_`…, Slack `xox?-`, GitLab, Google; AWS key ids by their fixed form
+ */
+const KNOWN_TOKEN =
+  /\b(?:(?:sk|rk|pk)-[\w-]{20,}|gh[pousr]_\w{20,}|github_pat_\w{20,}|xox[abprs]-[\w-]{20,}|glpat-[\w-]{20,}|AIza[\w-]{20,})/g
+const AWS_KEY_ID = /\bAKIA[0-9A-Z]{16}\b/g
+/** a quoted value whole, else printable ASCII up to a space, comma or semicolon (never Chinese text) */
+const VALUE = String.raw`("[^"]*"|'[^']*'|\u201c[^\u201d]*\u201d|[\x21-\x2b\x2d-\x3a\x3c-\x7e]+)`
+/** the value after a secret's name and `:` / `=` / `is` (`password is x`, `pwd: "a b"`) */
+const NAMED_SECRET = new RegExp(
+  String.raw`\b(password|passwd|passcode|pwd|pin|secret|token|api[ _-]?key|private key)(\s*(?:\bis\b|[:\uff1a=])\s*)` +
+    VALUE,
+  'gi',
+)
+/** the same after a Chinese name (密码 口令 密钥 秘钥 令牌 验证码), the separator (是 为 ：) optional */
+const NAMED_SECRET_CJK = new RegExp(
+  String.raw`(\u5bc6\u7801|\u53e3\u4ee4|\u5bc6\u94a5|\u79d8\u94a5|\u4ee4\u724c|\u9a8c\u8bc1\u7801)(\s*(?:(?:\u662f|\u4e3a|[:\uff1a=])\s*)?)` +
+    VALUE,
+  'g',
+)
+/** a secret's name glued to its value (`pwd123456`) */
+const GLUED_SECRET =
+  /\b(password|passwd|passcode|pwd|pin)([A-Za-z0-9][\x21-\x2b\x2d-\x3a\x3c-\x7e]*)/gi
+/** an 18-digit Chinese ID card number (the last character a digit or X) */
+const ID_CARD =
+  /(?<![\dA-Za-z])[1-9]\d{5}(?:18|19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}[\dXx](?![\dA-Za-z])/g
+/** 13-19 digits, single spaces or dashes between them allowed: a card number when Luhn passes */
+const CARD_LIKE = /(?<![\d-])\d(?:[ -]?\d){12,18}(?![\d-])/g
+/** a mainland mobile number, `+86` optional */
+const MOBILE = /(?<![\d+])(?:\+?86[ -]?)?1[3-9]\d{9}(?!\d)/g
+/** a long run of letters, digits, `_`, `-` (masked when it holds letters and digits both) */
+const LONG_RUN = /[\w-]{24,}/g
+/** `maskSecrets` reads at most this much: its callers keep far less (a memory is 1000 characters) */
+const MASK_INPUT_MAX = 10_000
+
+const quoted = (v: string) => /^["'\u201c]/.test(v)
+/** printable ASCII starting with a letter or digit, 6+ characters, holding a digit: a value that looks like a secret */
+const keyLike = (v: string) => /^[A-Za-z0-9][\x21-\x7e]{5,}$/.test(v) && /\d/.test(v)
+/** after `is`: printable ASCII holding a digit or a symbol (`s3cret!`, not `valid` or `to`) */
+const valueLike = (v: string) => /^[\x21-\x7e]+$/.test(v) && /[\d\W_]/.test(v)
+
+/** The Luhn check of a digit string (card numbers). */
+function luhn(digits: string): boolean {
+  let sum = 0
+  for (let i = 0; i < digits.length; i++) {
+    let d = Number(digits[digits.length - 1 - i])
+    if (i % 2 === 1) d = d * 2 > 9 ? d * 2 - 9 : d * 2
+    sum += d
+  }
+  return sum % 10 === 0
+}
+
+/**
+ * Free text with secrets and personal numbers masked (`***`), for text that is kept and shown again (agent
+ * memories): what `textRedactor` masks in a text of no request (`name=value` of secret names), plus PEM
+ * blocks, JWTs, tokens with a known prefix and AWS key ids, the value after a secret's name in English or
+ * Chinese (after `:` / `=` any value, quoted ones whole; after `is` or no separator only a value that looks
+ * like a secret; never Chinese words), Chinese ID card numbers, card numbers (13-19 digits passing Luhn),
+ * mainland mobile numbers and long runs of letters and digits. Ordinary sentences that merely name a secret
+ * (a forgotten password, "the token is valid") stay. Only the first {@link MASK_INPUT_MAX} characters are read and
+ * returned: callers cut their text first, and a bound keeps the rules' run time small. The request loggers
+ * keep their own rules.
+ */
+export function maskSecrets(input: string): string {
+  const text = input.slice(0, MASK_INPUT_MAX)
+  const named = (m: string, name: string, sep: string, value: string) => {
+    if (quoted(value)) return `${name}${sep}${MASK}`
+    const bare = !sep.trim()
+    const keep = /\bis\b/i.test(sep) ? !valueLike(value) : bare && !keyLike(value)
+    return keep ? m : `${name}${sep}${MASK}`
+  }
+  // whole blocks and tokens first: a pair rule would otherwise cut them at their first line or dot
+  const blocks = text
+    .replace(PEM, MASK)
+    .replace(JWT, MASK)
+    .replace(KNOWN_TOKEN, (m) => (/\d/.test(m) ? MASK : m))
+    .replace(AWS_KEY_ID, MASK)
+  return textRedactor(undefined)(blocks)
+    .replace(NAMED_SECRET, named)
+    .replace(NAMED_SECRET_CJK, named)
+    .replace(GLUED_SECRET, (m, name: string, value: string) =>
+      keyLike(value) ? `${name}${MASK}` : m,
+    )
+    .replace(ID_CARD, MASK)
+    .replace(CARD_LIKE, (m) => {
+      const digits = m.replace(/[ -]/g, '')
+      return digits.length >= 13 && digits.length <= 19 && luhn(digits) ? MASK : m
+    })
+    .replace(MOBILE, MASK)
+    .replace(LONG_RUN, (m) => (/\d/.test(m) && /[A-Za-z]/.test(m) ? MASK : m))
+}

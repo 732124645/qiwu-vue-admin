@@ -3,6 +3,7 @@ import { Injectable } from '@nestjs/common'
 import { TransactionHost } from '@nestjs-cls/transactional'
 import type { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm'
 import {
+  AGENT2_PARAMS,
   AGENT_INSTRUCTIONS_PARAM,
   AGENT_LIMIT_PARAMS,
   AGENT_PAUSED_PARAM,
@@ -62,7 +63,8 @@ const shown = (p: Parameter): Parameter =>
 /**
  * Sign-up switch, role and dept, the WeChat sign-in switch, the audit retention and the agent access
  * stop switch (`mcp.paused`: an emergency stop for every tenant), the in-app agent's stop switch, limits,
- * trust mode, platform instructions and web settings (they bound every tenant's cost and safety) are root-managed,
+ * trust mode, platform instructions, web settings, the auto-review model, the memory params and the research
+ * limits (they bound every tenant's cost and safety) are root-managed,
  * root being the platform's super admin only (403 `grant_exceeds_own`; see docs/design-notes.md#permissions,
  * #tenancy): the retention purge is the one way rows nobody may delete (tenant enter / leave) go.
  */
@@ -75,10 +77,17 @@ const ROOT_ONLY: ReadonlySet<unknown> = new Set([
   MCP_PAUSED_PARAM,
   AGENT_PAUSED_PARAM,
   ...Object.values(AGENT_LIMIT_PARAMS),
+  AGENT2_PARAMS.automationsPerUser,
+  AGENT2_PARAMS.automationRunsPerDay,
   AGENT_TRUST_MODE_PARAM,
   AGENT_INSTRUCTIONS_PARAM,
   AGENT_WEB_MODE_PARAM,
   AGENT_WEB_DOMAINS_PARAM,
+  AGENT2_PARAMS.reviewModel,
+  AGENT2_PARAMS.memoryExtract,
+  AGENT2_PARAMS.memoryPerTurn,
+  AGENT2_PARAMS.researchSteps,
+  AGENT2_PARAMS.researchSeconds,
 ])
 const assertWritable = (key: unknown): void => {
   if (ROOT_ONLY.has(key) && !clsGet('principal')?.root)
@@ -147,6 +156,8 @@ export class ParameterService extends BaseCrudService<Parameter> {
       await this.lockScopedIds([id])
       const stored = await this.repo.findOneByOrFail({ id })
       assertWritable(stored.paramKey)
+      // 改名也算写入：不能把一个普通参数改成 root 专用的键
+      if (dto.paramKey !== undefined) assertWritable(dto.paramKey)
       const { paramValue, ...rest } = dto
       const isPublic = rest.isPublic ?? stored.isPublic
       if (stored.isBuiltin && isPublic !== stored.isPublic)

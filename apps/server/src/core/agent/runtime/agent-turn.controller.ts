@@ -18,6 +18,7 @@ import type { Principal } from '../../auth/principal.js'
 import { clsGet } from '../../context/cls.js'
 import { Idempotent } from '../../guard/idempotent.js'
 import { ApiEnvelope } from '../../http/api-envelope.decorator.js'
+import { Sensitive } from '../../redact.js'
 import { TURN_CONTROL, type TurnControl } from '../agent-ports.js'
 import { AgentTurn } from '../entities/agent-thread.entity.js'
 import { turnVo } from './item-store.js'
@@ -40,6 +41,8 @@ export class AgentTurnController {
   @RequirePerm(agentPerms.chat.use)
   @Idempotent()
   @ActionLog({ domain: 'agent.thread', verb: 'send' })
+  // 消息正文可能带个人信息或密钥：不进操作日志和接口日志
+  @Sensitive('text')
   @ApiOperation({
     summary:
       'Send a message: starts a turn, or while one runs joins it (steer) or waits for the next (queue)',

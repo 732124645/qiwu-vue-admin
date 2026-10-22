@@ -40,6 +40,9 @@
         "lock": "锁",
         "jobLock": "任务锁",
         "jobFire": "任务触发记录",
+        "agentSweep": "智能体孤儿轮次清理统计",
+        "agentWaitMail": "智能体等待提醒邮件记号",
+        "agentMemoryMark": "智能体记忆提炼进度",
         "queue": "任务队列"
       }
     }

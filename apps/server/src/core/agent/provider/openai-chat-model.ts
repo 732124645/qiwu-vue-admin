@@ -11,6 +11,8 @@ import type {
   ChatRequest,
   ChatToolCall,
   ChatUsage,
+  ImageRequest,
+  ImageResult,
 } from './chat-model.js'
 
 type WireMessage = OpenAI.Chat.ChatCompletionMessageParam
@@ -30,6 +32,10 @@ export interface ChatModelConfig {
 }
 
 const DEFAULT_TIMEOUT_MS = 60_000
+/** an image takes longer than a chat answer and arrives in one piece */
+const IMAGE_TIMEOUT_MS = 180_000
+/** the longest base64 image taken (about 20 MB of bytes): a longer answer is refused before it is decoded */
+export const IMAGE_B64_MAX = 28 * 1024 * 1024
 const DEFAULT_RETRIES = 2
 /** waits before the 1st, 2nd, … retry */
 const BACKOFF_MS = [250, 1000, 2000]
@@ -185,6 +191,43 @@ export class OpenAiChatModel implements ChatModel {
     }
   }
 
+  /**
+   * 生成一张图片（兼容 OpenAI 的 Images API），同样的中断、重试与错误映射。只收 base64 结果：上游只给链接时
+   * 按失败处理，不另行下载（不为它开新的出站请求）。gpt-image 系列总是回 base64 且不接受 `response_format`，
+   * 其余模型显式要 base64。
+   */
+  async image(req: ImageRequest): Promise<ImageResult> {
+    const call = this.guard(req.signal, IMAGE_TIMEOUT_MS)
+    try {
+      const res = await this.withRetry(call, () =>
+        this.client.images.generate(
+          {
+            model: req.model,
+            prompt: req.prompt,
+            n: 1,
+            ...(req.size && { size: req.size }),
+            ...(!/^gpt-image/i.test(req.model) && { response_format: 'b64_json' as const }),
+          },
+          { signal: call.signal, timeout: IMAGE_TIMEOUT_MS },
+        ),
+      )
+      const b64 = res.data?.[0]?.b64_json
+      if (!b64) throw failed('bad_response')
+      if (b64.length > IMAGE_B64_MAX) throw failed('too_large')
+      const u = res.usage
+      return {
+        data: Buffer.from(b64, 'base64'),
+        usage: u
+          ? { promptTokens: u.input_tokens ?? 0, completionTokens: u.output_tokens ?? 0 }
+          : null,
+      }
+    } catch (e) {
+      throw this.fail(e, call)
+    } finally {
+      call.done()
+    }
+  }
+
   /** 本次请求涉及的工具名：提供的工具与历史消息里调用过的。 */
   private namesOf(req: ChatRequest) {
     return wireNames([
@@ -221,13 +264,13 @@ export class OpenAiChatModel implements ChatModel {
    * 一次调用的中断控制：调用方的 signal 与静默计时器（等响应头、等每个分片）都中止同一个请求；
    * 计时器每收到一个分片重置，所以长回答不会被总时长误杀。
    */
-  private guard(outer?: AbortSignal) {
+  private guard(outer?: AbortSignal, timeoutMs = this.timeoutMs) {
     const ctrl = new AbortController()
     let timer: NodeJS.Timeout | undefined
     const onAbort = () => ctrl.abort(outer?.reason)
     const touch = () => {
       clearTimeout(timer)
-      timer = setTimeout(() => ctrl.abort(TIMEOUT), this.timeoutMs)
+      timer = setTimeout(() => ctrl.abort(TIMEOUT), timeoutMs)
     }
     if (outer?.aborted) ctrl.abort(outer.reason)
     else outer?.addEventListener('abort', onAbort, { once: true })

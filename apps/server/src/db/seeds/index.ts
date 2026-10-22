@@ -39,6 +39,7 @@ import { seedAppVersion } from '../../modules/platform/settings/app-version/app-
 import { seedStorageConfig } from '../../modules/platform/storage/config/config.seed.js'
 import { seedStorageObject } from '../../modules/platform/storage/object.seed.js'
 import { seedAgent } from './agent/agent.seed.js'
+import { seedResearchSkill } from './agent/research-skill.seed.js'
 import { seedAudit } from './audit/audit.seed.js'
 import { seedCodegen } from './codegen/codegen.seed.js'
 import { seedCustomerSamples } from './demo/customer-sample.seed.js'
@@ -96,7 +97,7 @@ const SEEDS: Record<string, Seed[]> = {
   // the MCP tool and access token pages hang under system too
   mcp: [seedMcp],
   // the in-app agent's top-level group with its pages
-  agent: [seedAgent],
+  agent: [seedAgent, seedResearchSkill],
   scheduler: [seedScheduler, seedTask, seedRun],
   // before demo: its menu group holds the demo group
   codegen: [seedCodegen],

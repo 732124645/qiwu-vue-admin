@@ -24,6 +24,7 @@ const newModel = (): Model => ({
   vision: false,
   fast: false,
   contextWindow: 64_000,
+  image: false,
 })
 const { model, row, formRef, rules, loading, submitting, submit } = useCrudForm({
   api: {
@@ -60,6 +61,7 @@ const modelColumns = [
   { prop: 'reasoning', label: 'agent.admin.model.reasoning', width: 80 },
   { prop: 'vision', label: 'agent.admin.model.vision', width: 80 },
   { prop: 'fast', label: 'agent.admin.model.fast', width: 80 },
+  { prop: 'image', label: 'agent.admin.model.image', width: 80 },
   { prop: 'contextWindow', label: 'agent.admin.model.contextWindow', width: 170 },
 ]
 </script>
@@ -109,6 +111,9 @@ const modelColumns = [
       </template>
       <template #cell-fast="{ row: m }">
         <el-checkbox v-model="m.fast" :aria-label="t('agent.admin.model.fast')" />
+      </template>
+      <template #cell-image="{ row: m }">
+        <el-checkbox v-model="m.image" :aria-label="t('agent.admin.model.image')" />
       </template>
       <template #cell-contextWindow="{ row: m, index }">
         <el-form-item :prop="`models.${index}.contextWindow`" :rules="modelRules.contextWindow">

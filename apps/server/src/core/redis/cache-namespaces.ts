@@ -108,6 +108,20 @@ export const CACHE_NAMESPACES = {
   lock: ns('lock:', false, false, 'global-id'),
   jobLock: ns('job:lock:', false, false, 'platform'),
   jobFire: ns('job:fire:', false, false, 'platform'),
+  /** one hash: the agent's orphan turn sweep — last run (ISO) and the requeued / failed totals (AgentSweepStats) */
+  agentSweep: ns('agent:sweep', false, false, 'platform'),
+  /** turn id → 1 for 7 days: the turn's "waiting for you" mail went out (one per turn, the inbox gets every one) */
+  agentWaitMail: ns('agent:wait-mail:', false, false, 'global-id'),
+  /**
+   * `{automationId}:{createdAt ms}:{UTC day}` → the runs an automation started that day (INCR, kept 2 days;
+   * the creation time keeps a reused id from inheriting a count)
+   */
+  agentAutoRuns: ns('agent:auto-runs:', false, false, 'global-id'),
+  /**
+   * the memory distiller: thread id → the newest item seq it has read and the thread's activity then (8 days;
+   * a thread is never distilled twice); `calls:{userId}:{day}` → its model calls that day (2 days)
+   */
+  agentMemoryMark: ns('agent:memx:', false, false, 'global-id'),
   /**
    * BullMQ queues (core/queue): `{queue}:{job id}`, `{queue}:wait`, `{queue}:events`, … built by BullMQ
    * under `queuePrefix()`. One queue holds every tenant's jobs, each naming its tenant in its data; job

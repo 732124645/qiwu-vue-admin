@@ -34,6 +34,10 @@ export function threadVo(
     // shareToken 默认不查出：只有显式 addSelect 的查询才会带上它
     shared: !!t.shareToken,
     forkedFromId: t.forkedFromId === null ? null : num(t.forkedFromId),
+    profileId: t.profileId == null ? null : num(t.profileId),
+    memoryEnabled: t.memoryEnabled !== false,
+    parentThreadId: t.parentThreadId == null ? null : num(t.parentThreadId),
+    automationRunId: t.automationRunId == null ? null : num(t.automationRunId),
     batchId: t.batchId === null ? null : num(t.batchId),
     turnStatus: extra.turnStatus,
     lastActiveAt: iso(t.lastActiveAt),

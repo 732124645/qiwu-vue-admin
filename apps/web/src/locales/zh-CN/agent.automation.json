@@ -1,0 +1,89 @@
+{
+  "menu": {
+    "agent": {
+      "automation": "自动化"
+    },
+    "action": {
+      "share": "共享给全租户"
+    }
+  },
+  "agent": {
+    "automation": {
+      "entity": "自动化",
+      "hint": "按定时、业务事件或手动触发，以你的身份在后台运行一个技能或一段提示词；结果进收件箱，可在运行历史里打开会话查看。",
+      "lastRunAt": "最近运行",
+      "nextRunAt": "下次运行",
+      "owner": "创建人",
+      "sharedTag": "共享",
+      "on": "已启用",
+      "off": "已停用",
+      "runNow": "立即运行",
+      "runs": "运行历史",
+      "runsTitle": "运行历史：{name}",
+      "started": "已开始运行，结果见运行历史",
+      "openThread": "打开会话",
+      "trigger": {
+        "schedule": "定时",
+        "event": "业务事件",
+        "manual": "手动"
+      },
+      "preset": {
+        "label": "常用定时",
+        "every30m": "每 30 分钟",
+        "hourly": "每小时整点",
+        "daily9": "每天 9:00",
+        "weekdays9": "工作日 9:00",
+        "monday9": "每周一 9:00",
+        "monthly1": "每月 1 日 9:00",
+        "custom": "自定义"
+      },
+      "cronHint": "5 段 cron：分 时 日 月 周，最短 5 分钟一次",
+      "eventHint": "选择要监听的操作",
+      "writeMode": {
+        "read_only": "只读",
+        "ask": "询问",
+        "pre_approved": "预先同意",
+        "auto_review": "自动审查"
+      },
+      "writeModeHint": {
+        "read_only": "只读：不提供任何写入工具。",
+        "ask": "询问：遇到写入时停下，确认卡发到你的收件箱，你在会话里确认后才继续。",
+        "pre_approved": "预先同意：勾选的写入工具直接执行，其他写入仍停下等你确认；权限变化、工具停用或被禁用时自动失效。",
+        "auto_review": "自动审查：允许自动审查的写入交给审查模型，其他写入停下等你确认。"
+      },
+      "noTools": "你现在没有可以预先同意的写入工具",
+      "sharedHint": "全租户可见，以你的身份运行；只有你能修改。",
+      "notifyInbox": "站内信",
+      "notifyMail": "邮件",
+      "status": {
+        "running": "运行中",
+        "waiting": "等待确认",
+        "completed": "已完成",
+        "failed": "失败",
+        "cancelled": "已取消",
+        "skipped": "已跳过"
+      },
+      "run": {
+        "status": "状态",
+        "trigger": "触发方式",
+        "startedAt": "开始时间",
+        "endedAt": "结束时间",
+        "summary": "结果"
+      },
+      "error": {
+        "paused": "智能助手已被平台暂停",
+        "owner_inactive": "创建人已被停用或删除",
+        "owner_forbidden": "创建人没有运行它所需的权限",
+        "daily_limit": "今天的运行次数已满",
+        "not_configured": "没有可用的模型",
+        "thread_gone": "会话已被删除",
+        "turn_failed": "运行失败",
+        "mode_unavailable": "所选写入模式现在不可用",
+        "profile_missing": "配置方案已不可用，按默认设置运行",
+        "overlap": "已跳过：上一次运行还没结束"
+      },
+      "stale": "已失效",
+      "staleHint": "已失效的预先同意需要重新勾选并输入当前密码"
+    }
+  }
+}

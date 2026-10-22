@@ -11,7 +11,7 @@ import {
 } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
-import { useDebounceFn, useEventListener } from '@vueuse/core'
+import { useDebounceFn, useEventListener, useMediaQuery } from '@vueuse/core'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import dayjs from 'dayjs'
 import {
@@ -20,6 +20,7 @@ import {
   type AgentContext,
   type AgentItemVo,
   type AgentOptionsVo,
+  type AgentProfileVo,
   type AgentStatusVo,
   type AgentThreadVo,
   type AgentTurnVo,
@@ -30,8 +31,13 @@ import { toastRest } from '@/core/composables/use-crud'
 import { usePerm } from '@/core/permission'
 import { onRealtime, realtimeStatus } from '@/core/realtime/socket'
 import { saveBlob } from '@/core/request/http'
+import { useAuthStore } from '@/core/stores/auth'
 import ChatItem from './ChatItem.vue'
 import Composer, { type ComposerMessage, type ComposerSettings } from './Composer.vue'
+import NotifySettings from './NotifySettings.vue'
+import ProfileMemoryBar, { type ProfileDraft } from './ProfileMemoryBar.vue'
+import ShortcutSettings from './ShortcutSettings.vue'
+import { comboOf, loadShortcuts, saveShortcuts } from './shortcuts'
 import ThreadList from './ThreadList.vue'
 import { applyItemEvent, catchUpSeq, chatRows, mergeItems, type SlashCommand } from './thread-state'
 import { pendingContext, pendingRoute } from './use-agent-context'
@@ -41,7 +47,8 @@ import { pendingContext, pendingRoute } from './use-agent-context'
  * 打开会话时从接口读全部条目，之后靠 `agent:event` 实时更新（新增 / 替换条目、增量文本、轮次状态）；
  * 断线重连、页面重新显示或漏了事件时用 `afterSeq` 从接口补齐。所有接口只作用于本人的会话；
  * 地址里的 `?shared=<token>` 显示同租户的只读分享快照。其他会话的推送更新列表（未读数、轮次状态，
- * 未列出的会话会重读列表）。Alt+N 新会话（不与全局菜单搜索的 Ctrl/⌘+K 冲突，也不占用浏览器的查找）。
+ * 未列出的会话会重读列表）。快捷键（新会话、聚焦输入框、停止、切换计划模式）可在头部自定义，本人本浏览器
+ * 保存；默认 Alt+N 新会话（不与全局菜单搜索的 Ctrl/⌘+K 冲突，也不占用浏览器的查找）。会话可在新窗口打开。
  */
 // keep-alive 名称 = 菜单种子的 component_name
 defineOptions({ name: 'AgentChat' })
@@ -92,6 +99,11 @@ const context = shallowRef<AgentContext | null>(null)
 const settings = ref<ComposerSettings>(defaultSettings())
 /** 新会话草稿是否是临时会话（不进列表，离开即删） */
 const temporary = ref(false)
+/** 窄屏（≤ 640px）：方案、记忆、通知、快捷键与新窗口收进“更多”展开的一行，避免头部横向溢出 */
+const narrow = useMediaQuery('(max-width: 640px)')
+const moreOpen = ref(false)
+/** 新会话草稿的配置方案（undefined：默认方案）与是否使用记忆 */
+const draft = ref<ProfileDraft>({ profileId: undefined, memoryEnabled: true })
 /** 正在编辑最后一条用户消息：发送时从它之前分叉出新会话再发 */
 const editing = ref<{ seq: number } | null>(null)
 /** 只读分享快照的 token */
@@ -213,6 +225,7 @@ function newDraft(ctx: AgentContext | null = null) {
   editing.value = null
   sharedToken.value = null
   settings.value = defaultSettings()
+  draft.value = { profileId: undefined, memoryEnabled: true }
   showStatus.value = false
   setQuery({})
   void nextTick(() => composerRef.value?.focus())
@@ -320,13 +333,19 @@ async function toBottom() {
 watch(items, () => follow.value && void toBottom())
 
 // ---- 发送、停止、设置 ----
-/** 新建会话（草稿设置、带来的上下文、是否临时）；不带标题，服务端在第一轮后自动起名。 */
+/**
+ * 新建会话（草稿设置、配置方案与记忆开关、带来的上下文、是否临时）；不带标题，服务端在第一轮后自动起名。
+ */
 async function createThread() {
   const s = settings.value
+  const d = draft.value
   const th = await agentApi.createThread({
     approvalMode: s.approvalMode,
     planMode: s.planMode,
-    ...(temporary.value ? { temporary: true } : {}),
+    // undefined：服务端取本人的默认方案；null：明确不用方案
+    ...(d.profileId !== undefined ? { profileId: d.profileId } : {}),
+    // 记忆默认开，只在关掉时才带上（临时会话不读不写记忆）
+    ...(temporary.value ? { temporary: true } : d.memoryEnabled ? {} : { memoryEnabled: false }),
     ...(s.providerId != null && s.model ? { providerId: s.providerId, model: s.model } : {}),
     ...(s.reasoning ? { reasoning: s.reasoning } : {}),
     ...(context.value ? { context: context.value } : {}),
@@ -334,6 +353,26 @@ async function createThread() {
   context.value = null
   temporary.value = false
   return th
+}
+
+/** 草稿选了配置方案：输入框换成方案的模型、推理强度与审批模式（平台此刻提供的）；不用方案回到默认。 */
+function applyProfile(p: AgentProfileVo | null) {
+  const base = defaultSettings()
+  const modes = options.value?.approvalModes ?? []
+  settings.value = {
+    ...base,
+    planMode: settings.value.planMode,
+    ...(p?.providerId != null && p.model ? { providerId: p.providerId, model: p.model } : {}),
+    reasoning: p?.reasoning ?? null,
+    ...(p && modes.includes(p.approvalMode) ? { approvalMode: p.approvalMode } : {}),
+  }
+}
+
+/** 会话的记忆开关已保存：换上服务端返回的会话。 */
+function onThreadUpdated(next: AgentThreadVo) {
+  if (thread.value?.id !== next.id) return
+  thread.value = next
+  listRef.value?.upsert(next)
 }
 
 /**
@@ -568,13 +607,33 @@ async function onCommand(cmd: SlashCommand) {
   }
 }
 
-// ---- 快捷键：Alt+N（mac 上 ⌥N）新会话，只在本页显示时；按物理键判断，mac 的 ⌥ 会改变 e.key ----
+// ---- 快捷键：本人在本浏览器自定义（默认 Alt+N 新会话）；只在本页显示时；按物理键判断，mac 的 ⌥ 会改变 e.key ----
+const userId = useAuthStore().me?.user.id ?? 0
+const shortcuts = ref(loadShortcuts(userId))
+watch(shortcuts, (m) => saveShortcuts(userId, m))
 useEventListener(window, 'keydown', (e: KeyboardEvent) => {
-  if (!pageActive || e.defaultPrevented || !e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return
-  if (e.code !== 'KeyN') return
+  if (!pageActive || e.defaultPrevented) return
+  const combo = comboOf(e)
+  const map = shortcuts.value
+  if (!combo) return
+  if (combo === map.newChat) newDraft()
+  else if (combo === map.focusComposer) composerRef.value?.focus()
+  else if (combo === map.togglePlan && !sharedToken.value)
+    settings.value = { ...settings.value, planMode: !settings.value.planMode }
+  else return
   e.preventDefault()
-  newDraft()
 })
+
+/** 在新窗口打开当前会话（地址带 `?thread=<id>`，新窗口打开时直接载入它）。 */
+function openInWindow() {
+  const th = thread.value
+  if (!th) return
+  window.open(
+    router.resolve({ path: route.path, query: { thread: th.id } }).href,
+    '_blank',
+    'noopener',
+  )
+}
 
 // ---- 进入页面 ----
 /** 入口按钮带来的上下文：开一个新草稿并显示来源，开场提示换成适合来源页面的。 */
@@ -641,6 +700,33 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
           :active-text="t('agent.chat.temporary')"
           :aria-label="t('agent.chat.temporary')"
         />
+        <IconButton
+          v-if="narrow"
+          icon="lucide:ellipsis"
+          :label="t('crud.action.more')"
+          :aria-expanded="moreOpen"
+          aria-controls="agent-chat-tools"
+          @click="moreOpen = !moreOpen"
+        />
+        <div v-show="!narrow || moreOpen" id="agent-chat-tools" class="agent-chat__tools">
+          <ProfileMemoryBar
+            v-if="!sharedToken"
+            v-model:draft="draft"
+            :thread="thread"
+            :options="options"
+            :temporary="temporary"
+            @apply="applyProfile"
+            @updated="onThreadUpdated"
+          />
+          <NotifySettings v-if="!sharedToken" />
+          <ShortcutSettings v-model="shortcuts" />
+          <IconButton
+            v-if="thread && !thread.temporary"
+            icon="lucide:external-link"
+            :label="t('agent.chat.newWindow')"
+            @click="openInWindow"
+          />
+        </div>
         <el-dropdown v-if="thread" trigger="click" @command="onThreadCommand">
           <IconButton icon="lucide:ellipsis-vertical" :label="t('agent.chat.thread.menu')" />
           <template #dropdown>
@@ -806,6 +892,7 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
           :records
           :temporary="thread ? thread.temporary : temporary"
           :disabled="unavailable"
+          :stop-key="shortcuts.stop"
           @stop="stop"
           @command="onCommand"
         />
@@ -840,10 +927,19 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
 }
 .agent-chat__head {
   display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.agent-chat__tools {
+  display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: center;
 }
 .agent-chat__title {
+  min-width: 0;
+  max-width: 100%;
   margin: 0;
   overflow: hidden;
   font-size: 15px;
@@ -893,6 +989,16 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
   }
   .agent-chat__stream {
     height: 55vh;
+  }
+}
+/* narrow: switches without their text (the aria-label stays), the tools on a row of their own */
+@media (max-width: 640px) {
+  .agent-chat__head :deep(.el-switch__label) {
+    display: none;
+  }
+  .agent-chat__tools {
+    flex-basis: 100%;
+    justify-content: flex-end;
   }
 }
 </style>

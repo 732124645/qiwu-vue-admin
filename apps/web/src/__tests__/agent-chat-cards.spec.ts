@@ -382,6 +382,45 @@ describe('approval card', () => {
     w = mount(ApprovalCard, { props: { item: approval(), readonly: true }, global })
     expect(button('Approve')).toBeUndefined()
   })
+
+  it('shows the automatic review: approved or rejected with the reason, or handed over with its note', () => {
+    const auto = (verdict: string, reason: string) => ({ auto: { by: 'review', verdict, reason } })
+    w = mount(ApprovalCard, {
+      props: {
+        item: approval('approved', {
+          decision: 'approve',
+          ...auto('approve', 'The user asked for it.'),
+        }),
+      },
+      global,
+    })
+    const note = () => w.find('.agent-approval__review')
+    expect(note().text()).toContain('Approved by automatic review')
+    expect(note().text()).toContain('The user asked for it.')
+    expect(note().text()).toContain('What the review model said:')
+    expect(note().classes()).toContain('agent-approval__review--approve')
+    w.unmount()
+    w = mount(ApprovalCard, {
+      props: {
+        item: approval('rejected', { decision: 'reject', ...auto('reject', 'Wrong record.') }),
+      },
+      global,
+    })
+    expect(note().text()).toContain('Rejected by automatic review')
+    expect(note().text()).toContain('Wrong record.')
+    w.unmount()
+    // handed over: the note shows and the owner still decides
+    w = mount(ApprovalCard, {
+      props: { item: approval('pending', auto('escalate', 'Not sure.')) },
+      global,
+    })
+    expect(note().text()).toContain('Automatic review left it to you')
+    expect(note().text()).toContain('Not sure.')
+    expect(button('Approve')).toBeDefined()
+    w.unmount()
+    w = mount(ApprovalCard, { props: { item: approval() }, global })
+    expect(note().exists()).toBe(false)
+  })
 })
 
 const question = (status: AgentItemVo['status'] = 'pending', answers?: object[]) =>

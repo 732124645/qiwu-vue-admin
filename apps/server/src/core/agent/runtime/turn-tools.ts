@@ -14,7 +14,10 @@ export interface OfferedTool {
   parameters: Record<string, unknown>
   origin: ToolOrigin
   kind: McpToolKind
-  /** after the platform setting and the never-auto-write rule: `auto` runs at once, `ask` waits */
+  /**
+   * after the platform setting and the never-auto-write rule: `auto` runs at once, `ask` and `review` wait
+   * for the owner unless an approval reviewer decides
+   */
   policy: Exclude<AgentToolPolicy, 'deny'>
   /** the tool's method can preview a write (local tools) */
   preview: boolean
@@ -23,6 +26,44 @@ export interface OfferedTool {
 export const PLAN_TOOL = 'plan.update'
 export const ASK_TOOL = 'ask.user'
 export const SKILL_TOOL = 'skill.load'
+export const DELEGATE_TOOL = 'agent.delegate'
+export const CHART_TOOL = 'chart.render'
+export const REPORT_TOOL = 'report.write'
+export const IMAGE_TOOL = 'image.generate'
+
+/** A subagent's turn takes at most this many steps (fewer than a normal turn's limit when that is lower). */
+export const SUBAGENT_STEPS = 8
+
+/**
+ * 子会话里不提供的工具：再分派、反问用户（子会话没人回答），以及写给本人看的产出（图表、报告、图片：子会话
+ * 不在列表里，图片还要花钱；产出由父会话来写）。
+ */
+const SUBAGENT_DENIED = new Set([DELEGATE_TOOL, ASK_TOOL, CHART_TOOL, REPORT_TOOL, IMAGE_TOOL])
+
+/**
+ * 子智能体的会话只留下这些工具（see docs/agent.md#子智能体）：只读且策略为 auto 的（不会停下等审批），
+ * 去掉 {@link SUBAGENT_DENIED}，给了清单时只留清单里的（分派时父会话可用的工具）。就地修改并返回 `tools`。
+ */
+export function keepForSubagent(
+  tools: Map<string, OfferedTool>,
+  allowed: readonly string[] | undefined,
+): Map<string, OfferedTool> {
+  for (const [name, t] of tools)
+    if (
+      t.kind !== 'read' ||
+      t.policy !== 'auto' ||
+      SUBAGENT_DENIED.has(name) ||
+      (allowed && !allowed.includes(name))
+    )
+      tools.delete(name)
+  return tools
+}
+
+/** 子会话的 `target_ref`：分派它的调用 id 与序号（重做时据此找回）。 */
+export const subagentRef = (callId: string, n: number) => `subagent:${callId}#${n}`
+/** `target_ref` → 分派它的调用 id；不是子会话的为 null。 */
+export const subagentCallOf = (ref: string | null): string | null =>
+  ref?.startsWith('subagent:') ? ref.slice('subagent:'.length).replace(/#\d+$/, '') : null
 
 export const planInput = z.object({
   steps: z
@@ -59,58 +100,6 @@ export const askInput = z.object({
 })
 
 export const skillInput = z.object({ name: z.string().regex(AGENT_SKILL_NAME) })
-
-const schemaOf = (s: z.ZodObject) => {
-  const { $schema: _, ...rest } = z.toJSONSchema(s, { io: 'input' }) as Record<string, unknown>
-  return rest
-}
-
-const builtin = (
-  name: string,
-  title: string,
-  description: string,
-  input: z.ZodObject,
-): OfferedTool => ({
-  name,
-  title,
-  description,
-  parameters: schemaOf(input),
-  origin: 'builtin',
-  kind: 'read',
-  policy: 'auto',
-  preview: false,
-})
-
-/** 运行时自己实现的工具：计划清单、反问用户、加载技能（后者只在有技能来源时提供）。 */
-export function builtinTools(withSkills: boolean): OfferedTool[] {
-  return [
-    builtin(
-      PLAN_TOOL,
-      'Update the plan',
-      'Replaces the checklist of this task shown to the user: every step with its status ' +
-        '(pending, doing, done). Call it when you start a multi-step task and whenever a step changes.',
-      planInput,
-    ),
-    builtin(
-      ASK_TOOL,
-      'Ask the user',
-      'Asks the user 1-4 questions, each with 2-4 options (single or multiple choice; the user may also ' +
-        'type an answer), and waits for the answers. Use it when a choice is the user’s to make.',
-      askInput,
-    ),
-    ...(withSkills
-      ? [
-          builtin(
-            SKILL_TOOL,
-            'Load a skill',
-            'Returns the instructions of one of the listed skills by name. Load a skill before doing a ' +
-              'task it describes.',
-            skillInput,
-          ),
-        ]
-      : []),
-  ]
-}
 
 /**
  * 审批“本会话内同意”记住的目标：预览给出的目标记录；没有预览时本系统与联网工具取参数里的 `id`，再没有就是

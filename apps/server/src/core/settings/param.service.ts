@@ -19,10 +19,22 @@ interface CachedParam {
  */
 @Injectable()
 export class ParamService {
+  private readonly watchers: ((keys: string[]) => void)[] = []
+
   constructor(
     @InjectDataSource() private readonly ds: DataSource,
     @Inject(REDIS) private readonly redis: Redis,
   ) {}
+
+  /**
+   * Called with the keys after each {@link invalidate} (a param written through the API, or a cache
+   * clear): for work a change should start at once (the agent refills its turn slots when the emergency
+   * stop is lifted). Only on the instance that handled the write; the callback runs in the background and
+   * handles its own errors.
+   */
+  onInvalidate(fn: (keys: string[]) => void): void {
+    this.watchers.push(fn)
+  }
 
   /** The value, or null when the key does not exist. */
   async get(key: string): Promise<string | null> {
@@ -53,7 +65,9 @@ export class ParamService {
     if (!keys.length) return 0
     const tx = this.redis.multi()
     for (const k of new Set(keys)) tx.incr(redisKey('paramVer', k)).unlink(redisKey('param', k))
-    return droppedBy(await tx.exec())
+    const dropped = droppedBy(await tx.exec())
+    for (const fn of this.watchers) fn(keys)
+    return dropped
   }
 
   /**

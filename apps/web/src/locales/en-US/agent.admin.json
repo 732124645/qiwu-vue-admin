@@ -16,7 +16,8 @@
         "skills": "Platform skills",
         "params": "Instructions & limits",
         "prompts": "Prompt templates",
-        "instructions": "Instructions"
+        "instructions": "Instructions",
+        "diagnostics": "Diagnostics"
       },
       "scope": {
         "platform": "Platform",
@@ -109,7 +110,7 @@
         "paused": "Pause the agent",
         "pausedHint": "New turns and tool calls are refused at once; running turns stop",
         "pauseConfirm": "Pause the agent? New conversations and tool calls of every user are refused at once, and running turns stop.",
-        "trustMode": "Offer \"trust this thread\"",
+        "trustMode": "Offer \"trust this conversation\"",
         "trustModeHint": "When off, the chat page no longer offers this approval mode",
         "instructions": "Platform instructions",
         "instructionsHint": "Put first into every system prompt, for every tenant.",
@@ -163,6 +164,63 @@
         "totalTokens": "Total tokens",
         "total": "Total",
         "chart": "Agent token usage"
+      },
+      "diag": {
+        "queue": "Turn queue",
+        "turns": "Turns (all tenants)",
+        "sweeps": "Orphan turn sweep",
+        "providers": "Model providers",
+        "search": "Search providers",
+        "mcp": "External MCP servers",
+        "failures": "Recent failed turns",
+        "name": "Name",
+        "enabled": "Enabled",
+        "key": "Key",
+        "status": "Connection",
+        "lastError": "Last error",
+        "result": "Test result",
+        "test": "Test",
+        "ok": "OK ({ms} ms)",
+        "failed": "Failed: {error} ({ms} ms)",
+        "never": "Not run yet",
+        "q": {
+          "waiting": "Waiting",
+          "active": "Active",
+          "failed": "Failed",
+          "delayed": "Delayed"
+        },
+        "turn": {
+          "running": "Running",
+          "waiting": "Waiting for someone",
+          "failedToday": "Failed today"
+        },
+        "sweep": {
+          "lastAt": "Last run",
+          "requeued": "Requeued",
+          "failed": "Failed"
+        },
+        "f": {
+          "turnId": "Turn",
+          "tenantId": "Tenant",
+          "code": "Code",
+          "message": "Message",
+          "at": "Time"
+        },
+        "reason": {
+          "timeout": "Timed out",
+          "network": "Unreachable (network error)",
+          "auth": "Authentication failed",
+          "key_unreadable": "The stored key cannot be decrypted; enter it again",
+          "address": "Address not allowed (private or unresolvable)",
+          "too_large": "Answer too large",
+          "protocol": "Protocol error",
+          "bad_response": "Unexpected answer",
+          "answer": "Unexpected answer",
+          "no_model": "No model configured",
+          "search_not_configured": "No usable key",
+          "failed": "Failed",
+          "http": "HTTP {status}"
+        }
       }
     }
   }

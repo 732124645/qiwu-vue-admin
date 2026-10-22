@@ -2,6 +2,7 @@ import type {
   AgentApprovalDecide,
   AgentFeedbackSave,
   AgentMessageSend,
+  AgentNotifySettings,
   AgentOptionsVo,
   AgentQuestionAnswer,
   AgentSkillVo,
@@ -70,4 +71,10 @@ export const agentApi = {
   decide: (itemId: number, dto: AgentApprovalDecide) => api.post(`/agent/approvals/${itemId}`, dto),
   answer: (itemId: number, dto: Partial<AgentQuestionAnswer>) =>
     api.post(`/agent/questions/${itemId}`, dto),
+}
+
+/** /api/agent/notify-settings：本人的提醒设置（站内信总是发，每类提醒可另发邮件）。 */
+export const agentNotifyApi = {
+  get: () => api.get<AgentNotifySettings>('/agent/notify-settings'),
+  save: (dto: AgentNotifySettings) => api.put<AgentNotifySettings>('/agent/notify-settings', dto),
 }

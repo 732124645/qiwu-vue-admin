@@ -4,6 +4,7 @@
 import { spawnSync } from 'node:child_process'
 import bcrypt from 'bcryptjs'
 import {
+  AGENT2_PARAMS,
   AGENT_INSTRUCTIONS_PARAM,
   AGENT_LIMIT_PARAMS,
   AGENT_PAUSED_PARAM,
@@ -1230,6 +1231,7 @@ it('menu groups and pages follow the requested order', async () => {
     'agent-skill',
     'agent-setting',
     'agent-usage',
+    'agent-automation',
   ])
   expect(await children(await id('workflow'))).toEqual([
     'wf-start',
@@ -2524,10 +2526,17 @@ it('dicts with labels in every language, params with defaults', async () => {
     [AGENT_LIMIT_PARAMS.userDailyTokens]: '1000000',
     [AGENT_LIMIT_PARAMS.tenantDailyTokens]: '10000000',
     [AGENT_LIMIT_PARAMS.userConcurrentTurns]: '2',
+    [AGENT2_PARAMS.automationsPerUser]: '20',
+    [AGENT2_PARAMS.automationRunsPerDay]: '50',
+    [AGENT2_PARAMS.reviewModel]: '',
     [AGENT_TRUST_MODE_PARAM]: 'true',
     [AGENT_INSTRUCTIONS_PARAM]: '',
     [AGENT_WEB_MODE_PARAM]: 'live',
     [AGENT_WEB_DOMAINS_PARAM]: '',
+    [AGENT2_PARAMS.memoryExtract]: 'false',
+    [AGENT2_PARAMS.memoryPerTurn]: '5',
+    [AGENT2_PARAMS.researchSteps]: '60',
+    [AGENT2_PARAMS.researchSeconds]: '1200',
     [WX_SUBSCRIBE_ENABLED_PARAM]: 'false',
     [WX_SUBSCRIBE_TEMPLATES_PARAM]: expect.any(String),
     [wxoaParams.copyInbound]: 'true',

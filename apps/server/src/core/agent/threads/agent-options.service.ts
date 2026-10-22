@@ -5,6 +5,7 @@ import {
   AGENT_APPROVAL_MODES,
   AGENT_PAUSED_PARAM,
   AGENT_TRUST_MODE_PARAM,
+  AGENT2_PARAMS,
   AGENT_WEB_MODE_PARAM,
   type AgentOptionsVo,
   type AgentPromptSave,
@@ -30,6 +31,7 @@ import { ParamService } from '../../settings/param.service.js'
 import { AgentInstruction, AgentPrompt } from '../entities/agent-skill.entity.js'
 import { AgentUsage } from '../entities/agent-usage.entity.js'
 import { ProviderSearchConfig } from '../provider/provider-registry.js'
+import { parseReviewModel } from '../runtime/auto-reviewer.js'
 import { num, trustModeOn } from './thread-vo.js'
 import { AgentThreadService } from './thread.service.js'
 
@@ -102,6 +104,7 @@ export class AgentOptionsService {
     const providers = await this.threads.enabledProviders()
     const first = providers[0]
     const webMode = (await this.params.get(AGENT_WEB_MODE_PARAM))?.trim() || 'live'
+    const reviewOn = !!parseReviewModel(await this.params.get(AGENT2_PARAMS.reviewModel))
     const trust = trustModeOn(await this.params.get(AGENT_TRUST_MODE_PARAM))
     const lang = currentLocale()
     // 外部工具来源只列启用服务器上启用、策略不是 deny 的工具：按服务器名去重
@@ -117,7 +120,10 @@ export class AgentOptionsService {
       providers: providers.map(({ id, name, models }) => ({ id, name, models })),
       defaults: first ? { providerId: first.id, model: first.models[0]!.id } : null,
       skills: this.skills ? await this.skills.listFor(p) : [],
-      approvalModes: AGENT_APPROVAL_MODES.filter((m) => trust || m !== 'trust'),
+      // 自动审查要先由平台指定审查用的模型才提供
+      approvalModes: AGENT_APPROVAL_MODES.filter(
+        (m) => (trust || m !== 'trust') && (m !== 'auto_review' || reviewOn),
+      ),
       webSearch: webMode === 'live' && (await this.search.current()) !== null,
       paused: await this.on(AGENT_PAUSED_PARAM, false),
       starters: this.starters(lang, route),

@@ -1,0 +1,30 @@
+{
+  "agent": {
+    "chat": {
+      "mode": {
+        "auto_review": "自动审查"
+      }
+    },
+    "admin": {
+      "policy": {
+        "review": "自动审查"
+      },
+      "tool": {
+        "sources": {
+          "builtin": "内置"
+        },
+        "enabled": "启用",
+        "enabledToggle": "启用 {name}"
+      }
+    },
+    "review": {
+      "card": {
+        "approve": "已自动审查通过",
+        "reject": "自动审查驳回",
+        "escalate": "自动审查交给你确认",
+        "said": "审查模型的说法：",
+        "note": "说明："
+      }
+    }
+  }
+}

@@ -34,7 +34,7 @@
         "archived": "Archived",
         "restored": "Restored",
         "removeConfirm": "Delete the conversation \"{title}\" and all its messages? This cannot be undone.",
-        "actions": "Actions for \"{title}\"",
+        "actions": "Actions for the conversation \"{title}\"",
         "untitled": "Untitled conversation",
         "empty": "No conversations yet",
         "more": "Load more",
@@ -228,7 +228,7 @@
         "stopped": "Sharing stopped",
         "readonly": "Shared, read only"
       },
-      "temporary": "Temporary chat",
+      "temporary": "Temporary conversation",
       "error": {
         "generic": "Something went wrong, please try again",
         "interrupted": "The turn was interrupted"
@@ -248,6 +248,36 @@
       "planRun": {
         "action": "Run this plan",
         "text": "Go ahead with the plan"
+      },
+      "shortcut": {
+        "open": "Keyboard shortcuts",
+        "title": "Keyboard shortcuts",
+        "press": "Press the new keys…",
+        "reset": "Restore defaults",
+        "stopHint": "Stop works in the empty message box while a turn runs; the others anywhere on this page. Saved in this browser only.",
+        "action": {
+          "newChat": "New conversation",
+          "focusComposer": "Focus the message box",
+          "stop": "Stop the turn",
+          "togglePlan": "Toggle plan mode"
+        },
+        "conflict": {
+          "reserved": "{key} is already used by the page",
+          "modifier": "{key} needs Ctrl, Alt or ⌘",
+          "action": "{key} is already used for “{action}”"
+        }
+      },
+      "newWindow": "Open in a new window",
+      "notify": {
+        "open": "Notification settings",
+        "title": "Notifications",
+        "mail": "Also send an email",
+        "hint": "You always get an inbox message; the mobile app reads the inbox. Emails go to the address in your profile.",
+        "event": {
+          "turnDone": "A long turn finishes",
+          "waiting": "Waiting for my confirmation or answer",
+          "automation": "Automation results"
+        }
       }
     }
   }

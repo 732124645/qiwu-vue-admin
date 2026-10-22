@@ -1,6 +1,7 @@
 // settings seed (see docs/design-notes.md#i18n): the dictionaries and runtime parameters.
 // Dict labels and param names are mode B (`*_i18n` JSON); the plain `label`/`name` column holds zh-CN.
 import {
+  AGENT2_PARAMS,
   AGENT_INSTRUCTIONS_PARAM,
   AGENT_LIMIT_PARAMS,
   AGENT_PAUSED_PARAM,
@@ -382,11 +383,24 @@ const PARAMS: ParamSeed[] = [
     },
   },
   {
+    key: AGENT2_PARAMS.automationsPerUser,
+    value: 20,
+    nameI18n: { 'zh-CN': '智能体每用户最多自动化数', 'en-US': 'Agent automations per user' },
+  },
+  {
+    key: AGENT2_PARAMS.automationRunsPerDay,
+    value: 50,
+    nameI18n: {
+      'zh-CN': '智能体每条自动化每日最多运行次数（UTC 日）',
+      'en-US': 'Agent runs per automation per day (UTC)',
+    },
+  },
+  {
     key: AGENT_TRUST_MODE_PARAM,
     value: 'true',
     nameI18n: {
       'zh-CN': '智能体允许“信任本会话”审批模式（false 时不提供）',
-      'en-US': 'Agent offers the "trust this thread" approval mode (false: not offered)',
+      'en-US': 'Agent offers the "trust this conversation" approval mode (false: not offered)',
     },
   },
   {
@@ -412,6 +426,46 @@ const PARAMS: ParamSeed[] = [
       'zh-CN': '智能体可直接读取的网站域名（逗号分隔；空为只读搜索结果与用户给出的链接）',
       'en-US':
         'Domains the agent may read directly (comma-separated; empty: only search results and user links)',
+    },
+  },
+  {
+    key: AGENT2_PARAMS.reviewModel,
+    value: '',
+    nameI18n: {
+      'zh-CN': '智能体自动审查用的模型（提供方 id:模型 id；空为不提供“自动审查”模式）',
+      'en-US': 'Agent auto-review model (provider id:model id; empty: no auto-review mode)',
+    },
+  },
+  {
+    key: AGENT2_PARAMS.memoryExtract,
+    value: 'false',
+    nameI18n: {
+      'zh-CN': '智能体从空闲会话提炼记忆（true 时后台定时提炼，计入用量）',
+      'en-US': 'Agent distils memories from idle chats (true: a background job, counted as usage)',
+    },
+  },
+  {
+    key: AGENT2_PARAMS.memoryPerTurn,
+    value: 5,
+    nameI18n: {
+      'zh-CN': '智能体每轮最多放进上下文的记忆条数（0 为不用记忆）',
+      'en-US': 'Agent memories put into one turn at most (0: memories unused)',
+    },
+  },
+  {
+    key: AGENT2_PARAMS.researchSteps,
+    value: 60,
+    nameI18n: {
+      'zh-CN': '智能体研究模式每轮最多步数（以 deep-research 技能开始的轮次）',
+      'en-US': 'Agent steps per research turn (turns started with the research skill)',
+    },
+  },
+  {
+    key: AGENT2_PARAMS.researchSeconds,
+    value: 1200,
+    nameI18n: {
+      'zh-CN': '智能体研究模式每轮最长秒数',
+      'en-US': 'Agent seconds per research turn',
     },
   },
   {

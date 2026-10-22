@@ -1,0 +1,45 @@
+{
+  "agent": {
+    "admin": {
+      "model": {
+        "image": "Image"
+      }
+    },
+    "output": {
+      "export": {
+        "xlsx": "Export to Excel"
+      },
+      "chart": {
+        "title": "Chart"
+      },
+      "image": {
+        "title": "Generated image",
+        "download": "Download",
+        "failed": "The image could not be loaded",
+        "shared": "Images are not shown in a shared view"
+      },
+      "report": {
+        "label": "Research report",
+        "markdown": "Export Markdown",
+        "print": "Print as PDF",
+        "table": "Export table",
+        "tableN": "Export table {n}",
+        "sources": "Sources",
+        "unverified": "Unverified"
+      },
+      "subagent": {
+        "title": "Subtasks",
+        "open": "Open sub-conversation",
+        "summary": "Summary",
+        "status": {
+          "queued": "Queued",
+          "running": "Running",
+          "waiting": "Waiting",
+          "completed": "Done",
+          "failed": "Failed",
+          "cancelled": "Stopped"
+        }
+      }
+    }
+  }
+}

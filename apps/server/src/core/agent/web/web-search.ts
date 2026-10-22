@@ -126,10 +126,10 @@ export class WebSearch {
       throw new BizError(Err.AGENT_WEB_FAILED, { reason })
     }
     if (!res.ok) {
-      // 只记状态码：对方的错误正文可能回显请求内容
+      // 只记状态码：对方的错误正文可能回显请求内容（状态码随错误带出，供诊断页显示）
       this.logger.warn(`${config.kind} search answered HTTP ${res.status}`)
       await res.body?.cancel()
-      throw new BizError(Err.AGENT_WEB_FAILED, { reason: 'status' })
+      throw new BizError(Err.AGENT_WEB_FAILED, { reason: 'status', status: res.status })
     }
     return res.json().catch(() => null)
   }

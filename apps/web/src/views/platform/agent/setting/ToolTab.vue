@@ -12,8 +12,9 @@ import { useAuthStore } from '@/core/stores/auth'
 import { useList } from './use-list'
 
 /**
- * “工具策略”标签：本系统工具与内置联网工具的审批策略。写入工具只能“询问”或“禁用”，从不自动执行；
- * 改过的可恢复为按类型的默认（只读自动、写入询问）。只有 root 能改，其他人只读。
+ * “工具策略”标签：本系统工具、内置联网工具与智能体内置工具的审批策略。写入工具只能“询问”、“自动审查”
+ * 或“禁用”，从不自动执行；改过的可恢复为按类型的默认（只读自动、写入询问）。内置工具在这里启停（本系统
+ * 其他工具在 MCP 工具页）。只有 root 能改，其他人只读。
  */
 defineOptions({ name: 'AgentToolTab' })
 const { t } = useI18n()
@@ -28,10 +29,11 @@ const columns: QwColumn[] = [
   { prop: 'source', label: 'agent.admin.tool.source', width: 90 },
   { prop: 'perm', label: 'agent.admin.tool.perm', width: 200, showOverflowTooltip: true },
   { prop: 'policy', label: 'agent.admin.tool.policy', width: 150 },
+  { prop: 'enabled', label: 'agent.admin.tool.enabled', width: 90 },
 ]
-/** 一个工具可选的策略：写入工具不提供“自动”。 */
+/** 一个工具可选的策略：写入工具不提供“自动”，“自动审查”只给写入工具。 */
 const toolPolicies = (tool: Pick<AgentToolVo, 'kind'>): AgentToolPolicy[] =>
-  tool.kind === 'write' ? ['ask', 'deny'] : ['auto', 'ask', 'deny']
+  tool.kind === 'write' ? ['ask', 'review', 'deny'] : ['auto', 'ask', 'deny']
 /** 正在保存的工具名：其控件加载并禁用 */
 const busy = ref<string>()
 
@@ -41,6 +43,20 @@ async function setPolicy(row: AgentToolVo, policy: AgentToolPolicy | null) {
   busy.value = row.name
   try {
     await agentToolApi.setPolicy(row.name, policy)
+  } catch (e) {
+    toastRest(e)
+  } finally {
+    await refresh()
+    busy.value = undefined
+  }
+}
+
+/** 启用或停用一个内置工具，完成后以服务端为准重新载入。 */
+async function setEnabled(row: AgentToolVo, enabled: boolean) {
+  if (busy.value) return
+  busy.value = row.name
+  try {
+    await agentToolApi.setEnabled(row.name, enabled)
   } catch (e) {
     toastRest(e)
   } finally {
@@ -90,6 +106,17 @@ async function setPolicy(row: AgentToolVo, policy: AgentToolPolicy | null) {
             :label="t(`agent.admin.policy.${p}`)"
           />
         </el-select>
+      </template>
+      <template #cell-enabled="{ row }">
+        <el-switch
+          v-if="row.source === 'builtin'"
+          size="small"
+          :model-value="row.enabled"
+          :disabled="!canModify || busy != null"
+          :loading="busy === row.name"
+          :aria-label="t('agent.admin.tool.enabledToggle', { name: row.name })"
+          @change="setEnabled(row, $event as boolean)"
+        />
       </template>
       <template #actions="{ row }">
         <el-button

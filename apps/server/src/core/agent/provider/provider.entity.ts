@@ -12,6 +12,8 @@ export interface ProviderModel {
   vision?: boolean
   /** 作为“快速”选项提供 */
   fast?: boolean
+  /** 图片模型：作为内置工具 `image.generate` 提供给智能体 */
+  image?: boolean
   contextWindow: number
 }
 

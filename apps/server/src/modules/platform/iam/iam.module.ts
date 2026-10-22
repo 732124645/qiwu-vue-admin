@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common'
 import { TypeOrmModule } from '@nestjs/typeorm'
+import { AGENT_NOTIFY_PREFS } from '../../../core/agent/agent-ports.js'
 import { TENANT_LOOKUP } from '../../../core/auth/tenant-lookup.js'
 import { USER_LOOKUP } from '../../../core/auth/user-lookup.js'
 import { referencedBy } from '../../../core/db/references.js'
@@ -10,6 +11,7 @@ import { DeptModule } from './dept/dept.module.js'
 import { IamUserLookup } from './iam-user-lookup.js'
 import { MenuModule } from './menu/menu.module.js'
 import { PositionModule } from './position/position.module.js'
+import { IamAgentNotifyPrefs } from './profile/agent-notify-prefs.js'
 import { ProfileController } from './profile/profile.controller.js'
 import { ProfileMcpTools } from './profile/profile.mcp-tools.js'
 import { ProfileService } from './profile/profile.service.js'
@@ -84,12 +86,15 @@ referencedBy(
     TenantProvisioner,
     TenantService,
     ProfileService,
+    // 智能体的个人通知设置存在个人偏好里（core 不引用 modules，经端口取用；智能体关闭时无人注入）
+    IamAgentNotifyPrefs,
+    { provide: AGENT_NOTIFY_PREFS, useExisting: IamAgentNotifyPrefs },
     ProfileMcpTools,
     SignupService,
     WxMpGateway,
     WxMpService,
     WxSubscribeService,
   ],
-  exports: [USER_LOOKUP, TENANT_LOOKUP],
+  exports: [USER_LOOKUP, TENANT_LOOKUP, AGENT_NOTIFY_PREFS],
 })
 export class IamModule {}

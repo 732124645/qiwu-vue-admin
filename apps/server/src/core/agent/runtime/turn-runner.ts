@@ -2,6 +2,8 @@ import { Inject, Injectable, Logger, Optional } from '@nestjs/common'
 import { InjectDataSource } from '@nestjs/typeorm'
 import {
   AGENT_INSTRUCTIONS_PARAM,
+  AGENT_RESEARCH_SKILL,
+  AGENT2_PARAMS,
   AGENT_LIMIT_PARAMS,
   AGENT_TRUST_MODE_PARAM,
   AGENT_WEB_DOMAINS_PARAM,
@@ -17,7 +19,16 @@ import {
   type McpToolKind,
 } from '@qiwu/shared'
 import { I18nService } from 'nestjs-i18n'
-import { Between, type DataSource, type EntityManager, In, LessThan, MoreThan, Not } from 'typeorm'
+import {
+  Between,
+  type DataSource,
+  type EntityManager,
+  In,
+  IsNull,
+  LessThan,
+  MoreThan,
+  Not,
+} from 'typeorm'
 import { ZodError, z } from 'zod'
 import { AuditWriter } from '../../audit/audit-writer.js'
 import { PermVersion } from '../../auth/perm-version.js'
@@ -28,36 +39,55 @@ import { BizError } from '../../http/biz-error.js'
 import { McpRegistry } from '../../mcp/mcp-registry.js'
 import { McpToolSwitch } from '../../mcp/mcp.entity.js'
 import { ToolHost } from '../../mcp/tool-host.js'
-import { Notifier } from '../../notify/notify.js'
 import { redisKey } from '../../redis/cache-namespaces.js'
 import { REDIS, type Redis } from '../../redis/redis.module.js'
 import { ParamService } from '../../settings/param.service.js'
 import {
+  type AgentModelUsage,
+  type AgentReviewContext,
+  type AgentReviewVerdict,
+  type AgentRunContext,
+  type AgentToolContext,
+  type AgentToolWait,
   ATTACHMENT_SOURCE,
+  type AgentBuiltinToolMeta,
   type AttachmentSource,
   EXTERNAL_TOOL_SOURCE,
   type ElicitHandler,
   type ExternalToolSource,
   INSTRUCTION_SOURCE,
   type InstructionSource,
+  PROFILE_SOURCE,
+  type ProfileSource,
   type ResolvedAttachment,
   SKILL_SOURCE,
   type SkillSource,
 } from '../agent-ports.js'
+import { AutomationPreApproval } from '../automation/pre-approval.js'
+import { AgentSweepStats } from '../diagnostics/sweep-stats.js'
 import { AgentItem, AgentThread, AgentTurn } from '../entities/agent-thread.entity.js'
 import type { ChatFinishReason, ChatToolCall, ChatUsage } from '../provider/chat-model.js'
 import { ProviderRegistry, type ResolvedModel } from '../provider/provider-registry.js'
 import { trustModeOn } from '../threads/thread-vo.js'
 import { AgentToolPolicies, effectivePolicy } from '../tools/tool-policy.js'
 import { TurnUrls } from '../web/turn-urls.js'
-import { WEB_TOOLS, WebTools } from '../web/web-tools.js'
-import { type AgentItemStatus, type ItemInternal, ItemStore, ThreadGone } from './item-store.js'
+import { WEB_TOOLS, WebTools, wrapUntrusted } from '../web/web-tools.js'
+import {
+  type AgentItemStatus,
+  copiesSuggestion,
+  type ItemInternal,
+  ItemStore,
+  ThreadGone,
+} from './item-store.js'
+import { AgentNotices } from './notify-settings.js'
 import {
   citationsOf,
   COMPACT_AT,
   COMPACT_PROMPT,
+  contextMessage,
   estimateTokens,
   historyMessages,
+  latestUserText,
   splitSuggestions,
   summaryMessage,
   systemPrompt,
@@ -66,16 +96,12 @@ import {
 } from './turn-prompt.js'
 import { ACTIVE_TURN, openCards, TurnQueue } from './turn-queue.js'
 import { UsageBook, usageDay } from './usage-book.js'
+import { AgentExtensions, isToolItemKind, runThread, toolItemPayload } from './agent-extensions.js'
 import {
-  ASK_TOOL,
-  askInput,
-  builtinTools,
   isTrusted,
+  keepForSubagent,
   type OfferedTool,
-  PLAN_TOOL,
-  planInput,
-  SKILL_TOOL,
-  skillInput,
+  SUBAGENT_STEPS,
   trustKey,
 } from './turn-tools.js'
 
@@ -131,7 +157,21 @@ interface Limits {
   userDailyTokens: number
   tenantDailyTokens: number
   userConcurrentTurns: number
+  /** research mode's step and time limits (a turn started with the platform research skill) */
+  researchSteps: number
+  researchSeconds: number
 }
+
+/** What a subagent's turn reports to the parent run (see TurnRunner.runChild). */
+export interface ChildHooks {
+  /** a model call of the subagent: counted in the parent turn too */
+  onUsage(model: string, u: ChatUsage): Promise<void>
+  /** the parent turn's or the owner's budget is spent: the subagent stops before its next step */
+  overBudget(): Promise<'turn_tokens' | 'user_daily' | 'tenant_daily' | null>
+}
+
+/** The skill a turn was started with, with where it comes from. */
+type TurnSkill = NonNullable<Awaited<ReturnType<SkillSource['load']>>>
 
 /** 一次运行（一个队列任务）的状态。 */
 interface RunCtx {
@@ -160,6 +200,26 @@ interface RunCtx {
   clock: TurnClock
   /** by seq: this turn's user message repeats a suggestion of the answer before it */
   suggested?: Map<number, boolean>
+  /** what the extension points see of this run (owner, thread settings, turn, signal) */
+  view: AgentRunContext
+  /** the built-in tools available to this run with their effective policy, before mode and skill list */
+  builtins: Map<string, AgentToolPolicy>
+}
+
+/**
+ * 内置工具此刻生效的策略：平台停用了的按 deny；否则显式策略优先（`cfg_mcp_tool` 按名字一行），再按类型
+ * 默认（写入工具即使被写成 auto 也是 ask）。声明了 `humanOnly` 的只有 deny 或 ask：管理员设的 auto 与
+ * review 都按 ask。
+ */
+function builtinPolicy(
+  meta: Pick<AgentBuiltinToolMeta, 'name' | 'kind' | 'humanOnly'>,
+  policies: ReadonlyMap<string, AgentToolPolicy>,
+  switches: readonly Pick<McpToolSwitch, 'name' | 'enabled' | 'agentPolicy'>[],
+): AgentToolPolicy {
+  const row = switches.find((s) => s.name === meta.name)
+  if (row && !row.enabled) return 'deny'
+  const policy = policies.get(meta.name) ?? effectivePolicy(meta.kind, row?.agentPolicy ?? null)
+  return meta.humanOnly && policy !== 'deny' ? 'ask' : policy
 }
 
 /** A tool's outcome as the runtime stores it. */
@@ -194,6 +254,8 @@ const orphanKey = (turnId: number) => redisKey('lock', `agent-orphan-${turnId}`)
 @Injectable()
 export class TurnRunner {
   private readonly logger = new Logger(TurnRunner.name)
+  /** 子智能体的轮次 → 父轮的钩子：用量也计入父轮，父轮的额度用完时子轮也停（见 {@link runChild}） */
+  private readonly rollUp = new Map<number, ChildHooks>()
 
   constructor(
     @InjectDataSource() private readonly ds: DataSource,
@@ -208,18 +270,27 @@ export class TurnRunner {
     private readonly lock: RedisLock,
     private readonly audit: AuditWriter,
     private readonly i18n: I18nService,
-    private readonly notifier: Notifier,
     private readonly usage: UsageBook,
     private readonly toolPolicies: AgentToolPolicies,
+    private readonly ext: AgentExtensions,
     @Inject(REDIS) private readonly redis: Redis,
+    private readonly sweepStats: AgentSweepStats,
+    private readonly notices: AgentNotices,
+    @Optional() private readonly preApproval?: AutomationPreApproval,
     @Optional() @Inject(EXTERNAL_TOOL_SOURCE) private readonly external?: ExternalToolSource,
     @Optional() @Inject(SKILL_SOURCE) private readonly skills?: SkillSource,
     @Optional() @Inject(INSTRUCTION_SOURCE) private readonly instructions?: InstructionSource,
     @Optional() @Inject(ATTACHMENT_SOURCE) private readonly attachments?: AttachmentSource,
+    @Optional() @Inject(PROFILE_SOURCE) private readonly profiles?: ProfileSource,
   ) {}
 
-  /** 队列任务的入口：拿到这一轮的锁后推进它；锁被别的实例占着时等一会，仍拿不到就抛错让任务重试。 */
+  /**
+   * 队列任务的入口：拿到这一轮的锁后推进它；锁被别的实例占着时等一会，仍拿不到就抛错让任务重试。子智能体的
+   * 轮次只在父轮的调用里推进（{@link runChild} 带着父轮的钩子）：队列带来的（丢锁重排、补名额续跑）不跑，
+   * 否则它的用量不计入父轮、父轮的额度也管不住它。
+   */
   async run(turnId: number): Promise<void> {
+    if (!this.rollUp.has(turnId) && (await this.childTurn(turnId))) return
     const key = turnLockKey(turnId)
     const until = Date.now() + LOCK_WAIT_MS
     let lease = await this.lock.acquire(key, TURN_LOCK_TTL_MS)
@@ -232,6 +303,33 @@ export class TurnRunner {
       await this.runLocked(turnId, lease.lost)
     } finally {
       await lease.release()
+    }
+  }
+
+  /** 这一轮是不是子智能体会话的轮次。 */
+  private async childTurn(turnId: number): Promise<boolean> {
+    const t = await this.ds
+      .getRepository(AgentTurn)
+      .findOne({ where: { id: turnId }, select: { id: true, threadId: true } })
+    return (
+      !!t &&
+      (await this.ds
+        .getRepository(AgentThread)
+        .existsBy({ id: t.threadId, parentThreadId: Not(IsNull()) }))
+    )
+  }
+
+  /**
+   * 在调用方的运行里直接推进一个子智能体的轮次（不经队列，并发名额由父轮占着，见 `agent.delegate`）：与队列
+   * 任务同样先拿这一轮的锁；它每次模型调用的用量另经 `hooks.onUsage` 计入父轮，每一步之前还看父轮的额度
+   * （`hooks.overBudget`）。锁被别的运行占着时抛错（由调用方等它结束）。
+   */
+  async runChild(turnId: number, hooks: ChildHooks): Promise<void> {
+    this.rollUp.set(turnId, hooks)
+    try {
+      await this.run(turnId)
+    } finally {
+      this.rollUp.delete(turnId)
     }
   }
 
@@ -250,6 +348,8 @@ export class TurnRunner {
       userDailyTokens: await n(AGENT_LIMIT_PARAMS.userDailyTokens, 1_000_000),
       tenantDailyTokens: await n(AGENT_LIMIT_PARAMS.tenantDailyTokens, 10_000_000),
       userConcurrentTurns: await n(AGENT_LIMIT_PARAMS.userConcurrentTurns, 2),
+      researchSteps: await n(AGENT2_PARAMS.researchSteps, 60),
+      researchSeconds: await n(AGENT2_PARAMS.researchSeconds, 1200),
     }
   }
 
@@ -284,7 +384,14 @@ export class TurnRunner {
       ]
       if (!p.root && needs.some((perm) => !p.perms.includes(perm)))
         throw new TurnStop(Err.FORBIDDEN)
-      const limits = await this.limits()
+      // 自动化开的会话：创建人此刻还须能运行这条自动化（自动化权限，共享的另需共享权限；已删除的不再运行）
+      if (
+        thread.automationRunId !== null &&
+        !(await this.preApproval?.runAllowed(p, Number(thread.automationRunId)))
+      )
+        throw new TurnStop(Err.FORBIDDEN)
+      const skill = await this.turnSkill(turn, p)
+      const limits = this.scopeLimits(await this.limits(), thread, skill)
       // 时间上限按每次运行计：等人确认的时间不算（在调用里等表单时计时器暂停）
       let left = limits.turnSeconds * 1000
       let since = 0
@@ -303,7 +410,7 @@ export class TurnRunner {
         resume: arm,
       }
       arm()
-      const ctx = await this.context(turn, thread, p, ctrl.signal, limits, clock)
+      const ctx = await this.context(turn, thread, p, ctrl.signal, limits, clock, skill)
       await this.recover(ctx)
       await this.loop(ctx)
     } catch (e) {
@@ -318,6 +425,30 @@ export class TurnRunner {
       clearInterval(watch)
       clearTimeout(timer)
     }
+  }
+
+  /** 本轮第一条用户消息选的技能（`$技能`），按发起人此刻可用的取出（带来源范围）；没有为 null。 */
+  private async turnSkill(turn: AgentTurn, p: Principal): Promise<TurnSkill | null> {
+    const first = await this.ds
+      .getRepository(AgentItem)
+      .findOne({ where: { turnId: turn.id, kind: 'user' }, order: { seq: 'ASC' } })
+    const name = first ? pl<'user'>(first).skill : undefined
+    if (!name || !this.skills) return null
+    // 预先同意的自动化：按保存时记下的 id 与范围取，不按名字（同名的租户技能遮不住它）；取不到就不用
+    const ref = (first!.payload as { internal?: ItemInternal }).internal?.skillRef
+    return ref ? await this.skills.loadRef(p, ref) : await this.skills.load(p, name)
+  }
+
+  /**
+   * 按会话调整本轮的限额：子智能体的轮次步数不超过 {@link SUBAGENT_STEPS}；以平台技能“深度研究”开始的轮次
+   * （研究模式）步数与时长取 `agent.limit.research_*`（root 专用参数）。研究模式只认平台的那一份技能：本人或
+   * 租户的同名技能（取用时优先于平台的）不能借此拿到更高的上限。
+   */
+  private scopeLimits(l: Limits, thread: AgentThread, skill: TurnSkill | null): Limits {
+    if (thread.parentThreadId !== null)
+      return { ...l, turnSteps: Math.min(l.turnSteps, SUBAGENT_STEPS) }
+    if (skill?.name !== AGENT_RESEARCH_SKILL || skill.scope !== 'platform') return l
+    return { ...l, turnSteps: l.researchSteps, turnSeconds: l.researchSeconds }
   }
 
   /**
@@ -379,7 +510,8 @@ export class TurnRunner {
   /**
    * 本次运行提供给模型的工具：本系统工具（发起人能触达的，按审批策略去掉 deny、只读与计划模式下去掉
    * 写入）、联网工具（`agent.web.mode` 为 live；搜索还要配置了搜索服务商）、外部工具（策略来自来源，
-   * 只读模式只留管理员设为 auto 的）、内置工具；`$技能` 给了工具清单时只留清单里的（内置工具总在）。
+   * 只读模式只留管理员设为 auto 的）、内置工具；`$技能` 或配置方案给了工具清单时只留清单里的（只读的内置
+   * 工具总在）。
    */
   private async context(
     turn: AgentTurn,
@@ -388,6 +520,7 @@ export class TurnRunner {
     signal: AbortSignal,
     limits: Limits,
     clock: TurnClock,
+    skill: TurnSkill | null,
   ): Promise<RunCtx> {
     const model = await this.providers.resolve(
       thread.providerId === null ? undefined : Number(thread.providerId),
@@ -395,12 +528,11 @@ export class TurnRunner {
     )
     const items = await this.turnItems(turn)
     const first = items.find((i) => i.kind === 'user')
-    const skillName = first ? pl<'user'>(first).skill : undefined
-    const skill = skillName && this.skills ? await this.skills.load(p, skillName) : null
-    const readOnly = thread.approvalMode === 'read_only' || thread.planMode
-    const disabled = new Set(
-      (await this.ds.getRepository(McpToolSwitch).findBy({ enabled: false })).map((s) => s.name),
-    )
+    // 子智能体的会话总是只读（见 keepForSubagent）
+    const child = thread.parentThreadId !== null
+    const readOnly = thread.approvalMode === 'read_only' || thread.planMode || child
+    const switches = await this.ds.getRepository(McpToolSwitch).find()
+    const disabled = new Set(switches.filter((s) => !s.enabled).map((s) => s.name))
     // 生效策略（写入工具即使被设成 auto 也是 ask）；没有记录的按类型默认
     const policies = await this.toolPolicies.policies()
     const policyOf = (name: string, kind: McpToolKind) =>
@@ -457,14 +589,46 @@ export class TurnRunner {
         preview: false,
       })
     }
-    if (skill?.tools)
-      for (const name of tools.keys()) if (!skill.tools.includes(name)) tools.delete(name)
-    for (const b of builtinTools(this.skills !== undefined)) tools.set(b.name, b)
+    // `$技能` 与会话所用配置方案的工具清单同一条规则：给了清单就只留清单里的，两者都给时都要列着；方案已删
+    // 或本人已不能用时不限制（退回默认行为）
+    const profile =
+      thread.profileId === null ? null : await this.profiles?.find(p, Number(thread.profileId))
+    const lists = [skill?.tools, profile?.tools].filter((l): l is string[] => !!l)
+    const listed = (name: string) => lists.every((l) => l.includes(name))
+    for (const name of tools.keys()) if (!listed(name)) tools.delete(name)
+    const lang = p.locale ?? DEFAULT_LOCALE
+    const view: AgentRunContext = {
+      principal: p,
+      thread: runThread(thread),
+      turnId: Number(turn.id),
+      lang,
+      signal,
+    }
+    // 内置工具：与本系统工具同样受平台开关与策略约束（停用的、deny 的不提供）；写入类与其他写入工具一样
+    // 经审批，只读与计划模式下不提供，`$技能` 或配置方案给了工具清单时也须在清单里（只读的内置工具总在）
+    const builtins = new Map<string, AgentToolPolicy>()
+    for (const b of await this.ext.availableBuiltins(view)) {
+      const policy = builtinPolicy(b.meta, policies, switches)
+      builtins.set(b.meta.name, policy)
+      if (policy === 'deny') continue
+      if (b.meta.kind === 'write' && (readOnly || !listed(b.meta.name))) continue
+      tools.set(b.meta.name, {
+        name: b.meta.name,
+        title: b.meta.title,
+        description: b.meta.description,
+        parameters: b.parameters,
+        origin: 'builtin',
+        kind: b.meta.kind,
+        policy,
+        preview: false,
+      })
+    }
+    if (child) keepForSubagent(tools, first ? pl<'user'>(first).internal?.tools : undefined)
     return {
       turn,
       thread,
       p,
-      lang: p.locale ?? DEFAULT_LOCALE,
+      lang,
       model,
       tools,
       usable: new Set(usable.map((t) => t.name)),
@@ -479,6 +643,8 @@ export class TurnRunner {
       sentSeq: 0,
       attached: new Map(),
       clock,
+      view,
+      builtins,
     }
   }
 
@@ -565,12 +731,17 @@ export class TurnRunner {
     return null
   }
 
-  /** 每一步前检查限额：步数、本轮 token、本人与本租户今日 token。 */
+  /**
+   * 每一步前检查限额：步数、本轮 token、本人与本租户今日 token；子智能体的轮次还看父轮（父轮剩下的单轮 token
+   * 由它的子任务分着用，父轮用完时子轮也停）。
+   */
   private async checkLimits(ctx: RunCtx): Promise<void> {
     const l = ctx.limits
     if (ctx.turn.steps >= l.turnSteps) throw new TurnStop(Err.AGENT_LIMIT, { which: 'steps' })
     if (ctx.turn.promptTokens + ctx.turn.completionTokens >= l.turnTokens)
       throw new TurnStop(Err.AGENT_LIMIT, { which: 'turn_tokens' })
+    const parent = await this.rollUp.get(Number(ctx.turn.id))?.overBudget()
+    if (parent) throw new TurnStop(Err.AGENT_LIMIT, { which: parent })
     const over = await this.overDaily(ctx.p.userId, l)
     if (over) throw new TurnStop(Err.AGENT_LIMIT, { which: over })
   }
@@ -744,7 +915,10 @@ export class TurnRunner {
     }
   }
 
-  /** 这一步发给模型的系统提示与历史（早期对话的摘要作为第一条上下文消息，然后是摘要之后的条目）。 */
+  /**
+   * 这一步发给模型的系统提示与历史：最前面是上下文贡献者的各段（用户角色，从不进系统提示：记忆等内容
+   * 不能拿到系统指令的地位），然后是早期对话的摘要，再是摘要之后的条目。
+   */
   private async request(ctx: RunCtx) {
     const items = await this.ds.getRepository(AgentItem).find({
       where: { threadId: ctx.thread.id, seq: MoreThan(ctx.thread.summarySeq) },
@@ -757,14 +931,24 @@ export class TurnRunner {
       instructions,
       user: { username: ctx.p.username, deptName: ctx.p.deptName },
       today: usageDay(),
-      skills: this.skills ? await this.skills.listFor(ctx.p) : [],
+      // 自动化的会话：技能清单与 skill.load 同一规则，不列全租户技能
+      skills: this.skills
+        ? await this.skills.listFor(ctx.p, { noTenant: ctx.thread.automationRunId !== null })
+        : [],
       activeSkill: ctx.skill,
       context: ctx.thread.context,
       readOnly: ctx.readOnly,
       planMode: ctx.thread.planMode,
     })
     await this.readAttachments(ctx, items)
+    const parts = this.ext.hasContributors()
+      ? await this.ext.contextParts({
+          ...ctx.view,
+          userText: latestUserText(items),
+        })
+      : []
     const history = [
+      ...parts.map(contextMessage),
       ...(ctx.thread.summary ? [summaryMessage(ctx.thread.summary)] : []),
       ...historyMessages(items, { files: ctx.attached, vision: ctx.model.model.vision }),
     ]
@@ -819,21 +1003,28 @@ export class TurnRunner {
     return [...out.values()].slice(0, 20)
   }
 
-  /** 记一次模型调用的用量：本轮计数（有轮次时），加上每用户每天每模型的累计。 */
+  /**
+   * 记一次模型调用的用量：本轮计数（有轮次时；原子累加，子智能体的用量会同时计入同一个父轮），子智能体的
+   * 轮次另计入父轮，再加上每用户每天每模型的累计（`daily` 为 false 时不加：已经记过了）。
+   */
   private async recordUsage(
     userId: number,
     model: string,
-    u: ChatUsage,
+    u: ChatUsage | AgentModelUsage,
     turn: AgentTurn | null,
+    daily = true,
   ): Promise<void> {
-    if (turn)
-      await this.store.tx((w) =>
-        w.patchTurn(turn, {
-          promptTokens: turn.promptTokens + u.promptTokens,
-          completionTokens: turn.completionTokens + u.completionTokens,
-        }),
-      )
-    await this.usage.add(userId, model, u)
+    if (turn) {
+      const n = (v: number) => Math.max(0, Math.trunc(Number(v)) || 0)
+      await this.store.tx(async (w) => {
+        const repo = w.m.getRepository(AgentTurn)
+        await repo.increment({ id: turn.id }, 'promptTokens', n(u.promptTokens))
+        await repo.increment({ id: turn.id }, 'completionTokens', n(u.completionTokens))
+        await w.patchTurn(turn, {})
+      })
+      await this.rollUp.get(Number(turn.id))?.onUsage(model, u)
+    }
+    if (daily) await this.usage.add(userId, model, u)
   }
 
   /**
@@ -860,6 +1051,17 @@ export class TurnRunner {
         return this.finish(ctx, call, this.rejectOutcome(approval))
       // 确认之后又被收回（权限、模式或策略变了）：照样拦下
       if (!def) return this.block(ctx, call)
+      // 审批审查者放行的卡片在续跑时（重启、丢锁之后）执行前再核对一次资格：放行之后预先同意可能已失效、
+      // 会话可能已切到只读或计划模式
+      const auto = pl<'approval'>(approval).auto
+      if (auto?.verdict === 'approve' && !(await this.entitled(ctx, def, auto)))
+        return this.finish(ctx, call, {
+          ok: false,
+          content:
+            'The automatic approval of this call no longer holds, so it was not run. Do not retry it unless the user asks.',
+          untrusted: false,
+          error: { code: 'rejected', message: 'automatic approval no longer holds' },
+        })
       return this.execute(ctx, call, def, c.args)
     }
     if (!def) return this.block(ctx, call)
@@ -869,15 +1071,25 @@ export class TurnRunner {
         call,
         this.fail(Err.VALIDATION_FAILED, ctx.lang, 'arguments are no valid JSON'),
       )
-    if (def.name === ASK_TOOL) return this.ask(ctx, call)
-    if (def.policy === 'ask') {
+    // 内置工具的参数先校验：不合格的直接告诉模型，写入类也不为它出审批卡
+    if (def.origin === 'builtin') {
+      const parsed = this.ext.builtin(def.name)?.meta.input.safeParse(c.args)
+      if (parsed && !parsed.success)
+        return this.finish(
+          ctx,
+          call,
+          this.fail(Err.VALIDATION_FAILED, ctx.lang, z.prettifyError(parsed.error)),
+        )
+    }
+    // `ask` 与 `review`（自动审查）都要先经人或审批审查者：只有 `auto` 直接执行
+    if (def.policy !== 'auto') {
       // 信任的目标：写入预览给出的记录；没有预览的工具按参数里的 `id`，外部工具与没有 `id` 的只信任一模
       // 一样的参数（见 trustKey）。平台关掉信任（agent.trust_mode=false）时，已记下的信任一概不算
       const preview = def.preview ? await this.host.preview(ctx.p, def.name, c.args) : null
       const key = trustKey(def.name, c.args, preview?.target, def.origin === 'mcp')
       const trustOn = trustModeOn(await this.params.get(AGENT_TRUST_MODE_PARAM))
       if (!trustOn || !isTrusted(ctx.thread.trusted, key)) {
-        await this.pause(ctx, 'approval', {
+        const card: Pl<'approval'> = {
           callId: c.callId,
           tool: def.name,
           title: def.title,
@@ -885,16 +1097,170 @@ export class TurnRunner {
           ...(preview && { changes: preview }),
           sources: this.sources(ctx),
           internal: { key },
-        })
+        }
+        const v = await this.reviewed(ctx, def, card)
+        if (v && v.verdict !== 'escalate') {
+          const decided = await this.autoDecide(ctx, card, v)
+          if (v.verdict === 'reject') return this.finish(ctx, call, this.rejectOutcome(decided))
+          // 记卡期间被中断（停止、急停、丢锁）：不再执行
+          ctx.signal.throwIfAborted()
+          return this.execute(ctx, call, def, c.args)
+        }
+        await this.pause(ctx, 'approval', { ...card, ...(v && { auto: v }) })
         return 'wait'
       }
     }
     return this.execute(ctx, call, def, c.args)
   }
 
-  /** 审批被拒或作废时给模型的结果。 */
+  /**
+   * 写入调用要停下等人之前问审批审查者（没有登记的审查者时什么也不做）。从不问的情形——每一项都在此刻
+   * 重新读取，不用本次运行开始时的快照：会话是只读或计划模式（运行开始后才切过去的也算）、智能体已急停、
+   * 工具此刻生效的策略是 deny（运行中被管理员禁用的也算）。交给审查者的只有工具、参数、改动预览与来源，
+   * 从不包括任何工具的输出（网页、外部工具的内容不可信，不能借此左右审查）。审查者给出的放行再经
+   * {@link entitled} 核对，没有资格的降为交给人。
+   */
+  private async reviewed(
+    ctx: RunCtx,
+    def: OfferedTool,
+    card: Pl<'approval'>,
+  ): Promise<AgentReviewVerdict | null> {
+    if (!this.ext.hasReviewers() || ctx.readOnly) return null
+    // 只能由人确认的内置工具（如记住个人信息）从不交给审查者
+    if (def.origin === 'builtin' && this.ext.builtin(def.name)?.meta.humanOnly) return null
+    if (await this.paused()) return null
+    const now = await this.modeNow(ctx)
+    if (!now || now.approvalMode === 'read_only' || now.planMode) return null
+    const policy = await this.policyNow(ctx, def)
+    if (policy !== 'ask' && policy !== 'review') return null
+    // 审查者自己的模型调用与正常的一步同样记账：计入本轮 token（受单轮上限约束）与发起人的每日用量
+    const review: AgentReviewContext = {
+      ...ctx.view,
+      recordUsage: (model, u) => this.recordUsage(ctx.p.userId, model, u, ctx.turn),
+      overBudget: async () =>
+        ctx.turn.promptTokens + ctx.turn.completionTokens >= ctx.limits.turnTokens
+          ? 'turn_tokens'
+          : this.overDaily(ctx.p.userId, ctx.limits),
+    }
+    const v = await this.ext.review(review, {
+      callId: card.callId,
+      tool: def.name,
+      title: def.title,
+      origin: def.origin,
+      policy,
+      args: card.args,
+      ...(card.changes && { changes: card.changes }),
+      sources: card.sources,
+    })
+    if (v?.verdict !== 'approve' || (await this.entitled(ctx, def, v))) return v
+    // 降为交给人：卡片上的理由是运行时自己的说明，审查者的放行理由只附在后面
+    const note = String(
+      this.i18n.translate('agent.runtime.review.not_entitled', { lang: ctx.lang }),
+    )
+    return { ...v, verdict: 'escalate', reason: `${note} (${v.reason})`.slice(0, 500) }
+  }
+
+  /**
+   * 审查者的放行有没有资格生效（审查期间情况可能变了，所以在它答完之后重新读取）：会话此刻不能是只读或
+   * 计划模式；自动审查（`review`）还要求工具此刻的策略是 `review`、会话此刻的审批模式是 `auto_review`；
+   * 预先同意（`pre_approved`）只在自动化开的会话里有效。审查者是可以由任何模块登记的代码，运行时不能只信
+   * 它自己报的身份。
+   */
+  private async entitled(ctx: RunCtx, def: OfferedTool, v: AgentReviewVerdict): Promise<boolean> {
+    if (v.by === 'pre_approved') {
+      if (ctx.thread.automationRunId === null) return false
+      // 链条里拿不到给出结论的是哪个审查者：由自动化的预先同意本身再复核一次，别的审查者冒称的不算
+      if (def.origin !== 'local' || !(await this.preApproval?.approves(ctx.view, def.name)))
+        return false
+      const now = await this.modeNow(ctx)
+      return !!now && now.approvalMode !== 'read_only' && !now.planMode
+    }
+    const now = await this.modeNow(ctx)
+    return (
+      now?.approvalMode === 'auto_review' &&
+      !now.planMode &&
+      (await this.policyNow(ctx, def)) === 'review'
+    )
+  }
+
+  /** 会话此刻的审批模式与计划模式（不用运行开始时的快照）；会话已不在时为 null。 */
+  private modeNow(ctx: RunCtx): Promise<Pick<AgentThread, 'approvalMode' | 'planMode'> | null> {
+    return this.ds.getRepository(AgentThread).findOne({
+      where: { id: ctx.thread.id },
+      select: { id: true, approvalMode: true, planMode: true },
+    })
+  }
+
+  /**
+   * 一个工具此刻生效的策略（不用运行开始时的快照）：本系统与联网工具按平台策略；内置工具另看平台开关
+   * （停用的按 deny）；已不可用的外部工具按 deny。
+   */
+  private async policyNow(ctx: RunCtx, def: OfferedTool): Promise<AgentToolPolicy> {
+    if (def.origin === 'builtin') {
+      const row = await this.ds.getRepository(McpToolSwitch).findOneBy({ name: def.name })
+      const meta = this.ext.builtin(def.name)?.meta ?? { name: def.name, kind: def.kind }
+      return builtinPolicy(meta, await this.toolPolicies.policies(), row ? [row] : [])
+    }
+    if (def.origin === 'mcp')
+      return (await this.external?.list(ctx.p))?.find((d) => d.name === def.name)?.policy ?? 'deny'
+    return (await this.toolPolicies.policies()).get(def.name) ?? effectivePolicy(def.kind, null)
+  }
+
+  /**
+   * 审批审查者的放行或驳回：照样记一张审批卡（已决定，载荷带 `auto` 与理由，留作记录），与人的决定同一
+   * 形状。在会话行锁里再确认一次：轮次已被中断时直接停；审查期间急停了的按急停停下（放行作废）；这个
+   * 调用已经有审批卡（另一次运行抢先处理了它，这次运行已是过期的）时不写、按丢锁重新入队。
+   */
+  private async autoDecide(
+    ctx: RunCtx,
+    card: Pl<'approval'>,
+    v: AgentReviewVerdict,
+  ): Promise<AgentItem> {
+    const approve = v.verdict === 'approve'
+    const item = await this.store.tx(async (w) => {
+      await w.thread(Number(ctx.thread.id))
+      const now = await w.m.getRepository(AgentTurn).findOneBy({ id: ctx.turn.id })
+      if (now?.status !== 'running') throw new TurnStop(null)
+      if (await this.paused()) throw new TurnStop(Err.AGENT_PAUSED)
+      const carded = await w.m
+        .getRepository(AgentItem)
+        .createQueryBuilder('i')
+        .where('i.turnId = :turnId AND i.kind = :kind', {
+          turnId: Number(ctx.turn.id),
+          kind: 'approval',
+        })
+        .andWhere("JSON_UNQUOTE(JSON_EXTRACT(i.payload, '$.callId')) = :callId", {
+          callId: card.callId,
+        })
+        .getExists()
+      if (carded) throw new LeaseLost()
+      return w.append(
+        Number(ctx.thread.id),
+        Number(ctx.turn.id),
+        'approval',
+        {
+          ...card,
+          decision: approve ? 'approve' : 'reject',
+          decidedAt: new Date().toISOString(),
+          auto: v,
+        },
+        approve ? 'approved' : 'rejected',
+      )
+    })
+    ctx.items.push(item)
+    return item
+  }
+
+  /**
+   * 审批被拒或作废时给模型的结果。审批审查者驳回的附上它的理由：理由是另一个模型写的文字（可能复述了
+   * 外部内容），按不可信数据包起来交给模型，结果标为 untrusted。
+   */
   private rejectOutcome(approval: AgentItem): Outcome {
     const a = pl<'approval'>(approval)
+    if (a.auto?.verdict === 'reject') {
+      const content = `The automatic review rejected this call. Do not retry it unless the user asks. Its stated reason follows:\n${wrapUntrusted('automatic review', a.auto.reason)}`
+      return { ok: false, content, untrusted: true, error: { code: 'rejected', message: content } }
+    }
     const content =
       a.decision === 'reject'
         ? `The user rejected this call${a.note ? `: ${a.note}` : '.'} Do not retry it unless the user asks.`
@@ -925,15 +1291,24 @@ export class TurnRunner {
   private async block(ctx: RunCtx, call: AgentItem): Promise<'done'> {
     const c = pl<'tool_call'>(call)
     const local = this.registry.get(c.tool)
+    // 本次运行提供的内置工具（不提供的——如没有技能来源时的 skill.load——当作不存在）
+    const builtin = ctx.builtins.has(c.tool) ? this.ext.builtin(c.tool) : undefined
     const known =
       local !== undefined ||
+      builtin !== undefined ||
       WEB_TOOLS.some((w) => w.name === c.tool) ||
       ctx.servers.has(c.tool) ||
       c.tool.startsWith('ext.')
     if (!known)
       return this.finish(ctx, call, this.fail(Err.NOT_FOUND, ctx.lang, `no tool named ${c.tool}`))
     let blocked: NonNullable<AgentItemPayloads['approval']['blocked']>
-    if (local && !ctx.usable.has(c.tool))
+    // 内置工具：平台停用或 deny 的按策略；只读模式下的写入按模式；其余（技能清单没列）按策略
+    if (builtin)
+      blocked =
+        ctx.readOnly && builtin.meta.kind === 'write' && ctx.builtins.get(c.tool) !== 'deny'
+          ? { reason: 'mode' }
+          : { reason: 'policy' }
+    else if (local && !ctx.usable.has(c.tool))
       blocked = ctx.disabled.has(c.tool)
         ? { reason: 'policy' }
         : { reason: 'permission', ...(local.perm && { perm: local.perm }) }
@@ -963,24 +1338,6 @@ export class TurnRunner {
     })
   }
 
-  /** 内置的反问：校验问题后记问题卡并停下等回答。 */
-  private async ask(ctx: RunCtx, call: AgentItem): Promise<'done' | 'wait'> {
-    const c = pl<'tool_call'>(call)
-    const parsed = askInput.safeParse(c.args)
-    if (!parsed.success)
-      return this.finish(
-        ctx,
-        call,
-        this.fail(Err.VALIDATION_FAILED, ctx.lang, z.prettifyError(parsed.error)),
-      )
-    await this.pause(ctx, 'question', {
-      callId: c.callId,
-      from: 'agent',
-      questions: parsed.data.questions,
-    })
-    return 'wait'
-  }
-
   /**
    * 记一张等人的卡片（审批或提问）并把轮次置为 waiting，两件事同一个事务：确认请求不会看到“卡片在、
    * 轮次却不在等”的中间状态。轮次已被中断时直接停。
@@ -1004,7 +1361,7 @@ export class TurnRunner {
       await w.patchTurn(ctx.turn, { status: 'waiting' })
       return added
     })
-    await this.notice(ctx.thread, AGENT_NOTICE.waiting)
+    await this.notice(ctx.thread, AGENT_NOTICE.waiting, Number(ctx.turn.id))
     // 等审批、等反问回答的一轮不占并发名额：补开等名额的轮次与批量的下一行。在调用里等外部服务器表单的
     // 仍占着（任务还在执行）
     if (!(kind === 'question' && (payload as Pl<'question'>).form))
@@ -1014,25 +1371,42 @@ export class TurnRunner {
 
   /**
    * 执行一个工具：先把调用标成 running（重启后据此知道它可能已经执行过、不再重做），按来源调用，
-   * 结果落库。本系统工具走 ToolHost 的护栏并由它记操作日志；联网与外部工具在这里记同样形状的日志。
+   * 结果落库。本系统工具走 ToolHost 的护栏并由它记操作日志；联网、外部与写入类内置工具在这里记同样形状
+   * 的日志。只读的内置工具另走 {@link readBuiltin}。
    */
   private async execute(
     ctx: RunCtx,
     call: AgentItem,
     def: OfferedTool,
     args: unknown,
-  ): Promise<'done'> {
+  ): Promise<'done' | 'wait'> {
+    if (def.origin === 'builtin' && def.kind === 'read')
+      return this.readBuiltin(ctx, call, def, args)
     await this.store.update(call, { status: 'running' })
     let out: Outcome
     try {
-      if (def.origin === 'builtin') out = await this.builtin(ctx, def.name, args)
+      if (def.origin === 'builtin')
+        out = await this.logged(ctx, def, args, async () => {
+          // 与 ToolHost 一样：急停时写入一律拒绝（确认与执行之间可能刚急停）
+          if (await this.paused()) throw new BizError(Err.AGENT_PAUSED)
+          const r = await this.builtin(ctx, call, def, args)
+          if ('wait' in r) throw new Error(`built-in write tool ${def.name} cannot ask`)
+          return r
+        })
       else if (def.origin === 'local') {
         const r = await this.host.call(ctx.p, def.name, args, {
           threadId: Number(ctx.thread.id),
           turnId: Number(ctx.turn.id),
         })
+        // 自动化的会话没人实时看着，读到的业务数据可能是别人写的（事件触发的那条记录就是）：结果按不可信
+        // 内容交给模型，免得记录里写的“指示”被当成要做的事
+        const outsider = ctx.thread.automationRunId !== null
         out = r.ok
-          ? { ok: true, content: r.text, untrusted: false }
+          ? {
+              ok: true,
+              content: outsider ? wrapUntrusted(`tool ${def.name}`, r.text) : r.text,
+              untrusted: outsider,
+            }
           : {
               ok: false,
               content: `Error ${r.error.code}: ${r.error.message}${r.error.errors ? ` ${JSON.stringify(r.error.errors)}` : ''}`,
@@ -1076,13 +1450,7 @@ export class TurnRunner {
       })
       return { ok: r.ok, content: r.text, untrusted: true }
     }
-    const urls = new TurnUrls()
-    const suggested = await this.suggestedSeqs(ctx)
-    for (const i of ctx.items) {
-      if (i.kind === 'user' && !suggested.has(i.seq)) urls.addFromText(pl<'user'>(i).text)
-      if (i.kind === 'tool_result')
-        for (const u of pl<'tool_result'>(i).internal?.urls ?? []) urls.add(u)
-    }
+    const urls = await this.readableUrls(ctx)
     if (def.name === 'web.fetch') await this.allowDomain(urls, args)
     const r = await this.web.run(def.name, args, { turnUrls: urls, signal: ctx.signal })
     const fetched = def.name === 'web.fetch'
@@ -1097,6 +1465,25 @@ export class TurnRunner {
   }
 
   /**
+   * 本轮可读的链接：用户消息里的（点后续建议发出的除外）与本轮搜索带回的。每次调用都按当前条目重新算。
+   */
+  private async readableUrls(ctx: RunCtx): Promise<TurnUrls> {
+    const urls = new TurnUrls()
+    const suggested = await this.suggestedSeqs(ctx)
+    for (const i of ctx.items) {
+      if (i.kind === 'user' && !suggested.has(i.seq)) {
+        // 子会话的任务消息是父模型写的（可能被网页带偏）：不从其中取链接，只认分派时父轮可读的那份清单
+        if (ctx.thread.parentThreadId !== null)
+          for (const u of pl<'user'>(i).internal?.urls ?? []) urls.add(u)
+        else urls.addFromText(pl<'user'>(i).text)
+      }
+      if (i.kind === 'tool_result')
+        for (const u of pl<'tool_result'>(i).internal?.urls ?? []) urls.add(u)
+    }
+    return urls
+  }
+
+  /**
    * 本轮里原样照抄了前一条回答的某个后续建议的用户消息（点了建议发出的）：建议是模型写的，可能被网页内容
    * 带偏，里面的链接不能算“用户给的”可读链接。每条消息每次运行只查一次。
    */
@@ -1104,15 +1491,7 @@ export class TurnRunner {
     const seen = (ctx.suggested ??= new Map())
     for (const u of ctx.items) {
       if (u.kind !== 'user' || seen.has(u.seq)) continue
-      const before = await this.ds.getRepository(AgentItem).findOne({
-        where: { threadId: ctx.thread.id, kind: 'assistant', status: 'done', seq: LessThan(u.seq) },
-        order: { seq: 'DESC' },
-      })
-      const text = pl<'user'>(u).text.trim()
-      seen.set(
-        u.seq,
-        !!before && (pl<'assistant'>(before).suggestions ?? []).some((s) => s.trim() === text),
-      )
+      seen.set(u.seq, await copiesSuggestion(this.ds.manager, Number(ctx.thread.id), u))
     }
     return new Set([...seen].filter(([, s]) => s).map(([seq]) => seq))
   }
@@ -1240,29 +1619,113 @@ export class TurnRunner {
     }
   }
 
-  /** 内置工具：计划清单（本轮一份，原地替换）与加载技能。 */
-  private async builtin(ctx: RunCtx, name: string, args: unknown): Promise<Outcome> {
-    if (name === PLAN_TOOL) {
-      const { steps } = planInput.parse(args)
-      const plan = [...ctx.items].reverse().find((i) => i.kind === 'plan')
-      if (plan) await this.store.update(plan, { payload: { steps } })
-      else
-        ctx.items.push(
-          await this.store.append(Number(ctx.thread.id), Number(ctx.turn.id), 'plan', { steps }),
-        )
-      return { ok: true, content: 'Plan updated.', untrusted: false }
-    }
-    if (name === SKILL_TOOL) {
-      const { name: skill } = skillInput.parse(args)
-      const found = await this.skills?.load(ctx.p, skill)
-      if (!found) return this.fail(Err.NOT_FOUND, ctx.lang, `no skill named ${skill}`)
-      return {
-        ok: true,
-        content: `Skill ${found.name}${found.tools ? ` (tools: ${found.tools.join(', ')})` : ''}:\n${found.body}`,
-        untrusted: false,
+  /**
+   * 只读的内置工具：不先标 running（重做一次没有副作用，重启后照常再执行），这样它也能像 `ask.user` 那样
+   * 停下等回答——调用保持 pending、问题卡出来、轮次置为 waiting，回答到了由 {@link resolveCall} 交给模型。
+   */
+  private async readBuiltin(
+    ctx: RunCtx,
+    call: AgentItem,
+    def: OfferedTool,
+    args: unknown,
+  ): Promise<'done' | 'wait'> {
+    let out: Outcome
+    try {
+      const r = await this.builtin(ctx, call, def, args)
+      if ('wait' in r) {
+        await this.pause(ctx, 'question', {
+          callId: pl<'tool_call'>(call).callId,
+          from: 'agent',
+          questions: r.questions,
+        })
+        return 'wait'
       }
+      out = r
+    } catch (e) {
+      if (ctx.signal.aborted) throw ctx.signal.reason
+      if (isStop(e)) throw e
+      out = this.outcomeOf(e, ctx.lang)
     }
-    throw new Error(`unknown built-in tool ${name}`)
+    return this.finish(ctx, call, out)
+  }
+
+  /**
+   * 调用一个登记的内置工具（see AgentExtensions）：参数按声明的 zod schema 校验（不合格抛 ZodError，变成
+   * 校验失败的结果），工具拿到本次运行的上下文——身份、会话、中断信号、本轮可读链接，经 ItemStore 读写
+   * 本轮的界面条目（只限五种工具条目，载荷按 schema 校验并限长），`ask` 停下等回答（只给只读工具）。
+   */
+  private async builtin(
+    ctx: RunCtx,
+    call: AgentItem,
+    def: OfferedTool,
+    args: unknown,
+  ): Promise<Outcome | AgentToolWait> {
+    const reg = this.ext.builtin(def.name)
+    if (!reg) throw new Error(`unknown built-in tool ${def.name}`)
+    const callId = pl<'tool_call'>(call).callId
+    const internalOf = (i: AgentItem) => (i.payload as { internal?: ItemInternal }).internal
+    // 本次调用里第几次 add：调用重做时第 n 次 add 找回上次的第 n 条，替换它而不是再追加一条
+    let adds = 0
+    const tc: AgentToolContext = {
+      ...ctx.view,
+      callId,
+      items: {
+        list: (kind) => {
+          if (!isToolItemKind(kind)) throw new Error(`a built-in tool cannot list ${kind} items`)
+          return ctx.items
+            .filter((i) => i.kind === kind)
+            .map((i) => {
+              const { internal: _, ...payload } = (i.payload ?? {}) as Record<string, unknown>
+              return { id: Number(i.id), kind: i.kind, status: i.status, payload }
+            })
+        },
+        add: async (kind, payload) => {
+          const clean = toolItemPayload(kind, payload)
+          const byCall = `${callId}#${++adds}`
+          const earlier = ctx.items.find((i) => i.kind === kind && internalOf(i)?.byCall === byCall)
+          if (earlier) {
+            await this.store.update(earlier, { payload: { ...clean, internal: { byCall } } })
+            return Number(earlier.id)
+          }
+          const item = await this.store.append(Number(ctx.thread.id), Number(ctx.turn.id), kind, {
+            ...clean,
+            internal: { byCall },
+          } as never)
+          ctx.items.push(item)
+          return Number(item.id)
+        },
+        replace: async (id, payload) => {
+          // 只能改本轮里工具写的条目（ctx.items 只有本轮的）；运行时的内部部分保留
+          const item = ctx.items.find((i) => Number(i.id) === id && isToolItemKind(i.kind))
+          if (!item) throw new Error(`item ${id} is no tool item of this turn`)
+          const clean = toolItemPayload(item.kind, payload)
+          const internal = internalOf(item)
+          await this.store.update(item, { payload: { ...clean, ...(internal && { internal }) } })
+        },
+      },
+      tools: [...ctx.tools.values()].map((t) => ({ name: t.name, kind: t.kind })),
+      recordUsage: (model, u, opts) =>
+        this.recordUsage(ctx.p.userId, model, u, ctx.turn, opts?.daily !== false),
+      overBudget: async () =>
+        ctx.turn.promptTokens + ctx.turn.completionTokens >= ctx.limits.turnTokens
+          ? 'turn_tokens'
+          : this.overDaily(ctx.p.userId, ctx.limits),
+      readableUrls: () => this.readableUrls(ctx),
+      ask: (questions) => {
+        if (def.kind === 'write') throw new Error(`built-in write tool ${def.name} cannot ask`)
+        return { wait: 'question', questions }
+      },
+      fail: (err, detail) => this.fail(err, ctx.lang, detail),
+    }
+    const r = await reg.run(reg.meta.input.parse(args), tc)
+    if ('wait' in r) return r
+    return {
+      ok: r.ok,
+      content: r.content,
+      untrusted: r.untrusted === true,
+      ...(r.error && { error: r.error }),
+      ...(r.urls?.length && { urls: r.urls.slice(0, 200) }),
+    }
   }
 
   /**
@@ -1391,6 +1854,8 @@ export class TurnRunner {
   private async stopped(turn: AgentTurn, e: unknown, lang: string): Promise<void> {
     // 丢了锁：这次运行不再写终态，重新入队（新任务拿到锁后从库里的条目接着做；入队也失败时由孤儿清理接手）
     if (e instanceof LeaseLost) {
+      // 子智能体的轮次不重新入队：父轮的调用还在等它，会自己再推进（父轮也停了的由孤儿清理收尾）
+      if (this.rollUp.has(Number(turn.id))) return
       try {
         await this.queue.kick(Number(turn.id))
       } catch (err) {
@@ -1562,52 +2027,97 @@ export class TurnRunner {
       const carded = new Set(
         items.filter((i) => i.kind !== 'tool_call').map((i) => Number(i.turnId)),
       )
+      // 子智能体的轮次只由父轮的调用推进：父轮还在（运行或等人）就不动，父轮已结束的收尾为失败
+      const kids = await this.ds.getRepository(AgentThread).find({
+        where: {
+          id: In([...new Set(candidates.map((t) => Number(t.threadId)))]),
+          parentThreadId: Not(IsNull()),
+        },
+        select: { id: true, parentThreadId: true },
+      })
+      const parentOf = new Map(kids.map((k) => [Number(k.id), Number(k.parentThreadId)]))
+      const liveParents = parentOf.size
+        ? new Set(
+            (
+              await this.ds.getRepository(AgentTurn).find({
+                where: { threadId: In([...new Set(parentOf.values())]), status: ACTIVE_TURN },
+                select: { id: true, threadId: true },
+              })
+            ).map((p) => Number(p.threadId)),
+          )
+        : new Set<number>()
       return candidates.flatMap((t) => {
         const id = Number(t.id)
+        const parent = parentOf.get(Number(t.threadId))
+        if (parent !== undefined)
+          return liveParents.has(parent) ? [] : [{ t, held: false, child: true }]
         if (busy.has(Number(t.threadId))) return []
-        if (t.status === 'running' || inCall.has(id)) return [{ t, held: false }]
+        if (t.status === 'running' || inCall.has(id)) return [{ t, held: false, child: false }]
         // waiting：有卡片在等人的是正常等待；没有卡片的是在等并发名额
-        return carded.has(id) ? [] : [{ t, held: true }]
+        return carded.has(id) ? [] : [{ t, held: true, child: false }]
       })
     })
     let n = 0
-    for (const { t, held } of stale)
+    const done = { requeued: 0, failed: 0 }
+    for (const { t, held, child } of stale)
       try {
         // qw:cross-tenant each stale turn is handled in the tenant it belongs to
-        await withTenant(Number(t.tenantId), () =>
-          held ? this.queue.fill(Number(t.userId)) : this.adopt(t),
-        )
+        const outcome = await withTenant(Number(t.tenantId), async () => {
+          if (child) return this.dropChild(t)
+          if (!held) return this.adopt(t)
+          await this.queue.fill(Number(t.userId))
+          return null
+        })
+        if (outcome) done[outcome]++
         n++
       } catch (e) {
         this.logger.error(e, 'agent orphan turn not handled')
       }
+    // 每次都记（0 也记），诊断页的“最近一次”才反映清理确实在跑
+    await this.sweepStats.record(done)
     return n
   }
 
-  /** 接手一个孤儿轮次：锁还活着就不动；否则重新入队，或者接手次数用完时置为失败。 */
-  private async adopt(t: AgentTurn): Promise<void> {
+  /**
+   * 接手一个孤儿轮次：锁还活着就不动（null）；否则重新入队（`requeued`），或者接手次数用完时置为失败
+   * （`failed`）。结果供清理统计。
+   */
+  private async adopt(t: AgentTurn): Promise<'requeued' | 'failed' | null> {
     const lease = await this.lock.acquire(turnLockKey(Number(t.id)), 1000)
-    if (!lease) return
+    if (!lease) return null
     await lease.release()
     const key = orphanKey(Number(t.id))
     const n = await this.redis.incr(key)
     await this.redis.pExpire(key, 3600_000)
-    if (n <= ORPHAN_MAX_REQUEUES) return this.queue.kick(Number(t.id))
+    if (n <= ORPHAN_MAX_REQUEUES) {
+      await this.queue.kick(Number(t.id))
+      return 'requeued'
+    }
     const turn = await this.ds.getRepository(AgentTurn).findOneBy({ id: t.id })
-    if (turn) await this.stopped(turn, new TurnStop(Err.INTERNAL), DEFAULT_LOCALE)
+    if (!turn) return null
+    await this.stopped(turn, new TurnStop(Err.INTERNAL), DEFAULT_LOCALE)
+    return 'failed'
   }
 
-  /** 站内信提醒（没有配置模板时什么也不发）；失败只记日志。 */
-  private async notice(thread: AgentThread, template: string): Promise<void> {
-    try {
-      await this.notifier.send({
-        template,
-        to: [Number(thread.userId)],
-        channels: ['inbox'],
-        params: { title: thread.title || String(thread.id), threadId: Number(thread.id) },
-      })
-    } catch (e) {
-      this.logger.warn({ err: e instanceof Error ? e.name : 'Error' }, 'agent notice skipped')
-    }
+  /**
+   * 父轮已经结束的子智能体轮次：没人会再推进它（队列不跑子轮次），锁不在时置为失败（`failed`）；锁还在
+   * （父轮的调用刚结束、那次推进还没收尾）时不动（null）。
+   */
+  private async dropChild(t: AgentTurn): Promise<'failed' | null> {
+    const lease = await this.lock.acquire(turnLockKey(Number(t.id)), 1000)
+    if (!lease) return null
+    await lease.release()
+    const turn = await this.ds.getRepository(AgentTurn).findOneBy({ id: t.id })
+    if (!turn) return null
+    await this.stopped(turn, new TurnStop(Err.INTERNAL), DEFAULT_LOCALE)
+    return 'failed'
+  }
+
+  /** 提醒本人：渠道按本人的通知设置，投递不等（见 AgentNotices.send）；失败只记日志。 */
+  private async notice(thread: AgentThread, template: string, turnId?: number): Promise<void> {
+    // 子智能体的会话不提醒：结果由父会话的卡片与回答交给本人
+    if (thread.parentThreadId != null) return
+    const event = template === AGENT_NOTICE.completed ? 'turnDone' : 'waiting'
+    return this.notices.send(thread, template, event, turnId)
   }
 }

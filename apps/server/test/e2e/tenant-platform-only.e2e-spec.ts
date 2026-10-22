@@ -295,7 +295,12 @@ describe('@PlatformOnly() on the routes', () => {
         'QueueMonitorController.jobs',
         'QueueMonitorController.retry',
         'QueueMonitorController.remove',
-        // the agent's settings: models, web search, external MCP servers, tool policies, platform skills
+        // the agent's settings: models, web search, external MCP servers, tool policies, platform skills,
+        // and the diagnostics (overview and connectivity tests)
+        'AgentDiagnosticsController.overview',
+        'AgentDiagnosticsController.testMcp',
+        'AgentDiagnosticsController.testProvider',
+        'AgentDiagnosticsController.testSearch',
         'AgentMcpServerController.create',
         'AgentMcpServerController.remove',
         'AgentMcpServerController.sync',
@@ -312,6 +317,7 @@ describe('@PlatformOnly() on the routes', () => {
         'AgentSearchProviderController.remove',
         'AgentSearchProviderController.update',
         'AgentToolPolicyController.set',
+        'AgentToolPolicyController.setEnabled',
       ].sort(),
     )
     expect([...marked.values()].filter((who) => who !== 'root' && who !== 'platform')).toEqual([])

@@ -69,6 +69,10 @@ describe('cache-namespaces', () => {
         'lock:',
         'job:lock:',
         'job:fire:',
+        'agent:sweep',
+        'agent:wait-mail:',
+        'agent:memx:',
+        'agent:auto-runs:',
         'queue:',
       ].sort(),
     )
@@ -83,7 +87,16 @@ describe('cache-namespaces', () => {
       Object.entries(CACHE_NAMESPACES).map(([name, n]) => [name, n.tenancy]),
     )
     for (const t of Object.values(declared)) expect(CACHE_KEY_TENANCIES).toContain(t)
-    const platform = ['dict', 'dictVer', 'param', 'paramVer', 'throttle', 'jobLock', 'jobFire']
+    const platform = [
+      'dict',
+      'dictVer',
+      'param',
+      'paramVer',
+      'throttle',
+      'jobLock',
+      'jobFire',
+      'agentSweep',
+    ]
     expect(declared).toEqual(
       Object.fromEntries(
         Object.keys(CACHE_NAMESPACES).map((name) => [

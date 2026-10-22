@@ -13,6 +13,7 @@ import FileUpload from '@/core/components/FileUpload.vue'
 import IconButton from '@/core/components/IconButton.vue'
 import { isImage } from '@/core/composables/use-upload'
 import { useAuthStore } from '@/core/stores/auth'
+import { comboOf, DEFAULT_SHORTCUTS } from './shortcuts'
 import {
   loadHistory,
   mentionedSkill,
@@ -46,7 +47,7 @@ export interface ComposerMessage {
  * `@` 提及技能、外部服务器与当前页面带来的记录（插入可读的文字记号，模型直接读；提及技能同时作为本轮技能），
  * `/prompts` 与“提示词”菜单插入模板；↑/↓ 翻看本人发过的消息，Ctrl+R 搜索它们；附件（图片只给能看图的模型）；模型、
  * 快速档、推理强度、审批模式与计划模式；上下文用量；运行中可选“追加到当前步骤”或“排到下一轮”，
- * 输入框为空时 Esc 停止本轮。发送按钮在请求进行中 loading 且不可再点，失败时文字保留。
+ * 输入框为空时按停止键（默认 Esc，可在页面自定义）停止本轮。发送按钮在请求进行中 loading 且不可再点，失败时文字保留。
  */
 defineOptions({ name: 'AgentComposer' })
 const {
@@ -58,6 +59,7 @@ const {
   temporary = false,
   context = null,
   records = [],
+  stopKey = DEFAULT_SHORTCUTS.stop,
 } = defineProps<{
   options: AgentOptionsVo | null
   /** 发送一条消息，成功时为 true（此时才清空输入框与附件） */
@@ -71,6 +73,8 @@ const {
   context?: { used: number; window: number } | null
   /** 可以 `@` 提及的记录（当前页面或会话带来的选中记录） */
   records?: { target: string; id: number }[]
+  /** 停止本轮的组合键（见 shortcuts.ts），默认 Esc */
+  stopKey?: string
 }>()
 const settings = defineModel<ComposerSettings>('settings', { required: true })
 const emit = defineEmits<{ stop: []; command: [cmd: SlashCommand] }>()
@@ -324,21 +328,25 @@ function onKeydown(e: KeyboardEvent) {
       return
     }
   }
-  if (e.key === 'Escape') {
-    if (pickingHistory.value) {
-      e.preventDefault()
-      pickingHistory.value = false
-      void setText(draftBefore)
-    } else if (list.length || pickingPrompt.value) {
-      e.preventDefault()
-      dismissed.value = true
-      pickingPrompt.value = false
-    } else if (running && !text.value) {
-      e.preventDefault()
-      emit('stop')
-    }
+  if (e.key === 'Escape' && pickingHistory.value) {
+    e.preventDefault()
+    pickingHistory.value = false
+    void setText(draftBefore)
     return
   }
+  if (e.key === 'Escape' && (list.length || pickingPrompt.value)) {
+    e.preventDefault()
+    dismissed.value = true
+    pickingPrompt.value = false
+    return
+  }
+  // 停止本轮只在输入框为空时：正在打字时按到不会误停
+  if (running && !text.value && comboOf(e) === stopKey) {
+    e.preventDefault()
+    emit('stop')
+    return
+  }
+  if (e.key === 'Escape') return
   if (
     (e.key === 'ArrowUp' || e.key === 'ArrowDown') &&
     !e.shiftKey &&

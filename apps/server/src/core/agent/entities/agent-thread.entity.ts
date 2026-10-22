@@ -38,7 +38,7 @@ export class AgentThread extends BaseEntity {
   @Column({ type: 'varchar', length: 16, nullable: true })
   reasoning: (typeof AGENT_REASONING)[number] | null
 
-  /** 审批模式（read_only、ask、trust） */
+  /** 审批模式（read_only、ask、trust、auto_review） */
   @Column({ name: 'approval_mode', type: 'varchar', length: 16, default: 'ask' })
   approvalMode: AgentApprovalMode
 
@@ -69,6 +69,22 @@ export class AgentThread extends BaseEntity {
   /** 分叉来源会话 ID */
   @Column({ name: 'forked_from_id', type: 'bigint', unsigned: true, nullable: true })
   forkedFromId: number | null
+
+  /** 所用配置方案 ID */
+  @Column({ name: 'profile_id', type: 'bigint', unsigned: true, nullable: true })
+  profileId: number | null
+
+  /** 本会话是否使用记忆 */
+  @Column({ name: 'memory_enabled', type: 'boolean', default: true })
+  memoryEnabled: boolean
+
+  /** 父会话 ID（子智能体的会话，不进列表） */
+  @Column({ name: 'parent_thread_id', type: 'bigint', unsigned: true, nullable: true })
+  parentThreadId: number | null
+
+  /** 自动化运行 ID（自动化开的会话，不进列表） */
+  @Column({ name: 'automation_run_id', type: 'bigint', unsigned: true, nullable: true })
+  automationRunId: number | null
 
   /** 所属批次 ID */
   @Column({ name: 'batch_id', type: 'bigint', unsigned: true, nullable: true })

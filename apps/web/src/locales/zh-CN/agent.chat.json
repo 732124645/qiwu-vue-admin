@@ -248,6 +248,36 @@
       "planRun": {
         "action": "执行此计划",
         "text": "按计划执行"
+      },
+      "shortcut": {
+        "open": "快捷键设置",
+        "title": "快捷键",
+        "press": "请按下新的组合键…",
+        "reset": "恢复默认",
+        "stopHint": "停止本轮只在本轮运行中、输入框为空时生效；其他快捷键在本页任意位置生效。设置只保存在本浏览器。",
+        "action": {
+          "newChat": "新会话",
+          "focusComposer": "聚焦输入框",
+          "stop": "停止本轮",
+          "togglePlan": "切换计划模式"
+        },
+        "conflict": {
+          "reserved": "{key} 已被页面占用",
+          "modifier": "{key} 需要带 Ctrl、Alt 或 ⌘",
+          "action": "{key} 已用于“{action}”"
+        }
+      },
+      "newWindow": "在新窗口打开",
+      "notify": {
+        "open": "通知设置",
+        "title": "通知",
+        "mail": "同时发邮件",
+        "hint": "站内信总会收到；手机端通过站内信同步。邮件发到个人资料里的邮箱。",
+        "event": {
+          "turnDone": "耗时较长的一轮完成",
+          "waiting": "等我确认或回答",
+          "automation": "自动化运行结果"
+        }
       }
     }
   }

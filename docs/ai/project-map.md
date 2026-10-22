@@ -91,13 +91,17 @@
 
 | 表 | 实体 | 租户 | 软删除 | 文件 |
 | --- | --- | --- | --- | --- |
+| `agent_automation` | `AgentAutomation` | 租户 | 是 | core/agent/automation/automation.entity.ts |
+| `agent_automation_run` | `AgentAutomationRun` | 租户 | 是 | core/agent/automation/automation.entity.ts |
 | `agent_batch` | `AgentBatch` | 租户 | 是 | core/agent/entities/agent-thread.entity.ts |
 | `agent_feedback` | `AgentFeedback` | 租户 | 是 | core/agent/entities/agent-thread.entity.ts |
 | `agent_instruction` | `AgentInstruction` | 租户 | 是 | core/agent/entities/agent-skill.entity.ts |
 | `agent_item` | `AgentItem` | 租户 | 是 | core/agent/entities/agent-thread.entity.ts |
 | `agent_mcp_server` | `AgentMcpServer` | 平台 | 是 | core/agent/entities/agent-mcp.entity.ts |
 | `agent_mcp_tool` | `AgentMcpTool` | 平台 | 是 | core/agent/entities/agent-mcp.entity.ts |
+| `agent_memory` | `AgentMemory` | 租户 | 是 | core/agent/entities/agent-memory.entity.ts |
 | `agent_platform_skill` | `AgentPlatformSkill` | 平台 | 是 | core/agent/entities/agent-skill.entity.ts |
+| `agent_profile` | `AgentProfile` | 租户 | 是 | core/agent/entities/agent-memory.entity.ts |
 | `agent_prompt` | `AgentPrompt` | 租户 | 是 | core/agent/entities/agent-skill.entity.ts |
 | `agent_provider` | `AgentProvider` | 平台 | 是 | core/agent/provider/provider.entity.ts |
 | `agent_search_provider` | `AgentSearchProvider` | 平台 | 是 | core/agent/provider/provider.entity.ts |
@@ -175,6 +179,15 @@
 | `McpWellKnownController`（core/mcp/mcp.controller.ts） | GET | `/.well-known/oauth-protected-resource` |  | Public |
 |  | GET | `/.well-known/oauth-protected-resource/api/mcp` |  | Public |
 |  | GET | `/.well-known/oauth-authorization-server` |  | Public |
+| `AgentAutomationController`（core/agent/automation/automation.controller.ts），全部：HomeTenant | GET | `/api/agent/automations` | agent.automation.use |  |
+|  | POST | `/api/agent/automations` | agent.automation.use | Idempotent |
+|  | PUT | `/api/agent/automations/:id` | agent.automation.use |  |
+|  | DELETE | `/api/agent/automations/:id` | agent.automation.use |  |
+|  | POST | `/api/agent/automations/:id/enabled` | agent.automation.use |  |
+|  | POST | `/api/agent/automations/:id/run` | agent.automation.use | Idempotent |
+|  | GET | `/api/agent/automations/:id/runs` | agent.automation.use |  |
+|  | GET | `/api/agent/automation-events` | agent.automation.use |  |
+|  | GET | `/api/agent/automation-tools` | agent.automation.use |  |
 | `AgentChatController`（core/agent/threads/threads.controller.ts） | GET | `/api/agent/options` | agent.chat.use |  |
 |  | GET | `/api/agent/shared/:token` | agent.chat.use |  |
 |  | POST | `/api/agent/feedback` | agent.chat.use | Idempotent |
@@ -191,22 +204,38 @@
 | `AgentBatchController`（core/agent/batch/batch.controller.ts） | POST | `/api/agent/batches` | agent.batch.run | Idempotent |
 |  | GET | `/api/agent/batches/:id` | agent.batch.run |  |
 |  | POST | `/api/agent/batches/:id/decide` | agent.batch.run |  |
+| `AgentDiagnosticsController`（core/agent/diagnostics/diagnostics.controller.ts） | GET | `/api/agent/diagnostics` | agent.setting.browse | PlatformOnly(root) |
+|  | POST | `/api/agent/diagnostics/test-provider/:id` | agent.setting.browse | PlatformOnly(root) |
+|  | POST | `/api/agent/diagnostics/test-search/:id` | agent.setting.browse | PlatformOnly(root) |
+|  | POST | `/api/agent/diagnostics/test-mcp/:id` | agent.setting.browse | PlatformOnly(root) |
 | `AgentInstructionController`（core/agent/skills/skill.controller.ts） | GET | `/api/agent/instructions/me` | chat.use |  |
 |  | PUT | `/api/agent/instructions/me` | chat.use |  |
 |  | GET | `/api/agent/instructions/tenant` | chat.use / skill.browse / instruction.modify |  |
 |  | PUT | `/api/agent/instructions/tenant` | instruction.modify |  |
+| `AgentOutputController`（core/agent/runtime/output.controller.ts） | GET | `/api/agent/items/:itemId/xlsx` | agent.chat.use |  |
 | `AgentMcpServerController`（core/agent/mcp-client/mcp-server.controller.ts） | GET | `/api/agent/mcp-servers` | agent.setting.browse | PlatformOnly |
 |  | POST | `/api/agent/mcp-servers` | agent.setting.modify | PlatformOnly(root), Idempotent |
 |  | PUT | `/api/agent/mcp-servers/:id` | agent.setting.modify | PlatformOnly(root) |
 |  | DELETE | `/api/agent/mcp-servers/:id` | agent.setting.modify | PlatformOnly(root) |
 |  | POST | `/api/agent/mcp-servers/:id/sync` | agent.setting.modify | PlatformOnly(root) |
 |  | PUT | `/api/agent/mcp-servers/:id/tools/:toolId` | agent.setting.modify | PlatformOnly(root) |
+| `AgentMemoryController`（core/agent/memory/memory.controller.ts），全部：HomeTenant | GET | `/api/agent/memories` | agent.chat.use |  |
+|  | POST | `/api/agent/memories` | agent.chat.use | Idempotent |
+|  | POST | `/api/agent/memories/forget-all` | agent.chat.use |  |
+|  | PUT | `/api/agent/memories/:id` | agent.chat.use |  |
+|  | DELETE | `/api/agent/memories/:id` | agent.chat.use |  |
+| `AgentNotifySettingsController`（core/agent/runtime/notify-settings.ts），全部：HomeTenant | GET | `/api/agent/notify-settings` | agent.chat.use |  |
+|  | PUT | `/api/agent/notify-settings` | agent.chat.use |  |
 | `AgentPlatformSkillController`（core/agent/skills/skill.controller.ts） | GET | `/api/agent/platform-skills` | setting.browse | PlatformOnly |
 |  | POST | `/api/agent/platform-skills` | setting.modify | PlatformOnly(root), Idempotent |
 |  | PUT | `/api/agent/platform-skills/:id` | setting.modify | PlatformOnly(root) |
 |  | DELETE | `/api/agent/platform-skills/:id` | setting.modify | PlatformOnly(root) |
 |  | POST | `/api/agent/platform-skills/import` | setting.modify | PlatformOnly(root), Idempotent |
 |  | GET | `/api/agent/platform-skills/:id/export` | setting.browse | PlatformOnly |
+| `AgentProfileController`（core/agent/profiles/profile.controller.ts），全部：HomeTenant | GET | `/api/agent/profiles` | agent.chat.use |  |
+|  | POST | `/api/agent/profiles` | agent.chat.use | Idempotent |
+|  | PUT | `/api/agent/profiles/:id` | agent.chat.use |  |
+|  | DELETE | `/api/agent/profiles/:id` | agent.chat.use |  |
 | `AgentProviderController`（core/agent/provider/provider.controller.ts） | GET | `/api/agent/providers` | agent.setting.browse | PlatformOnly |
 |  | POST | `/api/agent/providers` | agent.setting.modify | PlatformOnly(root), Idempotent |
 |  | PUT | `/api/agent/providers/:id` | agent.setting.modify | PlatformOnly(root) |
@@ -237,6 +266,7 @@
 |  | DELETE | `/api/agent/threads/:id/share` | agent.chat.use |  |
 | `AgentToolPolicyController`（core/agent/tools/tool-policy.ts） | GET | `/api/agent/tools` | agent.setting.browse | PlatformOnly |
 |  | PUT | `/api/agent/tools/:name/policy` | agent.setting.modify | PlatformOnly(root) |
+|  | PUT | `/api/agent/tools/:name/enabled` | agent.setting.modify | PlatformOnly(root) |
 | `ActionLogController`（modules/platform/audit/action-log/action-log.controller.ts） | GET | `/api/audit/action-logs` | audit.actionLog.browse |  |
 |  | GET | `/api/audit/action-logs/export` | audit.actionLog.export |  |
 |  | GET | `/api/audit/action-logs/:id` | audit.actionLog.view |  |
@@ -728,6 +758,7 @@
 | 常量 | 权限码 | 文件 |
 | --- | --- | --- |
 | `actionLogPerms` | audit.actionLog.browse, audit.actionLog.view, audit.actionLog.export, audit.actionLog.remove | shared:platform/audit/action-log.schema.ts |
+| `agentAutomationPerms` | agent.automation.use, agent.automation.share | shared:platform/agent/agent.schema.ts |
 | `agentPerms` | agent.chat.use, agent.batch.run, agent.skill.browse, agent.skill.create, agent.skill.modify, agent.skill.remove, agent.instruction.modify, agent.setting.browse, agent.setting.modify, agent.usage.browse | shared:platform/agent/agent.schema.ts |
 | `appVersionPerms` | settings.appVersion.browse, settings.appVersion.view, settings.appVersion.create, settings.appVersion.modify, settings.appVersion.remove | shared:platform/settings/app-version.schema.ts |
 | `bookPerms` | demo.book.browse, demo.book.view, demo.book.create, demo.book.modify, demo.book.remove, demo.book.export, demo.book.import | shared:demo/book.schema.ts |
@@ -776,6 +807,7 @@
 | 路由名 | 类型 | 开关 | 种子文件 |
 | --- | --- | --- | --- |
 | `agent` | group | APP_AGENT | db/seeds/agent/agent.seed.ts |
+| `agent-automation` | page |  | db/seeds/agent/agent.seed.ts |
 | `agent-batch` | page |  | db/seeds/agent/agent.seed.ts |
 | `agent-chat` | page |  | db/seeds/agent/agent.seed.ts |
 | `agent-setting` | page |  | db/seeds/agent/agent.seed.ts |
@@ -934,13 +966,20 @@
 | 参数键 | 种子文件 |
 | --- | --- |
 | `agent.instructions` | db/seeds/settings/settings.seed.ts |
+| `agent.limit.automation_runs_per_day` | db/seeds/settings/settings.seed.ts |
+| `agent.limit.automations_per_user` | db/seeds/settings/settings.seed.ts |
+| `agent.limit.research_seconds` | db/seeds/settings/settings.seed.ts |
+| `agent.limit.research_steps` | db/seeds/settings/settings.seed.ts |
 | `agent.limit.tenant_daily_tokens` | db/seeds/settings/settings.seed.ts |
 | `agent.limit.turn_seconds` | db/seeds/settings/settings.seed.ts |
 | `agent.limit.turn_steps` | db/seeds/settings/settings.seed.ts |
 | `agent.limit.turn_tokens` | db/seeds/settings/settings.seed.ts |
 | `agent.limit.user_concurrent_turns` | db/seeds/settings/settings.seed.ts |
 | `agent.limit.user_daily_tokens` | db/seeds/settings/settings.seed.ts |
+| `agent.memory.extract` | db/seeds/settings/settings.seed.ts |
+| `agent.memory.per_turn` | db/seeds/settings/settings.seed.ts |
 | `agent.paused` | db/seeds/settings/settings.seed.ts |
+| `agent.review.model` | db/seeds/settings/settings.seed.ts |
 | `agent.trust_mode` | db/seeds/settings/settings.seed.ts |
 | `agent.web.allowed_domains` | db/seeds/settings/settings.seed.ts |
 | `agent.web.mode` | db/seeds/settings/settings.seed.ts |
@@ -985,7 +1024,9 @@
 
 | 队列 | 登记位置 | 处理器 |
 | --- | --- | --- |
+| `agent-automation` | core/agent/agent.module.ts | AgentAutomationProcessor（core/agent/automation/automation.processor.ts） |
 | `agent-cleanup` | core/agent/agent.module.ts | AgentCleanupProcessor（core/agent/runtime/turn.processor.ts） |
+| `agent-memory` | core/agent/memory/agent-memory.module.ts | AgentMemoryProcessor（core/agent/memory/memory-extract.ts） |
 | `agent-turn` | core/agent/agent.module.ts | AgentTurnProcessor（core/agent/runtime/turn.processor.ts） |
 
 ## 定时任务处理器

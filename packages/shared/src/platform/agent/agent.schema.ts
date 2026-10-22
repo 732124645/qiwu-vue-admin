@@ -93,16 +93,18 @@ export const AGENT_INSTRUCTIONS_PARAM = 'agent.instructions'
 
 /**
  * How a tool is offered to the agent: `auto` runs at once, `ask` stops the turn for the owner's decision,
- * `deny` keeps it away from the agent. A write tool is only ever `ask` or `deny`.
+ * `deny` keeps it away from the agent. A write tool is only ever `ask`, `review` or `deny`.
  */
-export const AGENT_TOOL_POLICIES = ['auto', 'ask', 'deny'] as const
+/** `review`: a write tool an administrator lets the review model approve in the auto-review mode */
+export const AGENT_TOOL_POLICIES = ['auto', 'ask', 'review', 'deny'] as const
 export type AgentToolPolicy = (typeof AGENT_TOOL_POLICIES)[number]
 
 /**
  * Per thread: `read_only` offers only read tools; `ask` (default) asks before each write; `trust` asks once
  * per tool and target in this thread (a write still never runs before a first confirmation).
  */
-export const AGENT_APPROVAL_MODES = ['read_only', 'ask', 'trust'] as const
+/** `auto_review`: writes of tools with policy `review` go to the review model first; every other write still asks */
+export const AGENT_APPROVAL_MODES = ['read_only', 'ask', 'trust', 'auto_review'] as const
 export type AgentApprovalMode = (typeof AGENT_APPROVAL_MODES)[number]
 
 export const AGENT_THREAD_STATUSES = ['active', 'archived'] as const
@@ -124,6 +126,10 @@ export const AGENT_ITEM_KINDS = [
   'plan',
   'reasoning',
   'compaction',
+  'chart',
+  'image',
+  'report',
+  'subagent',
   'error',
 ] as const
 export type AgentItemKind = (typeof AGENT_ITEM_KINDS)[number]
@@ -153,6 +159,8 @@ export const agentModelVo = z.object({
   /** offered as the "fast" choice */
   fast: z.boolean(),
   contextWindow: z.number().int(),
+  /** the model generates images (`image.generate`, OpenAI-compatible images API) */
+  image: z.boolean().optional(),
 })
 export type AgentModelVo = z.infer<typeof agentModelVo>
 
@@ -200,6 +208,12 @@ export const agentThreadVo = z.object({
   reasoning: z.enum(AGENT_REASONING).nullable(),
   approvalMode: z.enum(AGENT_APPROVAL_MODES),
   planMode: z.boolean(),
+  profileId: z.number().int().nullable(),
+  memoryEnabled: z.boolean(),
+  /** a subagent's thread (hidden from the list) */
+  parentThreadId: z.number().int().nullable(),
+  /** a thread an automation run started (hidden from the list) */
+  automationRunId: z.number().int().nullable(),
   pinned: z.boolean(),
   temporary: z.boolean(),
   /** items the owner has not read yet */
@@ -229,8 +243,15 @@ export const agentThreadCreate = z
     providerId: z.number().int().positive().optional(),
     model: z.string().max(128).optional(),
     reasoning: z.enum(AGENT_REASONING).optional(),
-    approvalMode: z.enum(AGENT_APPROVAL_MODES).default('ask'),
+    /** left out: the profile's mode, else `ask` */
+    approvalMode: z.enum(AGENT_APPROVAL_MODES).optional(),
     planMode: z.boolean().default(false),
+    /**
+     * a profile's model, mode, tools and instructions apply (fields given here win); left out: the caller's
+     * default profile; null: no profile at all
+     */
+    profileId: z.number().int().positive().nullable().optional(),
+    memoryEnabled: z.boolean().default(true),
     /** kept out of the list, deleted when closed */
     temporary: z.boolean().default(false),
     context: agentContext.optional(),
@@ -248,6 +269,8 @@ export const agentThreadUpdate = z
     approvalMode: z.enum(AGENT_APPROVAL_MODES).optional(),
     planMode: z.boolean().optional(),
     pinned: z.boolean().optional(),
+    memoryEnabled: z.boolean().optional(),
+    profileId: z.number().int().positive().nullable().optional(),
   })
   .register(fieldDomains, { domain: 'agent.thread' })
 export type AgentThreadUpdate = z.infer<typeof agentThreadUpdate>
@@ -328,6 +351,22 @@ export interface AgentItemPayloads {
   reasoning: { text: string }
   /** earlier items up to `upToSeq` were summarized to save context (auto or `/compact`) */
   compaction: { upToSeq: number; auto: boolean }
+  /** a declarative chart or table the page renders (`chart.render`); never code */
+  chart: AgentChartSpec
+  /** a generated image stored in the file storage (`image.generate`) */
+  image: { fileId: number; prompt: string; width?: number; height?: number }
+  /** a research report (Markdown with numbered citations), exportable */
+  report: { title: string; text: string; citations: AgentSource[] }
+  /** delegated subtasks (`agent.delegate`): one entry per child thread with its status and summary */
+  subagent: {
+    callId: string
+    tasks: {
+      title: string
+      threadId: number
+      status: AgentTurnStatus | 'queued'
+      summary?: string
+    }[]
+  }
   tool_call: {
     callId: string
     tool: string
@@ -358,6 +397,12 @@ export interface AgentItemPayloads {
     note?: string
     /** how it was decided: once, for the rest of this thread (same tool and target), rejected, cancelled */
     decision?: 'approve' | 'approve_session' | 'reject' | 'cancel'
+    /** decided by the review model (auto-review mode) or by the automation's pre-approval, with its reason */
+    auto?: {
+      by: 'review' | 'pre_approved'
+      verdict: 'approve' | 'reject' | 'escalate'
+      reason: string
+    }
     /** why the agent cannot do it, when a permission or the thread's mode blocks the tool (recovery hint) */
     blocked?: { reason: 'permission' | 'mode' | 'policy'; perm?: string }
   }
@@ -548,6 +593,8 @@ export const agentProviderSave = z
           vision: z.boolean().default(false),
           fast: z.boolean().default(false),
           contextWindow: z.number().int().min(1024).max(10_000_000).default(64_000),
+          /** an image model: offered to the agent as `image.generate` */
+          image: z.boolean().default(false),
         }),
       )
       .min(1)
@@ -647,16 +694,22 @@ export const agentToolVo = z.object({
   name: z.string(),
   title: z.string(),
   kind: z.enum(MCP_TOOL_KINDS),
-  source: z.enum(['local', 'web']),
+  /** `builtin`: a tool of the agent runtime itself (plan, questions, skills, memory and the like) */
+  source: z.enum(['local', 'web', 'builtin']),
   perm: z.string().nullable(),
   policy: z.enum(AGENT_TOOL_POLICIES),
   /** the policy is the kind's default (no explicit setting) */
   defaulted: z.boolean(),
+  /** the platform switch (`cfg_mcp_tool.enabled`); off: the agent never gets the tool */
+  enabled: z.boolean(),
 })
 export type AgentToolVo = z.infer<typeof agentToolVo>
 
+/** Switches a built-in tool on or off for the agent (this system's other tools: the MCP tool page). */
+export const agentToolEnabledUpdate = z.object({ enabled: z.boolean() })
+
 export const agentToolPolicyUpdate = z.object({
-  /** null: back to the kind's default (read `auto`, write `ask`); a write tool takes only `ask` or `deny` */
+  /** null: back to the kind's default (read `auto`, write `ask`); a write tool takes only `ask`, `review` or `deny` */
   policy: z.enum(AGENT_TOOL_POLICIES).nullable(),
 })
 
@@ -728,3 +781,346 @@ export const AGENT_WEB_MODE_PARAM = 'agent.web.mode'
 export const AGENT_WEB_MODES = ['live', 'off'] as const
 /** Comma-separated domains `web.fetch` may read besides search results; empty = only results and user links. */
 export const AGENT_WEB_DOMAINS_PARAM = 'agent.web.allowed_domains'
+
+// ---- charts, profiles, memories, automations, notifications, diagnostics ----
+/*
+ * Routes (all owner-only unless noted; `agent.chat.use`):
+ * - profiles: `GET /api/agent/profiles` → `AgentProfileVo[]`; `POST /api/agent/profiles`, `PUT|DELETE
+ *   /api/agent/profiles/:id` (`agentProfileSave`; tenant-wide ones need `agent.skill.modify`)
+ * - memories: `GET /api/agent/memories?<agentMemoryQuery>` → `{ items: AgentMemoryVo[], total }`;
+ *   `POST /api/agent/memories` / `PUT /api/agent/memories/:id` (`agentMemorySave`); `DELETE /api/agent/memories/:id`;
+ *   `POST /api/agent/memories/forget-all` `{ currentPassword }` → `{ removed }`
+ * - automations (`agent.automation.use`; shared ones `agent.automation.share`): `GET /api/agent/automations`
+ *   → `AgentAutomationVo[]`; `POST`, `PUT|DELETE /api/agent/automations/:id` (`agentAutomationSave`);
+ *   `POST /api/agent/automations/:id/run` → `AgentAutomationRunVo`; `POST /api/agent/automations/:id/enabled`
+ *   `{ enabled }`; `GET /api/agent/automations/:id/runs?<pageQuery>` → `{ items: AgentAutomationRunVo[], total }`;
+ *   `GET /api/agent/automation-events` → `AgentAutomationEventVo[]` (the action-log actions an automation may
+ *   listen to, those the caller may browse)
+ * - notification settings: `GET|PUT /api/agent/notify-settings` (`agentNotifySettings`)
+ * - exports: `GET /api/agent/items/:itemId/xlsx` (a chart's or report table's data as xlsx, owner only)
+ * - diagnostics (`agent.setting.browse`, platform): `GET /api/agent/diagnostics` → `AgentDiagnosticsVo`;
+ *   `POST /api/agent/diagnostics/test-provider/:id`, `POST /api/agent/diagnostics/test-search/:id`,
+ *   `POST /api/agent/diagnostics/test-mcp/:id` → `{ ok, ms, error? }` (root)
+ */
+
+export const agentAutomationPerms = {
+  use: 'agent.automation.use',
+  share: 'agent.automation.share',
+} as const
+
+/** System parameters of the second part (root only where they bound cost or safety). */
+export const AGENT2_PARAMS = {
+  /** `true`: a background job distils memories from idle threads (default false) */
+  memoryExtract: 'agent.memory.extract',
+  /** memories put into one turn at most */
+  memoryPerTurn: 'agent.memory.per_turn',
+  /** the review model for auto-review: `<providerId>:<model>`; empty = auto-review unavailable */
+  reviewModel: 'agent.review.model',
+  /** step and time limits of a research turn */
+  researchSteps: 'agent.limit.research_steps',
+  researchSeconds: 'agent.limit.research_seconds',
+  /** automations one user may own, and runs per automation per day */
+  automationsPerUser: 'agent.limit.automations_per_user',
+  automationRunsPerDay: 'agent.limit.automation_runs_per_day',
+} as const
+
+export const AGENT_CHART_KINDS = ['bar', 'line', 'pie', 'table'] as const
+/** At most 12 series × 200 points, plain values only. */
+export const agentChartSpec = z.object({
+  kind: z.enum(AGENT_CHART_KINDS),
+  title: z.string().max(120),
+  /** category labels (x axis, pie slices or table columns for `table`) */
+  categories: z.array(z.string().max(80)).max(200),
+  series: z
+    .array(
+      z.object({
+        name: z.string().max(80),
+        data: z.array(z.union([z.number(), z.string().max(200), z.null()])).max(200),
+      }),
+    )
+    .min(1)
+    .max(12),
+  unit: z.string().max(20).optional(),
+})
+export type AgentChartSpec = z.infer<typeof agentChartSpec>
+
+export const agentProfileVo = z.object({
+  id: z.number().int(),
+  scope: z.enum(['tenant', 'user']),
+  name: z.string(),
+  providerId: z.number().int().nullable(),
+  model: z.string().nullable(),
+  reasoning: z.enum(AGENT_REASONING).nullable(),
+  approvalMode: z.enum(AGENT_APPROVAL_MODES),
+  tools: z.array(z.string()).nullable(),
+  instructions: z.string().nullable(),
+  isDefault: z.boolean(),
+  editable: z.boolean(),
+})
+export type AgentProfileVo = z.infer<typeof agentProfileVo>
+
+export const agentProfileSave = z
+  .object({
+    scope: z.enum(['tenant', 'user']).default('user'),
+    name: z.string().trim().min(1).max(64),
+    providerId: z.number().int().positive().nullable().default(null),
+    model: z.string().max(128).nullable().default(null),
+    reasoning: z.enum(AGENT_REASONING).nullable().default(null),
+    approvalMode: z.enum(AGENT_APPROVAL_MODES).default('ask'),
+    tools: z.array(z.string().max(160)).max(100).nullable().default(null),
+    instructions: z.string().max(AGENT_SKILL_BODY_MAX).nullable().default(null),
+    isDefault: z.boolean().default(false),
+  })
+  .register(fieldDomains, { domain: 'agent.profile' })
+export type AgentProfileSave = z.infer<typeof agentProfileSave>
+
+export const agentMemoryVo = z.object({
+  id: z.number().int(),
+  content: z.string(),
+  source: z.enum(['chat', 'extract', 'manual']),
+  sourceThreadId: z.number().int().nullable(),
+  lastUsedAt: z.string().nullable(),
+  createdAt: z.string(),
+})
+export type AgentMemoryVo = z.infer<typeof agentMemoryVo>
+
+export const agentMemoryQuery = pageQuery(['createdAt', 'lastUsedAt']).extend({
+  keyword: z.string().trim().max(100).optional(),
+})
+export const agentMemorySave = z
+  .object({ content: z.string().trim().min(1).max(1000) })
+  .register(fieldDomains, { domain: 'agent.memory' })
+export type AgentMemorySave = z.infer<typeof agentMemorySave>
+export const agentMemoryForgetAll = z
+  .object({ currentPassword: z.string().min(1).max(128) })
+  .register(fieldDomains, { domain: 'agent.memory' })
+
+export const AGENT_AUTOMATION_TRIGGERS = ['schedule', 'event', 'manual'] as const
+export const AGENT_AUTOMATION_WRITE_MODES = [
+  'read_only',
+  'ask',
+  'pre_approved',
+  'auto_review',
+] as const
+export const AGENT_AUTOMATION_RUN_STATUSES = [
+  'running',
+  'waiting',
+  'completed',
+  'failed',
+  'cancelled',
+  'skipped',
+] as const
+
+/** An action-log action an event automation listens to (`domain` + `verb`, optionally the resource). */
+export const agentAutomationEvent = z.object({
+  domain: z.string().max(40),
+  verb: z.string().max(40),
+  resource: z.string().max(60).optional(),
+})
+export type AgentAutomationEvent = z.infer<typeof agentAutomationEvent>
+
+export const agentAutomationVo = z.object({
+  id: z.number().int(),
+  name: z.string(),
+  enabled: z.boolean(),
+  shared: z.boolean(),
+  ownerName: z.string(),
+  trigger: z.enum(AGENT_AUTOMATION_TRIGGERS),
+  cron: z.string().nullable(),
+  timezone: z.string().nullable(),
+  event: agentAutomationEvent.nullable(),
+  skill: z.string().nullable(),
+  prompt: z.string().nullable(),
+  profileId: z.number().int().nullable(),
+  writeMode: z.enum(AGENT_AUTOMATION_WRITE_MODES),
+  /** write tools the owner pre-approved (still valid) */
+  preApproved: z.array(z.string()),
+  /** pre-approved write tools that no longer hold (the facts they were given on changed): approve again */
+  stalePreApproved: z.array(z.string()),
+  notify: z.object({ inbox: z.boolean(), mail: z.boolean() }),
+  lastRunAt: z.string().nullable(),
+  nextRunAt: z.string().nullable(),
+  editable: z.boolean(),
+})
+export type AgentAutomationVo = z.infer<typeof agentAutomationVo>
+
+export const agentAutomationSave = z
+  .object({
+    name: z.string().trim().min(1).max(100),
+    enabled: z.boolean().default(true),
+    shared: z.boolean().default(false),
+    trigger: z.enum(AGENT_AUTOMATION_TRIGGERS),
+    /** 5-field cron, at most once per 5 minutes; with `timezone` (IANA) */
+    cron: z.string().trim().max(64).nullable().default(null),
+    timezone: z.string().max(64).nullable().default(null),
+    event: agentAutomationEvent.nullable().default(null),
+    /** a skill, a prompt, or both (the prompt then goes with the skill) */
+    skill: z.string().regex(AGENT_SKILL_NAME).nullable().default(null),
+    prompt: z.string().trim().max(AGENT_MESSAGE_MAX).nullable().default(null),
+    profileId: z.number().int().positive().nullable().default(null),
+    writeMode: z.enum(AGENT_AUTOMATION_WRITE_MODES).default('read_only'),
+    /** write tools to pre-approve (`pre_approved`); changing the list needs `currentPassword` */
+    preApproved: z.array(z.string().max(160)).max(20).default([]),
+    currentPassword: z.string().min(1).max(128).optional(),
+    notify: z
+      .object({ inbox: z.boolean().default(true), mail: z.boolean().default(false) })
+      .default({ inbox: true, mail: false }),
+  })
+  .register(fieldDomains, { domain: 'agent.automation' })
+export type AgentAutomationSave = z.infer<typeof agentAutomationSave>
+
+export const agentAutomationRunVo = z.object({
+  id: z.number().int(),
+  automationId: z.number().int(),
+  threadId: z.number().int().nullable(),
+  trigger: z.enum(AGENT_AUTOMATION_TRIGGERS),
+  status: z.enum(AGENT_AUTOMATION_RUN_STATUSES),
+  summary: z.string().nullable(),
+  error: z.string().nullable(),
+  startedAt: z.string(),
+  endedAt: z.string().nullable(),
+})
+export type AgentAutomationRunVo = z.infer<typeof agentAutomationRunVo>
+
+export const agentAutomationEventVo = agentAutomationEvent.extend({ label: z.string() })
+export type AgentAutomationEventVo = z.infer<typeof agentAutomationEventVo>
+
+/** Where agent notices go besides the inbox (which always gets them; the mobile app reads the inbox). */
+export const agentNotifySettings = z
+  .object({
+    turnDone: z.object({ mail: z.boolean() }),
+    waiting: z.object({ mail: z.boolean() }),
+    automation: z.object({ mail: z.boolean() }),
+  })
+  .register(fieldDomains, { domain: 'agent.notify' })
+export type AgentNotifySettings = z.infer<typeof agentNotifySettings>
+
+export const agentDiagnosticsVo = z.object({
+  providers: z.array(
+    z.object({ id: z.number().int(), name: z.string(), enabled: z.boolean(), hasKey: z.boolean() }),
+  ),
+  search: z.array(z.object({ id: z.number().int(), name: z.string(), enabled: z.boolean() })),
+  mcpServers: z.array(
+    z.object({
+      id: z.number().int(),
+      name: z.string(),
+      status: z.string(),
+      lastError: z.string().nullable(),
+    }),
+  ),
+  queue: z.object({
+    waiting: z.number().int(),
+    active: z.number().int(),
+    failed: z.number().int(),
+    delayed: z.number().int(),
+  }),
+  turns: z.object({
+    running: z.number().int(),
+    waiting: z.number().int(),
+    failedToday: z.number().int(),
+  }),
+  recentFailures: z.array(
+    z.object({
+      turnId: z.number().int(),
+      tenantId: z.number().int(),
+      code: z.string(),
+      message: z.string(),
+      at: z.string(),
+    }),
+  ),
+  sweeps: z.object({
+    lastAt: z.string().nullable(),
+    requeued: z.number().int(),
+    failed: z.number().int(),
+  }),
+})
+export type AgentDiagnosticsVo = z.infer<typeof agentDiagnosticsVo>
+
+// ---- automations: tools to pre-approve, schedule presets, run reasons ----
+/*
+ * - `GET /api/agent/automation-tools` → `AgentAutomationToolVo[]` (`agent.automation.use`): the system write
+ *   tools the caller may pre-approve for an automation now (reachable, switched on, policy not `deny`).
+ * - `GET /api/agent/automations/:id/runs`: only the automation's owner (others 404); a shared automation is
+ *   listed for everyone of the tenant holding `agent.automation.use`, `editable` only for its owner, and only
+ *   the owner may run, switch, change or delete it.
+ */
+
+/** A scheduled automation fires at most this often (minutes). */
+export const AGENT_AUTOMATION_MIN_INTERVAL_MIN = 5
+
+/** Schedule presets the page offers (5-field cron; label `agent.automation.preset.<id>`). */
+export const AGENT_AUTOMATION_CRON_PRESETS = [
+  { id: 'every30m', cron: '*/30 * * * *' },
+  { id: 'hourly', cron: '0 * * * *' },
+  { id: 'daily9', cron: '0 9 * * *' },
+  { id: 'weekdays9', cron: '0 9 * * 1-5' },
+  { id: 'monday9', cron: '0 9 * * 1' },
+  { id: 'monthly1', cron: '0 9 1 * *' },
+] as const
+
+/** Why a run was skipped or failed before or outside its turn (`AgentAutomationRunVo.error`). */
+export const AGENT_AUTOMATION_RUN_ERRORS = [
+  'paused',
+  'owner_inactive',
+  'owner_forbidden',
+  'daily_limit',
+  'not_configured',
+  'thread_gone',
+  'turn_failed',
+  'mode_unavailable',
+  /** a note on a run that did run: its profile was gone, so it ran with the defaults */
+  'profile_missing',
+  /** the automation's previous run had not ended yet (running or waiting for a person) */
+  'overlap',
+] as const
+
+export const agentAutomationToolVo = z.object({ name: z.string(), title: z.string() })
+export type AgentAutomationToolVo = z.infer<typeof agentAutomationToolVo>
+
+// ---- subagents, research, outputs ----
+
+/**
+ * The platform skill that runs a turn in research mode (higher step and time limits, `AGENT2_PARAMS`); its
+ * description is the seed key `seed.agentSkill.deepResearch` (each language in seed.json).
+ */
+export const AGENT_RESEARCH_SKILL = 'deep-research'
+
+/** `GET /api/agent/items/:itemId/xlsx?<agentXlsxQuery>`: `table` picks a report's Markdown table (0-based). */
+export const agentXlsxQuery = z.object({ table: z.coerce.number().int().min(0).max(99).optional() })
+export type AgentXlsxQuery = z.infer<typeof agentXlsxQuery>
+
+const MD_FENCE = /^\s*`{3}/
+const MD_TABLE_SEP = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/
+const mdCells = (line: string) =>
+  line
+    .trim()
+    .replace(/^\||\|$/g, '')
+    .split('|')
+    .map((c) => c.trim())
+
+/**
+ * The GFM tables of a Markdown text, by the chat page's rules (a header line with `|`, a delimiter line,
+ * rows up to the first blank line or line without `|`; code blocks skipped): each as rows of cell texts,
+ * the header first, every row as wide as the header. A report's table `n` is exported by this index.
+ */
+export function markdownTables(text: string): string[][][] {
+  const lines = text.replace(/\r\n?/g, '\n').split('\n')
+  const out: string[][][] = []
+  for (let i = 0; i < lines.length; i++) {
+    if (MD_FENCE.test(lines[i]!)) {
+      for (i++; i < lines.length && !MD_FENCE.test(lines[i]!); i++);
+      continue
+    }
+    const next = lines[i + 1] ?? ''
+    if (!lines[i]!.includes('|') || !MD_TABLE_SEP.test(next) || !next.includes('-')) continue
+    const head = mdCells(lines[i]!)
+    const rows = [head]
+    for (i += 2; i < lines.length && lines[i]!.includes('|') && lines[i]!.trim(); i++) {
+      const r = mdCells(lines[i]!)
+      rows.push(head.map((_, k) => r[k] ?? ''))
+    }
+    i--
+    out.push(rows)
+  }
+  return out
+}

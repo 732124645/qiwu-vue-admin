@@ -1,0 +1,26 @@
+{
+  "field": {
+    "agent": {
+      "automation": {
+        "name": "Name",
+        "enabled": "Enabled",
+        "shared": "Shared",
+        "trigger": "Trigger",
+        "cron": "Cron expression",
+        "timezone": "Time zone",
+        "event": "Business event",
+        "skill": "Skill",
+        "prompt": "Prompt",
+        "profileId": "Profile",
+        "writeMode": "Write mode",
+        "preApproved": "Pre-approved tools",
+        "currentPassword": "Current password",
+        "notify": "Notify by"
+      }
+    }
+  },
+  "validation": {
+    "agentCronTooOften": "{field} must be at least 5 minutes apart",
+    "agentPreApprovedSource": "{field}: with pre-approved writes only your own skills and profiles, or platform skills, can be used"
+  }
+}

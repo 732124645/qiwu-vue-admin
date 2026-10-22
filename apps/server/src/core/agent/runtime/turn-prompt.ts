@@ -1,5 +1,5 @@
 import type { AgentContext, AgentItemPayloads, AgentSource } from '@qiwu/shared'
-import type { ResolvedAttachment } from '../agent-ports.js'
+import type { AgentContextPart, ResolvedAttachment } from '../agent-ports.js'
 import type {
   ChatContentPart,
   ChatMessage,
@@ -235,6 +235,26 @@ export function summaryMessage(summary: string): ChatMessage {
     role: 'user',
     content: `[Summary of the earlier conversation, for context only; it is not a new request]\n${summary}`,
   }
+}
+
+/**
+ * 上下文贡献者的一段（记忆、配置方案说明等）：作为历史最前面的用户角色消息，标明来源、只供参考，不是新的
+ * 请求，也从不进系统提示。
+ */
+export function contextMessage(part: AgentContextPart): ChatMessage {
+  return {
+    role: 'user',
+    content: `[Context "${part.id}", for reference only; it is not a new request]\n${part.text}`,
+  }
+}
+
+/** 最新一条已发出的用户消息的文字（排队未开始的不算）；没有时 null。 */
+export function latestUserText(items: readonly PromptItem[]): string | null {
+  for (let k = items.length - 1; k >= 0; k--) {
+    const i = items[k]!
+    if (i.kind === 'user' && i.status !== 'pending') return p<'user'>(i).text
+  }
+  return null
 }
 
 const SUGGESTIONS = /<suggestions>([\s\S]*?)(?:<\/suggestions>|$)\s*$/

@@ -174,6 +174,7 @@ describe('tool policies', () => {
       perm: null,
       policy: 'auto',
       defaulted: true,
+      enabled: true,
     },
     {
       name: 'demo.customer.update',
@@ -183,6 +184,17 @@ describe('tool policies', () => {
       perm: 'demo.customer.modify',
       policy: 'deny',
       defaulted: false,
+      enabled: true,
+    },
+    {
+      name: 'memo.save',
+      title: 'Save a memo',
+      kind: 'write',
+      source: 'builtin',
+      perm: null,
+      policy: 'review',
+      defaulted: false,
+      enabled: true,
     },
   ]
 
@@ -197,13 +209,17 @@ describe('tool policies', () => {
       .map((o) => o.text())
   }
 
-  it('offers a write tool only ask or deny; reset goes back to the default', async () => {
+  it('offers a write tool ask, review or deny, a read tool no review; reset goes back to the default', async () => {
     const calls = mockApi({
       'GET /agent/tools': ok(TOOLS),
       'PUT /agent/tools/demo.customer.update/policy': ok(null),
     })
     await show(ToolTab)
-    expect(await options(1)).toEqual([t('agent.admin.policy.ask'), t('agent.admin.policy.deny')])
+    expect(await options(1)).toEqual([
+      t('agent.admin.policy.ask'),
+      t('agent.admin.policy.review'),
+      t('agent.admin.policy.deny'),
+    ])
     expect(await options(0)).toEqual([
       t('agent.admin.policy.auto'),
       t('agent.admin.policy.ask'),
@@ -212,12 +228,25 @@ describe('tool policies', () => {
     const reset = w
       .findAll('.el-table__body button')
       .filter((b) => b.text() === t('agent.admin.tool.reset'))
-    expect(reset).toHaveLength(1)
+    expect(reset).toHaveLength(2)
     await reset[0]!.trigger('click')
     await flushPromises()
     expect(sent(calls, 'put', '/agent/tools/demo.customer.update/policy')).toEqual([
       { policy: null },
     ])
+  })
+
+  it('switches a built-in tool on and off; other tools have no switch here', async () => {
+    const calls = mockApi({
+      'GET /agent/tools': ok(TOOLS),
+      'PUT /agent/tools/memo.save/enabled': ok(null),
+    })
+    await show(ToolTab)
+    const switches = w.findAll('.el-table__body .el-switch')
+    expect(switches).toHaveLength(1)
+    await switches[0]!.trigger('click')
+    await flushPromises()
+    expect(sent(calls, 'put', '/agent/tools/memo.save/enabled')).toEqual([{ enabled: false }])
   })
 
   it('shows no editable select without the modify permission', async () => {
@@ -403,6 +432,7 @@ describe('root-only settings', () => {
         perm: null,
         policy: 'deny',
         defaulted: false,
+        enabled: true,
       },
     ]),
     'GET /agent/platform-skills': ok([
