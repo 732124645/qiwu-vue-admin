@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toolTitle, toolPermission } from '../tool-presentation'
 import dayjs from 'dayjs'
@@ -35,7 +35,7 @@ const { t } = useI18n()
 
 const DECISIONS = computed<{ value: Decision; primary?: boolean }[]>(() => [
   { value: 'approve', primary: true },
-  ...(trust ? [{ value: 'approve_session' as const }] : []),
+  ...(trust && !item.payload.perCallConfirmation ? [{ value: 'approve_session' as const }] : []),
   { value: 'reject' },
   { value: 'cancel' },
 ])
@@ -43,6 +43,13 @@ const note = ref('')
 const pending = ref<Decision | null>(null)
 /** 本页已提交成功、等待服务端推送新状态的决定 */
 const sent = ref<Decision | null>(null)
+// 新预览不是旧同意的延续：同一卡片换 token 后必须恢复为可重新确认。
+watch(
+  () => item.payload.confirmationToken,
+  () => {
+    sent.value = null
+  },
+)
 const blocked = computed(() => item.payload.blocked)
 const open = computed(() => !readonly && item.status === 'pending' && !sent.value && !blocked.value)
 /** 已作出的决定：服务端记录的优先，推送到达前用本页刚提交的 */
@@ -59,8 +66,14 @@ async function decide(decision: Decision) {
   pending.value = decision
   try {
     const text = note.value.trim()
-    await agentApi.decide(item.id, text ? { decision, note: text } : { decision })
-    sent.value = decision
+    const token = item.payload.confirmationToken
+    await agentApi.decide(item.id, {
+      decision,
+      ...(text && { note: text }),
+      ...(item.payload.perCallConfirmation && { confirmationToken: token }),
+    })
+    if (!item.payload.perCallConfirmation || item.payload.confirmationToken === token)
+      sent.value = decision
     emit('decided')
   } catch (e) {
     toastRest(e)

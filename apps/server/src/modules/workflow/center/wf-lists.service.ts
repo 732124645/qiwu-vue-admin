@@ -52,6 +52,8 @@ export class WfListService {
       .createQueryBuilder('i')
       .where('i.initiatorId = :me', { me })
     if (q.state) qb.andWhere('i.state = :state', { state: q.state })
+    // 类型限制先于分页统计，仍保留发起人和租户条件。
+    if (q.modelKey) qb.andWhere('i.modelKey = :modelKey', { modelKey: q.modelKey })
     const page = await paginate(qb, {
       ...q,
       sort: q.sort ?? [{ field: 'startedAt', order: 'DESC' }],
@@ -131,6 +133,7 @@ export class WfListService {
       .innerJoinAndMapOne('c.instance', WfInstanceRow, 'i', 'i.id = c.instanceId')
       .where('c.userId = :me', { me })
     if (q.unread !== undefined) qb.andWhere(q.unread ? 'c.readAt IS NULL' : 'c.readAt IS NOT NULL')
+    if (q.modelKey) qb.andWhere('i.modelKey = :modelKey', { modelKey: q.modelKey })
     const page = await paginate(qb, {
       ...q,
       sort: q.sort ?? [{ field: 'createdAt', order: 'DESC' }],
@@ -174,6 +177,8 @@ export class WfListService {
       .innerJoinAndMapOne('t.instance', WfInstanceRow, 'i', 'i.id = t.instanceId')
       .where('t.assigneeId = :me', { me })
       .andWhere(which, params)
+    // 已办、待办共用实例类型筛选，条件不替代办理人限制。
+    if (q.modelKey) qb.andWhere('i.modelKey = :modelKey', { modelKey: q.modelKey })
     const page = await paginate(qb, q)
     const rows = page.items as WithInstance<WfTaskRow>[]
     const view = await this.view(rows.map((t) => t.instance))

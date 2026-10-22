@@ -986,6 +986,7 @@ describe('retry', () => {
       ['seed.task.demoEcho', 'demo.echo', 0],
       // the workflow seed's (超时提醒), off in test runs like dispatch
       ['seed.task.wfTaskRemind', 'wf.task.remind', 0],
+      ['seed.task.clockRetention', 'oa.clock.retention', 0],
     ])
     const echo = await findId(ds.manager, 'job_task', { name: 'seed.task.demoEcho' })
     await call('admin', 'post', `/${echo}/run`).expect(200)

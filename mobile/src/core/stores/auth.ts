@@ -1,14 +1,15 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
-import type {
-  LoginBody,
-  MePayload,
-  SmsLoginBody,
-  WxMpBindBody,
-  WxMpLoginVo,
-} from '@qiwu/shared'
+import type { LoginBody, MePayload, SmsLoginBody, WxMpBindBody, WxMpLoginVo } from '@qiwu/shared'
 import { stopRealtime } from '@/core/realtime'
-import { api, sessionEnd, setSession, toPasswordChange, type MobileTokens } from '@/core/request'
+import {
+  api,
+  currentSessionVersion,
+  sessionEnd,
+  setSession,
+  toPasswordChange,
+  type MobileTokens,
+} from '@/core/request'
 import { useCountsStore } from './counts'
 
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never
@@ -74,12 +75,31 @@ export const useAuthStore = defineStore('auth', () => {
   async function wxBind(proof: DistributiveOmit<WxMpBindBody, 'ticket'>) {
     const ticket = await wxLogin()
     if (ticket !== null)
-      start(await api.post<MobileTokens>('/auth/wx-mp/bind', { ...proof, ticket }, { silent: true }))
+      start(
+        await api.post<MobileTokens>('/auth/wx-mp/bind', { ...proof, ticket }, { silent: true }),
+      )
   }
 
-  async function fetchMe() {
-    me.value = await api.get<MePayload>('/auth/me')
-    if (passwordChangeDue.value) toPasswordChange()
+  let meFlight: { session: number; promise: Promise<void> } | undefined
+  /** 首页、计数和实时连接共享身份读取；旧会话的身份和改密导航均不能应用到新会话。 */
+  function fetchMe(): Promise<void> {
+    const session = currentSessionVersion()
+    if (meFlight?.session === session) return meFlight.promise
+    const flight = {
+      session,
+      promise: api
+        .get<MePayload>('/auth/me')
+        .then((loaded) => {
+          if (session !== currentSessionVersion()) return
+          me.value = loaded
+          if (passwordChangeDue.value) toPasswordChange()
+        })
+        .finally(() => {
+          if (meFlight === flight) meFlight = undefined
+        }),
+    }
+    meFlight = flight
+    return flight.promise
   }
 
   async function logout() {

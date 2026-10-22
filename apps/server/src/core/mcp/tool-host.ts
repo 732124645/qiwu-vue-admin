@@ -26,6 +26,7 @@ import { MASK } from '../redact.js'
 import { ParamService } from '../settings/param.service.js'
 import { McpRegistry, type RegisteredTool } from './mcp-registry.js'
 import { McpToolSwitch } from './mcp.entity.js'
+import type { ToolExecutionContext } from './mcp-tool.js'
 
 /** The largest answer a tool may give (UTF-8 bytes of its JSON). */
 export const MCP_OUTPUT_MAX_BYTES = 64 * 1024
@@ -139,6 +140,8 @@ export interface ToolCallContext {
   precheck?: () => Promise<void>
   /** the channel's own limit on a tool, checked after the platform switch (MCP: what the token allows) */
   allow?: (t: RegisteredTool) => ErrorDef | null
+  /** 仅运行时能提供的消费函数；接收原始调用并返回服务端规范快照，MCP/PAT 入口没有此能力。 */
+  confirmPerCall?: (tool: RegisteredTool, input: unknown) => Promise<ToolExecutionContext>
   /** the action log fields of the caller: request line, address and `params` naming the channel */
   log: {
     method: string
@@ -179,6 +182,7 @@ export type ToolPreview = z.infer<typeof toolPreview>
 export interface AgentCallRef {
   threadId: number
   turnId: number
+  confirmPerCall?: ToolCallContext['confirmPerCall']
 }
 
 /**
@@ -254,6 +258,7 @@ export class ToolHost {
       const out = await this.execute(name, args, {
         principal: p,
         lang,
+        confirmPerCall: ref.confirmPerCall,
         precheck: async () => {
           if (await this.flag(AGENT_PAUSED_PARAM)) throw new ToolRefusal(Err.AGENT_PAUSED)
         },
@@ -281,18 +286,47 @@ export class ToolHost {
    * 都返回 null，审批照常进行；它不记操作日志，因为不改数据。
    */
   async preview(p: Principal, name: string, args: unknown): Promise<ToolPreview | null> {
+    try {
+      return (await this.preparePreview(p, name, args))?.preview ?? null
+    } catch {
+      return null
+    }
+  }
+
+  /** 一次解析同时供规范参数与预览使用，默认工厂或 transform 不能在同一准备过程中运行两次。 */
+  async preparePreview(
+    p: Principal,
+    name: string,
+    args: unknown,
+  ): Promise<{ args: unknown; preview: ToolPreview } | null> {
     const tool = this.registry.get(name)
-    if (!tool?.runPreview || tenantIdIfAny() === undefined) return null
-    if (!(await this.reachable(p, tool))) return null
+    if (!tool?.runPreview || tenantIdIfAny() === undefined || !(await this.reachable(p, tool)))
+      return null
     const input = tool.input.safeParse(args)
-    if (!input.success) return null
+    if (!input.success) throw new ToolRefusal(Err.VALIDATION_FAILED)
+    const preview = await this.previewCanonical(p, name, input.data)
+    return preview ? { args: input.data, preview } : null
+  }
+
+  /**
+   * 仅供服务端已验证的规范快照重检；不接收客户端 prepared 标记，也不在此授予写入能力。
+   * 与首次预览共用权限、超时和返回形状校验，确认服务负责核对 receipt 的 schema 与原始调用未变。
+   */
+  async previewCanonical(
+    p: Principal,
+    name: string,
+    canonical: unknown,
+  ): Promise<ToolPreview | null> {
+    const tool = this.registry.get(name)
+    if (!tool?.runPreview || tenantIdIfAny() === undefined || !(await this.reachable(p, tool)))
+      return null
     const cls = ClsServiceManager.getClsService()
     try {
       const out = await cls.run({ ifNested: 'inherit' }, () => {
         cls.set('principal', p)
         const checked = tool.perm ? { perms: [tool.perm], all: false } : undefined
         return withCheckedPerm(checked, () =>
-          this.run({ ...tool, run: tool.runPreview! }, input.data),
+          this.run({ ...tool, run: tool.runPreview! }, canonical),
         )
       })
       const parsed = toolPreview.safeParse(out)
@@ -344,12 +378,24 @@ export class ToolHost {
       const refused = ctx.allow?.(tool)
       if (refused) throw new ToolRefusal(refused, { name })
       if (!(await this.reachable(ctx.principal, tool))) throw new ToolRefusal(Err.FORBIDDEN)
-      const input = tool.input.safeParse(args)
-      if (!input.success)
-        throw new ToolRefusal(Err.VALIDATION_FAILED, {}, this.issues(ctx.lang, input.error))
-      // 数据权限按工具声明的权限点计算，与对应列表接口一致（PermGuard 对路由做的同一件事）
+      let input: unknown
+      let execution: ToolExecutionContext | undefined
+      if (tool.perCallConfirmation) {
+        // 客户端不能传 prepared；规范参数只来自消费服务端 receipt 的回调。
+        if (!ctx.confirmPerCall) throw new ToolRefusal(Err.FORBIDDEN)
+        execution = await ctx.confirmPerCall(tool, args)
+        if (!execution.confirmation) throw new ToolRefusal(Err.FORBIDDEN)
+        input = execution.confirmation.args
+      } else {
+        // 未声明新能力的普通工具仍在每次执行前照旧解析一次。
+        const parsed = tool.input.safeParse(args)
+        if (!parsed.success)
+          throw new ToolRefusal(Err.VALIDATION_FAILED, {}, this.issues(ctx.lang, parsed.error))
+        input = parsed.data
+      }
+      // 数据权限按工具声明的权限点计算，与对应列表接口一致（PermGuard 对路由做的同一件事）。
       const checked = tool.perm ? { perms: [tool.perm], all: false } : undefined
-      const data = await withCheckedPerm(checked, () => this.run(tool, input.data))
+      const data = await withCheckedPerm(checked, () => this.run(tool, input, execution))
       rec.result = tool.output ? this.shaped(tool, data) : data
       const text = maskedJson(rec.result)
       if (Buffer.byteLength(text) > MCP_OUTPUT_MAX_BYTES)
@@ -386,8 +432,12 @@ export class ToolHost {
   }
 
   /** 在工具的时限内运行；超时只结束等待，已开始的工作无法中断（写入类工具应保持单次短事务）。 */
-  private async run(tool: RegisteredTool, input: unknown): Promise<unknown> {
-    const work = Promise.resolve(tool.run(input))
+  private async run(
+    tool: RegisteredTool,
+    input: unknown,
+    context?: ToolExecutionContext,
+  ): Promise<unknown> {
+    const work = Promise.resolve(tool.run(input, context))
     let timer: NodeJS.Timeout | undefined
     try {
       return await Promise.race([

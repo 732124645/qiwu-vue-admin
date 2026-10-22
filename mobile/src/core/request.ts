@@ -62,8 +62,10 @@ export interface RequestOptions {
   data?: string | object | ArrayBuffer
   /** no error toast and no redirect to sign-in: the caller handles errors (sign-in, sign-out, polling) */
   silent?: boolean
+  /** 不可自动重写的业务动作禁用 401 重放，交给调用者先查询结果。 */
+  retryAuth?: boolean
 }
-type Options = Pick<RequestOptions, 'silent'>
+type Options = Pick<RequestOptions, 'silent' | 'retryAuth'>
 
 /** What uni.request and uni.uploadFile both answer. */
 interface Raw {
@@ -85,6 +87,8 @@ export const SESSION_END_TEXT: Record<SessionEndReason, string> = {
 let accessToken = ''
 /** Each sign-in / sign-out starts a new epoch: a refresh or replay of an older one never applies. */
 let epoch = 0
+/** 敏感的一次性输入在身份切换时同步清理。 */
+export const sessionVersion = ref(0)
 let refreshing: Promise<void> | null = null
 let redirecting = false
 
@@ -93,6 +97,8 @@ const storedRt = (): string => uni.getStorageSync(RT_KEY) || ''
 /** Starts the session of a sign-in's tokens, or ends the session (null). */
 export function setSession(tokens: MobileTokens | null) {
   epoch++
+  sessionVersion.value = epoch
+  for (const path of browserFiles.keys()) releaseStorageContent(path)
   accessToken = tokens?.accessToken ?? ''
   if (tokens) {
     uni.setStorageSync(RT_KEY, tokens.refreshToken)
@@ -102,6 +108,9 @@ export function setSession(tokens: MobileTokens | null) {
 
 /** The access token the next call sends ('' until a sign-in or refresh): the realtime handshake's. */
 export const currentAccessToken = () => accessToken
+
+/** 登录身份切换后，业务详情和临时文件的迟到结果不得再显示。 */
+export const currentSessionVersion = () => epoch
 
 /** A refresh token is stored: the session can resume without signing in. */
 export const hasSession = () => !!storedRt()
@@ -159,7 +168,11 @@ export function refreshAccessToken(): Promise<void> {
   return refreshing
 }
 
-async function exchange<T>(o: RequestOptions, send: () => Promise<Raw>, replay = false): Promise<T> {
+async function exchange<T>(
+  o: RequestOptions,
+  send: () => Promise<Raw>,
+  replay = false,
+): Promise<T> {
   const at = epoch
   const sent = accessToken
   let res: Raw
@@ -182,7 +195,13 @@ async function exchange<T>(o: RequestOptions, send: () => Promise<Raw>, replay =
   if (res.statusCode === 401 && err.code === Err.AUTH_TENANT_INACTIVE.code && at === epoch)
     sessionEnd.value = 'tenant_unavailable'
   // a request of an earlier session (signed out, or in as someone else since) is never refreshed or replayed
-  if (res.statusCode === 401 && !replay && !NO_REFRESH.test(o.url) && at === epoch) {
+  if (
+    res.statusCode === 401 &&
+    !replay &&
+    o.retryAuth !== false &&
+    !NO_REFRESH.test(o.url) &&
+    at === epoch
+  ) {
     try {
       // sent with an older token: that refresh already happened, only replay
       if (!accessToken || sent === accessToken) await refreshAccessToken()
@@ -261,3 +280,89 @@ export const upload = <T>(url: string, filePath: string, formData?: object, o?: 
     if (!o?.silent && e instanceof ApiError && UPLOAD_TOAST.has(e.status)) toast(e.message)
     throw e
   })
+
+/** 浏览器 Blob 自行持有，避免 uni-h5 的全局文件字典永久保留文件内容。 */
+const browserFiles = new Map<string, ReturnType<typeof setTimeout>>()
+let browserPreview = ''
+export function releaseStorageContent(path: string, delay = 0) {
+  const timer = browserFiles.get(path)
+  if (timer === undefined) return
+  clearTimeout(timer)
+  if (delay) {
+    browserFiles.set(
+      path,
+      setTimeout(() => releaseStorageContent(path), delay),
+    )
+    return
+  }
+  URL.revokeObjectURL(path)
+  browserFiles.delete(path)
+  if (browserPreview === path) browserPreview = ''
+}
+
+/** 图片换图即释放旧预览；下载给浏览器留出读取 Blob 的时间。 */
+export function retainStoragePreview(path: string) {
+  if (browserPreview && browserPreview !== path) releaseStorageContent(browserPreview)
+  browserPreview = browserFiles.has(path) ? path : ''
+}
+
+/** 固定第一方内容接口复用会话刷新；服务端不能重定向到携带令牌的外域。 */
+export async function downloadStorageContent(
+  id: number,
+  mime = 'application/octet-stream',
+): Promise<string> {
+  if (!Number.isSafeInteger(id) || id <= 0)
+    throw new ApiError(400, 'invalid_file', t('approval.documentUnavailable'))
+  const at = epoch
+  const url = `/storage/objects/${id}/content`
+  if (process.env.UNI_PLATFORM === 'h5') {
+    const bytes = await exchange<ArrayBuffer>(
+      { url, silent: true },
+      () =>
+        new Promise<Raw>((resolve, reject) => {
+          uni.request({
+            url: BASE + url,
+            header: headers(),
+            responseType: 'arraybuffer',
+            timeout: TIMEOUT,
+            success: (result) =>
+              resolve({
+                statusCode: result.statusCode,
+                data: result.statusCode === 200 ? { code: 0, data: result.data } : null,
+              }),
+            fail: reject,
+          })
+        }),
+    )
+    if (at !== epoch) throw new ApiError(401, 'session_changed', t('approval.documentUnavailable'))
+    if (!(bytes instanceof ArrayBuffer) || !bytes.byteLength || bytes.byteLength > 20 * 1024 * 1024)
+      throw new Error('Invalid file content')
+    // 最多保留三个文件、五分钟；换身份、换图和失败路径会提前释放。
+    while (browserFiles.size >= 3) releaseStorageContent(browserFiles.keys().next().value!)
+    const path = URL.createObjectURL(new Blob([bytes], { type: mime }))
+    browserFiles.set(
+      path,
+      setTimeout(() => releaseStorageContent(path), 5 * 60_000),
+    )
+    return path
+  }
+  const path = await exchange<string>(
+    { url, silent: true },
+    () =>
+      new Promise<Raw>((resolve, reject) => {
+        uni.downloadFile({
+          url: BASE + url,
+          header: headers(),
+          timeout: TIMEOUT,
+          success: (result) =>
+            resolve({
+              statusCode: result.statusCode,
+              data: result.statusCode === 200 ? { code: 0, data: result.tempFilePath } : null,
+            }),
+          fail: reject,
+        })
+      }),
+  )
+  if (at !== epoch) throw new ApiError(401, 'session_changed', t('approval.documentUnavailable'))
+  return path
+}

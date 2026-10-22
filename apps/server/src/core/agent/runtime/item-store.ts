@@ -42,6 +42,16 @@ export interface ItemInternal {
   urls?: string[]
   /** `<tool>|<target>`: what `approve_session` trusts */
   key?: string
+  /** 本次预览绑定及单次消耗标记，只留在服务端，不进入模型或公开条目。 */
+  confirmation?: {
+    digest: string
+    token: string
+    rawArgs: unknown
+    args: unknown
+    schema: string
+    revision: string
+    consumedAt?: string
+  }
   /** the raw arguments text the model wrote, when it was no valid JSON */
   raw?: string
   /** an elicitation form's values, or that the owner declined */

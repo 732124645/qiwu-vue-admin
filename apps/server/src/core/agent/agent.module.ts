@@ -56,6 +56,7 @@ import { AgentOutputController, AgentOutputExport } from './runtime/output.contr
 import { AgentOutputTools } from './runtime/output-tools.js'
 import { AgentSubagents } from './runtime/subagents.js'
 import { ItemStore } from './runtime/item-store.js'
+import { HumanConfirmation } from './runtime/human-confirmation.js'
 import {
   AgentNotices,
   AgentNotifySettingsController,
@@ -142,6 +143,7 @@ import { AgentWebModule } from './web/agent-web.module.js'
     AgentExtensions,
     AgentCoreTools,
     ItemStore,
+    HumanConfirmation,
     UsageBook,
     TurnQueue,
     TurnRunner,

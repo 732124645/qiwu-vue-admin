@@ -19,6 +19,8 @@ const UPLOAD_TIMEOUT = 10 * 60_000
  * list (list, export, delete one object).
  */
 export const storageApi = {
+  /** 业务文件的安全展示信息，读取权限与下载一致。 */
+  metadata: (id: number) => api.get<FsObjectVo>(`${BASE}/${id}/metadata`),
   page: (params: Record<string, unknown>) => api.get<Page<FsObjectRowVo>>(BASE, { params }),
   /**
    * deletes the object: it stops being served at once (its public link too), the stored file is purged

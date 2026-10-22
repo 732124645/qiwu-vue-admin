@@ -12,6 +12,10 @@ vi.stubGlobal('uni', {
   request: vi.fn(),
   login: vi.fn(),
   uploadFile: vi.fn(),
+  downloadFile: vi.fn(),
+  getLocation: vi.fn(),
+  openDocument: vi.fn(),
+  previewImage: vi.fn(),
   showToast: vi.fn(),
   // navigation completes later, as on a device
   reLaunch: vi.fn((o: { complete?: () => void }) => setTimeout(() => o.complete?.())),

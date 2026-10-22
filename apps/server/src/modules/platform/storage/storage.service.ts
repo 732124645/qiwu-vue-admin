@@ -6,6 +6,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  PayloadTooLargeException,
   StreamableFile,
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
@@ -411,10 +412,11 @@ export class StorageService {
   }
 
   /**
-   * 调用者能否读取这个对象，与下载路由同一规则：公开的、上传人本人、root、有 `storage.object.view`，
-   * 或该业务标签登记的检查器放行。对象须已按调用者的租户查出（ORM 的租户条件）。
+   * 业务保护标签强制走检查器，上传者和文件管理员也不能绕过字段与单据授权。
+   * 其它标签保留公开、上传者、root、全局查看或业务检查器的既有规则。
    */
   async canRead(obj: FsObject, p: Principal): Promise<boolean> {
+    if (this.access.requiresCheck(obj.bizTag)) return this.access.allows(obj, p)
     return (
       obj.isPublic ||
       obj.uploaderId === p.userId ||
@@ -596,9 +598,11 @@ export class StorageService {
   }
 
   /** One object with its key, hash, business reference and storage driver; unknown id → 404. */
-  async detail(id: number): Promise<FsObjectDetailVo> {
+  async detail(id: number, principal: Principal): Promise<FsObjectDetailVo> {
     const obj = await this.objects.findOneBy({ id })
     if (!obj) throw new NotFoundException()
+    if (this.access.requiresCheck(obj.bizTag) && !(await this.canRead(obj, principal)))
+      throw new ForbiddenException()
     const [row] = await this.rows([obj])
     const storage = await this.storages.findOneByOrFail({ id: obj.storageId })
     return {
@@ -610,8 +614,35 @@ export class StorageService {
     }
   }
 
+  /** 登录员工只取已授权文件的安全展示字段，不泄露对象路径、哈希和业务引用。 */
+  async metadata(id: number, principal: Principal): Promise<FsObjectVo> {
+    const obj = await this.objects.findOneBy({ id })
+    if (!obj) throw new NotFoundException()
+    if (!(await this.canRead(obj, principal))) throw new ForbiddenException()
+    return this.vo(obj)
+  }
+
+  /** 绑定前复查当前文件策略；实际字节类型已经由上传及直传确认的嗅探验证。 */
+  async assertAttachment(obj: FsObject): Promise<void> {
+    const ext = extname(obj.originalName).slice(1).toLowerCase()
+    await this.assertExt(ext)
+    if (
+      !Number.isSafeInteger(obj.size) ||
+      obj.size <= 0 ||
+      obj.size > (await this.maxBytes()) ||
+      !/^[a-z0-9.+-]+\/[a-z0-9.+-]+$/i.test(obj.mime) ||
+      obj.isPublic ||
+      obj.publicUrl !== null
+    )
+      throw new BizError(Err.STORAGE_REF_INVALID)
+  }
+
   private filtered(q: FsObjectQuery): SelectQueryBuilder<FsObject> {
-    const qb = this.objects.createQueryBuilder('t')
+    const qb = this.objects
+      .createQueryBuilder('t')
+      .andWhere('t.biz_tag NOT IN (:...protectedTags)', {
+        protectedTags: this.access.protectedTags(),
+      })
     if (q.originalName)
       qb.andWhere('t.original_name LIKE :name', { name: contains(q.originalName) })
     if (q.bizTag) qb.andWhere('t.biz_tag = :bizTag', { bizTag: q.bizTag })
@@ -677,20 +708,28 @@ export class StorageService {
   }
 
   /**
-   * The object's content: public → anyone signed in; private → the uploader, `storage.object.view`
-   * or the tag's checker, else 403; unknown id → 404. The lookup keeps to the caller's tenant (the
+   * Protected business content always uses its checker; other private files also allow the uploader or
+   * file viewer. Denied → 403, unknown → 404. The lookup keeps to the caller's tenant (the
    * ORM), so another tenant's object is unknown to root, `storage.object.view` and every checker
    * alike. `attachment` always, except `inline` asked for an image. On S3 the caller is redirected
    * to a 60 s presigned GET carrying the same type and disposition.
    */
-  async download(id: number, inline: boolean, p: Principal): Promise<Download> {
+  async download(id: number, inline: boolean, p: Principal, proxy = false): Promise<Download> {
     const obj = await this.objects.findOneBy({ id })
     if (!obj) throw new NotFoundException()
     if (!(await this.canRead(obj, p))) throw new ForbiddenException()
+    // 移动端同源读取限制为20MiB，避免原生下载跟随重定向时将登录令牌发往对象存储。
+    if (proxy && obj.size > STORAGE_MAX_SIZE_DEFAULT) throw new PayloadTooLargeException()
     const how = disposition(inline && isImage(obj.mime) ? 'inline' : 'attachment', obj.originalName)
     const client = this.clientFor(await this.storages.findOneByOrFail({ id: obj.storageId }))
-    if (client instanceof S3Storage)
-      return { redirect: await client.presignGet(obj.objectKey, obj.isPublic, obj.mime, how) }
+    if (client instanceof S3Storage) {
+      if (!proxy)
+        return { redirect: await client.presignGet(obj.objectKey, obj.isPublic, obj.mime, how) }
+      // 固定使用管理员配置的受控存储端口；多读一字节可拒绝长度变更，读取始终有上限。
+      const bytes = await client.read(obj.objectKey, obj.isPublic, obj.size + 1)
+      if (!bytes || bytes.length !== obj.size) throw new NotFoundException()
+      return new StreamableFile(bytes, { type: obj.mime, length: obj.size, disposition: how })
+    }
     return new StreamableFile(await client.read(obj.objectKey, obj.isPublic), {
       type: obj.mime,
       length: obj.size,
@@ -711,6 +750,9 @@ export class StorageService {
         .getRepository(FsObject)
         .findOne({ where: { id, ...owner }, lock: { mode: 'pessimistic_write' } })
       if (!obj) throw new NotFoundException()
+      // 业务附件随业务事务移除，文件管理员不能删坏仍在审批中的引用。
+      if (this.access.requiresCheck(obj.bizTag) && obj.bizRef !== null)
+        throw new ForbiddenException()
       await softDeleteRows(q, 'fs_object', [id])
       if (obj.isPublic)
         await this.clientFor(await this.storages.findOneByOrFail({ id: obj.storageId })).unpublish(

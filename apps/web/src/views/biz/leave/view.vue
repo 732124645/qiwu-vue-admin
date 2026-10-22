@@ -14,6 +14,7 @@ import { Icon } from '@/core/icons'
 import { useTagsStore } from '@/core/stores/tags'
 import WfTimeline from '@/views/workflow/center/WfTimeline.vue'
 import LeaveForm from './form.vue'
+import OaAttachments from '@/views/oa/components/OaAttachments.vue'
 
 /**
  * One leave request (see docs/design-notes.md#workflow): the hidden page /biz/leave/:id and model leave's
@@ -138,6 +139,7 @@ function back() {
           {{ time(row.createdAt) }}
         </el-descriptions-item>
       </el-descriptions>
+      <OaAttachments :model-value="row.attachmentIds ?? []" readonly />
     </el-card>
 
     <el-card v-if="inst" class="leave-view__flow">

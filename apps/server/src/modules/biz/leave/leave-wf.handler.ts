@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common'
-import { Err, type WfFields, type WfInstanceState } from '@qiwu/shared'
+import { Err, leaveCreate, type WfFields, type WfInstanceState } from '@qiwu/shared'
 import type { EntityManager } from 'typeorm'
 import { BizError } from '../../../core/http/biz-error.js'
+import { parseOr400 } from '../../../core/http/validation.pipe.js'
 import { WfBusinessHandler } from '../../workflow/runtime/wf-handlers.js'
 import type { WfInstanceRow } from '../../workflow/runtime/wf-runtime.entity.js'
 import { Leave } from './leave.entity.js'
@@ -53,6 +54,14 @@ export class LeaveWfHandler implements WfBusinessHandler {
     const row = await tx.getRepository(Leave).findOneOrFail({
       where: { id: rowId(businessKey) ?? 0 },
       lock: { mode: 'pessimistic_read' },
+    })
+    // 通用流程入口与重新提交都重新校验库中的业务值，不能凭伪造 formValues 绕过校验。
+    parseOr400(leaveCreate, {
+      ...row,
+      // 历史申请没有附件，不能因新增的可选附件字段阻断原有审批。
+      attachmentIds: row.attachmentIds ?? [],
+      startAt: row.startAt.toISOString(),
+      endAt: row.endAt.toISOString(),
     })
     return { days: row.days, leaveKind: row.leaveKind, startAt: row.startAt.toISOString() }
   }

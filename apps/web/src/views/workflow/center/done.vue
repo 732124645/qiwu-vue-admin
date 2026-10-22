@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { toRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { WfTaskItemVo } from '@qiwu/shared'
 import { wfCenterApi } from '@/api/workflow/center'
@@ -15,11 +16,15 @@ import { at, useCenterList } from './use-center-list'
  * transferred), latest first, with where their process stands now.
  */
 defineOptions({ name: 'WfDone' })
+const props = defineProps<{ modelKey?: string }>()
 const { t } = useI18n()
-const { query, rows, total, loading, refresh, onSortChange, open } = useCenterList<WfTaskItemVo>({
-  api: { page: wfCenterApi.done },
-  sort: '-handledAt,-id',
-})
+const { query, rows, total, loading, refresh, onSortChange, open } = useCenterList<WfTaskItemVo>(
+  {
+    api: { page: wfCenterApi.done },
+    sort: '-handledAt,-id',
+  },
+  toRef(props, 'modelKey'),
+)
 const columns: QwColumn[] = [
   { prop: 'title', label: 'wf.center.list.title', minWidth: 260, showOverflowTooltip: true },
   { prop: 'nodeName', label: 'wf.center.list.node', width: 160, showOverflowTooltip: true },

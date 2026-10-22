@@ -1,7 +1,16 @@
 import type { NestExpressApplication } from '@nestjs/platform-express'
 import { Test } from '@nestjs/testing'
 import { getDataSourceToken } from '@nestjs/typeorm'
-import { Err, signupParams, userPerms } from '@qiwu/shared'
+import {
+  Err,
+  leavePerms,
+  oaTripPerms,
+  oaExpensePerms,
+  oaSealPerms,
+  signupParams,
+  userPerms,
+  type MenuNode,
+} from '@qiwu/shared'
 import bcrypt from 'bcryptjs'
 import request from 'supertest'
 import type { DataSource } from 'typeorm'
@@ -108,7 +117,7 @@ describe('signup', () => {
     expect(await row('off')).toBeUndefined()
   })
 
-  it('creates only a member with the home and approval menus; login and profile work', async () => {
+  it('creates only a member with exact personal and business office access; login and profile work', async () => {
     await setParam(signupParams.enabled, 'true')
     const res = await signup('member', { displayName: 'Member A' }).expect(201)
     expect(res.body.data).toBeNull()
@@ -124,8 +133,31 @@ describe('signup', () => {
       .send({ username: name('member'), password: PASSWORD })
       .expect(200)
     const auth = bearer(login.body.data.accessToken)
-    const menus = (await http().get('/api/auth/menus').set(auth).expect(200)).body.data
-    expect(menus.map((m: { routeName: string }) => m.routeName)).toEqual(['home', 'workflow'])
+    const menus = (await http().get('/api/auth/menus').set(auth).expect(200)).body
+      .data as MenuNode[]
+    expect(menus.map((m) => m.routeName)).toEqual(['home', 'workflow', 'oa'])
+    const routes = (nodes: MenuNode[]): string[] =>
+      nodes.flatMap((node) => [node.routeName!, ...routes(node.children)])
+    expect(routes(menus.find((node) => node.routeName === 'oa')!.children).sort()).toEqual([
+      'oa-clock-records',
+      'oa-expense',
+      'oa-expense-new',
+      'oa-expense-view',
+      'oa-office',
+      'oa-seal',
+      'oa-seal-new',
+      'oa-seal-view',
+      'oa-trip',
+      'oa-trip-new',
+      'oa-trip-view',
+    ])
+    // 精确员工动作集合同时否定流程管理、考勤管理和任何其它额外权限。
+    const profile = (await http().get('/api/auth/me').set(auth).expect(200)).body.data
+    expect(profile.perms.sort()).toEqual(
+      [leavePerms, oaTripPerms, oaExpensePerms, oaSealPerms]
+        .flatMap((perms) => Object.values(perms))
+        .sort(),
+    )
     await http().get('/api/iam/profile').set(auth).expect(200)
   })
 

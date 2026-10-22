@@ -2,6 +2,8 @@
 // sign-in / sign-out drops the previous user's answers.
 import { beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
+import type { MePayload } from '@qiwu/shared'
+import { useAuthStore } from '@/core/stores/auth'
 import { setSession } from '@/core/request'
 import { useCountsStore } from '@/core/stores/counts'
 
@@ -12,6 +14,7 @@ const replies: ((reply: Reply) => void)[] = []
 beforeEach(() => {
   setActivePinia(createPinia())
   setSession({ accessToken: 'a1', refreshToken: 'r1', expiresIn: 1800 })
+  useAuthStore().me = { features: ['workflow'] } as MePayload
   replies.length = 0
   vi.mocked(uni.showToast).mockClear()
   // each call waits until the spec answers it

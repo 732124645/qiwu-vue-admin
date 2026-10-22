@@ -1,0 +1,16 @@
+{
+  "field": {
+    "oa": {
+      "seal": {
+        "sealKind": "Seal type",
+        "documentName": "Document name",
+        "purpose": "Purpose",
+        "copies": "Copies",
+        "expectedDate": "Expected date",
+        "attachmentIds": "Attachments",
+        "initiatorPicks": "Selected reviewers",
+        "state": "Status"
+      }
+    }
+  }
+}

@@ -28,9 +28,9 @@
         <wd-cell :title="t('field.biz.leave.days')" required center>
           <wd-input-number
             v-model="form.days"
-            :min="0.5"
+            :min="0.1"
             :max="9999.9"
-            :step="0.5"
+            :step="0.1"
             :precision="1"
             allow-null
           />
@@ -46,6 +46,15 @@
           :error="!!errors.reason"
         />
         <text v-if="errors.reason" class="qw-field__error">{{ errors.reason }}</text>
+      </view>
+      <view v-for="step in picks" :key="step.id" class="qw-field">
+        <QwUserPicker
+          v-model="picked[step.id]"
+          multiple
+          :label="`${tx(step.name)} · ${t(`approval.start.pick.${step.type}`)}`"
+          required
+        />
+        <text v-if="pickErrors[step.id]" class="qw-field__error">{{ pickErrors[step.id] }}</text>
       </view>
       <text v-if="error" class="qw-form__error" role="alert">{{ error }}</text>
       <wd-button
@@ -75,12 +84,13 @@
 <script setup lang="ts">
 import { computed, reactive, ref, shallowRef, watch } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
-import { leaveCreate, type LeaveVo, type ValidationIssue } from '@qiwu/shared'
-import { decide } from '@/core/approvals'
+import { leaveCreate, type LeaveVo, type ValidationIssue, type WfStartInfoVo } from '@qiwu/shared'
+import { decide, loadStartInfo, picksMissing, type Picked } from '@/core/approvals'
 import QwDictSelect from '@/core/components/QwDictSelect.vue'
 import QwEmpty from '@/core/components/QwEmpty.vue'
+import QwUserPicker from '@/core/components/QwUserPicker.vue'
 import { formatTime } from '@/core/format'
-import { fieldErrors, t } from '@/core/i18n'
+import { fieldErrors, t, tx } from '@/core/i18n'
 import { ApiError, api, errorText } from '@/core/request'
 
 /**
@@ -99,6 +109,10 @@ const task = ref(0)
 const ready = ref(false)
 const error = ref('')
 const submitting = ref(false)
+const picks = shallowRef<WfStartInfoVo['picks']>([])
+const picked = reactive<Picked>({})
+const tried = ref(false)
+const pickErrors = computed(() => (tried.value ? picksMissing(picks.value, picked) : {}))
 /** the times as epoch ms (the picker's), 0 = none; days '' = none (the input's) */
 const form = reactive({
   leaveKind: null as string | null,
@@ -127,6 +141,11 @@ const input = () => ({
   endAt: form.endAt ? new Date(form.endAt).toISOString() : '',
   days: form.days === '' ? undefined : form.days,
   reason: form.reason,
+  ...(!id.value && {
+    initiatorPicks: Object.fromEntries(
+      Object.entries(picked).map(([step, users]) => [step, users.map((user) => user.id)]),
+    ),
+  }),
 })
 // once shown, the messages follow the input
 watch(form, () => {
@@ -137,8 +156,14 @@ onLoad(async (query) => {
   id.value = Number(query?.id) || 0
   task.value = Number(query?.task) || 0
   uni.setNavigationBarTitle({ title: t(id.value ? 'leave.edit' : 'home.shortcut.leave') })
-  if (!id.value) return void (ready.value = true)
   try {
+    if (!id.value) {
+      const info = await loadStartInfo('leave')
+      for (const step of info.picks) picked[step.id] = []
+      picks.value = info.picks
+      ready.value = true
+      return
+    }
     const row = await api.get<LeaveVo>(`/biz/leaves/${id.value}`)
     Object.assign(form, {
       leaveKind: row.leaveKind,
@@ -155,6 +180,8 @@ onLoad(async (query) => {
 
 async function submit() {
   if (submitting.value) return
+  tried.value = true
+  if (Object.keys(pickErrors.value).length) return
   const parsed = leaveCreate.safeParse(input())
   issues.value = parsed.error?.issues ?? []
   if (!parsed.success) return

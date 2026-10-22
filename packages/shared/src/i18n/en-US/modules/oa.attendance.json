@@ -1,0 +1,54 @@
+{
+  "field": {
+    "oa": {
+      "attendancePolicy": {
+        "enabled": "Allow clock punches",
+        "timezone": "Workday timezone",
+        "locationMode": "Location mode",
+        "retentionDays": "Record retention days"
+      },
+      "attendanceSite": {
+        "name": "Office location name",
+        "latitude": "Office latitude",
+        "longitude": "Office longitude",
+        "radiusM": "Allowed radius (m)",
+        "maxAccuracyM": "Maximum location error (m)",
+        "enabled": "Location enabled"
+      },
+      "clock": {
+        "action": "Clock action",
+        "requestId": "Request ID",
+        "position": "Current location",
+        "siteId": "Office location",
+        "latitude": "Latitude",
+        "longitude": "Longitude",
+        "accuracyM": "Location error (m)",
+        "userId": "Employee",
+        "deptId": "Department",
+        "workDate": "Work date",
+        "workDateFrom": "Work date from",
+        "workDateTo": "Work date to",
+        "punchedAt": "Punch time",
+        "timezone": "Workday timezone",
+        "policyId": "Policy ID",
+        "policySnapshot": "Policy snapshot",
+        "siteName": "Location name",
+        "distanceM": "Distance to office (m)",
+        "validationResult": "Validation result",
+        "source": "Source",
+        "siteSnapshot": "Office location snapshot"
+      }
+    }
+  },
+  "validation": {
+    "oa": {
+      "clock_disabled": "Clock punches are currently disabled by the attendance policy",
+      "clock_position_required": "Allow location access and select an office location, then try again",
+      "clock_site_disabled": "The selected office location is disabled; select another location",
+      "clock_accuracy": "Location accuracy is insufficient; move to an open area and try again",
+      "clock_outside": "Your current location is outside the selected office clock radius",
+      "clock_check_in_required": "Check in on this workday before checking out",
+      "clock_time_order": "Check-out time must be later than check-in time on the same workday"
+    }
+  }
+}

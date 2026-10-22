@@ -21,6 +21,7 @@ export interface OfferedTool {
   policy: Exclude<AgentToolPolicy, 'deny'>
   /** the tool's method can preview a write (local tools) */
   preview: boolean
+  perCallConfirmation?: true
 }
 
 export const PLAN_TOOL = 'plan.update'

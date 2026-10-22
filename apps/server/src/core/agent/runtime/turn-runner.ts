@@ -36,7 +36,7 @@ import type { Principal } from '../../auth/principal.js'
 import { allTenants, tenantId, withTenant } from '../../context/tenant.js'
 import { RedisLock } from '../../guard/redis-lock.js'
 import { BizError } from '../../http/biz-error.js'
-import { McpRegistry } from '../../mcp/mcp-registry.js'
+import { McpRegistry, type RegisteredTool } from '../../mcp/mcp-registry.js'
 import { McpToolSwitch } from '../../mcp/mcp.entity.js'
 import { ToolHost } from '../../mcp/tool-host.js'
 import { redisKey } from '../../redis/cache-namespaces.js'
@@ -63,6 +63,7 @@ import {
   SKILL_SOURCE,
   type SkillSource,
 } from '../agent-ports.js'
+import { HumanConfirmation } from './human-confirmation.js'
 import { AutomationPreApproval } from '../automation/pre-approval.js'
 import { AgentSweepStats } from '../diagnostics/sweep-stats.js'
 import { AgentItem, AgentThread, AgentTurn } from '../entities/agent-thread.entity.js'
@@ -263,6 +264,7 @@ export class TurnRunner {
     private readonly queue: TurnQueue,
     private readonly providers: ProviderRegistry,
     private readonly host: ToolHost,
+    private readonly confirmation: HumanConfirmation,
     private readonly registry: McpRegistry,
     private readonly web: WebTools,
     private readonly params: ParamService,
@@ -540,7 +542,8 @@ export class TurnRunner {
     const tools = new Map<string, OfferedTool>()
     const usable = await this.host.list(p)
     for (const t of usable) {
-      const policy = policyOf(t.name, t.kind)
+      const configured = policyOf(t.name, t.kind)
+      const policy = t.perCallConfirmation && configured !== 'deny' ? 'ask' : configured
       if (policy === 'deny' || (readOnly && t.kind === 'write')) continue
       tools.set(t.name, {
         name: t.name,
@@ -551,6 +554,7 @@ export class TurnRunner {
         kind: t.kind,
         policy,
         preview: t.runPreview !== undefined,
+        ...(t.perCallConfirmation && { perCallConfirmation: true }),
       })
     }
     if ((await this.params.get(AGENT_WEB_MODE_PARAM))?.trim() === 'live') {
@@ -1085,11 +1089,14 @@ export class TurnRunner {
     if (def.policy !== 'auto') {
       // 信任的目标：写入预览给出的记录；没有预览的工具按参数里的 `id`，外部工具与没有 `id` 的只信任一模
       // 一样的参数（见 trustKey）。平台关掉信任（agent.trust_mode=false）时，已记下的信任一概不算
-      const preview = def.preview ? await this.host.preview(ctx.p, def.name, c.args) : null
+      const preview =
+        def.preview && !def.perCallConfirmation
+          ? await this.host.preview(ctx.p, def.name, c.args)
+          : null
       const key = trustKey(def.name, c.args, preview?.target, def.origin === 'mcp')
       const trustOn = trustModeOn(await this.params.get(AGENT_TRUST_MODE_PARAM))
-      if (!trustOn || !isTrusted(ctx.thread.trusted, key)) {
-        const card: Pl<'approval'> = {
+      if (def.perCallConfirmation || !trustOn || !isTrusted(ctx.thread.trusted, key)) {
+        let card: Pl<'approval'> = {
           callId: c.callId,
           tool: def.name,
           title: def.title,
@@ -1097,6 +1104,27 @@ export class TurnRunner {
           ...(preview && { changes: preview }),
           sources: this.sources(ctx),
           internal: { key },
+        }
+        if (def.perCallConfirmation) {
+          try {
+            const fresh = await this.confirmation.prepare(
+              ctx.p,
+              {
+                threadId: Number(ctx.thread.id),
+                turnId: Number(ctx.turn.id),
+                callId: c.callId,
+              },
+              def.name,
+              c.args,
+            )
+            card = this.confirmation.renew(card, fresh)
+          } catch (e) {
+            return this.finish(
+              ctx,
+              call,
+              this.fail(e instanceof BizError ? e.err : Err.UNPROCESSABLE, ctx.lang),
+            )
+          }
         }
         const v = await this.reviewed(ctx, def, card)
         if (v && v.verdict !== 'escalate') {
@@ -1125,7 +1153,7 @@ export class TurnRunner {
     def: OfferedTool,
     card: Pl<'approval'>,
   ): Promise<AgentReviewVerdict | null> {
-    if (!this.ext.hasReviewers() || ctx.readOnly) return null
+    if (def.perCallConfirmation || !this.ext.hasReviewers() || ctx.readOnly) return null
     // 只能由人确认的内置工具（如记住个人信息）从不交给审查者
     if (def.origin === 'builtin' && this.ext.builtin(def.name)?.meta.humanOnly) return null
     if (await this.paused()) return null
@@ -1167,6 +1195,7 @@ export class TurnRunner {
    * 它自己报的身份。
    */
   private async entitled(ctx: RunCtx, def: OfferedTool, v: AgentReviewVerdict): Promise<boolean> {
+    if (def.perCallConfirmation) return false
     if (v.by === 'pre_approved') {
       if (ctx.thread.automationRunId === null) return false
       // 链条里拿不到给出结论的是哪个审查者：由自动化的预先同意本身再复核一次，别的审查者冒称的不算
@@ -1394,10 +1423,42 @@ export class TurnRunner {
           return r
         })
       else if (def.origin === 'local') {
+        let renewed = false
         const r = await this.host.call(ctx.p, def.name, args, {
           threadId: Number(ctx.thread.id),
           turnId: Number(ctx.turn.id),
+          ...(def.perCallConfirmation && {
+            confirmPerCall: async (_tool: RegisteredTool, raw: unknown) => {
+              const c = pl<'tool_call'>(call)
+              const approval = ctx.items.find(
+                (i) => i.kind === 'approval' && pl<'approval'>(i).callId === c.callId,
+              )
+              if (!approval) throw new BizError(Err.AGENT_APPROVAL_CLOSED)
+              const receipt = await this.confirmation.claim(
+                ctx.p,
+                {
+                  threadId: Number(ctx.thread.id),
+                  turnId: Number(ctx.turn.id),
+                  callId: c.callId,
+                },
+                Number(approval.id),
+                def.name,
+                raw,
+              )
+              if (!receipt) {
+                renewed = true
+                throw new BizError(Err.CONFLICT)
+              }
+              return receipt
+            },
+          }),
         })
+        if (renewed) {
+          // 确认后、真正写入前业务事实又变了：消费器已原子恢复 pending 卡与 waiting 轮次。
+          await this.notice(ctx.thread, AGENT_NOTICE.waiting, Number(ctx.turn.id))
+          await this.queue.release(ctx.p.userId)
+          return 'wait'
+        }
         // 自动化的会话没人实时看着，读到的业务数据可能是别人写的（事件触发的那条记录就是）：结果按不可信
         // 内容交给模型，免得记录里写的“指示”被当成要做的事
         const outsider = ctx.thread.automationRunId !== null

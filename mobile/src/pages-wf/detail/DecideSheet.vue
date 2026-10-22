@@ -73,7 +73,6 @@
 import { computed, reactive, ref, shallowRef, watch } from 'vue'
 import { WF_SIGN_KINDS, type ValidationIssue, type WfBackTargetVo } from '@qiwu/shared'
 import {
-  decide,
   decideBody,
   decideSchema,
   loadBackTargets,
@@ -87,6 +86,7 @@ import {
 import QwUserPicker from '@/core/components/QwUserPicker.vue'
 import { fieldErrors, t, tx } from '@/core/i18n'
 import { ApiError, errorText } from '@/core/request'
+import { submitDecision } from './decision-controller'
 
 /**
  * One action through a bottom sheet (as the web's WfDecideForm), opened with `open(on)`:
@@ -99,8 +99,8 @@ import { ApiError, errorText } from '@/core/request'
  * `open(on, formValues)`: an approve or resubmit also sends the dynamic form's `edit` fields (the detail
  * checked them; the comment body's schema would strip them, so they go in after it).
  */
-defineProps<{ signs: WfSign[] }>()
-const emit = defineEmits<{ done: [] }>()
+const props = defineProps<{ signs: WfSign[]; documentReady: boolean }>()
+const emit = defineEmits<{ done: []; conflict: [] }>()
 
 const visible = ref(false)
 const on = shallowRef<WfOn>({ action: 'approve', id: 0, node: '', commentRequired: false })
@@ -171,15 +171,22 @@ function open(next: WfOn, values?: Record<string, unknown>) {
 
 async function submit() {
   if (submitting.value || loading.value) return
-  const { body, issues: found } = check()
-  issues.value = found
-  if (!body) return
   submitting.value = true
   error.value = ''
   try {
-    await decide(on.value.id, action.value, formValues ? { ...body, formValues } : body)
-    visible.value = false
-    emit('done')
+    await submitDecision({
+      on: on.value,
+      ready: props.documentReady,
+      body: () => {
+        const { body, issues: found } = check()
+        issues.value = found
+        return body && (formValues ? { ...body, formValues } : body)
+      },
+      unavailable: () => (error.value = t('approval.documentUnavailable')),
+      close: () => (visible.value = false),
+      conflict: () => emit('conflict'),
+      done: () => emit('done'),
+    })
   } catch (e) {
     // a 400, or a 404 (the task is no longer mine), belongs to the sheet; the request layer toasts the rest
     if (e instanceof ApiError && (e.status === 400 || e.status === 404)) error.value = e.message

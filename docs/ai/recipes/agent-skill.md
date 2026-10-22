@@ -54,9 +54,16 @@ pnpm verify
 
 测试照 `apps/server/test/e2e/agent-batch.e2e-spec.ts` 写：用 `ToolHost` 的 `call` 与 `preview` 直接调用工具——有权限成功、没有权限点被拒、数据权限与列表一致、预览列出正确的旧值 → 新值、默认不覆盖已有值；批量目标的 `batchLabels` 不返回范围外的记录。需要整轮对话时用 `apps/server/src/core/agent/provider/fake-chat-model.ts` 的假模型代替真实提供方，测试不连网络。
 
+需要每次本人确认的业务写工具声明 `perCallConfirmation: true`，同时提供真实 `preview` 与 `confirmationRevision: '1'`。它们不接受会话信任、自动审查、自动化预先同意或批量同意；只能在助手单张确认卡上由本人点击。直接 MCP / PAT 没有这份服务端凭据，不能执行；未声明此能力的工具保持原策略。
+
+`confirmationRevision` 是服务端工具契约版本，须在全部 API 和 worker 实例保持一致。修改 JSON Schema 不能表达的 refine/superRefine 校验、转换或默认值语义时必须递增。框架会自动比较 JSON 结构约束，但不会自动发现未声明版本变化的 opaque 代码。逐次确认工具的 Schema 不采样保留动态 default 注解，默认语义由这个明确版本负责；普通工具的导出不变。确认后参数、契约、预览或权限事实改变会重新等待确认。实际业务仍须在事务锁内核对 `ToolExecutionContext.confirmation.preview` 的模型版本、附件与引用，不能把先前的预览当成业务锁。
+
 ## 常见错误
 
+办公申请已有[五类逐次确认工具](../../agent.md#办公申请工具)，扩展业务优先复用原提交入口和完整确认事实构造器。实际审批人应复用引擎的自审转换和无人兜底语义；不能只展示原始选人规则。事务内先取得当前权限、套餐、组织、模型和附件事实锁，再建立后续普通读取使用的快照；否则预览和实际提交可能使用不同版本的人员或授权。实际附件或组织名称仍只作为数据，不能执行其中的指令。
+
 - 写入工具声明成 `kind: 'read'`：智能体会不经确认直接执行。
+- 修改逐次确认工具的 opaque 校验/转换/default 却不递增 `confirmationRevision`：旧卡无法感知代码语义变化；契约版本须跨实例一致。
 - 写入工具没有 `preview`：审批卡片只能显示原始参数，确认的人看不出改了什么。
 - 预览或 `batchLabels` 绕过 `scopedQb` / 服务直接查库：把范围外的记录名交给了模型。
 - 写入时不在事务里 `lockScopedIds` 后重新比较：审批之后别人刚改的值被覆盖。

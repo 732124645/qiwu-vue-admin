@@ -509,7 +509,9 @@ describe('soft delete: remove, the reference registry, link helpers', () => {
   it('the registry stands in for every dropped foreign key (RESTRICT → restrict, CASCADE → cascade) and the iam links and OAuth2 consents that go with their user, role or client', () => {
     // registered where the referencing column lives, loaded with AppModule (imported above)
     const of = (parent: string) =>
-      referencesTo(parent).map((r) => `${r.table}.${r.column}${r.cascade ? ' cascade' : ''}`)
+      referencesTo(parent)
+        .map((r) => `${r.table}.${r.column}${r.cascade ? ' cascade' : ''}`)
+        .sort()
     expect(
       Object.fromEntries(
         [
@@ -524,6 +526,10 @@ describe('soft delete: remove, the reference registry, link helpers', () => {
           'msg_sms_channel',
           'demo_invoice',
           'oauth_client',
+          'oa_trip_request',
+          'oa_expense_claim',
+          'oa_attendance_policy',
+          'oa_attendance_site',
         ].map((t) => [t, of(t)]),
       ),
     ).toEqual({
@@ -535,16 +541,30 @@ describe('soft delete: remove, the reference registry, link helpers', () => {
         'iam_user_positions.user_id cascade',
         'iam_user_social.user_id cascade',
         'oauth_consent.user_id cascade',
-      ],
-      iam_role: ['iam_role_menus.role_id cascade', 'iam_role_depts.role_id cascade'],
-      iam_dept: ['demo_book.dept_id'],
+        'oa_clock_record.user_id',
+        'oa_trip_request.user_id',
+        'oa_expense_claim.user_id',
+        'oa_seal_request.user_id',
+      ].sort(),
+      iam_role: ['iam_role_menus.role_id cascade', 'iam_role_depts.role_id cascade'].sort(),
+      iam_dept: [
+        'demo_book.dept_id',
+        'oa_clock_record.dept_id',
+        'oa_trip_request.dept_id',
+        'oa_expense_claim.dept_id',
+        'oa_seal_request.dept_id',
+      ].sort(),
       fs_storage: ['fs_object.storage_id'],
-      cg_table: ['cg_table.master_table_id', 'cg_column.table_id cascade'],
+      cg_table: ['cg_table.master_table_id', 'cg_column.table_id cascade'].sort(),
       msg_bulletin: ['msg_bulletin_receipt.bulletin_id cascade'],
       msg_mail_account: ['msg_mail_template.account_id'],
       msg_sms_channel: ['msg_sms_template.channel_id'],
       demo_invoice: ['demo_invoice_line.invoice_id cascade'],
       oauth_client: ['oauth_consent.client_id cascade'],
+      oa_trip_request: ['oa_expense_claim.trip_id'],
+      oa_expense_claim: ['oa_expense_item.claim_id cascade'],
+      oa_attendance_policy: ['oa_clock_record.policy_id'],
+      oa_attendance_site: ['oa_clock_record.site_id'],
     })
   })
 

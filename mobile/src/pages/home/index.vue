@@ -111,6 +111,7 @@ interface Shortcut {
 }
 // the approval center and the bulletin feed need a sign-in only (see docs/design-notes.md#workflow)
 const SHORTCUTS: Shortcut[] = [
+  { name: 'clock', icon: 'clock', tone: 'brand', url: '/pages-biz/oa-clock/index' },
   {
     name: 'start',
     icon: 'send',
@@ -174,12 +175,13 @@ const recentLoaded = ref(false)
 let shown = false
 let seq = 0
 function loadRecent() {
+  if (!hasFeature(FEATURE.workflow)) return
   const mine = ++seq
   api
     .get<Page<WfTaskItemVo>>('/wf/tasks/todo', { page: 1, pageSize: RECENT }, { silent: true })
     .then(
       (res) => {
-        if (mine !== seq) return
+        if (mine !== seq || !hasFeature(FEATURE.workflow)) return
         recent.value = res.items
         recentLoaded.value = true
       },

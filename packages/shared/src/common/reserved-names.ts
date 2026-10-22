@@ -21,7 +21,7 @@ export const RESERVED_NAME_LISTS = {
    */
   pages: `home login profile error lock register redirect iframe password-change password-reset sso password my not 403 404 503`,
   /** built-in domains (platform, workflow) and the built-in project domains `biz` and `demo` */
-  domains: `iam settings messaging audit storage scheduler oauth wf codegen monitor geo formkit apidocs demo biz im wxoa mcp agent`,
+  domains: `iam settings messaging audit storage scheduler oauth wf codegen monitor geo formkit apidocs demo biz im wxoa mcp agent oa`,
   /** other API roots, and the paths the web server proxies or serves (`/api`, `/files`, `/assets`) */
   apiRoots: `auth health excel docs oauth2 api files assets .well-known`,
   /** locale namespaces beside the domains' */
@@ -35,9 +35,9 @@ export const RESERVED_NAMES: ReadonlySet<string> = new Set(
 
 /**
  * The built-in project domains: `biz` (the "Business" group, tables without an own domain) and the
- * samples' `demo`; reserved, yet a project config may use them.
+ * samples' `demo` and office business `oa`; reserved, yet a project config may use them.
  */
-export const PROJECT_BUILTIN_DOMAINS: readonly string[] = ['biz', 'demo']
+export const PROJECT_BUILTIN_DOMAINS: readonly string[] = ['biz', 'demo', 'oa']
 
 /**
  * The web router's static route names (apps/web/src/core/router/index.ts `staticRoutes`, exactly: the arch

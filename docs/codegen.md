@@ -35,11 +35,11 @@
 
 - 内置前缀 `iam_ cfg_ msg_ aud_ fs_ job_ oauth_ im_` 按 `TABLE_PREFIXES` 映射到平台领域，`wf_` 到 workflow，`biz_` / `demo_` 到内置项目领域。`im_` 当前仅是保留映射，不表示已有 IM 表或功能。
 - 其他表的第一段为领域，其余为业务：`erp_sale_order` → `erp/sale-order`，`crm_customer` → `crm/customer`。无下划线、首段为保留名或不符合 `^[a-z][a-z0-9]*$` 的表用领域 `biz`，业务取整张表名，如 `course` → `biz/course`。
-- `RESERVED_NAMES` 保留代码层、内置领域、API 根、静态路由及 locale 命名空间等。项目配置保存/渲染不能占用这些领域名（`biz/demo` 为例外），否则 422 `C3002`。
+- `RESERVED_NAMES` 保留代码层、内置领域、API 根、静态路由及 locale 命名空间等。项目配置保存/渲染不能占用这些领域名（`biz/demo/oa` 为内置业务例外），否则 422 `C3002`。
 - 同名业务跨领域、导出名与 shared 手写模块冲突时，类名加领域前缀，如 `ErpCustomer` / `erpCustomerPerms`；仍冲突则 422 `C3011`，指出另一张表。编辑领域或业务时，仍等于旧派生值的类名与字典码会跟随重新派生。
 - 项目父菜单按表名的前导段从长到短匹配分组，排除整张表名：`erp_sale_order` 先找 `erp-sale`，再找 `erp`，否则回落 `biz` 并给 `parent_menu` 提示。生成页可选任意层级的分组；自身或祖先路由名不合法的分组不可选，保存返回 422 `C3008`。
 - 页面路由名 `<domain>-<business>` 与已有目录/动作路由名（包含软删除记录）或父链冲突时返回 422 `C3012`，需要修改领域或业务名。
-- `meta_` / `test_` / `cg_` / `wxoa_` 表由 `EXCLUDED_TABLE` 排除。没有 `deleted_at` 的表不可导入或生成，整批导入失败，返回 422 `C3010`；唯一键缺少 `alive`、非平台表缺少 `tenant_id`、租户表的唯一键不以 `tenant_id` 开头，都只提示，不替数据库补约束。
+- `meta_` / `test_` / `cg_` / `wxoa_` / `oa_` 表由 `EXCLUDED_TABLE` 排除。`oa_` 固定办公单据由业务服务接入审批流，禁止通用 CRUD 导入，避免绕过流程状态与业务回写。没有 `deleted_at` 的表不可导入或生成，整批导入失败，返回 422 `C3010`；唯一键缺少 `alive`、非平台表缺少 `tenant_id`、租户表的唯一键不以 `tenant_id` 开头，都只提示，不替数据库补约束。
 
 内置父菜单为：`iam_/cfg_/oauth_/im_` → `system`；`msg_` → `messaging`；`aud_` → `audit`；`fs_` → `storage`；`job_` → `monitor`；`wf_` → `wf-admin`。领域、URL、权限来自表名与生成配置，不能由父菜单决定。
 

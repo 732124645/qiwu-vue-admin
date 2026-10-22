@@ -1,3 +1,13 @@
+import { seedOaAttendancePages } from './project/oa-attendance-pages.seed.js'
+import {
+  seedOaAttendance,
+  seedOaAttendanceMenus,
+  seedOaAttendanceJob,
+} from './project/oa-attendance.seed.js'
+import { seedOaOffice } from './project/oa-office.seed.js'
+import { seedOaSeal } from './project/oa-seal.seed.js'
+import { seedOaGeneric } from './project/oa-generic.seed.js'
+import { seedOaExpense } from './project/oa-expense.seed.js'
 import type { DataSource, EntityManager } from 'typeorm'
 import { allTenants, DEFAULT_TENANT_ID, withTenant } from '../../core/context/tenant.js'
 import { softDeleteWhere } from '../../core/db/references.js'
@@ -55,6 +65,8 @@ import { seedMonitorGroup } from './monitor/monitor.seed.js'
 import { seedOauth } from './oauth/oauth.seed.js'
 import { seedProjectActionVerbs } from './project/action-verbs.seed.js'
 import { seedProjectMenuGroups } from './project/menu-groups.seed.js'
+import { seedOa } from './project/oa.seed.js'
+import { seedOaTrip } from './project/oa-trip.seed.js'
 import { PROJECT_TENANT_SEEDS, type TenantSeed } from './project/tenant.seed.js'
 import { seedScheduler } from './scheduler/scheduler.seed.js'
 import { seedSettings } from './settings/settings.seed.js'
@@ -121,7 +133,20 @@ const SEEDS: Record<string, Seed[]> = {
   ],
   // the project's generated modules (the samples stay in demo, the leave sample with its
   // workflow), after the project menu groups they hang under and the project's action verbs
-  project: [seedProjectMenuGroups, seedProjectActionVerbs],
+  project: [
+    seedProjectMenuGroups,
+    seedProjectActionVerbs,
+    seedOa,
+    seedOaTrip,
+    seedOaExpense,
+    seedOaSeal,
+    seedOaGeneric,
+    seedOaOffice,
+    seedOaAttendance,
+    seedOaAttendanceMenus,
+    seedOaAttendanceJob,
+    seedOaAttendancePages,
+  ],
   // last: the other tenants' own seeds (the project's need its menus and verbs)
   tenant: [seedTenants],
   // the demo site's sample tenants (APP_DEMO_MODE and APP_MULTI_TENANT both on), opened with their own seeds

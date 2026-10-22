@@ -28,7 +28,8 @@
     "demoEcho": "Sample: echo a message",
     "wfTaskRemind": "Send overdue to-do reminders",
     "wxoaMessagePurge": "Purge expired Official Account messages",
-    "wxoaFanSync": "Sync Official Account fans"
+    "wxoaFanSync": "Sync Official Account fans",
+    "clockRetention": "Purge expired attendance records"
   },
   "inboxTemplate": {
     "schedulerJobTimeout": "Job timeout alert"
@@ -119,5 +120,17 @@
   },
   "agentSkill": {
     "deepResearch": "Deep research: plan first, search and read several sources, then write a cited report you can export"
+  },
+  "oa": {
+    "trip": "Business trip",
+    "tripDescription": "Submit a travel plan and select its reviewers",
+    "reviewer": "Reviewer",
+    "expense": "Expense claim",
+    "expenseDescription": "Submit CNY expense items and select reviewers",
+    "seal": "Seal request",
+    "sealDescription": "Submit a document sealing request and select reviewers",
+    "generic": "General approval",
+    "genericDescription": "Submit an office matter and select reviewers",
+    "genericForm": "General office request form"
   }
 }

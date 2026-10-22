@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common'
 import { referencedBy } from '../core/db/references.js'
 import { LeaveModule } from './biz/leave/leave.module.js'
+import { OaModule } from './oa/oa.module.js'
 import { BookMcpModule } from './demo/book/book.mcp-tools.js'
 import { BookModule } from './demo/book/book.module.js'
 import { CustomerMcpModule } from './demo/customer/customer.mcp-tools.js'
@@ -12,6 +13,19 @@ import { TopicModule } from './demo/topic/topic.module.js'
 // The former foreign key of the book sample: a dept holding books is in use (an invoice's lines go
 // with it: invoice.entity.ts, generated from the master-sub link)
 referencedBy('iam_dept', { table: 'demo_book', column: 'dept_id' })
+
+// 办公单据保留申请人与流程引用，删除被使用的组织或实例时必须先走业务规则。
+for (const table of ['oa_trip_request', 'oa_expense_claim', 'oa_seal_request']) {
+  referencedBy('iam_user', { table, column: 'user_id' })
+  referencedBy('iam_dept', { table, column: 'dept_id' })
+  referencedBy('wf_instance', { table, column: 'instance_id' })
+}
+referencedBy('oa_trip_request', { table: 'oa_expense_claim', column: 'trip_id' })
+referencedBy('oa_expense_claim', {
+  table: 'oa_expense_item',
+  column: 'claim_id',
+  cascade: true,
+})
 
 /**
  * Project business (see docs/design-notes.md#layering): the one registration point of the project domains
@@ -31,6 +45,7 @@ referencedBy('iam_dept', { table: 'demo_book', column: 'dept_id' })
     CustomerMcpModule,
     DemoRealtimeModule,
     LeaveModule,
+    OaModule,
   ],
 })
 export class ProjectModule {}

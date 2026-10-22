@@ -1,0 +1,18 @@
+{
+  "field": {
+    "oa": {
+      "trip": {
+        "destination": "Destination",
+        "startAt": "Start time",
+        "endAt": "End time",
+        "reason": "Travel purpose",
+        "estimatedAmount": "Estimated cost",
+        "attachmentIds": "Attachments",
+        "initiatorPicks": "Selected reviewers",
+        "state": "Status",
+        "startAtFrom": "Start time from",
+        "startAtTo": "Start time to"
+      }
+    }
+  }
+}

@@ -8,14 +8,14 @@ import { STORAGE_DRIVERS } from './storage-driver.schema.js'
  *
  * Public or private is decided by the upload's `bizTag`, never by the client: the public tags accept only
  * the images in {@link STORAGE_IMAGE_MIMES} (sniffed by magic number) and are served without a token under
- * `/files/…`; every other tag is private and read only through `GET /objects/:id/download` (uploader,
- * `storage.object.view` or the tag's registered access checker).
+ * `/files/…`; private files use authenticated metadata/download/content endpoints. Protected business
+ * tags always require their registered checker; other private files also allow their uploader or file viewer.
  */
 
 export const storageObjectPerms = {
   /** the file list (GET /objects) */
   browse: 'storage.object.browse',
-  /** any object's detail; download any private object */
+  /** 查看普通私有文件；业务保护附件仍须通过单据或字段授权。 */
   view: 'storage.object.view',
   export: 'storage.object.export',
   /** delete objects (and their files) */
@@ -24,7 +24,12 @@ export const storageObjectPerms = {
 
 export const STORAGE_PUBLIC_TAGS = ['avatar', 'richtext', 'cover'] as const
 /** `wf.attachment`: workflow form attachments, bound to their instance on start (`biz_ref = 'wf:<id>'`) */
-export const STORAGE_PRIVATE_TAGS = ['attachment', 'import', 'wf.attachment'] as const
+export const STORAGE_PRIVATE_TAGS = [
+  'attachment',
+  'import',
+  'wf.attachment',
+  'oa.attachment',
+] as const
 export const STORAGE_BIZ_TAGS = [...STORAGE_PUBLIC_TAGS, ...STORAGE_PRIVATE_TAGS] as const
 export type StorageBizTag = (typeof STORAGE_BIZ_TAGS)[number]
 

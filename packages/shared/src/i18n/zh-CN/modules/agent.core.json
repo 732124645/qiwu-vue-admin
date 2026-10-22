@@ -21,7 +21,8 @@
       },
       "approval": {
         "decision": "决定",
-        "note": "备注"
+        "note": "备注",
+        "confirmationToken": "确认信息"
       },
       "skill": {
         "scope": "范围",

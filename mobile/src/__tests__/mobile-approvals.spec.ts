@@ -221,7 +221,17 @@ it("form summary: a mapped form's document as label and text, dict labels, local
     startAt: '2026-10-08T01:00:00.000Z',
     endAt: '2026-10-10T10:00:00.000Z',
     days: 2.5,
-    reason: null,
+    reason: '',
+    id: 4,
+    userId: 1,
+    deptId: null,
+    state: 'approved',
+    instanceId: 40,
+    attachmentIds: [],
+    createdBy: 1,
+    createdAt: '2026-10-08T01:00:00.000Z',
+    updatedBy: 1,
+    updatedAt: '2026-10-08T01:00:00.000Z',
   }
   const kinds: DictPayload = {
     version: 1,
@@ -250,12 +260,22 @@ it("form summary: a mapped form's document as label and text, dict labels, local
   expect(await loadSummary(leave)).toEqual({
     title: '请假单',
     rows: [
+      { label: '单据编号', value: '4' },
+      { label: '申请人', value: '#1' },
+      { label: '申请部门 ID', value: '' },
+      { label: '状态', value: 'approved' },
       { label: '请假类型', value: '年假' },
       { label: '开始时间', value: formatTime(doc.startAt) },
       { label: '结束时间', value: formatTime(doc.endAt) },
       { label: '请假天数', value: '2.5' },
       { label: '请假事由', value: '' },
+      { label: '创建时间', value: formatTime(doc.createdAt) },
+      { label: '更新时间', value: formatTime(doc.updatedAt) },
     ],
+    attachments: [],
+    items: [],
+    ready: true,
+    problem: null,
   })
   expect(calls.map((c) => c.url)).toContain('/api/biz/leaves/4')
 

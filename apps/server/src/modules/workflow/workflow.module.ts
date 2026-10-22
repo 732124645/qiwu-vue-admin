@@ -76,7 +76,7 @@ import { typeormOrg } from './typeorm-org.js'
         }),
     },
   ],
-  exports: [WfStartService, WfDetailService, WfNotify],
+  exports: [WfStartService, WfDetailService, WfNotify, WfListService],
 })
 export class WorkflowModule implements OnModuleInit {
   constructor(
@@ -86,9 +86,18 @@ export class WorkflowModule implements OnModuleInit {
 
   onModuleInit(): void {
     // `canDownload` judges the request's (CLS) principal: the downloader's
-    this.access.register('wf.attachment', async (obj) => {
-      const id = /^wf:(\d+)$/.exec(obj.bizRef ?? '')?.[1]
-      return id !== undefined && this.detail.canDownload(Number(id), Number(obj.id))
-    })
+    this.access.register(
+      'wf.attachment',
+      async (obj, principal) => {
+        if (obj.bizRef === null) return obj.uploaderId === principal.userId
+        const id = /^wf:([1-9]\d*)$/.exec(obj.bizRef)?.[1]
+        return (
+          id !== undefined &&
+          Number.isSafeInteger(Number(id)) &&
+          this.detail.canDownload(Number(id), Number(obj.id))
+        )
+      },
+      { exclusive: true, feature: 'workflow' },
+    )
   }
 }

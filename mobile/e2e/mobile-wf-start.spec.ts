@@ -85,13 +85,34 @@ async function startPage(page: Page, user: User, english = false) {
   await expect(page.locator('.qw-start__model').first()).toBeVisible()
 }
 
-/** Fills the leave form: `kind`, start and end as their pickers offer them (now), `days`, `reason`. */
+/** 通过 H5 真实滚轮选取小时，避免两个时间都确认默认值而落在同一分钟。 */
+async function pickHour(page: Page, hour: number) {
+  const column = page
+    .locator('.wd-datetime-picker__popup .wd-picker-view__column')
+    .filter({ visible: true })
+    .nth(3)
+  const active = column.locator('.wd-picker-view__column-item--active')
+  await expect(active).toHaveText(/^\d{2}$/)
+  let current = Number(await active.innerText())
+  while (current !== hour) {
+    const step = Math.sign(hour - current)
+    await column.locator('.uni-picker-view-group').dispatchEvent('wheel', { deltaY: step * 20 })
+    current += step
+    await expect(active).toHaveText(String(current).padStart(2, '0'))
+  }
+}
+
+/** 填写有效的起止时间与原申报天数；不依赖执行时恰好跨过一分钟。 */
 async function fillLeave(page: Page, days: string, reason: string, kind = '事假') {
   await field(page, 'leaveKind').locator('.wd-cell').click()
   await page.locator('.wd-select-picker__radio-item', { hasText: kind }).click()
   await expect(field(page, 'leaveKind')).toContainText(kind)
-  for (const time of ['startAt', 'endAt']) {
+  for (const [time, hour] of [
+    ['startAt', 9],
+    ['endAt', 10],
+  ] as const) {
     await field(page, time).locator('.wd-cell').click()
+    await pickHour(page, hour)
     await page.locator('.wd-datetime-picker__action').last().click()
     await expect(field(page, time).locator('.wd-cell__value')).toHaveText(
       /^\d{4}-\d\d-\d\d \d\d:\d\d$/,
@@ -110,6 +131,8 @@ async function submitLeave(page: Page) {
   await formSubmit(page).click()
   const res = await answered
   expect(res.status(), await res.text()).toBe(201)
+  const body = res.request().postDataJSON() as { startAt: string; endAt: string }
+  expect(Date.parse(body.endAt)).toBeGreaterThan(Date.parse(body.startAt))
   const { instanceId } = ((await res.json()) as { data: { instanceId: number } }).data
   await expect(page).toHaveURL(new RegExp(`#/pages-wf/detail/index\\?id=${instanceId}$`))
   await expect(state(page)).toContainText('审批中')

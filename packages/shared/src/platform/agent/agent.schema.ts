@@ -297,6 +297,7 @@ export const agentApprovalDecide = z
   .object({
     /** `approve_session`: also approve this tool on this target for the rest of the thread; `cancel` stops the turn */
     decision: z.enum(['approve', 'approve_session', 'reject', 'cancel']),
+    confirmationToken: z.string().uuid().optional(),
     note: z.string().trim().max(500).optional(),
   })
   .register(fieldDomains, { domain: 'agent.approval' })
@@ -392,6 +393,9 @@ export interface AgentItemPayloads {
     /** what changes: the record and each field's current → proposed value, when the tool can tell */
     changes?: { target: string; fields: { field: string; from: unknown; to: unknown }[] }
     sources: AgentSource[]
+    /** 每次都须单卡人工确认；token 只代表当前展示的预览版本。 */
+    perCallConfirmation?: true
+    confirmationToken?: string
     decidedBy?: number
     decidedAt?: string
     note?: string

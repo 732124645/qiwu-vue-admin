@@ -20,10 +20,10 @@ import { GLOBAL_UNIQUE, isTenantTable, PLATFORM_TABLES } from '../../../core/db/
 import { BizError } from '../../../core/http/biz-error.js'
 
 /**
- * Tables never offered for import: TypeORM's `meta_`, test fixtures, the generator's own, and `wxoa_`
+ * Tables never offered for import: TypeORM's `meta_`, test fixtures, the generator's own, `oa_` (workflow-bound business), and `wxoa_`
  * (reserved for the WeChat Official Account module).
  */
-export const EXCLUDED_TABLE = /^(meta|test|cg|wxoa)_/
+export const EXCLUDED_TABLE = /^(meta|test|cg|wxoa|oa)_/
 
 /** Built-in table prefixes → code group and domain; stripped to derive the business name. */
 export const TABLE_PREFIXES: Record<

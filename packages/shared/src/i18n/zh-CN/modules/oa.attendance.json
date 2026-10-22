@@ -1,0 +1,54 @@
+{
+  "field": {
+    "oa": {
+      "attendancePolicy": {
+        "enabled": "允许打卡",
+        "timezone": "工作日时区",
+        "locationMode": "定位模式",
+        "retentionDays": "记录保留天数"
+      },
+      "attendanceSite": {
+        "name": "办公地点名称",
+        "latitude": "办公地点纬度",
+        "longitude": "办公地点经度",
+        "radiusM": "允许半径（米）",
+        "maxAccuracyM": "最大定位误差（米）",
+        "enabled": "地点是否启用"
+      },
+      "clock": {
+        "action": "打卡动作",
+        "requestId": "请求标识",
+        "position": "本次定位",
+        "siteId": "办公地点",
+        "latitude": "纬度",
+        "longitude": "经度",
+        "accuracyM": "定位误差（米）",
+        "userId": "员工",
+        "deptId": "部门",
+        "workDate": "工作日",
+        "workDateFrom": "工作日起",
+        "workDateTo": "工作日止",
+        "punchedAt": "打卡时间",
+        "timezone": "工作日时区",
+        "policyId": "规则标识",
+        "policySnapshot": "当时规则",
+        "siteName": "地点名称",
+        "distanceM": "地点距离（米）",
+        "validationResult": "校验结果",
+        "source": "来源",
+        "siteSnapshot": "办公地点快照"
+      }
+    }
+  },
+  "validation": {
+    "oa": {
+      "clock_disabled": "当前考勤规则已停用，暂不能打卡",
+      "clock_position_required": "请授权定位并选择办公地点后重试",
+      "clock_site_disabled": "所选办公地点已停用，请重新选择",
+      "clock_accuracy": "当前定位精度不足，请到开阔位置重新定位",
+      "clock_outside": "当前位置不在所选办公地点的打卡范围内",
+      "clock_check_in_required": "请先完成同一工作日的签到，再签退",
+      "clock_time_order": "签退时间必须晚于该工作日的签到时间"
+    }
+  }
+}

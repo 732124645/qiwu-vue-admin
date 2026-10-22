@@ -1,6 +1,6 @@
 // Opening a tenant (TenantProvisioner, see docs/design-notes.md#tenancy), multi-tenancy on. One transaction
 // makes the tenant row, its tenant seeds (a root dept named after it, the builtin tenant_admin role, the
-// process templates, its leave model) and its administrator (the owner: tenant_admin, root dept, the
+// process templates, its office models and attendance policy) and its administrator (the owner: tenant_admin, root dept, the
 // initial password to be changed at the first sign-in); a failing step leaves none of it. The initial
 // password is random per tenant, returned once and stored only as a SecretBox box, and new users of the
 // tenant made without a password get it, never the default tenant's param. A user of the new tenant
@@ -16,6 +16,10 @@ import { BizError } from '../../src/core/http/biz-error.js'
 import { REDIS, type Redis } from '../../src/core/redis/redis.module.js'
 import { runSeeds } from '../../src/db/seeds/index.js'
 import { WF_TEMPLATES } from '../../src/db/seeds/workflow/process-templates.seed.js'
+import { GENERIC_MODEL } from '../../src/db/seeds/project/oa-generic.seed.js'
+import { TRIP_MODEL } from '../../src/modules/oa/trip/trip-wf.handler.js'
+import { EXPENSE_MODEL } from '../../src/modules/oa/expense/expense-wf.handler.js'
+import { SEAL_MODEL } from '../../src/modules/oa/seal/seal-wf.handler.js'
 import { LEAVE_MODEL } from '../../src/modules/biz/leave/leave-wf.handler.js'
 import { TenantProvisioner } from '../../src/modules/platform/iam/tenant/tenant-provisioner.js'
 import { bearer, signIn } from '../setup/auth.js'
@@ -30,6 +34,7 @@ import {
 } from '../setup/tenants.js'
 
 const PREFIX = 'tpv-'
+const OFFICE_MODELS = [TRIP_MODEL, EXPENSE_MODEL, SEAL_MODEL, GENERIC_MODEL]
 
 let on: NestExpressApplication
 let ds: DataSource
@@ -59,6 +64,7 @@ const tables = [
   'iam_user',
   'iam_user_roles',
   'wf_form',
+  'oa_attendance_policy',
   'wf_model',
   'wf_version',
 ]
@@ -97,7 +103,7 @@ afterAll(async () => {
 })
 
 describe('opening a tenant', () => {
-  it('makes its root dept, builtin tenant_admin role, process templates, leave model and the administrator who owns it', async () => {
+  it('makes its root dept, builtin tenant_admin role, process templates, office models, attendance policy and the administrator who owns it', async () => {
     const t = await tenant(`${PREFIX}Acme`)
     const dept = await rootDept(t.id)
     expect(
@@ -127,18 +133,50 @@ describe('opening a tenant', () => {
       [t.id],
     )
     expect(models.map((m) => m.model_key)).toEqual(
-      [LEAVE_MODEL, ...WF_TEMPLATES.map((tpl) => WF_TEMPLATE_KEY_PREFIX + tpl.key)].sort(),
+      [
+        LEAVE_MODEL,
+        ...OFFICE_MODELS,
+        ...WF_TEMPLATES.map((tpl) => WF_TEMPLATE_KEY_PREFIX + tpl.key),
+      ].sort(),
     )
-    // the leave process: published, reviewed by the tenant's own tenant_admin role
-    const leave = await one<{ version: number; tree_json: unknown }>(
-      `SELECT v.version, v.tree_json FROM wf_model m JOIN wf_version v ON v.id = m.current_version_id
-        WHERE m.tenant_id = ? AND m.model_key = ? AND m.deleted_at IS NULL`,
-      [t.id, LEAVE_MODEL],
+    // 可运行流程只发布在本租户，由本租户管理员审批，不能引用默认租户角色。
+    const versions = await ds.query<
+      { model_key: string; version: number; tenant_id: number; tree_json: unknown }[]
+    >(
+      `SELECT m.model_key, v.version, v.tenant_id, v.tree_json FROM wf_model m JOIN wf_version v ON v.id = m.current_version_id
+        WHERE m.tenant_id = ? AND m.model_key IN (?) AND m.deleted_at IS NULL ORDER BY m.model_key`,
+      [t.id, [LEAVE_MODEL, ...OFFICE_MODELS]],
     )
-    expect(leave.version).toBe(1)
-    expect(leave.tree_json).toMatchObject({
-      next: { type: 'review', assignee: { kind: 'roles', ids: [role] } },
-    })
+    expect(versions.map((version) => version.model_key)).toEqual(
+      [LEAVE_MODEL, ...OFFICE_MODELS].sort(),
+    )
+    for (const version of versions) {
+      expect({ version: version.version, tenant_id: version.tenant_id }).toEqual({
+        version: 1,
+        tenant_id: t.id,
+      })
+      expect(version.tree_json).toMatchObject({
+        next: { type: 'review', assignee: { kind: 'roles', ids: [role] } },
+      })
+    }
+    expect(
+      await ds.query(
+        'SELECT enabled, timezone, location_mode, retention_days FROM oa_attendance_policy WHERE tenant_id = ?',
+        [t.id],
+      ),
+    ).toEqual([
+      { enabled: 1, timezone: 'Asia/Shanghai', location_mode: 'none', retention_days: 180 },
+    ])
+    for (const table of [
+      'oa_trip_request',
+      'oa_expense_claim',
+      'oa_expense_item',
+      'oa_seal_request',
+      'oa_clock_record',
+    ])
+      expect(await one(`SELECT COUNT(*) AS n FROM ${table} WHERE tenant_id = ?`, [t.id])).toEqual({
+        n: 0,
+      })
     expect(
       await ds.query(
         'SELECT id, username, dept_id, password_changed_at, enabled FROM iam_user WHERE tenant_id = ?',

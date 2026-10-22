@@ -4,6 +4,29 @@
 
 All notable product changes are recorded here in Keep a Changelog style. The initial release below summarizes the delivered features. Planned work is identified explicitly.
 
+## [1.10.0] - 2026-10-23
+
+### Added
+
+- Office requests on the existing workflow engine: leave, travel, expense claims, seal use and a general dynamic form, with one desktop entry and the existing personal requests, to-dos, handled tasks and CC lists. Saving a fixed request, its attachments and starting approval share a transaction; approval outcomes write back to the business record in the same transaction.
+- Travel requests with optional estimated cost; CNY expense claims with complete line items and exact server-calculated totals, optionally referencing the requester's approved travel; seal requests with document, purpose, copies and expected date. Approval does not represent payment or actual seal use.
+- Complete mobile decision information for fixed office requests and authenticated private attachments, alongside the existing dynamic forms and approval actions. Failed decision data or attachment loading blocks approval; a concurrent action refreshes the task instead of replaying the write. Existing mobile leave submission and editing remain available; travel, expense and seal creation/editing use desktop.
+- Native mobile clock-in/out independent of DingTalk and the workflow capability: server time and tenant workday timezone, durable duplicate protection, personal records, optional foreground office-site location checks, policy and site administration, department-scoped original records and daily activity summaries with approved leave/travel intervals. Historical department and policy snapshots are preserved; raw employee coordinates are not stored and are masked in request logs.
+- Assistant tools for personal to-dos, visible requests, published forms and the five request types. Every new request requires the user's own individual confirmation of its full contents, process version, attachments and reviewers. Conversation trust, automatic review, automation pre-approval, bulk approval and direct MCP/PAT cannot replace this click. Facts and effective permissions are rechecked under transaction locks before the original submission service runs.
+
+### Changed
+
+- Private office and workflow attachments require business and field access even for uploaders or global file administrators. Global file lists omit these attachments and cannot delete bound files. Mobile content uses a bounded same-origin endpoint without object-store redirects carrying the session token.
+- Leave validates ordered times and positive bounded declared duration while keeping its existing API, data and published process configuration. New travel, expense, seal and general models are initialized only when missing, using the tenant's protected administrator role with explicit self-review and no silent missing-reviewer approval.
+- The mobile workbench waits for known account features before querying approval counts, and discards old-account responses. Office tool names and purposes follow the existing localized tool presentation.
+
+### Upgrade notes and limits
+
+- Run migrations and the idempotent seeds before using the new pages; never reset an existing database to upgrade. First installation adds normal office-request and personal attendance access to the staff/member roles, without attendance or workflow management permissions. Later administrator changes, revoked links and disabled/deleted models remain intact.
+- Leave keeps its original sample process, including its existing missing-approver and self-approval settings; review these before business use. Initial native attendance is enabled in Asia/Shanghai with no location check and 180-day retention. Site mode uses WGS84 coordinates and needs deployment-specific foreground location permissions.
+- Daily summaries count active user/recorded-department pairs, not a complete employee roster. No absence, lateness, working-time or payroll judgement is inferred. Overnight or multiple shifts, scheduling, holidays, leave balances, corrections, offline clock uploads, hardware fraud protection and DingTalk integration are outside this release.
+- H5 automation and app/mini-program builds were verified. Real app/mini-program location authorization and on-site clock-in/out remain unverified; successful builds are not device acceptance. SMTP and object-storage delivery also need acceptance in the deployment environment.
+
 ## [1.9.1] - 2026-10-22
 
 ### Fixed

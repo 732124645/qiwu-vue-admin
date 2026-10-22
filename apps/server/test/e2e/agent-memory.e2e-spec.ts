@@ -1,3 +1,4 @@
+import assert from 'node:assert/strict'
 // Agent memories (see docs/agent.md): each user's own, listed, added, changed, deleted and forgotten all at once
 // (current password required); secrets are masked before anything is stored and the same content is kept once;
 // another user's and another tenant's memories are 404. In a chat with memory on, the most relevant memories
@@ -157,7 +158,15 @@ async function clear(who: keyof typeof users) {
 
 async function remember(who: keyof typeof users, content: string): Promise<number> {
   const res = await http().post(URL).set(as(who)).send({ content })
-  expect(res.status).toBe(201)
+  assert.equal(
+    res.status,
+    201,
+    JSON.stringify({
+      status: res.status,
+      code: res.body?.code,
+      hasPermVersion: !!res.headers['x-perm-ver'],
+    }),
+  )
   return res.body.data.id as number
 }
 

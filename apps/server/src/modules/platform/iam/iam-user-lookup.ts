@@ -112,8 +112,9 @@ export class IamUserLookup implements UserLookup {
     private readonly tenants: IamTenantLookup,
   ) {}
 
-  async load(userId: number): Promise<AuthUser | null> {
-    const [user] = await this.ds.query<UserRow[]>(
+  /** 可由业务事务传入当前读适配器，在确认后复核并冻结完整授权来源。 */
+  async load(userId: number, db: Pick<DataSource, 'query'> = this.ds): Promise<AuthUser | null> {
+    const [user] = await db.query<UserRow[]>(
       // a deleted dept is no dept: it reaches nothing
       // qw:cross-tenant the user by the global id of its session or grant; its tenant comes from the row
       `SELECT u.tenant_id, u.username, u.user_type, d.id AS dept_id, u.locale, d.tree_path,
@@ -127,9 +128,9 @@ export class IamUserLookup implements UserLookup {
     const userTenant = Number(user.tenant_id)
     // a disabled or expired tenant (or another one while multi-tenancy is off) signs nobody in and
     // reloads nobody (see docs/design-notes.md#tenancy)
-    const tenant = await this.tenants.activeTenant(userTenant)
+    const tenant = await this.tenants.activeTenant(userTenant, db)
     if (!tenant) return null
-    const roleRows = await this.ds.query<RoleRow[]>(
+    const roleRows = await db.query<RoleRow[]>(
       `SELECT r.id, r.code, r.data_scope, r.is_builtin, r.tenant_id
          FROM iam_user_roles ur
          JOIN iam_role r ON r.id = ur.role_id AND r.tenant_id = ur.tenant_id AND r.enabled = 1
@@ -140,7 +141,7 @@ export class IamUserLookup implements UserLookup {
     )
     const ids = roleRows.map((r) => r.id)
     const granted = ids.length
-      ? await this.ds.query<GrantRow[]>(
+      ? await db.query<GrantRow[]>(
           `SELECT rm.role_id, rm.menu_id, m.perms
              FROM iam_role_menus rm
              JOIN iam_menu m ON m.id = rm.menu_id AND m.deleted_at IS NULL
@@ -153,12 +154,12 @@ export class IamUserLookup implements UserLookup {
     // what the tenant's package opens: a grant outside it gives nothing (kept, it counts again once the
     // package holds the menu again); null = unrestricted, the default tenant (see
     // docs/design-notes.md#tenancy)
-    const inPackage = await packageMenuIds(this.ds, userTenant)
+    const inPackage = await packageMenuIds(db, userTenant)
     // the menus (few, hundreds at most): which grants count, which perms are the platform's, what a
     // tenant admin holds and which groups the package reaches
     const menus =
       granted.length || admin || inPackage
-        ? await this.ds.query<(MenuPermRow & { kind: string; route_name: string | null })[]>(
+        ? await db.query<(MenuPermRow & { kind: string; route_name: string | null })[]>(
             `SELECT id, parent_id, kind, route_name, enabled, perms, platform_only
                FROM iam_menu WHERE deleted_at IS NULL ORDER BY sort_no, id`,
           )
@@ -178,7 +179,7 @@ export class IamUserLookup implements UserLookup {
         (!inPackage || inPackage.has(Number(g.menu_id))),
     )
     const picked = ids.length
-      ? await this.ds.query<PickedRow[]>(
+      ? await db.query<PickedRow[]>(
           // qw:no-data-scope the picked depts of the user's own roles: the input of its scope
           `SELECT rd.role_id, rd.dept_id FROM iam_role_depts rd
              JOIN iam_dept d ON d.id = rd.dept_id AND d.tenant_id = rd.tenant_id AND d.deleted_at IS NULL

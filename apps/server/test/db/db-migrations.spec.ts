@@ -477,7 +477,7 @@ describe('Workflow tables', () => {
         'id instance_id node_id user_id from_task_id from_user_id reason read_at created_at deleted_at tenant_id',
       wf_event:
         'id instance_id task_id node_id actor_id action target_ids comment created_at deleted_at tenant_id',
-      biz_leave_request: `id user_id dept_id leave_kind start_at end_at days reason state instance_id ${AUDIT} tenant_id`,
+      biz_leave_request: `id user_id dept_id leave_kind start_at end_at days reason state instance_id ${AUDIT} tenant_id attachment_ids`,
     })
     // the engine's ids, lengths and json columns (WfInstance / WfTask, shared wf-engine.ts)
     const types = Object.fromEntries(

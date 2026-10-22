@@ -15,6 +15,13 @@
 | demo/invoice | `InvoiceModule`（invoice.module.ts） |  |
 | demo/realtime | `DemoRealtimeModule`（realtime.module.ts） |  |
 | demo/topic | `TopicModule`（topic.module.ts） |  |
+| oa | `OaModule`（oa.module.ts） |  |
+| oa/agent | `OaAgentModule`（oa-agent.module.ts） |  |
+| oa/attachment | `OaAttachmentModule`（oa-attachment.module.ts） |  |
+| oa/attendance | `AttendanceModule`（attendance.module.ts） |  |
+| oa/expense | `ExpenseModule`（expense.module.ts） |  |
+| oa/seal | `SealModule`（seal.module.ts） |  |
+| oa/trip | `TripModule`（trip.module.ts） |  |
 | platform/audit | `AuditModule`（audit.module.ts） |  |
 | platform/audit/action-log | `ActionLogModule`（action-log.module.ts） |  |
 | platform/audit/http-fault | `HttpFaultModule`（http-fault.module.ts） |  |
@@ -149,6 +156,13 @@
 | `msg_sms_otp` | `SmsOtp` | 租户 | 是 | modules/platform/messaging/sms-otp/sms-otp.entity.ts |
 | `msg_sms_record` | `SmsRecord` | 租户 | 是 | modules/platform/messaging/sms-record/sms-record.entity.ts |
 | `msg_sms_template` | `SmsTemplate` | 平台 | 是 | modules/platform/messaging/sms-template/sms-template.entity.ts |
+| `oa_attendance_policy` | `AttendancePolicy` | 租户 | 是 | modules/oa/attendance/policy.entity.ts |
+| `oa_attendance_site` | `AttendanceSite` | 租户 | 是 | modules/oa/attendance/site.entity.ts |
+| `oa_clock_record` | `ClockRecord` | 租户 | 是 | modules/oa/attendance/clock-record.entity.ts |
+| `oa_expense_claim` | `OaExpenseClaim` | 租户 | 是 | modules/oa/expense/expense.entity.ts |
+| `oa_expense_item` | `OaExpenseItem` | 租户 | 是 | modules/oa/expense/expense-item.entity.ts |
+| `oa_seal_request` | `OaSealRequest` | 租户 | 是 | modules/oa/seal/seal.entity.ts |
+| `oa_trip_request` | `OaTripRequest` | 租户 | 是 | modules/oa/trip/trip.entity.ts |
 | `oauth_client` | `Client` | 平台 | 是 | modules/platform/oauth/client/client.entity.ts |
 | `wf_cc` | `WfCcRow` | 租户 | 是 | modules/workflow/runtime/wf-runtime.entity.ts |
 | `wf_event` | `WfEventRow` | 租户 | 是 | modules/workflow/runtime/wf-runtime.entity.ts |
@@ -526,6 +540,35 @@
 |  | GET | `/api/monitor/queues/:name/jobs` | monitor.queue.browse |  |
 |  | POST | `/api/monitor/queues/:name/jobs/:id/retry` | monitor.queue.retry |  |
 |  | DELETE | `/api/monitor/queues/:name/jobs/:id` | monitor.queue.remove |  |
+| `AttendancePolicyController`（modules/oa/attendance/attendance-policy.controller.ts），全部：RequireFeature(oa) | GET | `/api/oa/attendance-policies/current` | oa.attendance-policy.view |  |
+|  | PUT | `/api/oa/attendance-policies/current` | oa.attendance-policy.modify |  |
+| `AttendanceSiteController`（modules/oa/attendance/attendance-site.controller.ts），全部：RequireFeature(oa) | GET | `/api/oa/attendance-sites/options` |  |  |
+|  | GET | `/api/oa/attendance-sites` | oa.attendance-site.browse |  |
+|  | GET | `/api/oa/attendance-sites/:id` | oa.attendance-site.view |  |
+|  | POST | `/api/oa/attendance-sites` | oa.attendance-site.create | Idempotent |
+|  | PUT | `/api/oa/attendance-sites/:id` | oa.attendance-site.modify |  |
+|  | DELETE | `/api/oa/attendance-sites/:id` | oa.attendance-site.remove |  |
+| `ClockController`（modules/oa/attendance/clock.controller.ts），全部：RequireFeature(oa) | POST | `/api/oa/clock-records/punch` |  | Idempotent |
+|  | GET | `/api/oa/clock-records/today` |  |  |
+|  | GET | `/api/oa/clock-records/requests/:requestId` |  |  |
+|  | GET | `/api/oa/clock-records/mine` |  |  |
+| `ClockQueryController`（modules/oa/attendance/clock-query.controller.ts），全部：RequireFeature(oa) | GET | `/api/oa/clock-records/admin` | oa.clock.browse |  |
+|  | GET | `/api/oa/clock-records/admin/:id` | oa.clock.view |  |
+|  | GET | `/api/oa/clock-records/mine/:id` |  |  |
+| `ClockSummaryController`（modules/oa/attendance/clock-query.controller.ts），全部：RequireFeature(oa) | GET | `/api/oa/clock-summaries/mine` |  |  |
+|  | GET | `/api/oa/clock-summaries` | oa.clock.browse |  |
+| `ExpenseController`（modules/oa/expense/expense.controller.ts），全部：RequireFeature(workflow) | GET | `/api/oa/expense-claims` | oa.expense.browse |  |
+|  | GET | `/api/oa/expense-claims/:id` |  |  |
+|  | POST | `/api/oa/expense-claims` | oa.expense.create | Idempotent |
+|  | PUT | `/api/oa/expense-claims/:id` | oa.expense.modify |  |
+| `SealController`（modules/oa/seal/seal.controller.ts），全部：RequireFeature(workflow) | GET | `/api/oa/seal-requests` | oa.seal.browse |  |
+|  | GET | `/api/oa/seal-requests/:id` |  |  |
+|  | POST | `/api/oa/seal-requests` | oa.seal.create | Idempotent |
+|  | PUT | `/api/oa/seal-requests/:id` | oa.seal.modify |  |
+| `TripController`（modules/oa/trip/trip.controller.ts），全部：RequireFeature(workflow) | GET | `/api/oa/trips` | oa.trip.browse |  |
+|  | GET | `/api/oa/trips/:id` |  |  |
+|  | POST | `/api/oa/trips` | oa.trip.create | Idempotent |
+|  | PUT | `/api/oa/trips/:id` | oa.trip.modify |  |
 | `ClientController`（modules/platform/oauth/client/client.controller.ts），全部：PlatformOnly | GET | `/api/oauth/clients` | oauth.client.browse |  |
 |  | GET | `/api/oauth/clients/:id` | oauth.client.view |  |
 |  | POST | `/api/oauth/clients` | oauth.client.create | Idempotent |
@@ -604,11 +647,13 @@
 |  | POST | `/api/storage/configs/batch-delete` | storage.config.remove |  |
 | `StorageController`（modules/platform/storage/storage.controller.ts） | GET | `/api/storage/objects` | storage.object.browse |  |
 |  | GET | `/api/storage/objects/export` | storage.object.export |  |
+|  | GET | `/api/storage/objects/:id/metadata` |  |  |
 |  | GET | `/api/storage/objects/:id` | storage.object.view |  |
 |  | POST | `/api/storage/objects` |  | Idempotent |
 |  | POST | `/api/storage/objects/presign` |  |  |
 |  | POST | `/api/storage/objects/confirm` |  |  |
 |  | GET | `/api/storage/objects/:id/download` |  |  |
+|  | GET | `/api/storage/objects/:id/content` |  |  |
 |  | DELETE | `/api/storage/objects/:id` | storage.object.remove |  |
 | `WfAdminController`（modules/workflow/admin/wf-admin.controller.ts） | GET | `/api/wf/instances` | wf.instance.browse |  |
 |  | GET | `/api/wf/tasks` | wf.task.browse |  |
@@ -761,9 +806,12 @@
 | `agentAutomationPerms` | agent.automation.use, agent.automation.share | shared:platform/agent/agent.schema.ts |
 | `agentPerms` | agent.chat.use, agent.batch.run, agent.skill.browse, agent.skill.create, agent.skill.modify, agent.skill.remove, agent.instruction.modify, agent.setting.browse, agent.setting.modify, agent.usage.browse | shared:platform/agent/agent.schema.ts |
 | `appVersionPerms` | settings.appVersion.browse, settings.appVersion.view, settings.appVersion.create, settings.appVersion.modify, settings.appVersion.remove | shared:platform/settings/app-version.schema.ts |
+| `attendancePolicyPerms` | oa.attendance-policy.view, oa.attendance-policy.modify | shared:oa/attendance.schema.ts |
+| `attendanceSitePerms` | oa.attendance-site.browse, oa.attendance-site.view, oa.attendance-site.create, oa.attendance-site.modify, oa.attendance-site.remove | shared:oa/attendance.schema.ts |
 | `bookPerms` | demo.book.browse, demo.book.view, demo.book.create, demo.book.modify, demo.book.remove, demo.book.export, demo.book.import | shared:demo/book.schema.ts |
 | `bulletinPerms` | messaging.bulletin.browse, messaging.bulletin.view, messaging.bulletin.create, messaging.bulletin.modify, messaging.bulletin.remove, messaging.bulletin.publish | shared:platform/messaging/bulletin.schema.ts |
 | `clientPerms` | oauth.client.browse, oauth.client.view, oauth.client.create, oauth.client.modify, oauth.client.remove, oauth.client.reset-secret | shared:platform/oauth/client.schema.ts |
+| `clockPerms` | oa.clock.browse, oa.clock.view | shared:oa/attendance.schema.ts |
 | `codegenPerms` | codegen.table.browse, codegen.table.view, codegen.table.import, codegen.table.modify, codegen.table.remove, codegen.table.generate, codegen.table.write | shared:platform/codegen/codegen-api.schema.ts |
 | `configPerms` | storage.config.browse, storage.config.view, storage.config.create, storage.config.modify, storage.config.remove | shared:platform/storage/config.schema.ts |
 | `customerPerms` | demo.customer.browse, demo.customer.view, demo.customer.create, demo.customer.modify, demo.customer.remove, demo.customer.export | shared:demo/customer.schema.ts |
@@ -784,6 +832,9 @@
 | `mcpPerms` | mcp.tool.browse, mcp.tool.modify, mcp.token.browse, mcp.token.revoke | shared:platform/mcp/mcp.schema.ts |
 | `menuPerms` | iam.menu.browse, iam.menu.view, iam.menu.create, iam.menu.modify, iam.menu.remove | shared:platform/iam/menu.schema.ts |
 | `monitorPerms` | monitor.server.browse, monitor.redis.browse, monitor.cache.browse, monitor.cache.remove, monitor.mysql.browse, monitor.queue.browse, monitor.queue.retry, monitor.queue.remove | shared:platform/monitor/monitor.schema.ts |
+| `oaExpensePerms` | oa.expense.browse, oa.expense.view, oa.expense.create, oa.expense.modify | shared:oa/expense.schema.ts |
+| `oaSealPerms` | oa.seal.browse, oa.seal.view, oa.seal.create, oa.seal.modify | shared:oa/seal.schema.ts |
+| `oaTripPerms` | oa.trip.browse, oa.trip.view, oa.trip.create, oa.trip.modify | shared:oa/trip.schema.ts |
 | `paramPerms` | settings.param.browse, settings.param.view, settings.param.create, settings.param.modify, settings.param.remove, settings.param.export | shared:platform/settings/param.schema.ts |
 | `positionPerms` | iam.position.browse, iam.position.view, iam.position.create, iam.position.modify, iam.position.remove, iam.position.export | shared:platform/iam/position.schema.ts |
 | `rolePerms` | iam.role.browse, iam.role.view, iam.role.create, iam.role.modify, iam.role.remove, iam.role.export, iam.role.grant, iam.role.assign-users | shared:platform/iam/role.schema.ts |
@@ -863,6 +914,10 @@
 | `monitor-queue` | page |  | modules/platform/monitor/monitor.seed.ts |
 | `monitor-redis` | page |  | modules/platform/monitor/monitor.seed.ts |
 | `monitor-server` | page |  | modules/platform/monitor/monitor.seed.ts |
+| `oa` | group |  | db/seeds/project/menu-groups.seed.ts |
+| `oa-attendance-policy` | page |  | db/seeds/project/oa-attendance-pages.seed.ts |
+| `oa-attendance-sites` | page |  | db/seeds/project/oa-attendance-pages.seed.ts |
+| `oa-clock-records` | page |  | db/seeds/project/oa-attendance-pages.seed.ts |
 | `oauth-client` | page |  | modules/platform/oauth/client/client.seed.ts |
 | `scheduler-run` | page |  | modules/platform/scheduler/run/run.seed.ts |
 | `scheduler-task` | page |  | modules/platform/scheduler/task/task.seed.ts |
@@ -935,6 +990,9 @@
 | `messaging.sms_purpose` | otp, notice, promo | db/seeds/messaging/delivery.seed.ts |
 | `messaging.sms_receipt_status` | delivered, failed | db/seeds/messaging/delivery.seed.ts |
 | `messaging.sms_record_status` | pending, sending, sent, failed, skipped | db/seeds/messaging/delivery.seed.ts |
+| `oa.expense_kind` | transport, lodging, meal, office, other | db/seeds/project/oa.seed.ts |
+| `oa.request_state` | draft, in_review, approved, rejected, canceled | db/seeds/project/oa.seed.ts |
+| `oa.seal_kind` | company, contract, finance, other | db/seeds/project/oa.seed.ts |
 | `scheduler.job_group` | default, system | db/seeds/scheduler/scheduler.seed.ts |
 | `scheduler.misfire` | skip, run_once | db/seeds/scheduler/scheduler.seed.ts |
 | `scheduler.run_outcome` | ok, failed, skipped, timeout | db/seeds/scheduler/scheduler.seed.ts |
@@ -1036,6 +1094,7 @@
 | `audit.purge` | BuiltinJobs.purge | modules/platform/scheduler/builtin-jobs.ts |
 | `demo.echo` | BuiltinJobs.echo | modules/platform/scheduler/builtin-jobs.ts |
 | `notify.dispatch` | NotifyDispatcher.dispatch | core/notify/notify.ts |
+| `oa.clock.retention` | ClockRetentionJob.run | modules/oa/attendance/clock-retention.job.ts |
 | `session.sweep` | BuiltinJobs.sweep | modules/platform/scheduler/builtin-jobs.ts |
 | `wf.task.remind` | WfRemind.remind | modules/workflow/runtime/wf-remind.ts |
 | `wxoa.fan.sync` | WxoaFanService.nightly | modules/platform/wxoa/fan/fan.service.ts |
@@ -1052,3 +1111,11 @@
 | `demo.customer.update` | write | `demo.customer.modify` | CustomerMcpTools.update | modules/demo/customer/customer.mcp-tools.ts |
 | `iam.me.get` | read | （只需登录） | ProfileMcpTools.me | modules/platform/iam/profile/profile.mcp-tools.ts |
 | `iam.user.search` | read | `iam.user.browse` | UserMcpTools.search | modules/platform/iam/user/user.mcp-tools.ts |
+| `oa.application.get` | read | （只需登录） | OaAgentTools.get | modules/oa/agent/oa-agent.tools.ts |
+| `oa.application.options` | read | （只需登录） | OaAgentTools.options | modules/oa/agent/oa-agent.tools.ts |
+| `oa.expense.apply` | write | `oa.expense.create` | OaAgentTools.expense | modules/oa/agent/oa-agent.tools.ts |
+| `oa.generic.apply` | write | （只需登录） | OaAgentTools.generic | modules/oa/agent/oa-agent.tools.ts |
+| `oa.leave.apply` | write | `biz.leave.create` | OaAgentTools.leave | modules/oa/agent/oa-agent.tools.ts |
+| `oa.seal.apply` | write | `oa.seal.create` | OaAgentTools.seal | modules/oa/agent/oa-agent.tools.ts |
+| `oa.task.todo` | read | （只需登录） | OaAgentTools.todo | modules/oa/agent/oa-agent.tools.ts |
+| `oa.trip.apply` | write | `oa.trip.create` | OaAgentTools.trip | modules/oa/agent/oa-agent.tools.ts |

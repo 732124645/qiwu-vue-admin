@@ -275,6 +275,70 @@ const approval = (status: AgentItemVo['status'] = 'pending', extra = {}) =>
   )
 
 describe('approval card', () => {
+  it('restores the confirmation button when a new preview arrives after a successful response', async () => {
+    const calls = mockApi({ 'POST /agent/approvals/11': ok(null) })
+    const first = 'c67cbb42-4f40-42a0-a767-870f38404c80'
+    const next = '228c73ef-cfc9-4215-a56e-945c62a276de'
+    w = mount(ApprovalCard, {
+      props: {
+        item: approval('pending', {
+          perCallConfirmation: true,
+          confirmationToken: first,
+        }),
+      },
+      global,
+    })
+    await button('Approve')!.trigger('click')
+    await flushPromises()
+    expect(button('Approve')).toBeUndefined()
+    await w.setProps({
+      item: approval('pending', { perCallConfirmation: true, confirmationToken: next }),
+    })
+    expect(button('Approve')).toBeDefined()
+    expect(button('Approve')!.attributes('disabled')).toBeUndefined()
+    await button('Approve')!.trigger('click')
+    await flushPromises()
+    expect(body(calls.filter((c) => c.url === '/agent/approvals/11').at(-1))).toEqual({
+      decision: 'approve',
+      confirmationToken: next,
+    })
+  })
+
+  it('requires the current single-card token and resets when the preview changes during submission', async () => {
+    const gate = held()
+    const calls = mockApi({ 'POST /agent/approvals/11': gate.route })
+    const first = '5b81926c-0d55-4b6c-92a2-ed1de60840b7'
+    const next = 'eb450db4-ad5e-4d64-b9af-6e368ca8f630'
+    w = mount(ApprovalCard, {
+      props: {
+        item: approval('pending', {
+          perCallConfirmation: true,
+          confirmationToken: first,
+        }),
+      },
+      global,
+    })
+    expect(button('Approve for this conversation')).toBeUndefined()
+    await button('Approve')!.trigger('click')
+    await flushPromises()
+    expect(body(calls.find((c) => c.url === '/agent/approvals/11'))).toEqual({
+      decision: 'approve',
+      confirmationToken: first,
+    })
+    await w.setProps({
+      item: approval('pending', { perCallConfirmation: true, confirmationToken: next }),
+    })
+    gate.release()
+    await flushPromises()
+    expect(button('Approve')!.attributes('disabled')).toBeUndefined()
+    await button('Approve')!.trigger('click')
+    await flushPromises()
+    expect(body(calls.filter((c) => c.url === '/agent/approvals/11').at(-1))).toEqual({
+      decision: 'approve',
+      confirmationToken: next,
+    })
+  })
+
   it('approves once with a note: every button disabled while the request is pending', async () => {
     const gate = held()
     const calls = mockApi({ 'POST /agent/approvals/11': gate.route })

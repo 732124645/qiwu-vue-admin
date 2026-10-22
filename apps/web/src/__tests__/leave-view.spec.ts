@@ -22,6 +22,7 @@ const ROW: LeaveVo = {
   startAt: '2026-10-08T01:00:00.000Z',
   endAt: '2026-10-09T10:00:00.000Z',
   days: 2,
+  attachmentIds: [],
   reason: 'Family trip',
   state: 'sent_back',
   instanceId: 40,

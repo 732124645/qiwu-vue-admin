@@ -145,13 +145,25 @@ test('the initiator: head, timeline, the leave form through the registry, a dyna
   // the form: model leave's summary (view registry), its page (view_component → pages-biz/leave/view)
   // read-only, no way back to the detail
   await expect(page.locator('.qw-wf__summary .qw-wf__box-title')).toHaveText('请假单')
-  await expect(page.locator('.qw-kv .qw-kv__k')).toHaveText([
+  await expect(page.locator('.qw-wf__summary .qw-kv .qw-kv__k')).toHaveText([
+    '单据编号',
+    '申请人',
+    '申请部门 ID',
+    '状态',
     '请假类型',
     '开始时间',
     '结束时间',
     '请假天数',
     '请假事由',
+    '创建时间',
+    '更新时间',
   ])
+  await expect(kv(page, '单据编号').locator('.qw-kv__v')).toHaveText(String(ids.leave))
+  await expect(kv(page, '申请人').locator('.qw-kv__v')).toHaveText(OWNER.username)
+  await expect(kv(page, '状态').locator('.qw-kv__v')).toHaveText('审批中')
+  for (const name of ['创建时间', '更新时间'])
+    await expect(kv(page, name).locator('.qw-kv__v')).toHaveText(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/)
+  await expect(page.locator('.qw-wf__summary input, .qw-wf__summary textarea')).toHaveCount(0)
   for (const [name, value] of [
     ['请假类型', '病假'],
     ['开始时间', '2026-09-0'],

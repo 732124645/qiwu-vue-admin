@@ -92,3 +92,15 @@ export * from './workflow/wf-admin.schema.js'
 export * from './workflow/wf-data.schema.js'
 export * from './demo/realtime.schema.js'
 export * from './biz/leave.schema.js'
+
+export * from './oa/common.schema.js'
+
+export * from './oa/trip.schema.js'
+
+export * from './oa/expense.schema.js'
+
+export * from './oa/seal.schema.js'
+
+export * from './oa/attendance.schema.js'
+export * from './oa/agent.schema.js'
+export * from './oa/attendance-query.schema.js'

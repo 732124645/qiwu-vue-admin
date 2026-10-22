@@ -218,7 +218,9 @@ export class AutomationPreApproval implements AgentApprovalReviewer {
     return (await this.host.list(p))
       .filter(
         (t) =>
-          t.kind === 'write' && (policies.get(t.name) ?? effectivePolicy('write', null)) !== 'deny',
+          t.kind === 'write' &&
+          !t.perCallConfirmation &&
+          (policies.get(t.name) ?? effectivePolicy('write', null)) !== 'deny',
       )
       .map((t) => ({ name: t.name, title: t.title }))
       .sort((x, y) => x.name.localeCompare(y.name))

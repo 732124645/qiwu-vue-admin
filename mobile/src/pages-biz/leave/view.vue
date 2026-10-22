@@ -12,6 +12,11 @@
         <wd-cell :title="t('field.biz.leave.reason')" :label="row.reason" />
         <wd-cell :title="t('field.common.createdAt')" :value="formatTime(row.createdAt)" />
       </wd-cell-group>
+      <view class="qw-card qw-leave__attachments">
+        <text class="qw-field__label">{{ t('oa.attachments') }}</text>
+        <QwAttachments :files="files" />
+        <text v-if="fileError" class="qw-form__error">{{ fileError }}</text>
+      </view>
       <wd-cell-group v-if="!readonly && row.instanceId" custom-class="qw-group" border>
         <wd-cell
           custom-class="qw-leave__flow"
@@ -28,13 +33,15 @@
 <script setup lang="ts">
 import { computed, reactive, ref, shallowRef } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
-import type { DictPayload, LeaveVo } from '@qiwu/shared'
+import { leaveVo, type DictPayload, type FsObjectVo, type LeaveVo } from '@qiwu/shared'
 import { stateTag } from '@/core/approvals'
 import QwEmpty from '@/core/components/QwEmpty.vue'
+import QwAttachments from '@/core/components/QwAttachments.vue'
+import { loadAttachments } from '@/core/attachments'
 import { formatTime } from '@/core/format'
 import { t } from '@/core/i18n'
 import { choiceText, dictChoices, loadDict } from '@/core/pickers'
-import { api, errorText } from '@/core/request'
+import { api, currentSessionVersion, errorText } from '@/core/request'
 
 /**
  * One leave request (subpackage pages-biz), the mobile view of model leave's `view_component`
@@ -44,6 +51,8 @@ import { api, errorText } from '@/core/request'
  */
 const row = shallowRef<LeaveVo>()
 const error = ref('')
+const files = shallowRef<FsObjectVo[]>([])
+const fileError = ref('')
 const readonly = ref(false)
 
 type Dict = 'biz.leave_kind' | 'biz.leave_state'
@@ -62,10 +71,28 @@ const openInstance = () =>
 onLoad(async (query) => {
   uni.setNavigationBarTitle({ title: t('leave.view') })
   readonly.value = query?.readonly === '1'
+  const version = currentSessionVersion()
   try {
-    row.value = await api.get<LeaveVo>(`/biz/leaves/${Number(query?.id)}`)
+    const loaded = leaveVo.parse(await api.get(`/biz/leaves/${Number(query?.id)}`))
+    let attachments: FsObjectVo[] = []
+    let failed = false
+    try {
+      attachments = await loadAttachments(loaded.attachmentIds, 'oa.attachment')
+    } catch {
+      failed = true
+    }
+    if (version !== currentSessionVersion()) return
+    row.value = loaded
+    files.value = attachments
+    if (failed) fileError.value = t('approval.attachmentUnavailable')
   } catch (e) {
-    error.value = errorText(e)
+    if (version === currentSessionVersion()) error.value = errorText(e)
   }
 })
 </script>
+
+<style>
+.qw-leave__attachments {
+  padding: var(--qw-space-4);
+}
+</style>

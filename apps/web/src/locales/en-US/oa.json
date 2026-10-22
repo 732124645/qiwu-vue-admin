@@ -1,0 +1,102 @@
+{
+  "title": "Office",
+  "subtitle": "Submit office requests and follow your approval tasks",
+  "apply": "Start a request",
+  "unavailable": "This process is not enabled. Contact a workflow administrator.",
+  "workflowUnavailable": "Approvals are not included in this tenant package.",
+  "allTypes": "All types",
+  "myRequests": "My requests",
+  "myTodo": "My to-dos",
+  "myDone": "Handled by me",
+  "myCc": "Copied to me",
+  "viewProcess": "View approval details",
+  "returnToList": "Back to list",
+  "resubmit": "Resubmit",
+  "resubmitConfirm": "Resubmit this request?",
+  "resubmitted": "Request resubmitted",
+  "approvalPanel": "Approval progress",
+  "create": "Submit request",
+  "amountInvalid": "Enter a valid CNY amount.",
+  "trip": {
+    "entity": "Business trip"
+  },
+  "expense": {
+    "entity": "Expense claim",
+    "addItem": "Add expense item",
+    "removeItem": "Remove item",
+    "total": "Total amount",
+    "tripHint": "Optional: the ID of your approved trip",
+    "itemsRequired": "Add at least one expense item."
+  },
+  "seal": {
+    "entity": "Seal request"
+  },
+  "leave": {
+    "entity": "Leave request"
+  },
+  "generic": {
+    "entity": "General approval"
+  },
+  "notAllowed": "You do not have permission to submit this request.",
+  "view": "View",
+  "attachmentsUnavailable": "Attachments are unavailable. Retry before submitting.",
+  "attachmentLimit": "An expense claim allows at most 10 attachments in total.",
+  "attendance": {
+    "title": "Attendance",
+    "scope": "Attendance scope",
+    "mine": "My attendance",
+    "admin": "Managed attendance",
+    "records": "Punch records",
+    "summary": "Daily summary",
+    "workDates": "Work date range",
+    "summaryTimezone": "Absence-window timezone",
+    "recordHint": "Original work dates and timezones are preserved. Punches cannot be edited, deleted or entered for another employee here.",
+    "activityHint": "Totals count active employee/recorded-department pairs, not a full employee roster. No absence, lateness or working-hours judgment is made without schedules.",
+    "utcHint": "Summary punch instants use UTC; recorded timezones explain historical punches. The absence-window timezone does not move recorded work dates.",
+    "window": "Absence window: {start} — {end} ({timezone})",
+    "checkIn": "Check-in",
+    "checkOut": "Check-out",
+    "recordCount": "Punch count",
+    "clockTimezones": "Recorded punch timezones",
+    "absences": "Approved absence intervals",
+    "absenceCount": "{count} approved intervals",
+    "truncated": "Showing {shown} of {count} approved intervals; additional intervals are not expanded.",
+    "noRecord": "No punch record",
+    "none": "None",
+    "unknown": "Unknown employee",
+    "unavailable": "Attendance is unavailable for the current identity or tenant package.",
+    "notAllowed": "You do not have permission for this action.",
+    "loadFailed": "Attendance could not be loaded. Retry.",
+    "pickEmployee": "Select employee",
+    "clearEmployee": "Clear employee",
+    "policy": "Attendance policy",
+    "editPolicy": "Edit attendance policy",
+    "retentionHint": "Retention is 30–730 days; cleanup does not remove current-day records.",
+    "sites": "Attendance locations",
+    "siteDetails": "Location details",
+    "editSite": "Edit location",
+    "createSite": "Create location",
+    "coordinateHint": "Enter fixed office coordinates, up to six decimal places. These settings are not employee location tracks.",
+    "detail": "Punch record details",
+    "snapshotHint": "These are the rule and office-location snapshots at punch time. Later configuration changes do not overwrite them.",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "native": "Native mobile punch",
+    "action": {
+      "check_in": "Check-in",
+      "check_out": "Check-out"
+    },
+    "location": {
+      "none": "No location required",
+      "site": "Configured office location"
+    },
+    "validation": {
+      "not_required": "Location not required",
+      "passed": "Location verified"
+    },
+    "absenceType": {
+      "leave": "Approved leave",
+      "trip": "Approved trip"
+    }
+  }
+}

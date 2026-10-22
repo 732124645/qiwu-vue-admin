@@ -44,7 +44,9 @@ export function formText(form: Pick<FormSchema, 'option'>): Text {
 export function processForm(schema: unknown, access?: WfFieldAccess): FormSchema | null {
   const r = sanitizeFormSchema(schema)
   if (!r.ok) return null
-  return access ? { ...r.schema, rule: r.schema.rule.filter((x) => access[x.field] !== 'hide') } : r.schema
+  return access
+    ? { ...r.schema, rule: r.schema.rule.filter((x) => access[x.field] !== 'hide') }
+    : r.schema
 }
 
 /** The props the renderer reads (each rule type has some of them). */
@@ -211,7 +213,10 @@ export function pickerValue(spec: DateSpec, value: unknown): PickerValue | Picke
 }
 
 /** The value of what the picker confirmed, in the field's format (a time `HH:mm` with 00 seconds). */
-export function pickedValue(spec: DateSpec, picked: PickerValue | PickerValue[]): string | string[] {
+export function pickedValue(
+  spec: DateSpec,
+  picked: PickerValue | PickerValue[],
+): string | string[] {
   const one = (x: PickerValue) =>
     formatDate(typeof x === 'number' ? x : (parseDate(x, 'HH:mm') ?? Date.now()), spec.fmt)
   return Array.isArray(picked) ? picked.map(one) : one(picked)
@@ -252,7 +257,9 @@ export function fieldViews(form: FormSchema, access: WfFieldAccess | undefined, 
       const widget = props.type === 'textarea' ? 'textarea' : (WIDGETS[rule.type] ?? 'none')
       const date = widget === 'date' ? dateSpec(rule) : null
       const unsupported =
-        widget === 'none' || (widget === 'date' && !date) || (widget === 'cascader' && !!props.props?.multiple)
+        widget === 'none' ||
+        (widget === 'date' && !date) ||
+        (widget === 'cascader' && !!props.props?.multiple)
       const edit =
         !unsupported &&
         widget !== 'days' &&
@@ -274,6 +281,14 @@ export function fieldViews(form: FormSchema, access: WfFieldAccess | undefined, 
         date,
       }
     })
+}
+
+/** 决策前只检查手机实际可见且可渲染的字段；隐藏字段不触发附件读取。 */
+export function decisionFormRules(schema: unknown, access: WfFieldAccess) {
+  const form = processForm(schema, access)
+  if (!form) return null
+  const visible = fieldViews(form, access, formText(form))
+  return visible.some((field) => field.unsupported) ? null : visible.map((field) => field.rule)
 }
 
 /** field → its title (a detail table's column total: the column's label), for the messages */
@@ -374,7 +389,8 @@ export function fieldText(v: FieldView, value: unknown, look: Lookups, text: Tex
 /** The dicts of the form's `qw-dict-select` fields (the pre-check needs them all: an unloaded one has no values). */
 export async function formDicts(form: FormSchema): Promise<Map<string, DictPayload>> {
   const codes = new Set<string>()
-  for (const r of form.rule) if (r.type === 'qw-dict-select' && r.props?.code) codes.add(r.props.code)
+  for (const r of form.rule)
+    if (r.type === 'qw-dict-select' && r.props?.code) codes.add(r.props.code)
   return new Map(await Promise.all([...codes].map(async (c) => [c, await loadDict(c)] as const)))
 }
 
@@ -427,3 +443,8 @@ export const uploadObjects = (value: unknown): FsObjectVo[] =>
 /** QwUpload's objects as a `qw-upload` value: `<id>/<name>` lines; none → null. */
 export const uploadValue = (list: readonly FsObjectVo[]) =>
   list.length ? list.map((o) => `${o.id}/${o.originalName}`).join('\n') : null
+/** 只给当前字段仍引用的文件提供打开入口，编辑与只读分支共用元信息筛选。 */
+export const uploadAttachments = (value: unknown, files: readonly FsObjectVo[]) => {
+  const ids = new Set(uploadObjects(value).map((file) => file.id))
+  return files.filter((file) => ids.has(file.id))
+}

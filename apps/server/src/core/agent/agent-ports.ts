@@ -111,7 +111,12 @@ export interface TurnControl {
   send(p: Principal, threadId: number, msg: AgentMessageSend): Promise<{ turnId: number }>
   cancel(p: Principal, threadId: number): Promise<void>
   compact(p: Principal, threadId: number): Promise<void>
-  decideApproval(p: Principal, itemId: number, body: AgentApprovalDecide): Promise<void>
+  decideApproval(
+    p: Principal,
+    itemId: number,
+    body: AgentApprovalDecide,
+    source?: 'interactive' | 'batch',
+  ): Promise<void>
   answerQuestion(p: Principal, itemId: number, body: AgentQuestionAnswer): Promise<void>
 }
 export const TURN_CONTROL = Symbol('qw:agent:turn-control')

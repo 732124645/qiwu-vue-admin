@@ -141,9 +141,10 @@ it('features: without the workflow group no approval tab, counts or start; witho
       ['start', 'bulletin', 'todo', 'running', 'unread'].map((name) => ({ name })),
     ).map((e) => e.name)
 
-  // switch off (or `/me` not loaded yet): every tab, every count
+  // display remains permissive until identity is known; counts use the confirmed package
   expect(visibleTabs()).toEqual(['home', 'approval', 'message', 'mine'])
   expect(home()).toEqual(['start', 'bulletin', 'todo', 'running', 'unread'])
+  auth.me = { features: undefined } as MePayload
   counts.load()
   expect(loaded()).toEqual([
     '/api/wf/tasks/todo',

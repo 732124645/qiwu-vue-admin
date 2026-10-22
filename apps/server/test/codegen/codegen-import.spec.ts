@@ -45,6 +45,7 @@ const PROBES = [
   'pdzcourse',
   'pdw_leave',
   'pdw_trip',
+  'pdw_journey',
 ]
 /** Route names of the menu groups the menu-group cases add (removed for good after each). */
 const GROUPS = ['pdz', 'pdz-sale', 'pdz-sale-order', 'pdz-x', 'PDQ', 'pdz-null']
@@ -148,6 +149,7 @@ beforeAll(async () => {
     'pdzcourse',
     'pdw_leave',
     'pdw_trip',
+    'pdw_journey',
   ])
     await ds.query(`CREATE TABLE ${t} (
       id bigint unsigned NOT NULL AUTO_INCREMENT,
@@ -470,11 +472,14 @@ it('project domains: the same business in another domain gets the domain in fron
 
 it('a class name whose exports @qiwu/shared holds for a hand-written module gets the domain in front, on import and in the defaults; no clash keeps the short one', async () => {
   expect((await run(() => svc.defaults('pdw_leave'))).className).toBe('PdwLeave')
+  expect((await run(() => svc.defaults('pdw_trip'))).className).toBe('PdwTrip')
+  expect((await run(() => svc.defaults('pdw_journey'))).className).toBe('Journey')
   const {
-    ids: [leave, trip],
-  } = await run(() => svc.import(['pdw_leave', 'pdw_trip']))
+    ids: [leave, trip, journey],
+  } = await run(() => svc.import(['pdw_leave', 'pdw_trip', 'pdw_journey']))
   expect((await run(() => svc.detail(leave!))).className).toBe('PdwLeave')
-  expect((await run(() => svc.detail(trip!))).className).toBe('Trip')
+  expect((await run(() => svc.detail(trip!))).className).toBe('PdwTrip')
+  expect((await run(() => svc.detail(journey!))).className).toBe('Journey')
 })
 
 describe('save', () => {

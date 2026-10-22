@@ -273,7 +273,14 @@ describe('own tokens', () => {
         .sort()
     await user('picker')
     const picker = (await signIn(app, `${PREFIX}picker`)).accessToken
-    expect(await names(picker)).toEqual(['cfg.dict.options', 'iam.me.get'])
+    expect(await names(picker)).toEqual([
+      'cfg.dict.options',
+      'iam.me.get',
+      'oa.application.get',
+      'oa.application.options',
+      'oa.generic.apply',
+      'oa.task.todo',
+    ])
     expect(await names(rootConsole)).toEqual(
       expect.arrayContaining(['demo.book.create', 'iam.user.search', 'iam.me.get']),
     )
@@ -283,7 +290,13 @@ describe('own tokens', () => {
 
 it('403: a tool the user has no perm for, one the token does not list, a write tool without writes', async () => {
   const limited = await patFor(app, await user('limited'))
-  expect(await toolNames(app, limited.token)).toEqual(['cfg.dict.options', 'iam.me.get'])
+  expect(await toolNames(app, limited.token)).toEqual([
+    'cfg.dict.options',
+    'iam.me.get',
+    'oa.application.get',
+    'oa.application.options',
+    'oa.task.todo',
+  ])
   expect((await callTool(app, limited.token, 'iam.user.search')).error?.code).toBe(
     Err.FORBIDDEN.code,
   )
@@ -301,6 +314,93 @@ it('403: a tool the user has no perm for, one the token does not list, a write t
   expect(write.error?.code).toBe(Err.MCP_WRITE_NOT_ALLOWED.code)
   const writer = await patFor(app, adminId, { allowWrite: true })
   expect(await toolNames(app, writer.token)).toContain('demo.book.create')
+})
+
+it('a personal token allowing writes cannot bypass personal confirmation for office applications', async () => {
+  const applications = [
+    [
+      'oa.leave.apply',
+      {
+        leaveKind: 'annual',
+        startAt: '2026-11-01T00:00:00Z',
+        endAt: '2026-11-02T00:00:00Z',
+        days: 1,
+        reason: 'Annual leave',
+      },
+    ],
+    [
+      'oa.trip.apply',
+      {
+        destination: 'North office',
+        startAt: '2026-11-01T00:00:00Z',
+        endAt: '2026-11-02T00:00:00Z',
+        reason: 'Office visit',
+        initiatorPicks: {},
+      },
+    ],
+    [
+      'oa.expense.apply',
+      {
+        reason: 'Office supplies',
+        items: [
+          {
+            expenseDate: '2026-11-01',
+            expenseKind: 'supplies',
+            amount: '1.00',
+            description: 'Office paper',
+          },
+        ],
+        initiatorPicks: {},
+      },
+    ],
+    [
+      'oa.seal.apply',
+      {
+        sealKind: 'company',
+        documentName: 'Office agreement',
+        purpose: 'Office lease',
+        copies: 1,
+        expectedDate: '2026-11-03',
+        initiatorPicks: {},
+      },
+    ],
+    [
+      'oa.generic.apply',
+      {
+        formValues: {
+          title: 'Office request',
+          description: 'Office access',
+          expectedDate: '2026-11-03',
+        },
+        initiatorPicks: {},
+      },
+    ],
+  ] as const
+  const writer = await patFor(app, adminId, {
+    allowWrite: true,
+    tools: applications.map(([name]) => name),
+  })
+  expect(await toolNames(app, writer.token)).toEqual(applications.map(([name]) => name).sort())
+  const counts = async () =>
+    (
+      await ds.query(
+        `SELECT (SELECT COUNT(*) FROM biz_leave_request WHERE tenant_id = 1) AS leaves,
+            (SELECT COUNT(*) FROM oa_trip_request WHERE tenant_id = 1) AS trips,
+            (SELECT COUNT(*) FROM oa_expense_claim WHERE tenant_id = 1) AS expenses,
+            (SELECT COUNT(*) FROM oa_seal_request WHERE tenant_id = 1) AS seals,
+            (SELECT COUNT(*) FROM wf_instance WHERE tenant_id = 1) AS instances`,
+      )
+    )[0]
+  const before = await counts()
+  for (const [name, args] of applications) {
+    const result = await callTool(app, writer.token, name, {
+      ...args,
+      confirmed: true,
+      prepared: { args },
+    })
+    expect([name, result.error?.code]).toEqual([name, Err.FORBIDDEN.code])
+  }
+  expect(await counts()).toEqual(before)
 })
 
 describe('ends', () => {

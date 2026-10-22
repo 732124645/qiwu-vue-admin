@@ -21,7 +21,8 @@
       },
       "approval": {
         "decision": "Decision",
-        "note": "Note"
+        "note": "Note",
+        "confirmationToken": "Confirmation"
       },
       "skill": {
         "scope": "Scope",

@@ -24,7 +24,7 @@ H5 调试服务器与预览服务器（锁定的 Vite 5.2）在 `mobile/vite.con
 
 ## 基础层（`mobile/src/core`）
 
-- **请求**（`request.ts`）：`api.get/post/put/delete`、`upload`（`uni.uploadFile` 走后端上传，字段 `file`）。基址默认 `/api`（H5 走代理）；小程序与 App 构建时设 `VITE_API_BASE=https://<域名>/api`。每个请求带 `X-Client-Id: mobile`、`Accept-Language`、`X-Timezone`；access 令牌只在内存，refresh 令牌存 uni 存储（`qw.auth.rt`），401 时单飞刷新（`POST /auth/refresh {refreshToken}`，应答同登录：`accessToken` + 轮换后的 `refreshToken`）并重放；刷新被拒 → 清会话、`reLaunch` 到 `/pages/login/index`。403/409/422/429/5xx 与网络错误弹 toast，`silent` 调用方自己处理；例外是 403 `A1004`（须先改密码，服务端此时只放行 `/auth/me`、`/auth/menus`、改密与退出）：不弹 toast，`reLaunch` 到改密页 `/pages-sys/password/index`。
+- **请求**（`request.ts`）：`api.get/post/put/delete`、`upload`（`uni.uploadFile` 走后端上传，字段 `file`）。基址默认 `/api`（H5 走代理）；小程序与 App 构建时设 `VITE_API_BASE=https://<域名>/api`。每个请求带 `X-Client-Id: mobile`、`Accept-Language`、`X-Timezone`；access 令牌只在内存，refresh 令牌存 uni 存储（`qw.auth.rt`），401 时单飞刷新（`POST /auth/refresh {refreshToken}`，应答同登录：`accessToken` + 轮换后的 `refreshToken`）并重放；打卡写请求显式禁用认证后的自动重放，结果不确定时由页面先查持久请求结果，见[原生考勤](attendance.md)。刷新被拒 → 清会话、`reLaunch` 到 `/pages/login/index`。403/409/422/429/5xx 与网络错误弹 toast，`silent` 调用方自己处理；例外是 403 `A1004`（须先改密码，服务端此时只放行 `/auth/me`、`/auth/menus`、改密与退出）：不弹 toast，`reLaunch` 到改密页 `/pages-sys/password/index`。
 - **登录态与权限**（`stores/auth.ts`）：`hasPerm()`（任一即可，`*` 全通过）与 `<QwPerm perm="…">`（小程序不支持自定义指令）；只控制显示，权限以服务端为准。`/auth/me` 带 `mustChangePassword` 或 `passwordExpired`（初始密码、密码过期）时 `passwordChangeDue` 为真：`fetchMe()` 之后与每次 tab 页显示时都转到改密页；改密页此时显示原因和"退出登录"，改完重新取 `/auth/me` 再进入工作台。
 - **实时推送**（`core/realtime.ts`；细节见 `docs/realtime.md` 的"移动端（uni-app）"一节）：登录后连服务端的 Socket.IO 网关（只走 websocket），握手带内存里的 access 令牌和当前语言；用的是官方 `socket.io-client`，加自写的 `uni.connectSocket` 传输类，H5、小程序、App 走同一套代码。收到 `wf:task`、`notify:new` → 重新拉取待办数和未读数（`stores/counts.ts`）；`session:kicked` → 回登录页，并提示"你已被管理员强制下线，请重新登录"。应用回到前台（`App.vue` 的 `onShow`）和 tab 页显示时连接，并补拉一次计数；进入后台（`onHide`）、登录、登出时断开。socket 连不上时（小程序没配 socket 合法域名、网络受限等），tab 页每 60 秒轮询一次，所以角标最迟 60 秒内刷新。
 - **国际化**（`i18n.ts`）：一律用 `t(key, params)` / `tx()` / `issueText(schema, issue)`，不要用 vue-i18n 的 `t`/`$t`（小程序上不插值，完整版还会 `new Function`）。文案放 `src/locales/{zh-CN,en-US}/*.json`，`validation.*`/`field.*`/`seed.*` 直接来自 shared；`setLocale()` 同时切换 wot-ui 与 uni 内置界面，并存入 `qw.locale`。
@@ -49,6 +49,16 @@ H5 调试服务器与预览服务器（锁定的 Vite 5.2）在 `mobile/vite.con
   - `<QwDeptPicker v-model="deptId">`：`GET /api/iam/depts/tree`（数据范围内）上的 `wd-cascader`，任一级可选（点部门展开下级，"确认"取最后点的一级；再点一次取消，确认空值即清为 `null`）；树里没有的部门显示其 id。
   - `<QwDictSelect v-model="kind" code="biz.leave_kind" [multiple]>`：字典条目上的 `wd-select-picker`，值为条目编码（未选为 `null`），标签按 `labelI18n[当前语言]` → 种子 key → 编码；字典在一次运行内只取一次（v1 不按 `version` 失效，改字典后重启应用生效）。
   - `<QwUpload v-model="files" [biz-tag] [limit] [max-size]>`：`v-model` 为已存对象（`FsObjectVo[]`，提交时取 `id`）；先在本地检查个数与大小，再逐个经 `uni.uploadFile` 走后端 `POST /api/storage/objects`（`bizTag` 在文件之前，默认私有 `attachment`；公开标签只收图片，因此只让选图片），失败由请求层提示、列表不变；移除只从列表去掉。选文件：微信小程序从聊天记录选（`chooseMessageFile`），H5 用浏览器文件框，App 只能选图片（无原生插件时 uni 没有通用文件选择）。v1 只显示文件名与大小，不打开文件。
+
+## 办公审批与原生打卡
+
+办公单据继续使用原来的审批四列表和办理动作。请假、出差、报销、用印使用各自的只读业务详情，报销显示完整明细和精确合计；通用申请按节点的读写及隐藏权限渲染。既有手机请假发起、退回编辑和动态表单发起保留，新增出差、报销、用印暂只提供查看和办理。
+
+附件元信息、内容与当前单据都须验证归属和授权。文件经鉴权的固定同源 `content` 接口打开，上限20MiB，不携带系统令牌追随对象存储外链。H5使用自有Blob URL并限制数量与生命周期；App和小程序使用各自文件打开能力。读取决策信息或附件失败时不提供盲批；409关闭动作层并刷新，不重放写入。
+
+“打卡”入口属于 `oa` 功能，独立于审批和钉钉。`none`规则不定位，`site`规则仅在点击时取得一次前台WGS84位置；失败不降级。定位与请求期间禁止重复动作，超时先查原请求再刷新今日，账号切换和页面退出使迟到回调失效。完整时间、幂等、隐私和平台限制见[原生考勤](attendance.md)。
+
+工作台与TabBar计数先等待真实身份信息再按套餐请求；并发身份读取共用当前会话请求，旧账号的身份和计数结果不回填新会话。仅有OA功能的账号不会因冷启动未知身份而先请求workflow计数。
 
 ## 多租户（租户编码）
 

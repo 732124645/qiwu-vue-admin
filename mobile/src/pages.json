@@ -111,6 +111,22 @@
         {
           "path": "demo/invoice/form",
           "style": {}
+        },
+        {
+          "path": "oa-trip/view",
+          "style": {}
+        },
+        {
+          "path": "oa-expense/view",
+          "style": {}
+        },
+        {
+          "path": "oa-seal/view",
+          "style": {}
+        },
+        {
+          "path": "oa-clock/index",
+          "style": {}
         }
       ]
     },

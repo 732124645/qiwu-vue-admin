@@ -4,9 +4,21 @@ import type { z } from 'zod'
 
 export const MCP_TOOL = 'qw:mcp:tool'
 
+/** 可跨实例比较的工具确认契约版本；不能用启动时随机值。 */
+export const MCP_CONFIRMATION_REVISION = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/
+
 /** A tool's longest time limit; the default is {@link MCP_TIMEOUT_MS}. */
 export const MCP_TIMEOUT_MAX_MS = 120_000
 export const MCP_TIMEOUT_MS = 30_000
+
+/** 单次人工确认后，宿主交给工具的服务端快照；客户端参数不能构造它。 */
+export interface ToolExecutionContext {
+  confirmation?: {
+    approvalId: number
+    args: unknown
+    preview: { target: string; fields: { field: string; from: unknown; to: unknown }[] }
+  }
+}
 
 /** What `@McpTool` declares about a provider method (see docs/mcp.md). */
 export interface McpToolMeta {
@@ -45,6 +57,10 @@ export interface McpToolMeta {
    * would change: `{ target, fields: [{ field, from, to }] }`; the in-app agent shows it on the approval card
    */
   preview?: string
+  /** 每次写入都须本人确认本次预览；不接受会话信任、自动审查、预批准或直接令牌调用。 */
+  perCallConfirmation?: true
+  /** 人工逐次确认时必填；不体现在 JSON Schema 的校验、转换或默认值语义改变时必须递增。 */
+  confirmationRevision?: string
 }
 
 /**

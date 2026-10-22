@@ -9,7 +9,8 @@
   "shortcut": {
     "start": "New request",
     "leave": "Leave",
-    "bulletin": "Bulletins"
+    "bulletin": "Bulletins",
+    "clock": "Clock in / out"
   },
   "recent": "Awaiting me",
   "viewAll": "View all"

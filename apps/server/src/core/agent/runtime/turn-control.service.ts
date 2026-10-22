@@ -3,6 +3,7 @@ import { InjectDataSource } from '@nestjs/typeorm'
 import {
   AGENT_TRUST_MODE_PARAM,
   type AgentApprovalDecide,
+  type AgentItemPayloads,
   type AgentAttachment,
   type AgentMessageSend,
   type AgentQuestionAnswer,
@@ -28,6 +29,7 @@ import { type ItemInternal, ItemStore, type ItemWriter, StaleItem } from './item
 import { ACTIVE_TURN, TurnQueue } from './turn-queue.js'
 import { TurnRunner } from './turn-runner.js'
 import { isTrusted, trustEntry } from './turn-tools.js'
+import { HumanConfirmation } from './human-confirmation.js'
 
 const notFound = () => new BizError(Err.NOT_FOUND)
 
@@ -41,6 +43,7 @@ export class TurnControlService implements TurnControl {
   constructor(
     @InjectDataSource() private readonly ds: DataSource,
     private readonly store: ItemStore,
+    private readonly confirmation: HumanConfirmation,
     private readonly queue: TurnQueue,
     private readonly runner: TurnRunner,
     private readonly providers: ProviderRegistry,
@@ -205,11 +208,43 @@ export class TurnControlService implements TurnControl {
    * `agent.trust_mode` 为 `false` 时什么信任都不记：“本会话内同意”只当这一次同意。记住的目标见
    * `trustKey`；每条信任连同记下它的轮次一起存（撤回那一轮时一并去掉）。
    */
-  async decideApproval(p: Principal, itemId: number, body: AgentApprovalDecide): Promise<void> {
+  async decideApproval(
+    p: Principal,
+    itemId: number,
+    body: AgentApprovalDecide,
+    source?: 'interactive' | 'batch',
+  ): Promise<void> {
     const trustMode = trustModeOn(await this.params.get(AGENT_TRUST_MODE_PARAM))
     const out = await this.decide(p, itemId, 'approval', async (w, item, thread, turn) => {
-      const a = item.payload as { blocked?: unknown; internal?: ItemInternal }
+      const a = item.payload as AgentItemPayloads['approval'] & { internal?: ItemInternal }
       if (a.blocked) throw new BizError(Err.AGENT_APPROVAL_CLOSED)
+      const perCall = this.confirmation.required(a)
+      if (perCall) {
+        // 服务端调用来源与当前预览 token 缺一不可；批量确认和会话信任不代表逐次人工同意。
+        if (source !== 'interactive') throw new BizError(Err.AGENT_APPROVAL_CLOSED)
+        if (body.decision === 'approve_session') throw new BizError(Err.VALIDATION_FAILED)
+        const ref = { threadId: Number(thread.id), turnId: Number(turn.id), callId: a.callId }
+        if (!a.perCallConfirmation || !a.internal?.confirmation) {
+          const fresh = await this.confirmation.prepare(p, ref, a.tool, a.args)
+          await w.update(item, { payload: this.confirmation.renew(a, fresh) }, 'pending')
+          return 'stale'
+        }
+        if (!this.confirmation.currentToken(a, body.confirmationToken))
+          throw new BizError(Err.CONFLICT)
+        if (body.decision === 'approve') {
+          const fresh = await this.confirmation.prepare(
+            p,
+            ref,
+            a.tool,
+            a.internal.confirmation.rawArgs,
+            a.internal.confirmation,
+          )
+          if (fresh.digest !== a.internal.confirmation.digest) {
+            await w.update(item, { payload: this.confirmation.renew(a, fresh) }, 'pending')
+            return 'stale'
+          }
+        }
+      }
       const ok = body.decision === 'approve' || body.decision === 'approve_session'
       await w.update(
         item,
@@ -226,6 +261,7 @@ export class TurnControlService implements TurnControl {
         'pending',
       )
       const remember =
+        !perCall &&
         trustMode &&
         (body.decision === 'approve_session' ||
           (body.decision === 'approve' && thread.approvalMode === 'trust'))
@@ -244,6 +280,7 @@ export class TurnControlService implements TurnControl {
       }
       return 'resume'
     })
+    if (out.action === 'stale') throw new BizError(Err.CONFLICT)
     await this.after(out, p.userId)
   }
 
@@ -287,8 +324,8 @@ export class TurnControlService implements TurnControl {
       item: AgentItem,
       thread: AgentThread,
       turn: AgentTurn,
-    ) => Promise<'resume' | 'ended' | 'none'>,
-  ): Promise<{ action: 'resume' | 'ended' | 'none'; turnId: number; threadId: number }> {
+    ) => Promise<'resume' | 'ended' | 'none' | 'stale'>,
+  ): Promise<{ action: 'resume' | 'ended' | 'none' | 'stale'; turnId: number; threadId: number }> {
     const found = await this.ds
       .getRepository(AgentItem)
       .findOne({ where: { id: itemId }, select: { id: true, threadId: true, kind: true } })
@@ -327,7 +364,7 @@ export class TurnControlService implements TurnControl {
    * 或在它结束时开始排队的下一条。
    */
   private async after(
-    out: { action: 'resume' | 'ended' | 'none'; turnId: number; threadId: number },
+    out: { action: 'resume' | 'ended' | 'none' | 'stale'; turnId: number; threadId: number },
     userId: number,
   ) {
     if (out.action === 'resume') await this.queue.resume(out.turnId, userId)

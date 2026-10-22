@@ -1465,6 +1465,8 @@ it('seed: one enabled primary local storage named by a seed key; Swagger documen
     `${URL}/export`,
     `${URL}/presign`,
     `${URL}/{id}`,
+    `${URL}/{id}/content`,
     `${URL}/{id}/download`,
+    `${URL}/{id}/metadata`,
   ])
 })

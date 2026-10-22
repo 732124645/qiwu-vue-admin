@@ -69,7 +69,39 @@
         "title": "生成图片",
         "description": "使用已配置的图片模型生成图片并保存到文件存储。"
       },
-      "unknownDescription": "暂无用途说明"
+      "unknownDescription": "暂无用途说明",
+      "oa_task_todo": {
+        "title": "我的审批待办",
+        "description": "分页查询当前登录用户的审批待办。"
+      },
+      "oa_application_get": {
+        "title": "查看我的办公申请",
+        "description": "读取本人发起或实际参与的办公申请，不扩大管理员的个人查询范围。"
+      },
+      "oa_application_options": {
+        "title": "查询办公表单与审批人",
+        "description": "读取当前已发布表单、可见字段和可选人员，缺项须向本人询问。"
+      },
+      "oa_leave_apply": {
+        "title": "发起请假申请",
+        "description": "展示完整请假内容与审批信息，每张申请由本人逐次确认后发起。"
+      },
+      "oa_trip_apply": {
+        "title": "发起出差申请",
+        "description": "展示目的地、时间、费用、附件和审批信息，每张申请由本人逐次确认后发起。"
+      },
+      "oa_expense_apply": {
+        "title": "发起报销申请",
+        "description": "展示完整明细、精确合计、附件和审批信息，每张申请由本人逐次确认后发起。"
+      },
+      "oa_seal_apply": {
+        "title": "发起用印申请",
+        "description": "展示文件、用途、份数、日期、附件和审批信息，每张申请由本人逐次确认后发起。"
+      },
+      "oa_generic_apply": {
+        "title": "发起通用申请",
+        "description": "按已发布通用表单展示可见内容，每张申请由本人逐次确认后发起。"
+      }
     }
   }
 }

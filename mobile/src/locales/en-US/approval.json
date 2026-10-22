@@ -83,5 +83,8 @@
       "row": "Item {n}",
       "total": "Total"
     }
-  }
+  },
+  "documentUnavailable": "The full document is unavailable. Reload it or review it on a computer before deciding.",
+  "attachmentUnavailable": "Attachments could not be loaded safely. Reload or review them on a computer.",
+  "attachmentDesktop": "This attachment cannot be safely previewed on this phone or exceeds 20 MiB. Review it on a computer before deciding."
 }

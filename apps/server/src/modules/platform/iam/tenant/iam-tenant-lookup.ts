@@ -63,9 +63,12 @@ export class IamTenantLookup implements TenantLookup {
    * Tenant `tenantId` when it is available (`active`), with its end (epoch ms, null = none); null when
    * it is not. Reads the row every time: callers run when a user is loaded, not per request.
    */
-  async activeTenant(tenantId: number): Promise<{ endsAt: number | null } | null> {
+  async activeTenant(
+    tenantId: number,
+    db: Pick<DataSource, 'query'> = this.ds,
+  ): Promise<{ endsAt: number | null } | null> {
     if (tenantId !== DEFAULT_TENANT_ID && !this.cfg.get('APP_MULTI_TENANT')) return null
-    const [row] = await this.ds.query<{ enabled: number; expires_at: Date | null }[]>(
+    const [row] = await db.query<{ enabled: number; expires_at: Date | null }[]>(
       'SELECT enabled, expires_at FROM iam_tenant WHERE id = ? AND deleted_at IS NULL',
       [tenantId],
     )

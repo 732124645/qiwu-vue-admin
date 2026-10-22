@@ -125,9 +125,9 @@ export function pathsTaken(
  * Decision: the `whenNobody` targets are taken as they are, not run through
  * `whenInitiatorIsReviewer`, so an initiator who is a process manager / the fallback user reviews it.
  */
-async function reviewersOf(
-  ctx: WfEngineCtx,
-  inst: WfInstance,
+export async function reviewersOf(
+  ctx: Pick<WfEngineCtx, 'org' | 'managerIds'>,
+  inst: Pick<WfInstance, 'initiatorId' | 'formValues' | 'initiatorPicks'>,
   node: WfReviewNode,
 ): Promise<number[]> {
   const { org } = ctx

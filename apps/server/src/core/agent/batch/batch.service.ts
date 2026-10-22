@@ -273,12 +273,15 @@ export class AgentBatchService implements OnModuleInit {
     let decided = 0
     let skipped = 0
     for (const item of pending) {
-      if (!onOwnRecord(item.payload, targetOf.get(Number(item.threadId)) ?? 0, tools)) {
+      if (
+        (item.payload as { perCallConfirmation?: boolean }).perCallConfirmation ||
+        !onOwnRecord(item.payload, targetOf.get(Number(item.threadId)) ?? 0, tools)
+      ) {
         skipped++
         continue
       }
       try {
-        await this.control.decideApproval(p, Number(item.id), { decision })
+        await this.control.decideApproval(p, Number(item.id), { decision }, 'batch')
         decided++
       } catch (e) {
         if (!(e instanceof BizError && e.err === Err.AGENT_APPROVAL_CLOSED)) throw e

@@ -1155,7 +1155,7 @@ describe('attachment access: files follow field access; approve and resubmit bin
       200,
     )
     await expectDownloads(added, ['sender', 'approver2', 'copied'], ['stranger'])
-    await expectDownloads(first, ['sender'], ['approver2', 'copied'])
+    await expectDownloads(first, [], ['sender', 'approver2', 'copied'])
     // the approver adds a file of their own on approve: the initiator downloads it
     const review = await upload('approver2')
     await act('approver2', await pendingOf(id), 'approve', {
@@ -1164,7 +1164,7 @@ describe('attachment access: files follow field access; approve and resubmit bin
     await expectDownloads(review, ['sender', 'approver2', 'copied'], ['stranger'])
   })
 
-  it('a version whose tree no longer compiles (no form shown): its files for their uploader only', async () => {
+  it('a version whose tree no longer compiles exposes no attachment, including to its uploader', async () => {
     const open = await upload('sender')
     await startWith({ memo: 'broken', files: open })
     await expectDownloads(open, ['sender', 'approver2'], [])
@@ -1175,7 +1175,7 @@ describe('attachment access: files follow field access; approve and resubmit bin
     )
     await ds.query(sql, [JSON.stringify({ id: 'begin' }), modelKey])
     try {
-      await expectDownloads(open, ['sender'], ['approver2', 'copied'])
+      await expectDownloads(open, [], ['sender', 'approver2', 'copied'])
     } finally {
       await ds.query(sql, [JSON.stringify(tree), modelKey])
     }

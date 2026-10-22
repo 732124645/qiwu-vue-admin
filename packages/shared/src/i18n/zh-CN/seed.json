@@ -28,7 +28,8 @@
     "demoEcho": "示例：回显消息",
     "wfTaskRemind": "发送待办超时提醒",
     "wxoaMessagePurge": "清理过期公众号消息",
-    "wxoaFanSync": "同步公众号粉丝"
+    "wxoaFanSync": "同步公众号粉丝",
+    "clockRetention": "清理到期考勤记录"
   },
   "inboxTemplate": {
     "schedulerJobTimeout": "任务超时告警"
@@ -119,5 +120,17 @@
   },
   "agentSkill": {
     "deepResearch": "深度研究：先列计划，再多来源检索与阅读，最后写成带引用、可导出的研究报告"
+  },
+  "oa": {
+    "trip": "出差申请",
+    "tripDescription": "提交出差计划，由发起人选择审批人",
+    "reviewer": "审批人",
+    "expense": "费用报销",
+    "expenseDescription": "按费用明细提交人民币报销，由发起人选择审批人",
+    "seal": "用印申请",
+    "sealDescription": "提交文件用印事项并选择审批人",
+    "generic": "通用审批",
+    "genericDescription": "提交办公事项并选择审批人",
+    "genericForm": "通用办公申请表"
   }
 }

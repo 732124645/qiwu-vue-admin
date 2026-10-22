@@ -3,14 +3,21 @@ import { DiscoveryService, MetadataScanner, Reflector } from '@nestjs/core'
 import * as shared from '@qiwu/shared'
 import { MCP_TOOL_NAME } from '@qiwu/shared'
 import { z } from 'zod'
-import { MCP_TIMEOUT_MAX_MS, MCP_TIMEOUT_MS, MCP_TOOL, type McpToolMeta } from './mcp-tool.js'
+import {
+  MCP_CONFIRMATION_REVISION,
+  MCP_TIMEOUT_MAX_MS,
+  MCP_TIMEOUT_MS,
+  MCP_TOOL,
+  type McpToolMeta,
+  type ToolExecutionContext,
+} from './mcp-tool.js'
 
 /** A registered tool: its declaration, the JSON Schemas the agent sees and the bound method. */
 export interface RegisteredTool extends McpToolMeta {
   timeoutMs: number
   inputSchema: Record<string, unknown>
   outputSchema?: Record<string, unknown>
-  run: (input: unknown) => unknown
+  run: (input: unknown, context?: ToolExecutionContext) => unknown
   /** the bound `preview` method, when the tool names one */
   runPreview?: (input: unknown) => unknown
 }
@@ -29,11 +36,20 @@ export function knownPerms(source: Record<string, unknown> = shared): Set<string
 }
 
 /** The JSON Schema of a tool's object schema, without the `$schema` line clients do not need. */
-function jsonSchemaOf(schema: z.ZodObject, io: 'input' | 'output'): Record<string, unknown> {
-  const { $schema: _, ...rest } = z.toJSONSchema(schema, { io, unrepresentable: 'any' }) as Record<
-    string,
-    unknown
-  >
+function jsonSchemaOf(
+  schema: z.ZodObject,
+  io: 'input' | 'output',
+  stripDefaultAnnotations = false,
+): Record<string, unknown> {
+  const { $schema: _, ...rest } = z.toJSONSchema(schema, {
+    io,
+    unrepresentable: 'any',
+    override: ({ jsonSchema }) => {
+      // default 是注解；动态工厂的启动样本不作为跨实例契约，其语义由 confirmationRevision 维护。
+      // 公开回调仅处理 schema 节点，不会删除 properties 下真正名为 default 的业务字段。
+      if (stripDefaultAnnotations) delete jsonSchema.default
+    },
+  }) as Record<string, unknown>
   return rest
 }
 
@@ -96,13 +112,26 @@ export class McpRegistry implements OnModuleInit {
       (meta.output && !(meta.output instanceof z.ZodObject))
     )
       throw new Error(`${where}: input and output must be zod object schemas`)
+    if (
+      meta.perCallConfirmation !== undefined &&
+      (meta.perCallConfirmation !== true || meta.kind !== 'write' || !meta.preview || !preview)
+    )
+      throw new Error(`${where}: per-call confirmation requires a write tool with a preview method`)
+    if (
+      meta.perCallConfirmation &&
+      (typeof meta.confirmationRevision !== 'string' ||
+        !MCP_CONFIRMATION_REVISION.test(meta.confirmationRevision))
+    )
+      throw new Error(
+        `${where}: per-call confirmation requires a stable confirmationRevision (1-64 ASCII letters, digits, dots, underscores or hyphens)`,
+      )
     const timeoutMs = meta.timeoutMs ?? MCP_TIMEOUT_MS
     if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > MCP_TIMEOUT_MAX_MS)
       throw new Error(`${where}: timeoutMs must be 1 … ${MCP_TIMEOUT_MAX_MS}`)
     this.tools.set(meta.name, {
       ...meta,
       timeoutMs,
-      inputSchema: jsonSchemaOf(meta.input, 'input'),
+      inputSchema: jsonSchemaOf(meta.input, 'input', meta.perCallConfirmation === true),
       outputSchema: meta.output && jsonSchemaOf(meta.output, 'output'),
       run,
       ...(preview && { runPreview: preview }),

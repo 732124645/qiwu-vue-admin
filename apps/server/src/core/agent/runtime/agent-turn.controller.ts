@@ -91,7 +91,7 @@ export class AgentTurnController {
     @Param('itemId', ParseIntPipe) itemId: number,
     @Body({ schema: agentApprovalDecide }) dto: AgentApprovalDecide,
   ) {
-    await this.control.decideApproval(me(), itemId, dto)
+    await this.control.decideApproval(me(), itemId, dto, 'interactive')
     return null
   }
 
