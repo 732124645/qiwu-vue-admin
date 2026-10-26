@@ -6,6 +6,7 @@ import {
   AGENT2_PARAMS,
   AGENT_INSTRUCTIONS_PARAM,
   AGENT_LIMIT_PARAMS,
+  agentCreditAmount,
   AGENT_PAUSED_PARAM,
   AGENT_TRUST_MODE_PARAM,
   AGENT_WEB_DOMAINS_PARAM,
@@ -77,6 +78,10 @@ const ROOT_ONLY: ReadonlySet<unknown> = new Set([
   MCP_PAUSED_PARAM,
   AGENT_PAUSED_PARAM,
   ...Object.values(AGENT_LIMIT_PARAMS),
+  // 旧键仅供升级与回退保留，不能因换成积分预算而开放给租户管理员改写。
+  'agent.limit.turn_tokens',
+  'agent.limit.user_daily_tokens',
+  'agent.limit.tenant_daily_tokens',
   AGENT2_PARAMS.automationsPerUser,
   AGENT2_PARAMS.automationRunsPerDay,
   AGENT_TRUST_MODE_PARAM,
@@ -92,6 +97,30 @@ const ROOT_ONLY: ReadonlySet<unknown> = new Set([
 const assertWritable = (key: unknown): void => {
   if (ROOT_ONLY.has(key) && !clsGet('principal')?.root)
     throw new BizError(Err.IAM_GRANT_EXCEEDS_OWN)
+}
+
+const CREDIT_LIMITS = new Set<unknown>([
+  AGENT_LIMIT_PARAMS.turnCredits,
+  AGENT_LIMIT_PARAMS.userDailyCredits,
+  AGENT_LIMIT_PARAMS.tenantDailyCredits,
+])
+const POSITIVE_LIMITS = new Set<unknown>([
+  AGENT_LIMIT_PARAMS.turnSteps,
+  AGENT_LIMIT_PARAMS.turnSeconds,
+  AGENT_LIMIT_PARAMS.userConcurrentTurns,
+])
+
+/** 积分的 0 是明确不限额，安全步数/时间/并发不能借用该语义或由坏值静默回退。 */
+function assertAgentLimit(key: unknown, value: unknown): void {
+  if (CREDIT_LIMITS.has(key) && !agentCreditAmount.safeParse(value).success)
+    throw new BizError(Err.VALIDATION_FAILED)
+  if (
+    POSITIVE_LIMITS.has(key) &&
+    (typeof value !== 'string' ||
+      !/^[1-9]\d{0,12}$/.test(value) ||
+      BigInt(value) > 1_000_000_000_000n)
+  )
+    throw new BizError(Err.VALIDATION_FAILED)
 }
 
 /**
@@ -144,6 +173,7 @@ export class ParameterService extends BaseCrudService<Parameter> {
 
   override async create(dto: DeepPartial<Parameter>): Promise<Parameter> {
     assertWritable(dto.paramKey)
+    assertAgentLimit(dto.paramKey, dto.paramValue)
     if (dto.isSecret && dto.isPublic) throw new BizError(Err.SETTINGS_PARAM_SECRET_PUBLIC)
     const row = await super.create({ ...dto, isBuiltin: false })
     await this.cache.invalidate(row.paramKey)
@@ -158,6 +188,7 @@ export class ParameterService extends BaseCrudService<Parameter> {
       assertWritable(stored.paramKey)
       // 改名也算写入：不能把一个普通参数改成 root 专用的键
       if (dto.paramKey !== undefined) assertWritable(dto.paramKey)
+      assertAgentLimit(dto.paramKey ?? stored.paramKey, dto.paramValue ?? stored.paramValue)
       const { paramValue, ...rest } = dto
       const isPublic = rest.isPublic ?? stored.isPublic
       if (stored.isBuiltin && isPublic !== stored.isPublic)

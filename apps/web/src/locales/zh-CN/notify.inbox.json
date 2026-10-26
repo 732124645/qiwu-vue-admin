@@ -1,6 +1,9 @@
 {
   "notify": {
-    "tabs": { "bulletins": "公告", "inbox": "站内信" },
+    "tabs": {
+      "bulletins": "公告",
+      "inbox": "站内信"
+    },
     "inbox": {
       "pageTitle": "我的消息",
       "viewAll": "查看全部消息",
@@ -18,7 +21,11 @@
       "read": "已读",
       "unread": "未读",
       "view": "查看",
-      "category": { "system": "系统", "business": "业务" }
+      "category": {
+        "system": "系统",
+        "business": "业务"
+      },
+      "openConversation": "打开会话"
     }
   }
 }

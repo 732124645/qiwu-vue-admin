@@ -53,9 +53,6 @@ import {
   oaTripPerms,
   oaExpensePerms,
   oaSealPerms,
-  clockPerms,
-  attendancePolicyPerms,
-  attendanceSitePerms,
   LOCALES,
   loginSecurityParams,
   newTenantCode,
@@ -155,7 +152,6 @@ const TABLES = [
   'wf_version',
   'wf_form',
   'oauth_client',
-  'oa_attendance_policy',
 ]
 
 let ds: DataSource
@@ -205,7 +201,6 @@ const adminRoles = async () =>
 const OFFICE_EMPLOYEE_ROUTES = [
   'oa',
   'oa-office',
-  'oa-clock-records',
   'oa-trip',
   'oa-trip-new',
   'oa-trip-view',
@@ -972,9 +967,6 @@ it('every module seeds its own menus once: one action per perm of each module, p
     oaTripPerms,
     oaExpensePerms,
     oaSealPerms,
-    clockPerms,
-    attendancePolicyPerms,
-    attendanceSitePerms,
   ]
     .flatMap((p) => Object.values(p))
     .sort()
@@ -997,6 +989,7 @@ it('every module seeds its own menus once: one action per perm of each module, p
   )
   expect(hidden).toEqual([
     { route_name: 'agent-batch', parent: 'agent-chat', perms: agentPerms.batch.run },
+    { route_name: 'agent-chat', parent: 'agent', perms: agentPerms.chat.use },
     { route_name: 'biz-leave-new', parent: 'biz-leave', perms: null },
     { route_name: 'biz-leave-view', parent: 'biz-leave', perms: null },
     { route_name: 'codegen-table-edit', parent: 'codegen-table', perms: codegenPerms.modify },
@@ -1285,15 +1278,7 @@ it('menu groups and pages follow the requested order', async () => {
     'wf-instance-detail',
     'wf-admin',
   ])
-  expect(await children(await id('oa'))).toEqual([
-    'oa-office',
-    'oa-trip',
-    'oa-expense',
-    'oa-seal',
-    'oa-clock-records',
-    'oa-attendance-policy',
-    'oa-attendance-sites',
-  ])
+  expect(await children(await id('oa'))).toEqual(['oa-office', 'oa-trip', 'oa-expense', 'oa-seal'])
   expect(await children(await id('wf-admin'))).toEqual([
     'wf-wizard',
     'wf-model',
@@ -1946,7 +1931,7 @@ it('Menus: workflow group after home → center pages, leave (hidden new/view), 
   }
 })
 
-it('staff and member: exact personal and office business grants without workflow or attendance administration, root sees workflow administration', async () => {
+it('staff and member: exact personal and office business grants without workflow administration, root sees workflow administration', async () => {
   await runSeeds(ds)
   expect(
     await one("SELECT name, data_scope, sort_no, is_builtin FROM iam_role WHERE code = 'staff'"),
@@ -1971,12 +1956,7 @@ it('staff and member: exact personal and office business grants without workflow
   ]
   expect(await grantsOf('staff')).toEqual(granted)
   expect(await grantsOf('member')).toEqual(granted)
-  const managementPerms: string[] = [
-    clockPerms,
-    attendancePolicyPerms,
-    attendanceSitePerms,
-    ...Object.values(wfPerms),
-  ].flatMap((perms) => Object.values(perms))
+  const managementPerms: string[] = Object.values(wfPerms).flatMap((perms) => Object.values(perms))
   for (const code of ['staff', 'member']) {
     expect(
       (await grantsOf(code)).filter((row) => row.perms && managementPerms.includes(row.perms)),
@@ -2035,7 +2015,6 @@ it('staff and member: exact personal and office business grants without workflow
             { 'oa-trip': ['oa-trip-new', 'oa-trip-view'] },
             { 'oa-expense': ['oa-expense-new', 'oa-expense-view'] },
             { 'oa-seal': ['oa-seal-new', 'oa-seal-view'] },
-            'oa-clock-records',
           ],
         },
       ],
@@ -2604,9 +2583,9 @@ it('dicts with labels in every language, params with defaults', async () => {
     [AGENT_PAUSED_PARAM]: 'false',
     [AGENT_LIMIT_PARAMS.turnSteps]: '20',
     [AGENT_LIMIT_PARAMS.turnSeconds]: '300',
-    [AGENT_LIMIT_PARAMS.turnTokens]: '200000',
-    [AGENT_LIMIT_PARAMS.userDailyTokens]: '1000000',
-    [AGENT_LIMIT_PARAMS.tenantDailyTokens]: '10000000',
+    [AGENT_LIMIT_PARAMS.turnCredits]: '0',
+    [AGENT_LIMIT_PARAMS.userDailyCredits]: '0',
+    [AGENT_LIMIT_PARAMS.tenantDailyCredits]: '0',
     [AGENT_LIMIT_PARAMS.userConcurrentTurns]: '2',
     [AGENT2_PARAMS.automationsPerUser]: '20',
     [AGENT2_PARAMS.automationRunsPerDay]: '50',

@@ -8,6 +8,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import type { APIRequestContext } from '@playwright/test'
+import { TEST_MODEL_PRICING } from './agent-fake.ts'
 import { serverEnv } from './env.ts'
 import { bearer, expect, msg, signIn, test, type Page } from './fixtures.ts'
 
@@ -131,7 +132,7 @@ test.beforeAll(async ({ playwright }) => {
       name: PROVIDER,
       baseUrl: `http://127.0.0.1:${port}/v1`,
       apiKey: 'e2e-dummy-key-not-a-secret',
-      models: [{ id: MODEL }],
+      models: [{ id: MODEL, pricing: TEST_MODEL_PRICING }],
       isDefault: true,
     },
   })
@@ -223,4 +224,85 @@ test('reject: the model is told so and the field stays empty', async ({ page }) 
     .click()
   await expect(answer(page, REJECTED)).toBeVisible({ timeout: 20_000 })
   expect(await industryOf(c.id)).toBeNull()
+})
+
+test('a lost real message acknowledgement is recovered after reload without another model charge or write', async ({
+  page,
+}) => {
+  const c = await emptyCustomer('美团')
+  script = { id: c.id, field: 'industry', value: 'Receipt check' }
+  let unavailable = true,
+    posts = 0
+  let accepted: { threadId: number; turnId: number; clientMessageId: string; at: number } | null =
+    null
+  await page.route(/\/api\/agent\/threads\/\d+\/messages$/, async (route) => {
+    if (route.request().method() !== 'POST') return route.continue()
+    posts++
+    const result = await route.fetch()
+    const body = await result.json()
+    expect(result.status(), JSON.stringify(body)).toBe(201)
+    accepted = {
+      threadId: Number(
+        new URL(route.request().url()).pathname.match(/\/threads\/(\d+)\/messages$/)![1],
+      ),
+      turnId: Number(body.data.id),
+      clientMessageId: route.request().postDataJSON().clientMessageId,
+      at: Date.now(),
+    }
+    // 服务端已经提交接收事务，仅丢浏览器 ACK；不伪造接口数据或模型结算。
+    await route.abort('connectionreset')
+  })
+  await page.route(/\/api\/agent\/threads\/\d+\/messages\/[0-9a-f-]+\/receipt$/, async (route) => {
+    if (unavailable) await route.abort('connectionreset')
+    else await route.continue()
+  })
+  try {
+    await signIn(page, 'admin', '/agent/chat')
+    const composer = page.getByRole('textbox', { name: msg('agent.chat.composer.label') })
+    await expect(composer).toBeEnabled()
+    await composer.fill('Check this message receipt before changing the customer')
+    await page.getByRole('button', { name: msg('agent.chat.composer.send'), exact: true }).click()
+    await expect.poll(() => accepted !== null).toBe(true)
+    await expect(page.locator('.agent-chat__delivery')).toBeVisible()
+    const original = accepted!
+    expect(original.clientMessageId).toMatch(/^[0-9a-f-]{36}$/i)
+    await expect.poll(() => Date.now() - original.at).toBeGreaterThan(3100)
+    unavailable = false
+    await page.reload()
+    const card = page.getByRole('region', { name: msg('agent.chat.approval.title') })
+    await expect(card).toBeVisible({ timeout: 20_000 })
+    await expect(page.locator('.agent-chat__delivery')).toHaveCount(0)
+    await expect(composer).toHaveValue('')
+    expect(posts).toBe(1)
+    const detail = await api.get(`/api/agent/threads/${original.threadId}/items`, { headers })
+    expect(detail.ok(), await detail.text()).toBe(true)
+    const snapshot = (await detail.json()).data as {
+      items: { kind: string; payload: { text?: string } }[]
+      turn: { id: number }
+    }
+    expect(snapshot.items.filter((item) => item.kind === 'user')).toHaveLength(1)
+    expect(snapshot.turn.id).toBe(original.turnId)
+    const day = new Date().toISOString().slice(0, 10)
+    const ledger = await api.get('/api/agent/usage/entries', {
+      headers,
+      params: { from: day, to: day, page: 1, pageSize: 200 },
+    })
+    expect(ledger.ok(), await ledger.text()).toBe(true)
+    const entries = (await ledger.json()).data.items as {
+      turnId: number
+      status: string
+      credits: string | null
+    }[]
+    const charged = entries.filter((entry) => entry.turnId === original.turnId)
+    expect(charged).toHaveLength(1)
+    expect(charged[0]!.status).toBe('complete')
+    expect(Number(charged[0]!.credits)).toBeGreaterThan(0)
+    expect(await industryOf(c.id)).toBeNull()
+  } finally {
+    const saved = accepted as { threadId: number } | null
+    if (saved) {
+      await api.post(`/api/agent/threads/${saved.threadId}/cancel`, { headers })
+      await api.delete(`/api/agent/threads/${saved.threadId}`, { headers })
+    }
+  }
 })

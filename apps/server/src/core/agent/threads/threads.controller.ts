@@ -6,6 +6,7 @@ import {
   HttpCode,
   Param,
   ParseIntPipe,
+  ParseUUIDPipe,
   Patch,
   Post,
   Put,
@@ -15,6 +16,10 @@ import { ApiOperation, ApiTags } from '@nestjs/swagger'
 import {
   type AgentFeedbackSave,
   agentFeedbackSave,
+  agentDraftReceiptVo,
+  agentMessageReceiptVo,
+  agentRecoveryAcknowledge,
+  type AgentRecoveryAcknowledge,
   agentOptionsQuery,
   agentOptionsVo,
   agentPerms,
@@ -34,6 +39,9 @@ import {
   type AgentUsageQuery,
   agentUsageQuery,
   agentUsageRowVo,
+  type AgentUsageEntriesQuery,
+  agentUsageEntriesQuery,
+  agentUsageEntryVo,
   Err,
   pageVo,
 } from '@qiwu/shared'
@@ -87,6 +95,40 @@ export class AgentThreadController {
     return this.threads.create(me(), dto)
   }
 
+  @Get('client-drafts/:clientDraftId')
+  @ApiOperation({
+    summary: 'Read the own persistent draft receipt without creating or reviving a thread',
+  })
+  @ApiEnvelope(agentDraftReceiptVo)
+  draftReceipt(@Param('clientDraftId', new ParseUUIDPipe()) clientDraftId: string) {
+    return this.threads.draftReceipt(me(), clientDraftId)
+  }
+
+  @Get(':id/messages/:clientMessageId/receipt')
+  @ApiOperation({ summary: 'Read the own accepted message receipt, including a removed message' })
+  @ApiEnvelope(agentMessageReceiptVo)
+  messageReceipt(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('clientMessageId', new ParseUUIDPipe()) clientMessageId: string,
+  ) {
+    return this.threads.messageReceipt(me(), id, clientMessageId)
+  }
+
+  @Post(':id/recovery/acknowledge')
+  @HttpCode(200)
+  @ActionLog({ domain: 'agent.thread', verb: 'modify' })
+  @ApiOperation({
+    summary:
+      'Acknowledge checked business results for the current recovery revision; never resumes old work',
+  })
+  @ApiEnvelope(agentThreadVo)
+  acknowledgeRecovery(
+    @Param('id', ParseIntPipe) id: number,
+    @Body({ schema: agentRecoveryAcknowledge }) dto: AgentRecoveryAcknowledge,
+  ) {
+    return this.threads.acknowledgeRecovery(me(), id, dto.revision)
+  }
+
   @Patch(':id')
   @ActionLog({ domain: 'agent.thread', verb: 'modify' })
   @ApiOperation({
@@ -126,9 +168,10 @@ export class AgentThreadController {
   @ApiEnvelope(agentThreadVo, 201)
   fork(
     @Param('id', ParseIntPipe) id: number,
-    @Body({ schema: agentThreadFork }) { seq }: { seq: number },
+    @Body({ schema: agentThreadFork })
+    { seq, clientDraftId }: { seq: number; clientDraftId?: string },
   ) {
-    return this.threads.fork(me(), id, seq)
+    return this.threads.fork(me(), id, seq, clientDraftId)
   }
 
   @Post('read-all')
@@ -286,5 +329,15 @@ export class AgentChatController {
   @ApiEnvelope(z.array(agentUsageRowVo))
   usage(@Query({ schema: agentUsageQuery }) query: AgentUsageQuery) {
     return this.options.usage(query)
+  }
+
+  @Get('usage/entries')
+  @RequirePerm(agentPerms.usage.browse)
+  @ApiOperation({
+    summary: 'Paged actual model usage and immutable credit-rate snapshots in this tenant',
+  })
+  @ApiEnvelope(pageVo(agentUsageEntryVo))
+  usageEntries(@Query({ schema: agentUsageEntriesQuery }) query: AgentUsageEntriesQuery) {
+    return this.options.usageEntries(query)
   }
 }

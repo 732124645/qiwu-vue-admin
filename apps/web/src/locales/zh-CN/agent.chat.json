@@ -150,12 +150,16 @@
         "context": "上下文 {percent}%",
         "sendMode": "运行中发送方式",
         "steer": "追加到本轮",
-        "historyPlaceholder": "输入文字搜索发过的消息，Enter 填入，Esc 取消"
+        "historyPlaceholder": "输入文字搜索发过的消息，Enter 填入，Esc 取消",
+        "reasoningDefault": "模型默认：{value}",
+        "contextEstimate": "上下文估算 {percent}%",
+        "queueExpired": "排队消息已作废，未自动执行"
       },
       "reasoning": {
         "low": "低",
         "medium": "中",
-        "high": "高"
+        "high": "高",
+        "off": "关闭"
       },
       "mode": {
         "read_only": "只读",
@@ -187,7 +191,14 @@
         "context": "上下文",
         "of": "{used} / {limit}",
         "userToday": "本人今日",
-        "tenantToday": "本租户今日"
+        "tenantToday": "本租户今日",
+        "credits": "本轮累计积分",
+        "userCreditsToday": "本人今日积分",
+        "tenantCreditsToday": "租户今日积分",
+        "unpricedHint": "未计价调用：{n}",
+        "unreportedHint": "未报告用量调用：{n}",
+        "legacyHint": "包含缺少历史明细的旧记录",
+        "unlimited": "不限额"
       },
       "action": {
         "copy": "复制",
@@ -278,6 +289,71 @@
           "waiting": "等我确认或回答",
           "automation": "自动化运行结果"
         }
+      },
+      "panel": {
+        "open": "工作面板",
+        "close": "收起工作面板",
+        "tasks": "任务",
+        "sources": "来源",
+        "outputs": "产物",
+        "scope": "仅汇总当前已加载的会话内容；审批仍在对话卡片中确认。",
+        "noPlan": "当前没有计划",
+        "tools": "工具进度",
+        "noTools": "当前没有工具活动",
+        "noSources": "当前没有可打开的网页来源",
+        "noOutputs": "当前没有产物；可从回答选择展开阅读。",
+        "answer": "回答 · {n}",
+        "reading": "展开阅读",
+        "chooseOutput": "选择一个产物查看"
+      },
+      "markdown": {
+        "plainText": "纯文本",
+        "wrap": "自动折行",
+        "unwrap": "取消折行",
+        "copyCode": "复制此段代码",
+        "source": "查看 Markdown 原文",
+        "rendered": "返回排版阅读",
+        "download": "下载 Markdown",
+        "expand": "展开阅读"
+      },
+      "dock": {
+        "currentPage": "当前页面旁的助手",
+        "restore": "还原宽度",
+        "expand": "展开窗口",
+        "close": "收起助手",
+        "escapeHint": "输入区 Esc 收起窗口，后台任务继续。停止请点按钮，或设置带修饰键的快捷键。"
+      },
+      "subtask": {
+        "counts": "进行中 {active} · 已结束 {finished}",
+        "back": "返回主任务",
+        "details": "子任务详情",
+        "readonly": "只读查看子任务，操作和后续指令请回主任务。",
+        "failed": "暂时无法读取这个子任务，请重试。",
+        "empty": "子任务尚无输出。"
+      },
+      "connection": {
+        "reconnecting": "连接已中断，正在重新连接；已保存内容会在恢复后补齐。",
+        "down": "当前未连接；发送结果需核对，后台任务不会因收起窗口而取消。"
+      },
+      "delivery": {
+        "uncertain": "上次发送结果尚未确认。恢复后只核对结果，不会自动重发。",
+        "check": "核对发送结果",
+        "clear": "不再保留本次待确认发送",
+        "clearConfirm": "上次请求可能已被接收。清除本地待确认标识不会取消服务器任务；之后发送会作为新的消息。确定继续吗？",
+        "different": "上次发送尚未确认，请先核对结果或明确清除本次待确认发送，再发送其他内容。",
+        "accepted": "上次消息已接收，可在会话中查看；随后编辑的新草稿已保留。",
+        "removed": "上次消息或会话已被删除，不会重新发送。",
+        "missing": "尚未查到接收记录；如需重试，请保持原消息并再次点击发送。",
+        "memoryLost": "本地没有保存消息正文。请先核对接收结果；重新输入前需明确清除待确认标识。",
+        "storageUnavailable": "当前浏览器无法保存回执标识，请保持本页打开；刷新后需要手动核对上次发送结果。"
+      },
+      "recovery": {
+        "required": "上次操作可能已生效或产生费用，写入和图片生成已暂停。你仍可只读查询，模型调用仍按实际用量计费。",
+        "acknowledge": "已核对操作结果",
+        "confirm": "请先在业务页面或供应商记录中确认上次操作已经结束，核对是否实际生效或产生费用。确认后仅解除后续操作暂停，不会重跑旧任务、旧队列或重新启用自动化。"
+      },
+      "message": {
+        "interrupted": "生成已中断，显示已保存内容"
       }
     }
   }

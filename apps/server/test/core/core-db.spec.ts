@@ -528,8 +528,6 @@ describe('soft delete: remove, the reference registry, link helpers', () => {
           'oauth_client',
           'oa_trip_request',
           'oa_expense_claim',
-          'oa_attendance_policy',
-          'oa_attendance_site',
         ].map((t) => [t, of(t)]),
       ),
     ).toEqual({
@@ -541,7 +539,6 @@ describe('soft delete: remove, the reference registry, link helpers', () => {
         'iam_user_positions.user_id cascade',
         'iam_user_social.user_id cascade',
         'oauth_consent.user_id cascade',
-        'oa_clock_record.user_id',
         'oa_trip_request.user_id',
         'oa_expense_claim.user_id',
         'oa_seal_request.user_id',
@@ -549,7 +546,6 @@ describe('soft delete: remove, the reference registry, link helpers', () => {
       iam_role: ['iam_role_menus.role_id cascade', 'iam_role_depts.role_id cascade'].sort(),
       iam_dept: [
         'demo_book.dept_id',
-        'oa_clock_record.dept_id',
         'oa_trip_request.dept_id',
         'oa_expense_claim.dept_id',
         'oa_seal_request.dept_id',
@@ -563,8 +559,6 @@ describe('soft delete: remove, the reference registry, link helpers', () => {
       oauth_client: ['oauth_consent.client_id cascade'],
       oa_trip_request: ['oa_expense_claim.trip_id'],
       oa_expense_claim: ['oa_expense_item.claim_id cascade'],
-      oa_attendance_policy: ['oa_clock_record.policy_id'],
-      oa_attendance_site: ['oa_clock_record.site_id'],
     })
   })
 

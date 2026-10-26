@@ -12,6 +12,8 @@
 
 需要后台界面的步骤（第 1、4、8 步的菜单管理、代码生成页面、角色授权）由开发者在运行中的应用里操作；AI 工具不自己启动 `pnpm dev`，到这些步骤时请用户操作，或保持默认继续。
 
+开发者交互运行 `pnpm dev` 时，runner 已统一处理 shared watch 和 server 增量编译，不必另开共享包 watcher。需要核对开发重载链路时，在准备好的默认测试通道运行 `pnpm smoke:boot --dev-reload`；它使用真实应用验证变更与编译失败恢复，自动还原临时探针并退出，不作为人工后台操作的替代。
+
 1. **建菜单分组**（可选）。在后台“菜单管理”建 `kind=group` 的目录，如 `crm`；保存后路由名只读。没有自己的分组时页面挂在内置的 `biz` 分组下。
 2. **建表并迁移。** 按[建表与迁移](table-migration.md)写迁移，然后运行 `pnpm db:migrate`。表必须有 `deleted_at`，否则生成器拒绝导入。
 3. **导入。** `pnpm gen import crm_customer`。逐条读输出的 `hint:`（唯一键缺 `alive`、缺 `tenant_id`、唯一键不以 `tenant_id` 开头、找不到父分组），先修表结构再继续。
@@ -56,7 +58,7 @@ pnpm verify
 
 ## 常见错误
 
-办公申请先查[OA 办公](../../oa.md)的既有提交服务与 workflow handler，固定申请不可生成任意改状态的 CRUD。考勤查询和配置见[原生考勤](../../attendance.md)：历史部门、工作日、时区及规则快照不能按当前资料回算，日汇总的活动主体数不等于全员人数；不要从“无记录”推断旷工。可选外部系统接入不能成为本系统原生路径的前置条件。
+办公申请先查[OA 办公](../../oa.md)的既有提交服务与 workflow handler，固定申请不可生成任意改状态的 CRUD。可选外部系统接入不能成为本系统原生路径的前置条件。
 
 - 忘了第 6 步的登记：接口 404（模块没进 `project.module.ts`）、菜单不出现（种子没进 `SEEDS.project`）、前端拿不到 schema（shared 没导出）。
 - 种子报 “menu group … is missing”：父分组既不在库里，也不在 `PROJECT_MENU_GROUPS` 里。

@@ -10,6 +10,7 @@ import { Test } from '@nestjs/testing'
 import { getDataSourceToken } from '@nestjs/typeorm'
 import {
   AUDIT_RETENTION_PARAM,
+  AGENT_LIMIT_PARAMS,
   DEFAULT_TIMEZONE_PARAM,
   Err,
   PARAM_SECRET_MASK,
@@ -658,4 +659,39 @@ describe('params (hand-written)', () => {
     await call('admin', 'delete', `/${row.id}`).expect(200)
     expect(await params().get(key)).toBeNull()
   })
+})
+
+it('credit budgets accept explicit unlimited and exact fractions, reject invalid values, and stay root-only', async () => {
+  for (const key of [
+    AGENT_LIMIT_PARAMS.turnCredits,
+    AGENT_LIMIT_PARAMS.userDailyCredits,
+    AGENT_LIMIT_PARAMS.tenantDailyCredits,
+  ]) {
+    const [row] = await ds.query<{ id: number; param_value: string }[]>(
+      'SELECT id,param_value FROM cfg_param WHERE param_key = ?',
+      [key],
+    )
+    expect(row).toBeTruthy()
+    try {
+      await call('editor', 'put', `/${row!.id}`, { paramValue: '0' }).expect(403)
+      for (const value of ['-1', '1e3', '1.0000001', '-0', 'NaN', ''])
+        await call('admin', 'put', `/${row!.id}`, { paramValue: value }).expect(400)
+      for (const value of ['0', '0.000001', '123.456789']) {
+        await call('admin', 'put', `/${row!.id}`, { paramValue: value }).expect(200)
+        expect(await app.get(ParamService).get(key)).toBe(value)
+      }
+    } finally {
+      await call('admin', 'put', `/${row!.id}`, { paramValue: row!.param_value }).expect(200)
+    }
+  }
+  for (const key of [
+    AGENT_LIMIT_PARAMS.turnSteps,
+    AGENT_LIMIT_PARAMS.turnSeconds,
+    AGENT_LIMIT_PARAMS.userConcurrentTurns,
+  ]) {
+    const [row] = await ds.query<{ id: number }[]>('SELECT id FROM cfg_param WHERE param_key = ?', [
+      key,
+    ])
+    await call('admin', 'put', `/${row!.id}`, { paramValue: '0' }).expect(400)
+  }
 })

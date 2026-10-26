@@ -1,6 +1,6 @@
 import { Controller, Get, HttpCode, Param, ParseIntPipe, Post } from '@nestjs/common'
 import { ApiOperation, ApiTags } from '@nestjs/swagger'
-import { agentDiagnosticsVo, agentPerms } from '@qiwu/shared'
+import { agentDiagnosticsVo, agentPerms, Err } from '@qiwu/shared'
 import { z } from 'zod'
 import { ActionLog } from '../../audit/action-log.js'
 import { RequirePerm } from '../../auth/decorators.js'
@@ -9,6 +9,8 @@ import { RateLimit } from '../../guard/rate-limit.decorator.js'
 import { ApiEnvelope } from '../../http/api-envelope.decorator.js'
 import { AgentRootOnly } from '../tools/root-only.js'
 import { AgentDiagnosticsService } from './diagnostics.service.js'
+import { clsGet } from '../../context/cls.js'
+import { BizError } from '../../http/biz-error.js'
 
 const probeResult = z.object({
   ok: z.boolean(),
@@ -53,7 +55,9 @@ export class AgentDiagnosticsController {
   })
   @ApiEnvelope(probeResult)
   testProvider(@Param('id', ParseIntPipe) id: number) {
-    return this.diagnostics.testProvider(id)
+    const p = clsGet('principal')
+    if (!p) throw new BizError(Err.UNAUTHENTICATED)
+    return this.diagnostics.testProvider(id, p)
   }
 
   @Post('test-search/:id')

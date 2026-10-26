@@ -1,3 +1,4 @@
+import { TEST_AGENT_PRICING } from '../setup/agent-pricing.js'
 // Agent diagnostics (see docs/agent.md): the platform page's overview (providers and search providers
 // without keys, external MCP servers with their status, the turn queue's counts, running / waiting /
 // failed-today turns of every tenant and the latest failures as numbers and short codes only, sweep
@@ -170,7 +171,7 @@ beforeAll(async () => {
     name: `${PREFIX}model`,
     baseUrl: `${base}/v1`,
     apiKey: KEY,
-    models: [{ id: 'chat-1' }],
+    models: [{ id: 'chat-1', pricing: TEST_AGENT_PRICING }],
   })
   searchId = await add('/api/agent/search-providers', {
     kind: 'tavily',
@@ -197,6 +198,8 @@ afterAll(async () => {
       await ds.query('DELETE FROM agent_turn WHERE thread_id IN (?)', [threadIds])
       await ds.query('DELETE FROM agent_thread WHERE id IN (?)', [threadIds])
     }
+    for (const table of ['agent_usage_entry', 'agent_usage'])
+      await ds.query(`DELETE FROM ${table} WHERE provider_id = ? AND tenant_id = 1`, [providerId])
     await ds.query('DELETE FROM agent_provider WHERE name LIKE ?', [`${PREFIX}%`])
     await ds.query('DELETE FROM agent_search_provider WHERE name LIKE ?', [`${PREFIX}%`])
     await ds.query('DELETE FROM agent_mcp_server WHERE name LIKE ?', [`${PREFIX}%`])

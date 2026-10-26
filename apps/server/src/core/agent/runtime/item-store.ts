@@ -34,6 +34,8 @@ export type AgentItemStatus = (typeof AGENT_ITEM_STATUSES)[number]
 export interface ItemInternal {
   /** the full (capped) tool output the model got; `preview` is what the page shows */
   content?: string
+  /** 该调用结果不明已持久登记，避免重复提高核对版本。 */
+  uncertain?: boolean
   sources?: { title: string; url: string }[]
   /**
    * URLs a `web.search` returned (or a subagent read or found): readable by `web.fetch` for the rest of the
@@ -112,6 +114,7 @@ export function itemVo(i: AgentItem): AgentItemVo {
   const { internal: _, ...payload } = (i.payload ?? {}) as Record<string, unknown>
   return {
     id: Number(i.id),
+    revision: i.revision ?? 0,
     seq: i.seq,
     turnId: i.turnId === null ? null : Number(i.turnId),
     kind: i.kind,
@@ -128,8 +131,12 @@ export function turnVo(t: AgentTurn): AgentTurnVo {
     threadId: Number(t.threadId),
     status: t.status,
     steps: t.steps,
-    promptTokens: t.promptTokens,
-    completionTokens: t.completionTokens,
+    promptTokens: Number(t.promptTokens),
+    completionTokens: Number(t.completionTokens),
+    credits: t.credits ?? '0',
+    unpricedCalls: t.unpricedCalls ?? 0,
+    unreportedCalls: t.unreportedCalls ?? 0,
+    legacyUsage: t.legacyUsage ?? false,
     error: t.errorCode ? { code: t.errorCode, message: t.errorMsg ?? '' } : null,
     startedAt: new Date(t.startedAt).toISOString(),
     endedAt: t.endedAt ? new Date(t.endedAt).toISOString() : null,
@@ -220,12 +227,16 @@ export class ItemWriter {
   async move(item: AgentItem, turnId: number): Promise<AgentItem> {
     const threadId = Number(item.threadId)
     await this.locked(threadId)
-    item.seq = await this.nextSeq(threadId)
-    item.turnId = turnId
-    item.status = null
-    await this.m
+    const seq = await this.nextSeq(threadId)
+    const revision = item.revision ?? 0
+    const moved = await this.m
       .getRepository(AgentItem)
-      .update({ id: item.id }, { seq: item.seq, turnId, status: null })
+      .update(
+        { id: item.id, revision },
+        { seq, turnId, status: null, revision: () => 'revision + 1' },
+      )
+    if (!moved.affected) throw new StaleItem(`agent item ${item.id} changed`)
+    Object.assign(item, { seq, turnId, status: null, revision: revision + 1 })
     this.push(threadId, { threadId, type: 'item', item: itemVo(item) })
     return item
   }
@@ -238,25 +249,29 @@ export class ItemWriter {
     item: AgentItem,
     patch: { payload?: unknown; status?: AgentItemStatus | null },
     from?: AgentItemStatus,
+    emit = true,
   ): Promise<AgentItem> {
     const payload = patch.payload !== undefined ? patch.payload : item.payload
     const text = patch.payload !== undefined ? textOf(item.kind, patch.payload) : item.text
     const status = patch.status !== undefined ? patch.status : item.status
-    const res = await this.m
-      .getRepository(AgentItem)
-      .update(from === undefined ? { id: item.id } : { id: item.id, status: from }, {
+    const res = await this.m.getRepository(AgentItem).update(
+      { id: item.id, revision: item.revision ?? 0, ...(from !== undefined && { status: from }) },
+      {
         payload: payload as object,
         text,
         status,
-      })
-    if (from !== undefined && !res.affected) throw new StaleItem(`agent item ${item.id} changed`)
-    Object.assign(item, { payload, text, status })
+        revision: () => 'revision + 1',
+      },
+    )
+    if (!res.affected) throw new StaleItem(`agent item ${item.id} changed`)
+    Object.assign(item, { payload, text, status, revision: (item.revision ?? 0) + 1 })
     await this.ensureOwner(Number(item.threadId))
-    this.push(Number(item.threadId), {
-      threadId: Number(item.threadId),
-      type: 'item',
-      item: itemVo(item),
-    })
+    if (emit)
+      this.push(Number(item.threadId), {
+        threadId: Number(item.threadId),
+        type: 'item',
+        item: itemVo(item),
+      })
     return item
   }
 
@@ -339,11 +354,32 @@ export class ItemStore {
     return this.tx((w) => w.update(item, patch))
   }
 
-  /** 流式文本增量：只推送不落库（条目在回答结束时整体保存）。 */
-  delta(userId: number, threadId: number, itemId: number, delta: string): void {
+  /** 有界流式快照先提交再广播，页面看到的前缀在进程被强杀后也可补拉。 */
+  async checkpoint(
+    userId: number,
+    item: AgentItem,
+    text: string,
+    signal?: AbortSignal,
+    fence?: (m: EntityManager) => Promise<void>,
+  ): Promise<void> {
+    signal?.throwIfAborted()
+    const before = String((item.payload as { text?: string }).text ?? '')
+    if (before === text) return
+    await this.tx(async (w) => {
+      await fence?.(w.m)
+      return w.update(item, { payload: { ...(item.payload as object), text } }, undefined, false)
+    })
+    signal?.throwIfAborted()
     this.realtime.toUser(userId, {
       type: RT.agentEvent,
-      payload: { threadId, type: 'delta', itemId, delta },
+      payload: {
+        threadId: Number(item.threadId),
+        type: 'delta',
+        itemId: Number(item.id),
+        revision: item.revision,
+        offset: before.length,
+        delta: text.slice(before.length),
+      },
     })
   }
 }

@@ -39,7 +39,28 @@
         "vision": "看图",
         "fast": "快速档",
         "contextWindow": "上下文窗口",
-        "required": "至少添加一个模型"
+        "required": "至少添加一个模型",
+        "configure": "费率与思考",
+        "pricingEnabled": "配置积分费率",
+        "pricingConfigured": "费率已配置",
+        "pricingMissing": "待配置费率",
+        "pricingHint": "以下为每百万 Token 的积分费率。明确填 0 表示免费；未配置费率的模型不能发起调用。",
+        "inputCredits": "普通输入积分 / 百万 Token",
+        "outputCredits": "输出积分 / 百万 Token",
+        "cacheReadCredits": "缓存读取积分 / 百万 Token",
+        "cacheWriteCredits": "缓存写入积分 / 百万 Token",
+        "imageCredits": "无可计价 Token 时的单张图片积分",
+        "cacheFallback": "留空沿用普通输入费率",
+        "imageFallback": "仅无可计价 Token 时使用；有 Token 计价时不重复收取",
+        "reasoningDefault": "默认思考",
+        "reasoningProvider": "提供方默认",
+        "reasoningStyle": "思考参数协议",
+        "reasoningStandard": "标准兼容接口",
+        "reasoningVllm": "vLLM 开关",
+        "reasoningHint": "勾选表示模型支持通过参数控制思考，不代表取消勾选就关闭模型思考。",
+        "vllmHint": "vLLM 只切换 enable_thinking；低、中、高不会映射成不同等级。",
+        "standardOffHint": "标准接口的“关闭”发送 none；仅在模型明确支持时配置。",
+        "reasoningOn": "开启"
       },
       "search": {
         "entity": "搜索提供方",
@@ -85,7 +106,8 @@
           "unknown": "未同步",
           "ok": "正常",
           "error": "连接失败"
-        }
+        },
+        "trustConfirm": "确认信任服务器“{server}”的工具“{tool}”，允许其无需逐次审批自动执行？外部只读声明不能证明安全，未声明只读的工具也可能修改数据。此设置不改变本系统工具的本人确认要求。"
       },
       "tool": {
         "name": "工具名",
@@ -114,7 +136,9 @@
         "trustModeHint": "关闭后对话页不再提供该审批模式",
         "instructions": "平台说明",
         "instructionsHint": "拼在每个系统提示的最前面，对所有租户生效。",
-        "limits": "限额"
+        "limits": "限额",
+        "creditsHint": "积分预算最多保留 6 位小数，0 表示不限额。调用前按已记账消费检查，达到预算后停止后续调用，在途调用可能越过阈值；步数、时间与并发仍须大于 0。",
+        "creditInvalid": "请输入有效积分金额（非负，最多 6 位小数）。"
       },
       "limit": {
         "turnSteps": "每轮最多步数",
@@ -122,7 +146,10 @@
         "turnTokens": "每轮 token 上限",
         "userDailyTokens": "每用户每日 token 上限",
         "tenantDailyTokens": "每租户每日 token 上限",
-        "userConcurrentTurns": "每用户同时运行的轮次"
+        "userConcurrentTurns": "每用户同时运行的轮次",
+        "turnCredits": "每轮累计积分预算",
+        "userDailyCredits": "每人每日积分预算",
+        "tenantDailyCredits": "每租户每日积分预算"
       },
       "skill": {
         "entity": "技能",
@@ -163,7 +190,30 @@
         "completionTokens": "输出 token",
         "totalTokens": "合计 token",
         "total": "合计",
-        "chart": "智能体 token 用量"
+        "chart": "积分用量",
+        "credits": "已计积分",
+        "cacheReadTokens": "缓存读取 Token",
+        "cacheWriteTokens": "缓存写入 Token",
+        "reasoningTokens": "思考 Token",
+        "unpricedCalls": "未计价调用",
+        "unreportedCalls": "未报告用量调用",
+        "legacyCalls": "旧记录缺少明细",
+        "unknown": "未知",
+        "entries": "调用明细",
+        "entry": "原始用量与费率快照",
+        "pricingSnapshot": "当次费率快照",
+        "rawUsage": "供应商原始用量",
+        "unpriced": "未计价",
+        "unreported": "供应商未报告用量",
+        "legacy": "旧记录未留存细分或费率，不补算历史积分。",
+        "hint": "已计积分不包含未计价调用。未知用量不代表 0；旧历史和缺少供应商报告的调用另行标记。",
+        "invocationStatus": "调用状态",
+        "state": {
+          "pending": "计量中",
+          "complete": "已完成",
+          "unknown": "结果待核对"
+        },
+        "pendingHint": "调用正在进行，最终用量尚未返回；结束或中断核算后进入汇总。"
       },
       "diag": {
         "queue": "轮次队列",

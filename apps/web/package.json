@@ -32,6 +32,7 @@
     "echarts": "^6.1.0",
     "element-plus": "^2.14.6",
     "go-captcha-vue": "2.0.7",
+    "marked": "17.0.6",
     "pinia": "^4.0.3",
     "shiki": "^4.4.3",
     "socket.io-client": "^4.8.4",

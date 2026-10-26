@@ -1,9 +1,3 @@
-import { seedOaAttendancePages } from './project/oa-attendance-pages.seed.js'
-import {
-  seedOaAttendance,
-  seedOaAttendanceMenus,
-  seedOaAttendanceJob,
-} from './project/oa-attendance.seed.js'
 import { seedOaOffice } from './project/oa-office.seed.js'
 import { seedOaSeal } from './project/oa-seal.seed.js'
 import { seedOaGeneric } from './project/oa-generic.seed.js'
@@ -142,10 +136,6 @@ const SEEDS: Record<string, Seed[]> = {
     seedOaSeal,
     seedOaGeneric,
     seedOaOffice,
-    seedOaAttendance,
-    seedOaAttendanceMenus,
-    seedOaAttendanceJob,
-    seedOaAttendancePages,
   ],
   // last: the other tenants' own seeds (the project's need its menus and verbs)
   tenant: [seedTenants],

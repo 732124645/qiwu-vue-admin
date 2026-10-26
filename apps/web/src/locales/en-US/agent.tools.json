@@ -69,39 +69,7 @@
         "title": "Generate an image",
         "description": "Generate an image with a configured model and save it to file storage."
       },
-      "unknownDescription": "No purpose description provided",
-      "oa_task_todo": {
-        "title": "My approval tasks",
-        "description": "Page through the signed-in user’s pending approval tasks."
-      },
-      "oa_application_get": {
-        "title": "Read my office request",
-        "description": "Read an office request started by or shared with the current participant; administrator status does not widen this personal query."
-      },
-      "oa_application_options": {
-        "title": "Office form and reviewer options",
-        "description": "Read the current published form, visible fields and available people; ask the user for missing information."
-      },
-      "oa_leave_apply": {
-        "title": "Start a leave request",
-        "description": "Show the complete leave request and approval facts; require a fresh personal confirmation for each request."
-      },
-      "oa_trip_apply": {
-        "title": "Start a travel request",
-        "description": "Show destination, dates, cost, attachments and approval facts; require a fresh personal confirmation for each request."
-      },
-      "oa_expense_apply": {
-        "title": "Start an expense claim",
-        "description": "Show all lines, the exact total, attachments and approval facts; require a fresh personal confirmation for each claim."
-      },
-      "oa_seal_apply": {
-        "title": "Start a seal request",
-        "description": "Show the document, purpose, copies, date, attachments and approval facts; require a fresh personal confirmation for each request."
-      },
-      "oa_generic_apply": {
-        "title": "Start a general request",
-        "description": "Show the visible contents of the published general form; require a fresh personal confirmation for each request."
-      }
+      "unknownDescription": "No purpose description provided"
     }
   }
 }

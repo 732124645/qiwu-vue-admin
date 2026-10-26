@@ -16,6 +16,9 @@ async function bootstrap() {
   // loopback by default: the API is reached through the Vite proxy / reverse proxy, never directly
   // from the LAN (a future Docker setup sets HOST=0.0.0.0 inside the container network)
   await app.listen(cfg.get('PORT'), cfg.get('HOST'))
+  // 开发父进程据此确认端口已就绪，不能把编译结束或进程创建当作服务恢复。
+  if (process.env.QW_DEV === '1' && cfg.get('NODE_ENV') === 'development' && process.send)
+    process.send({ type: 'qw:dev-ready', url: await app.getUrl() })
 }
 
 // No top-level await: keeps a CommonJS fallback a zero-change switch (see docs/adr/001-module-format.md).

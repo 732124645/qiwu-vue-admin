@@ -5,13 +5,13 @@ import manifest from '../manifest.json?raw'
 import pkg from '../../package.json'
 
 const USED = [
-  'ACCESS_COARSE_LOCATION',
-  'ACCESS_FINE_LOCATION',
   'ACCESS_NETWORK_STATE',
   'ACCESS_WIFI_STATE',
   'CAMERA',
 ]
 const REMOVED = [
+  'ACCESS_COARSE_LOCATION',
+  'ACCESS_FINE_LOCATION',
   'READ_PHONE_STATE',
   'GET_ACCOUNTS',
   'READ_LOGS',
@@ -49,10 +49,15 @@ it('dark mode: App and the mini program follow theme.json; H5 does it in core/th
 it('iOS: uni.chooseImage has usage strings for the camera and the photo library', () => {
   const { ios } = json['app-plus']!.distribute as { ios?: { privacyDescription?: object } }
   expect(ios?.privacyDescription).toEqual({
-    NSLocationWhenInUseUsageDescription: expect.stringMatching(/\S/),
     NSCameraUsageDescription: expect.stringMatching(/\S/),
     NSPhotoLibraryUsageDescription: expect.stringMatching(/\S/),
   })
+})
+
+it('the mobile package declares no unused location capability', () => {
+  expect(json['app-plus']?.modules).toEqual({})
+  expect(json['mp-weixin']?.requiredPrivateInfos).toBeUndefined()
+  expect(json['mp-weixin']?.permission).toBeUndefined()
 })
 
 it('the App icon and splash point at committed images outside src/static', () => {

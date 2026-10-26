@@ -1,7 +1,7 @@
 import { Processor } from '@nestjs/bullmq'
 import { Inject, Injectable, Logger, type OnApplicationBootstrap } from '@nestjs/common'
 import { InjectDataSource } from '@nestjs/typeorm'
-import { AGENT_LIMIT_PARAMS, AGENT_PAUSED_PARAM, AGENT2_PARAMS, agentPerms } from '@qiwu/shared'
+import { AGENT_PAUSED_PARAM, AGENT2_PARAMS, agentPerms } from '@qiwu/shared'
 import { type DataSource, In, IsNull, LessThan, MoreThan } from 'typeorm'
 import { PermVersion } from '../../auth/perm-version.js'
 import { allTenants, tenantId, withTenant } from '../../context/tenant.js'
@@ -12,7 +12,7 @@ import { redisKey } from '../../redis/cache-namespaces.js'
 import { REDIS, type Redis } from '../../redis/redis.module.js'
 import { ParamService } from '../../settings/param.service.js'
 import { AgentItem, AgentThread, AgentTurn } from '../entities/agent-thread.entity.js'
-import { ProviderRegistry } from '../provider/provider-registry.js'
+import { ProviderRegistry, usageTarget } from '../provider/provider-registry.js'
 import { UsageBook } from '../runtime/usage-book.js'
 import { wrapUntrusted } from '../web/web-tools.js'
 import { AgentMemoryService, MEMORY_CONTENT_MAX, MEMORY_MAX, maskMemory } from './memory.service.js'
@@ -103,7 +103,7 @@ export function parseMemories(text: string): string[] {
  * 从空闲会话里提炼记忆（see docs/agent.md），平台参数 `agent.memory.extract` 为 true 时才做。只读本人自己
  * 发出的消息：回答、工具结果（网页、外部 MCP 的内容）、附件和照抄回答里后续建议发出的消息一概不进提炼
  * 输入，外部内容因此不会变成记忆。关了记忆的会话、临时会话、子智能体、自动化与批量开的会话不提炼。每个会话
- * 记下读到的位置（Redis，按会话 id），同一段不会提炼两次；每人每天有上限；调用模型受急停与每日 token 限额
+ * 记下读到的位置（Redis，按会话 id），同一段不会提炼两次；每人每天有上限；调用模型受急停与每日积分 限额
  * 约束并记账；保存前遮蔽，同样的内容不重复保存。
  */
 @Injectable()
@@ -228,27 +228,35 @@ export class AgentMemoryExtractor {
       if (room <= 0 || !(await this.withinBudget(c.userId))) return null
       if (!(await this.takeCall(c.userId))) return null
       const model = await this.providers.resolve()
+      const target = usageTarget(model)
       let chars = 0
       const known = (await this.memories.relevant(c.userId, null, KNOWN_MAX)).filter(
         (m) => (chars += m.content.length) <= KNOWN_CHARS,
       )
-      const answer = await model.chat.complete({
-        model: model.model.id,
-        messages: [
-          { role: 'system', content: EXTRACT_PROMPT },
-          {
-            role: 'user',
-            content:
-              `At most ${room} memories. Already remembered:\n${known.map((m) => `- ${JSON.stringify(m.content)}`).join('\n') || '(nothing)'}\n\n` +
-              wrapUntrusted(
-                `messages of the user in thread ${c.id}`,
-                texts.join('\n\n').slice(-SOURCE_MAX),
-              ),
-          },
-        ],
-        maxTokens: 1000,
-      })
-      await this.usage.add(c.userId, model.model.id, answer.usage)
+      const answer = await this.usage.invoke(
+        c.userId,
+        target,
+        { threadId: c.id },
+        (receipt) =>
+          model.chat.complete({
+            model: model.model.id,
+            messages: [
+              { role: 'system', content: EXTRACT_PROMPT },
+              {
+                role: 'user',
+                content:
+                  `At most ${room} memories. Already remembered:\n${known.map((m) => `- ${JSON.stringify(m.content)}`).join('\n') || '(nothing)'}\n\n` +
+                  wrapUntrusted(
+                    `messages of the user in thread ${c.id}`,
+                    texts.join('\n\n').slice(-SOURCE_MAX),
+                  ),
+              },
+            ],
+            maxTokens: 1000,
+            ...receipt,
+          }),
+        undefined,
+      )
       let added = 0
       for (const raw of parseMemories(answer.text).slice(0, room)) {
         const content = maskMemory(raw.slice(0, MEMORY_CONTENT_MAX))
@@ -309,7 +317,7 @@ export class AgentMemoryExtractor {
 
   /**
    * 占用本人今天的一次提炼调用（Redis 计数，保留两天）；今天已用满 {@link EXTRACT_CALLS_PER_DAY} 次时为 false。
-   * 计数丢了只会多调几次，仍受每日 token 限额约束。
+   * 计数丢了只会多调几次，仍受每日积分 限额约束。
    */
   private async takeCall(userId: number): Promise<boolean> {
     const key = redisKey('agentMemoryMark', 'calls', userId, new Date().toISOString().slice(0, 10))
@@ -318,19 +326,10 @@ export class AgentMemoryExtractor {
     return n <= EXTRACT_CALLS_PER_DAY
   }
 
-  /** 模型调用前：没有急停，本人与本租户今日 token 都还有余量（与轮次同一组限额）。 */
+  /** 模型调用前：没有急停，本人与本租户今日积分 都还有余量（与轮次同一组限额）。 */
   private async withinBudget(userId: number): Promise<boolean> {
     if (await this.on(AGENT_PAUSED_PARAM)) return false
-    const limit = (key: string, fallback: number) => this.params.int(key, 1, 1e12, fallback)
-    if (
-      (await this.usage.usedToday(userId)) >=
-      (await limit(AGENT_LIMIT_PARAMS.userDailyTokens, 1_000_000))
-    )
-      return false
-    return (
-      (await this.usage.usedToday()) <
-      (await limit(AGENT_LIMIT_PARAMS.tenantDailyTokens, 10_000_000))
-    )
+    return (await this.usage.overDaily(userId)) === null
   }
 }
 

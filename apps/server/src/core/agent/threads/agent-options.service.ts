@@ -12,6 +12,9 @@ import {
   type AgentPromptVo,
   type AgentUsageQuery,
   type AgentUsageRowVo,
+  type AgentUsageEntriesQuery,
+  type AgentUsageEntryVo,
+  type Page,
   agentPerms,
   Err,
 } from '@qiwu/shared'
@@ -29,7 +32,8 @@ import { BizError } from '../../http/biz-error.js'
 import { currentLocale } from '../../i18n/locale.js'
 import { ParamService } from '../../settings/param.service.js'
 import { AgentInstruction, AgentPrompt } from '../entities/agent-skill.entity.js'
-import { AgentUsage } from '../entities/agent-usage.entity.js'
+import { AgentUsage, AgentUsageEntry } from '../entities/agent-usage.entity.js'
+import { paginate } from '../../db/page.js'
 import { ProviderSearchConfig } from '../provider/provider-registry.js'
 import { parseReviewModel } from '../runtime/auto-reviewer.js'
 import { num, trustModeOn } from './thread-vo.js'
@@ -44,7 +48,7 @@ const PAGE_STARTERS = 3
 const USAGE_KEY = {
   day: "DATE_FORMAT(u.day, '%Y-%m-%d')",
   user: 'u.userId',
-  model: 'u.model',
+  model: "CONCAT(u.providerId, ':', u.model)",
 } as const
 
 /**
@@ -238,16 +242,47 @@ export class AgentOptionsService {
       .addSelect('SUM(u.calls)', 'calls')
       .addSelect('SUM(u.promptTokens)', 'promptTokens')
       .addSelect('SUM(u.completionTokens)', 'completionTokens')
+      .addSelect('SUM(u.credits)', 'credits')
+      .addSelect('SUM(u.unpricedCalls)', 'unpricedCalls')
+      .addSelect('SUM(u.unreportedCalls)', 'unreportedCalls')
+      .addSelect('SUM(u.legacyCalls)', 'legacyCalls')
+      .addSelect(
+        'IF(COUNT(u.cacheReadTokens) = COUNT(*), SUM(u.cacheReadTokens), NULL)',
+        'cacheReadTokens',
+      )
+      .addSelect(
+        'IF(COUNT(u.cacheWriteTokens) = COUNT(*), SUM(u.cacheWriteTokens), NULL)',
+        'cacheWriteTokens',
+      )
+      .addSelect(
+        'IF(COUNT(u.reasoningTokens) = COUNT(*), SUM(u.reasoningTokens), NULL)',
+        'reasoningTokens',
+      )
+      .addSelect('MIN(u.providerName)', 'providerName')
+      .addSelect('MIN(u.model)', 'model')
       .where('u.day BETWEEN :from AND :to', { from: q.from, to: q.to })
       .groupBy(key)
-    // 按日从早到晚，其余按总 token 从多到少
+    // 按日从早到晚，其余先按积分；历史同积分时用已存 Token 总数稳定排序。
     if (q.groupBy === 'day') qb.orderBy('groupKey', 'ASC')
-    else qb.orderBy('SUM(u.promptTokens + u.completionTokens)', 'DESC')
+    else
+      qb.orderBy('SUM(u.credits)', 'DESC').addOrderBy(
+        'SUM(u.promptTokens + u.completionTokens)',
+        'DESC',
+      )
     const rows = await qb.getRawMany<{
       groupKey: string
       calls: string
       promptTokens: string
       completionTokens: string
+      credits: string
+      unpricedCalls: string
+      unreportedCalls: string
+      legacyCalls: string
+      cacheReadTokens: string | null
+      cacheWriteTokens: string | null
+      reasoningTokens: string | null
+      providerName: string | null
+      model: string
     }>()
     const names = new Map<string, string>()
     if (q.groupBy === 'user' && rows.length) {
@@ -265,11 +300,57 @@ export class AgentOptionsService {
       const k = String(r.groupKey)
       return {
         key: k,
-        label: names.get(k) ?? k,
+        label:
+          q.groupBy === 'model'
+            ? r.providerName
+              ? `${r.providerName} / ${r.model}`
+              : r.model
+            : (names.get(k) ?? k),
         calls: num(r.calls),
-        promptTokens: num(r.promptTokens),
-        completionTokens: num(r.completionTokens),
+        promptTokens: num(r.unreportedCalls) ? null : num(r.promptTokens),
+        completionTokens: num(r.unreportedCalls) ? null : num(r.completionTokens),
+        totalTokens: num(r.unreportedCalls) ? null : num(r.promptTokens) + num(r.completionTokens),
+        credits: r.credits ?? '0',
+        unpricedCalls: num(r.unpricedCalls),
+        unreportedCalls: num(r.unreportedCalls),
+        legacyCalls: num(r.legacyCalls),
+        cacheReadTokens: r.cacheReadTokens === null ? null : num(r.cacheReadTokens),
+        cacheWriteTokens: r.cacheWriteTokens === null ? null : num(r.cacheWriteTokens),
+        reasoningTokens: r.reasoningTokens === null ? null : num(r.reasoningTokens),
       }
     })
+  }
+
+  /** 用量明细只读当前租户；保留当次费率和真实用量供审计，不按现在的价格重算历史。 */
+  async usageEntries(q: AgentUsageEntriesQuery): Promise<Page<AgentUsageEntryVo>> {
+    const until = new Date(`${q.to}T00:00:00.000Z`)
+    until.setUTCDate(until.getUTCDate() + 1)
+    const qb = this.txHost.tx
+      .getRepository(AgentUsageEntry)
+      .createQueryBuilder('u')
+      .where('u.createdAt >= :from AND u.createdAt < :until', {
+        from: new Date(`${q.from}T00:00:00.000Z`),
+        until,
+      })
+    const page = await paginate(qb, q)
+    return {
+      total: page.total,
+      items: page.items.map((r) => ({
+        id: num(r.id),
+        status: r.status,
+        userId: num(r.userId),
+        providerId: num(r.providerId),
+        providerName: r.providerName,
+        model: r.model,
+        threadId: r.threadId === null ? null : num(r.threadId),
+        turnId: r.turnId === null ? null : num(r.turnId),
+        kind: r.kind,
+        usage: r.usage,
+        pricing: r.pricing,
+        credits: r.credits,
+        usageReported: r.usageReported,
+        createdAt: r.createdAt.toISOString(),
+      })),
+    }
   }
 }

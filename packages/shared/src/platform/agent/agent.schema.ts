@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { pageQuery } from '../../common/pagination.js'
 import { fieldDomains } from '../../validation/zod-i18n.js'
 import { MCP_TOOL_KINDS } from '../mcp/mcp.schema.js'
+import { agentCreditAmount, agentModelPricing, agentTokenUsage } from './agent-billing.schema.js'
 
 /**
  * The in-app agent (see docs/agent.md), only while the server runs with `APP_AGENT=true` (otherwise every
@@ -81,9 +82,9 @@ export const AGENT_PAUSED_PARAM = 'agent.paused'
 export const AGENT_LIMIT_PARAMS = {
   turnSteps: 'agent.limit.turn_steps',
   turnSeconds: 'agent.limit.turn_seconds',
-  turnTokens: 'agent.limit.turn_tokens',
-  userDailyTokens: 'agent.limit.user_daily_tokens',
-  tenantDailyTokens: 'agent.limit.tenant_daily_tokens',
+  turnCredits: 'agent.limit.turn_credits',
+  userDailyCredits: 'agent.limit.user_daily_credits',
+  tenantDailyCredits: 'agent.limit.tenant_daily_credits',
   userConcurrentTurns: 'agent.limit.user_concurrent_turns',
 } as const
 /** `false` (default `true`): the "trust this thread" approval mode is not offered. */
@@ -139,7 +140,7 @@ export const AGENT_SKILL_SCOPES = ['platform', 'tenant', 'user'] as const
 export type AgentSkillScope = (typeof AGENT_SKILL_SCOPES)[number]
 export const AGENT_SEARCH_KINDS = ['bocha', 'tavily'] as const
 export const AGENT_MCP_AUTH_KINDS = ['none', 'header', 'oauth'] as const
-export const AGENT_REASONING = ['low', 'medium', 'high'] as const
+export const AGENT_REASONING = ['off', 'low', 'medium', 'high'] as const
 
 /** A skill name: what `$name` in the composer calls (letters, digits, `-`, CJK allowed). */
 export const AGENT_SKILL_NAME = /^[\p{L}\p{N}][\p{L}\p{N}-]{0,63}$/u
@@ -161,6 +162,9 @@ export const agentModelVo = z.object({
   contextWindow: z.number().int(),
   /** the model generates images (`image.generate`, OpenAI-compatible images API) */
   image: z.boolean().optional(),
+  pricing: agentModelPricing.nullable().optional(),
+  reasoningDefault: z.enum(['provider', ...AGENT_REASONING]).optional(),
+  reasoningStyle: z.enum(['standard', 'vllm']).optional(),
 })
 export type AgentModelVo = z.infer<typeof agentModelVo>
 
@@ -207,6 +211,8 @@ export const agentThreadVo = z.object({
   model: z.string().nullable(),
   reasoning: z.enum(AGENT_REASONING).nullable(),
   approvalMode: z.enum(AGENT_APPROVAL_MODES),
+  recoveryRequired: z.boolean().optional(),
+  recoveryRevision: z.number().int().nonnegative().optional(),
   planMode: z.boolean(),
   profileId: z.number().int().nullable(),
   memoryEnabled: z.boolean(),
@@ -239,6 +245,7 @@ export type AgentThreadQuery = z.infer<typeof agentThreadQuery>
 
 export const agentThreadCreate = z
   .object({
+    clientDraftId: z.uuid().optional(),
     title: z.string().trim().max(200).optional(),
     providerId: z.number().int().positive().optional(),
     model: z.string().max(128).optional(),
@@ -275,13 +282,17 @@ export const agentThreadUpdate = z
   .register(fieldDomains, { domain: 'agent.thread' })
 export type AgentThreadUpdate = z.infer<typeof agentThreadUpdate>
 
-export const agentThreadFork = z.object({ seq: z.number().int().min(0) })
+export const agentThreadFork = z.object({
+  seq: z.number().int().min(0),
+  clientDraftId: z.uuid().optional(),
+})
 export const agentThreadRead = z.object({ seq: z.number().int().min(0) })
 /** `route`: the page the chat was opened from, for starters that fit it */
 export const agentOptionsQuery = z.object({ route: z.string().max(200).optional() })
 
 export const agentMessageSend = z
   .object({
+    clientMessageId: z.uuid().optional(),
     text: z.string().trim().min(1).max(AGENT_MESSAGE_MAX),
     /** `$name` picked in the composer: the skill's body is loaded for this turn */
     skill: z.string().regex(AGENT_SKILL_NAME).optional(),
@@ -451,6 +462,8 @@ export type AgentItemVo = {
   [K in AgentItemKind]: {
     id: number
     seq: number
+    /** 缺省只用于兼容旧服务器；新快照总携带版本。 */
+    revision?: number
     turnId: number | null
     kind: K
     status: (typeof AGENT_ITEM_STATUSES)[number] | null
@@ -466,11 +479,44 @@ export const agentTurnVo = z.object({
   steps: z.number().int(),
   promptTokens: z.number().int(),
   completionTokens: z.number().int(),
+  credits: z.string(),
+  unpricedCalls: z.number().int(),
+  unreportedCalls: z.number().int(),
+  legacyUsage: z.boolean(),
   error: z.object({ code: z.string(), message: z.string() }).nullable(),
   startedAt: z.string(),
   endedAt: z.string().nullable(),
 })
 export type AgentTurnVo = z.infer<typeof agentTurnVo>
+
+export const agentDraftReceiptVo = z.object({
+  clientDraftId: z.uuid(),
+  threadId: z.number().int(),
+  status: z.enum(['accepted', 'removed']),
+  thread: agentThreadVo.nullable(),
+})
+export type AgentDraftReceiptVo = z.infer<typeof agentDraftReceiptVo>
+
+export const agentMessageReceiptVo = z.object({
+  clientMessageId: z.uuid(),
+  threadId: z.number().int(),
+  itemId: z.number().int(),
+  turnId: z.number().int(),
+  status: z.enum(['accepted', 'removed']),
+  turn: agentTurnVo.nullable(),
+})
+export type AgentMessageReceiptVo = z.infer<typeof agentMessageReceiptVo>
+
+export const agentRecoveryAcknowledge = z
+  .object({ revision: z.number().int().nonnegative() })
+  .register(fieldDomains, { domain: 'agent.thread' })
+export type AgentRecoveryAcknowledge = z.infer<typeof agentRecoveryAcknowledge>
+
+export const agentClientDraftParams = z.object({ clientDraftId: z.uuid() })
+export const agentMessageReceiptParams = z.object({
+  id: z.coerce.number().int().positive(),
+  clientMessageId: z.uuid(),
+})
 
 export interface AgentThreadDetailVo {
   thread: AgentThreadVo
@@ -486,7 +532,15 @@ export interface AgentThreadDetailVo {
  */
 export type AgentEvent =
   | { threadId: number; type: 'item'; item: AgentItemVo }
-  | { threadId: number; type: 'delta'; itemId: number; delta: string }
+  | {
+      threadId: number
+      type: 'delta'
+      itemId: number
+      delta: string
+      /** 已提交的快照版本，以及本段开始的 UTF-16 字符偏移。 */
+      revision?: number
+      offset?: number
+    }
   | { threadId: number; type: 'turn'; turn: AgentTurnVo }
 
 // ---- skills & instructions ----
@@ -599,6 +653,9 @@ export const agentProviderSave = z
           contextWindow: z.number().int().min(1024).max(10_000_000).default(64_000),
           /** an image model: offered to the agent as `image.generate` */
           image: z.boolean().default(false),
+          pricing: agentModelPricing.nullable().default(null),
+          reasoningDefault: z.enum(['provider', ...AGENT_REASONING]).default('provider'),
+          reasoningStyle: z.enum(['standard', 'vllm']).default('standard'),
         }),
       )
       .min(1)
@@ -730,10 +787,42 @@ export const agentUsageRowVo = z.object({
   key: z.string(),
   label: z.string(),
   calls: z.number().int(),
-  promptTokens: z.number().int(),
-  completionTokens: z.number().int(),
+  promptTokens: z.number().int().nullable(),
+  completionTokens: z.number().int().nullable(),
+  totalTokens: z.number().int().nullable(),
+  cacheReadTokens: z.number().int().nullable(),
+  cacheWriteTokens: z.number().int().nullable(),
+  reasoningTokens: z.number().int().nullable(),
+  credits: z.string(),
+  unpricedCalls: z.number().int(),
+  unreportedCalls: z.number().int(),
+  legacyCalls: z.number().int(),
 })
 export type AgentUsageRowVo = z.infer<typeof agentUsageRowVo>
+
+export const agentUsageEntriesQuery = pageQuery(['createdAt', 'id']).extend({
+  from: z.iso.date(),
+  to: z.iso.date(),
+})
+export type AgentUsageEntriesQuery = z.infer<typeof agentUsageEntriesQuery>
+
+export const agentUsageEntryVo = z.object({
+  id: z.number().int(),
+  status: z.enum(['pending', 'complete', 'unknown']).optional(),
+  userId: z.number().int(),
+  providerId: z.number().int(),
+  providerName: z.string(),
+  model: z.string(),
+  threadId: z.number().int().nullable(),
+  turnId: z.number().int().nullable(),
+  kind: z.enum(['chat', 'image']),
+  usage: agentTokenUsage.nullable(),
+  pricing: agentModelPricing.nullable(),
+  credits: z.string().nullable(),
+  usageReported: z.boolean(),
+  createdAt: z.string(),
+})
+export type AgentUsageEntryVo = z.infer<typeof agentUsageEntryVo>
 
 // ---- status, feedback, prompt templates ----
 
@@ -745,10 +834,16 @@ export const agentStatusVo = z.object({
   contextWindow: z.number().int(),
   turn: agentTurnVo.nullable(),
   today: z.object({
-    userTokens: z.number().int(),
-    userLimit: z.number().int(),
-    tenantTokens: z.number().int(),
-    tenantLimit: z.number().int(),
+    userTokens: z.number().int().nullable(),
+    userLimit: agentCreditAmount,
+    tenantTokens: z.number().int().nullable(),
+    tenantLimit: agentCreditAmount,
+    userCredits: z.string(),
+    tenantCredits: z.string(),
+    userUnpricedCalls: z.number().int(),
+    tenantUnpricedCalls: z.number().int(),
+    userLegacyCalls: z.number().int().optional(),
+    tenantLegacyCalls: z.number().int().optional(),
   }),
 })
 export type AgentStatusVo = z.infer<typeof agentStatusVo>

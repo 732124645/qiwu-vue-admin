@@ -5,7 +5,7 @@
 // card shows the review's pass and its words and the write runs without a click; when it hands over, the
 // card waits with its buttons and the write runs once the user approves.
 import type { APIRequestContext, Locator } from '@playwright/test'
-import { afterTool, fakeModel } from './agent-fake.ts'
+import { afterTool, fakeModel, TEST_MODEL_PRICING } from './agent-fake.ts'
 import { serverEnv } from './env.ts'
 import { bearer, expect, msg, signIn, test, type Page } from './fixtures.ts'
 
@@ -36,7 +36,7 @@ async function provider(name: string, model: string, isDefault: boolean) {
       name,
       baseUrl: fake.url,
       apiKey: 'e2e-dummy-key-not-a-secret',
-      models: [{ id: model }],
+      models: [{ id: model, pricing: TEST_MODEL_PRICING }],
       isDefault,
     },
   })

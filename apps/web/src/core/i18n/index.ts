@@ -4,28 +4,8 @@ import dayjs from 'dayjs'
 import 'dayjs/locale/zh-cn'
 import epEn from 'element-plus/es/locale/lang/en'
 import epZhCn from 'element-plus/es/locale/lang/zh-cn'
-import {
-  DEFAULT_LOCALE,
-  LOCALES,
-  mergeLocaleFile,
-  type I18nText,
-  type Locale,
-  type Messages,
-} from '@qiwu/shared'
-import { sharedMessages } from '@/core/form/zod-rules'
-
-// locales/<lang>/<namespace>.json → messages[lang][namespace], a module fragment
-// locales/<lang>/<domain>.<biz>.json (generated modules; see docs/design-notes.md#codegen) deep-merged at the root; on top of the
-// shared validation/field messages and seeded display names (seed.*: the server searches them too; see docs/design-notes.md#i18n).
-const files = import.meta.glob<Messages>('/src/locales/*/**/*.json', {
-  eager: true,
-  import: 'default',
-})
-const messages = structuredClone(sharedMessages)
-for (const [path, content] of Object.entries(files)) {
-  const [, lang = ''] = path.match(/\/locales\/([^/]+)\//) ?? []
-  mergeLocaleFile((messages[lang] ??= {}), path, content)
-}
+import { DEFAULT_LOCALE, LOCALES, type I18nText, type Locale } from '@qiwu/shared'
+import { messages } from './messages'
 
 const STORAGE_KEY = 'qw.locale'
 const isLocale = (v: unknown): v is Locale => LOCALES.includes(v as Locale)
@@ -53,6 +33,14 @@ export const i18n = createI18n({
   fallbackLocale: DEFAULT_LOCALE,
   messages,
 })
+
+if (import.meta.hot)
+  import.meta.hot.accept('./messages', (updated) => {
+    if (!updated) return
+    // 替换现有实例的整份语言树，让删除的文案消失并保留当前语言与页面状态。
+    for (const locale of LOCALES)
+      i18n.global.setLocaleMessage(locale, updated.messages[locale] ?? {})
+  })
 
 /** Current locale; also the source of the `Accept-Language` request header. */
 export const currentLocale = () => i18n.global.locale.value as Locale

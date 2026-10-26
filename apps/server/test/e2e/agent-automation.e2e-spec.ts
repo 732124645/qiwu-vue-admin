@@ -1,3 +1,4 @@
+import { TEST_AGENT_PRICING, clearAgentUsage } from '../setup/agent-pricing.js'
 // Automations of the in-app agent (see docs/agent.md), multi-tenancy on, with a scripted model standing in
 // for the provider (`registry.connect`): a run's prompt says which tool the model calls (`#call:<tool>`).
 // Covered: create / list / change / switch / delete with 401, 403, 400 and another user's or tenant's 404;
@@ -314,8 +315,20 @@ beforeAll(async () => {
     name: `${PREFIX}provider`,
     base_url: 'http://127.0.0.1:9/v1',
     models: [
-      { id: 'm1', label: 'm1', reasoning: false, contextWindow: 64_000 },
-      { id: 'm2', label: 'm2', reasoning: true, contextWindow: 64_000 },
+      {
+        id: 'm1',
+        label: 'm1',
+        reasoning: false,
+        pricing: TEST_AGENT_PRICING,
+        contextWindow: 64_000,
+      },
+      {
+        id: 'm2',
+        label: 'm2',
+        reasoning: true,
+        pricing: TEST_AGENT_PRICING,
+        contextWindow: 64_000,
+      },
     ],
     enabled: 1,
     is_default: 1,
@@ -386,7 +399,7 @@ afterAll(async () => {
         await ds.query('DELETE FROM agent_turn WHERE thread_id IN (?)', [threads])
         await ds.query('DELETE FROM agent_thread WHERE id IN (?)', [threads])
       }
-      await ds.query('DELETE FROM agent_usage WHERE user_id IN (?)', [userIds])
+      await clearAgentUsage(ds, userIds)
       await ds.query('DELETE FROM agent_profile WHERE tenant_id = 1 AND owner_user_id IN (?)', [
         userIds,
       ])
@@ -947,6 +960,9 @@ describe('write modes', () => {
       turnId,
       lang: 'en-US',
       signal: new AbortController().signal,
+      invokeModel: async () => {
+        throw new Error('Pre-approval must not invoke a model')
+      },
       recordUsage: async () => undefined,
       overBudget: async () => null,
     })
@@ -1593,6 +1609,51 @@ describe('events of a data-scoped resource without a batch target', () => {
 })
 
 describe('deleting an automation', () => {
+  it('does not half-delete a definition with active or unchecked work and keeps disabled manual runs explicit', async () => {
+    const u = await user([...RUNNER])
+    const a = await created(u.token, { prompt: 'A slow inspection #tag:deleteguard' })
+    delay = 1500
+    let run: RunRow
+    try {
+      run = (await runNow(a.id, u.token)).body.data
+      await http().delete(`${URL}/${a.id}`).set(bearer(u.token)).expect(409)
+      const [kept] = await ds.query('SELECT deleted_at FROM agent_automation WHERE id = ?', [a.id])
+      expect(kept.deleted_at).toBeNull()
+      await http()
+        .post(`${URL}/${a.id}/enabled`)
+        .set(bearer(u.token))
+        .send({ enabled: false })
+        .expect(200)
+      run = await runIs(run.id, ['cancelled', 'completed', 'failed'])
+    } finally {
+      delay = 0
+    }
+    const threadId = Number(run.thread_id)
+    await ds.query(
+      'UPDATE agent_thread SET recovery_required = 1, recovery_revision = 1 WHERE id = ? AND tenant_id = 1',
+      [threadId],
+    )
+    await http().delete(`${URL}/${a.id}`).set(bearer(u.token)).expect(409)
+    // 等首次成功运行的防重复窗口结束，再独立验证风险闸。
+    await sleep(3100)
+    await runNow(a.id, u.token).expect(409)
+    const [kept] = await ds.query('SELECT deleted_at FROM agent_automation WHERE id = ?', [a.id])
+    expect(kept.deleted_at).toBeNull()
+    const [thread] = await ds.query(
+      'SELECT deleted_at FROM agent_thread WHERE id = ? AND tenant_id = 1',
+      [threadId],
+    )
+    expect(thread.deleted_at).toBeNull()
+    await http()
+      .post(`/api/agent/threads/${threadId}/recovery/acknowledge`)
+      .set(bearer(u.token))
+      .send({ revision: 1 })
+      .expect(200)
+    const explicit = await runNow(a.id, u.token).expect(201)
+    await runIs(explicit.body.data.id, ['completed', 'failed'])
+    await http().delete(`${URL}/${a.id}`).set(bearer(u.token)).expect(200)
+  })
+
   it('deletes its hidden threads with their turns, items and helper threads', async () => {
     const u = await user([...RUNNER])
     const a = await created(u.token, { prompt: 'Look around #tag:gone2' })

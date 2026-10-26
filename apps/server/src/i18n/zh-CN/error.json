@@ -155,6 +155,11 @@
     "mcp_server_failed": "外部 MCP 服务器连接失败：{reason}",
     "skill_invalid": "技能文件格式不正确：{reason}",
     "web_failed": "联网读取或搜索失败：{reason}",
-    "key_required": "改了地址或类型后需要重新填写密钥"
+    "key_required": "改了地址或类型后需要重新填写密钥",
+    "pricing_required": "当前模型尚未配置积分费率，请联系平台管理员在模型设置中完成定价",
+    "credit_config_invalid": "积分预算或模型费率配置无效，请联系平台管理员检查设置",
+    "recovery_required": "上次操作可能已生效或产生费用，请先核对实际结果后解除暂停",
+    "thread_busy": "此会话仍有任务运行或等待确认，请先停止当前任务再执行此操作",
+    "recovery_busy": "仍有操作可能正在执行，请等待其结束并核对实际结果后再解除暂停"
   }
 }

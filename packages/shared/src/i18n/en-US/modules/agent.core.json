@@ -11,13 +11,16 @@
         "context": "Page context",
         "planMode": "Plan mode",
         "pinned": "Pinned",
-        "temporary": "Temporary conversation"
+        "temporary": "Temporary conversation",
+        "clientDraftId": "Draft delivery ID",
+        "revision": "Recovery revision"
       },
       "message": {
         "text": "Message",
         "skill": "Skill",
         "fileIds": "Attachments",
-        "mode": "Send mode"
+        "mode": "Send mode",
+        "clientMessageId": "Message delivery ID"
       },
       "approval": {
         "decision": "Decision",

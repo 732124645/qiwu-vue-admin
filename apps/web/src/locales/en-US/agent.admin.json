@@ -39,7 +39,28 @@
         "vision": "Vision",
         "fast": "Fast",
         "contextWindow": "Context window",
-        "required": "Add at least one model"
+        "required": "Add at least one model",
+        "configure": "Rates and reasoning",
+        "pricingEnabled": "Configure credit rates",
+        "pricingConfigured": "Rates configured",
+        "pricingMissing": "Rates required",
+        "pricingHint": "Credits per million tokens. An explicit 0 is free; models without rates cannot be called.",
+        "inputCredits": "Input credits / million tokens",
+        "outputCredits": "Output credits / million tokens",
+        "cacheReadCredits": "Cache read credits / million tokens",
+        "cacheWriteCredits": "Cache write credits / million tokens",
+        "imageCredits": "Image credits when billable token usage is unavailable",
+        "cacheFallback": "Empty inherits the input rate",
+        "imageFallback": "Used only without billable tokens; never added to a token charge.",
+        "reasoningDefault": "Default reasoning",
+        "reasoningProvider": "Provider default",
+        "reasoningStyle": "Reasoning parameter style",
+        "reasoningStandard": "Standard compatible API",
+        "reasoningVllm": "vLLM on/off switch",
+        "reasoningHint": "This capability allows reasoning controls; unchecking it does not turn the model’s reasoning off.",
+        "vllmHint": "vLLM only toggles enable_thinking; low, medium and high do not represent different levels.",
+        "standardOffHint": "Off sends none to the standard API; configure it only when the model supports it.",
+        "reasoningOn": "On"
       },
       "search": {
         "entity": "search provider",
@@ -85,7 +106,8 @@
           "unknown": "Not synced",
           "ok": "OK",
           "error": "Failed"
-        }
+        },
+        "trustConfirm": "Trust tool “{tool}” on server “{server}” to run automatically without approval each time? External read-only hints do not prove safety, and tools without that hint may modify data. This does not change confirmation requirements for local tools."
       },
       "tool": {
         "name": "Tool",
@@ -114,7 +136,9 @@
         "trustModeHint": "When off, the chat page no longer offers this approval mode",
         "instructions": "Platform instructions",
         "instructionsHint": "Put first into every system prompt, for every tenant.",
-        "limits": "Limits"
+        "limits": "Limits",
+        "creditsHint": "Credit budgets allow up to 6 decimals; 0 is unlimited. Checks use recorded spend before each call; in-flight calls can cross the threshold. Steps, time and concurrency must stay positive.",
+        "creditInvalid": "Enter a nonnegative credit amount with at most 6 decimal places."
       },
       "limit": {
         "turnSteps": "Steps per turn",
@@ -122,7 +146,10 @@
         "turnTokens": "Tokens per turn",
         "userDailyTokens": "Tokens per user per day",
         "tenantDailyTokens": "Tokens per tenant per day",
-        "userConcurrentTurns": "Turns running at once per user"
+        "userConcurrentTurns": "Turns running at once per user",
+        "turnCredits": "Credits per turn",
+        "userDailyCredits": "Daily credits per user",
+        "tenantDailyCredits": "Daily credits per tenant"
       },
       "skill": {
         "entity": "skill",
@@ -163,7 +190,30 @@
         "completionTokens": "Output tokens",
         "totalTokens": "Total tokens",
         "total": "Total",
-        "chart": "Agent token usage"
+        "chart": "Credit usage",
+        "credits": "Recorded credits",
+        "cacheReadTokens": "Cache read tokens",
+        "cacheWriteTokens": "Cache write tokens",
+        "reasoningTokens": "Reasoning tokens",
+        "unpricedCalls": "Unpriced calls",
+        "unreportedCalls": "Calls without reported usage",
+        "legacyCalls": "Legacy calls without details",
+        "unknown": "Unknown",
+        "entries": "Call details",
+        "entry": "Raw usage and rate snapshot",
+        "pricingSnapshot": "Rate snapshot",
+        "rawUsage": "Provider-reported usage",
+        "unpriced": "Unpriced",
+        "unreported": "Usage was not reported by the provider",
+        "legacy": "This legacy record lacks details or rates. Historical credits are not reconstructed.",
+        "hint": "Recorded credits exclude unpriced calls. Unknown usage is not zero; legacy and unreported calls are marked separately.",
+        "invocationStatus": "Invocation status",
+        "state": {
+          "pending": "In progress",
+          "complete": "Complete",
+          "unknown": "Outcome unknown"
+        },
+        "pendingHint": "The call is in progress and final usage has not arrived. It enters the aggregate after completion or interruption is recorded."
       },
       "diag": {
         "queue": "Turn queue",

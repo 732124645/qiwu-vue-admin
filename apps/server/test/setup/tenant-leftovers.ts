@@ -3,6 +3,9 @@
 // packages: a file that left a tenant of its own behind (test/setup/tenants.ts) fails here, not the
 // unrelated file that would trip over it later.
 import { createConnection } from 'mysql2/promise'
+import { assertMigrationRunSafe } from './migration-run-safety.js'
+
+assertMigrationRunSafe()
 
 // read now: a spec may change process.env while it runs
 const db = {

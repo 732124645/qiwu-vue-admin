@@ -27,18 +27,16 @@
             "delay" : 0
         },
         /* 模块配置 */
-        "modules" : { "Geolocation" : {} },
+        "modules" : {},
         /* 应用发布信息 */
         "distribute" : {
             /* android打包配置 */
             "android" : {
-                /* only network state, camera and foreground location; docs/mobile.md "App 权限" */
+                /* only network state and camera; docs/mobile.md "App 权限" */
                 "permissions" : [
                     "<uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\"/>",
                     "<uses-permission android:name=\"android.permission.ACCESS_WIFI_STATE\"/>",
                     "<uses-permission android:name=\"android.permission.CAMERA\"/>",
-                    "<uses-permission android:name=\"android.permission.ACCESS_COARSE_LOCATION\"/>",
-                    "<uses-permission android:name=\"android.permission.ACCESS_FINE_LOCATION\"/>",
                     "<uses-feature android:name=\"android.hardware.camera\"/>"
                 ]
             },
@@ -47,7 +45,6 @@
                string for each, or the call crashes and review rejects the build; docs/mobile.md "发布清单" */
             "ios" : {
                 "privacyDescription" : {
-                    "NSLocationWhenInUseUsageDescription" : "仅在你点击签到或签退时获取一次位置，用于核验办公地点与定位精度，不后台追踪",
                     "NSCameraUsageDescription" : "用于拍照更换头像或上传附件图片",
                     "NSPhotoLibraryUsageDescription" : "用于从相册选择图片更换头像或上传附件"
                 }
@@ -109,8 +106,6 @@
         "setting" : {
             "urlCheck" : false
         },
-        "requiredPrivateInfos": ["getLocation"],
-        "permission": { "scope.userLocation": { "desc": "仅在你点击打卡时获取一次位置以核验办公地点，不后台追踪" } },
         "usingComponents" : true
     },
     "uniStatistics": {  

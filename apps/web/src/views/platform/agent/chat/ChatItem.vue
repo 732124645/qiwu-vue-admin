@@ -8,7 +8,8 @@ import IconButton from '@/core/components/IconButton.vue'
 import { toastRest } from '@/core/composables/use-crud'
 import { Icon } from '@/core/icons'
 import ApprovalCard from './ApprovalCard.vue'
-import { MarkdownText } from './markdown'
+import { MarkdownText, safeMarkdownHref } from './markdown'
+import { saveBlob } from '@/core/request/http'
 import OutputCard from './OutputCard.vue'
 import QuestionCard from './QuestionCard.vue'
 import { show, type ChatRow } from './thread-state'
@@ -27,6 +28,7 @@ const {
   canEdit = false,
   last = false,
   readonly = false,
+  canInspect = true,
   trust = true,
   canRunPlan = false,
   runningPlan = false,
@@ -39,6 +41,8 @@ const {
   last?: boolean
   /** 分享的只读快照 */
   readonly?: boolean
+  /** 已位于只读详情时不重复提供没有接收方的展开按钮。 */
+  canInspect?: boolean
   /** 审批卡是否提供“本会话内同意” */
   trust?: boolean
   /** 计划模式下最后一条已完成的回答：可执行此计划 */
@@ -51,8 +55,19 @@ const emit = defineEmits<{
   suggest: [text: string]
   changed: []
   runPlan: []
+  inspect: [itemId: number]
+  inspectChild: [threadId: number]
 }>()
 const { t, te } = useI18n()
+const raw = ref(false)
+/** 下载原始 Markdown，不从渲染后的 HTML 或高亮节点还原。 */
+function downloadMarkdown() {
+  if (row.kind !== 'item' || row.item.kind !== 'assistant') return
+  saveBlob(
+    new Blob([row.item.payload.text], { type: 'text/markdown;charset=utf-8' }),
+    `message-${row.item.id}.md`,
+  )
+}
 
 /** 错误的显示文字：本页认识的错误码用本页翻译，否则用服务端按发起人语言写好的说明，从不只显示错误码。 */
 function errorText(err: { code: string; message: string }) {
@@ -183,6 +198,17 @@ async function rate(itemId: number, value: 1 | -1) {
         >
           {{ t('agent.chat.queued') }}
         </el-tag>
+        <el-tag
+          v-else-if="
+            row.item.payload.mode === 'queue' &&
+            row.item.status === 'expired' &&
+            row.item.turnId === null
+          "
+          size="small"
+          type="info"
+          class="agent-msg__queued-expired"
+          >{{ t('agent.chat.composer.queueExpired') }}</el-tag
+        >
       </div>
       <div class="agent-msg__actions">
         <IconButton
@@ -207,7 +233,13 @@ async function rate(itemId: number, value: 1 | -1) {
 
     <div v-else-if="row.item.kind === 'assistant'" class="agent-msg agent-msg--assistant">
       <div class="agent-msg__answer">
-        <MarkdownText v-if="row.item.payload.text" :text="row.item.payload.text" />
+        <p v-if="row.item.status === 'failed'" class="agent-card__meta agent-msg__interrupted">
+          {{ t('agent.chat.message.interrupted') }}
+        </p>
+        <template v-if="row.item.payload.text">
+          <pre v-if="raw" class="agent-msg__raw">{{ row.item.payload.text }}</pre>
+          <MarkdownText v-else :text="row.item.payload.text" />
+        </template>
         <p v-else-if="row.item.status === 'running'" class="agent-card__meta">
           {{ t('agent.chat.thinking') }}
         </p>
@@ -218,8 +250,8 @@ async function rate(itemId: number, value: 1 | -1) {
         >
           <li v-for="(c, k) in row.item.payload.citations" :key="k">
             <a
-              v-if="/^https?:/i.test(c.url)"
-              :href="c.url"
+              v-if="safeMarkdownHref(c.url)"
+              :href="safeMarkdownHref(c.url)!"
               target="_blank"
               rel="noopener noreferrer"
               >{{ c.title || c.url }}</a
@@ -227,6 +259,25 @@ async function rate(itemId: number, value: 1 | -1) {
             <span v-else>{{ c.title || c.url }}</span>
           </li>
         </ol>
+        <div v-if="row.item.payload.text" class="agent-msg__actions agent-msg__reading">
+          <IconButton
+            icon="lucide:code"
+            :label="t(raw ? 'agent.chat.markdown.rendered' : 'agent.chat.markdown.source')"
+            :aria-pressed="raw"
+            @click="raw = !raw"
+          />
+          <IconButton
+            icon="lucide:download"
+            :label="t('agent.chat.markdown.download')"
+            @click="downloadMarkdown"
+          />
+          <IconButton
+            v-if="canInspect"
+            icon="lucide:expand"
+            :label="t('agent.chat.markdown.expand')"
+            @click="emit('inspect', row.item.id)"
+          />
+        </div>
         <div v-if="row.item.status !== 'running'" class="agent-msg__actions">
           <IconButton
             icon="lucide:copy"
@@ -293,6 +344,9 @@ async function rate(itemId: number, value: 1 | -1) {
               : 'agent.chat.thought.title',
           )
         }}
+        <span v-if="row.item.status === 'failed'" class="agent-card__meta agent-msg__interrupted">
+          · {{ t('agent.chat.message.interrupted') }}</span
+        >
       </summary>
       <p class="agent-msg__text">{{ row.item.payload.text }}</p>
     </details>
@@ -330,15 +384,24 @@ async function rate(itemId: number, value: 1 | -1) {
       </ul>
     </section>
 
+    <template v-else-if="row.item.kind === 'report'">
+      <div v-if="canInspect" class="agent-msg__actions agent-msg__reading">
+        <IconButton
+          icon="lucide:expand"
+          :label="t('agent.chat.markdown.expand')"
+          @click="emit('inspect', row.item.id)"
+        />
+      </div>
+      <OutputCard :item="row.item" :readonly />
+    </template>
+
     <OutputCard
       v-else-if="
-        row.item.kind === 'chart' ||
-        row.item.kind === 'image' ||
-        row.item.kind === 'report' ||
-        row.item.kind === 'subagent'
+        row.item.kind === 'chart' || row.item.kind === 'image' || row.item.kind === 'subagent'
       "
       :item="row.item"
       :readonly
+      @inspect-child="emit('inspectChild', $event)"
     />
 
     <el-alert
@@ -355,3 +418,29 @@ async function rate(itemId: number, value: 1 | -1) {
     }}</pre>
   </template>
 </template>
+
+<style scoped>
+.agent-msg__raw {
+  max-width: 100%;
+  margin: 0 0 8px;
+  padding: 12px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--qw-text);
+  background: var(--qw-surface-2);
+  border-radius: var(--qw-radius-sm);
+}
+.agent-msg__reading {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin-top: 8px;
+}
+:deep(.qw-md__task) {
+  list-style: none;
+}
+:deep(.qw-md__task > input) {
+  margin: 0 6px 0 0;
+}
+</style>

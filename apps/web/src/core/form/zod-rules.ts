@@ -1,31 +1,7 @@
 import { watch, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { FormInstance, FormItemRule } from 'element-plus'
-import {
-  fieldDomainOf,
-  fieldLabelKeys,
-  mergeLocaleFile,
-  type Messages,
-  type ObjectSchema,
-  validationMessage,
-} from '@qiwu/shared'
-
-/**
- * The shared messages (packages/shared/src/i18n/<lang>: `validation.*`, `field.*` incl. the module
- * fragments in `modules/`, `seed.*`), deep-merged per locale, to merge into vue-i18n.
- */
-export const sharedMessages: Record<string, Messages> = {}
-const sharedFiles = import.meta.glob<Messages>(
-  '../../../../../packages/shared/src/i18n/*/**/*.json',
-  {
-    eager: true,
-    import: 'default',
-  },
-)
-for (const [path, content] of Object.entries(sharedFiles)) {
-  const lang = path.match(/\/i18n\/([^/]+)\//)?.[1] ?? ''
-  mergeLocaleFile((sharedMessages[lang] ??= {}), path, content)
-}
+import { fieldDomainOf, fieldLabelKeys, type ObjectSchema, validationMessage } from '@qiwu/shared'
 
 /** The vue-i18n functions the rules need (`useI18n()` or `i18n.global`). */
 export interface FormI18n {

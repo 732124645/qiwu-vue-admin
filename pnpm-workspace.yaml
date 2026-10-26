@@ -29,6 +29,8 @@ minimumReleaseAgeExclude: []
 
 # install scripts are opt-in (pnpm 11 strictDepBuilds); every dependency change updates this map
 allowBuilds:
+  # Markdown is parsed into safe Vue text nodes; this package has no installation build step.
+  marked: false
   # install-time usage telemetry (via @nestjs/swagger -> swagger-ui-dist); never allowed to run
   '@scarf/scarf': false
   # geo-conditional "call for peace" console message (via @wangeditor-next/core -> event-emitter -> d);

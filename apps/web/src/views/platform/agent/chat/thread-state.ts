@@ -1,7 +1,9 @@
 import dayjs from 'dayjs'
+import { watch } from 'vue'
 import type { AgentEvent, AgentItemVo, AgentThreadVo, AgentTurnVo } from '@qiwu/shared'
+import { accessToken } from '@/core/request/http'
 
-// 对话页的纯逻辑：条目合并、实时事件、断线补齐的起点、会话分组、技能与斜杠命令的解析。
+// 对话页的条目合并、会话内状态、断线补齐、技能与斜杠命令解析。
 
 type Item<K extends AgentItemVo['kind']> = Extract<AgentItemVo, { kind: K }>
 
@@ -13,10 +15,22 @@ export function mergeItems(shown: AgentItemVo[], incoming: AgentItemVo[]): Agent
   const byId = new Map(shown.map((i) => [i.id, i]))
   for (const i of incoming) {
     const local = byId.get(i.id)
+    if (local?.revision !== undefined && (i.revision === undefined || i.revision < local.revision))
+      continue
+    if (
+      local &&
+      (local.kind === 'assistant' || local.kind === 'reasoning') &&
+      local.kind === i.kind &&
+      local.status !== 'running' &&
+      i.status === 'running' &&
+      (i.revision ?? 0) <= (local.revision ?? 0)
+    )
+      continue
     const streaming =
       local &&
       (local.kind === 'assistant' || local.kind === 'reasoning') &&
       local.kind === i.kind &&
+      local.revision === i.revision &&
       local.status === 'running' &&
       i.status === 'running' &&
       local.payload.text.length > (i.payload as { text: string }).text.length
@@ -40,6 +54,34 @@ export function turnOver(item: AgentItemVo, turn: AgentTurnVo | null): boolean {
   return item.turnId !== turn.id || (turn.status !== 'running' && turn.status !== 'waiting')
 }
 
+/** 同一轮的已结束状态不被旧补拉或迟到事件推回运行；新一轮仍按递增 ID 接续。 */
+export function mergeTurn(
+  shown: AgentTurnVo | null,
+  incoming: AgentTurnVo | null,
+): AgentTurnVo | null {
+  if (!shown || !incoming) return incoming
+  if (incoming.id < shown.id) return shown
+  if (
+    incoming.id === shown.id &&
+    !['running', 'waiting'].includes(shown.status) &&
+    ['running', 'waiting'].includes(incoming.status)
+  )
+    return shown
+  return incoming
+}
+
+/** 同一线程的旧快照不能清掉更新一代的操作风险；跨线程不继承其他会话的标记。 */
+export function mergeThread(shown: AgentThreadVo | null, incoming: AgentThreadVo): AgentThreadVo {
+  return shown?.id === incoming.id &&
+    (shown.recoveryRevision ?? 0) > (incoming.recoveryRevision ?? 0)
+    ? {
+        ...incoming,
+        recoveryRequired: shown.recoveryRequired,
+        recoveryRevision: shown.recoveryRevision,
+      }
+    : incoming
+}
+
 /**
  * 把一条 `item` / `delta` 事件应用到条目列表；`turn` 事件由调用方处理。返回新列表，
  * 或 `null`：增量文本指向一条还没见过的条目（漏了事件），调用方应从接口补齐。
@@ -53,6 +95,31 @@ export function applyItemEvent(
   const target = items[at]
   // 增量文本只流进回答与推理摘要
   if (!target || (target.kind !== 'assistant' && target.kind !== 'reasoning')) return null
+  if (ev.revision !== undefined || ev.offset !== undefined) {
+    if (
+      !Number.isSafeInteger(ev.revision) ||
+      !Number.isSafeInteger(ev.offset) ||
+      ev.revision! < 0 ||
+      ev.offset! < 0
+    )
+      return null
+    const revision = target.revision ?? 0
+    if (ev.revision! < revision) return items
+    if (target.status !== 'running') return ev.revision! <= revision ? items : null
+    const text = target.payload.text
+    if (ev.offset! > text.length) return null
+    const overlap = Math.min(text.length - ev.offset!, ev.delta.length)
+    if (text.slice(ev.offset!, ev.offset! + overlap) !== ev.delta.slice(0, overlap)) return null
+    const next = items.slice()
+    next[at] = {
+      ...target,
+      revision: Math.max(revision, ev.revision!),
+      payload: { ...target.payload, text: text + ev.delta.slice(overlap) },
+    }
+    return next
+  }
+  // 新协议条目不能再混入无位置的旧增量，否则重复投递会把同一段追加两次。
+  if (target.revision !== undefined) return null
   const next = items.slice()
   next[at] = { ...target, payload: { ...target.payload, text: target.payload.text + ev.delta } }
   return next
@@ -219,41 +286,116 @@ export function formFields(schema: Record<string, unknown>): FormField[] {
 const HISTORY_MAX = 100
 /** 一条历史最长的字符数（约 2 KB）：更长的消息不记，翻出来半截也没法用 */
 const HISTORY_ENTRY_MAX = 2000
-const historyKey = (userId: number) => `qw.agent.history.${userId}`
+const historyKey = (userId: number, tenantId = 1) => `${tenantId}:${userId}`
+const inputHistory = new Map<string, string[]>()
+
+/** 升级后移除旧版本的明文输入历史；新历史仅留当前页面运行内存。 */
+export function clearHistory(userId?: number, tenantId = 1): void {
+  if (userId === undefined) inputHistory.clear()
+  else inputHistory.delete(historyKey(userId, tenantId))
+  for (const name of ['sessionStorage', 'localStorage'] as const)
+    try {
+      const storage = globalThis[name]
+      for (let at = storage.length - 1; at >= 0; at--) {
+        const key = storage.key(at)
+        if (key?.startsWith('qw.agent.history.')) storage.removeItem(key)
+      }
+    } catch {
+      // 隐私模式可能不允许访问存储，内存历史仍可正常使用。
+    }
+}
 
 /**
  * 本人在这个标签页里发过的消息（新的在后），输入框 ↑/↓ 与 Ctrl+R 翻看；存储不可用时为空。存在
- * sessionStorage 里、键带用户 id：关掉标签页就没了，同一台电脑上换人登录也看不到上一个人发过什么。
+ * 页面运行内存里，按用户与租户隔离；不再把业务正文写入浏览器存储。
  */
-export function loadHistory(userId: number): string[] {
+export function loadHistory(userId: number, tenantId = 1): string[] {
   if (!userId) return []
-  try {
-    const list: unknown = JSON.parse(sessionStorage.getItem(historyKey(userId)) ?? '[]')
-    return Array.isArray(list) ? list.filter((x): x is string => typeof x === 'string') : []
-  } catch {
-    return []
-  }
+  return [...(inputHistory.get(historyKey(userId, tenantId)) ?? [])]
 }
 
 /**
  * 记下一条发出的消息（去掉与它相同的旧记录，最多 100 条）；临时会话里发的、太长的、没有登录用户时不记；
- * 存储不可用时忽略。返回记下之后的历史。
+ * 返回记下之后的内存历史。
  */
 export function pushHistory(
   userId: number,
   text: string,
-  opts: { temporary?: boolean } = {},
+  opts: { temporary?: boolean; tenantId?: number } = {},
 ): string[] {
-  const before = loadHistory(userId)
+  const before = loadHistory(userId, opts.tenantId)
   if (!userId || opts.temporary || text.length > HISTORY_ENTRY_MAX) return before
   const list = [...before.filter((x) => x !== text), text].slice(-HISTORY_MAX)
-  try {
-    sessionStorage.setItem(historyKey(userId), JSON.stringify(list))
-  } catch {
-    // 存储被禁用：本页仍可用，只是不记历史
-  }
+  inputHistory.set(historyKey(userId, opts.tenantId), list)
   return list
 }
+
+export interface PendingDeliveryIds {
+  clientDraftId: string
+  clientMessageId: string
+  threadId: number | null
+}
+const deliveryKey = (actor: string) => `qw.agent.delivery.${actor}`
+const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/** 仅存少量非内容标识，刷新后先查询回执，绝不恢复或自动重发明文消息。 */
+export function saveDelivery(actor: string, pending: PendingDeliveryIds | null): boolean {
+  try {
+    if (!pending) sessionStorage.removeItem(deliveryKey(actor))
+    else
+      sessionStorage.setItem(
+        deliveryKey(actor),
+        JSON.stringify({
+          clientDraftId: pending.clientDraftId,
+          clientMessageId: pending.clientMessageId,
+          threadId: pending.threadId,
+        }),
+      )
+    return true
+  } catch {
+    // 存储禁用时只保证当前挂载期间的身份不变，不能伪称刷新后仍能恢复。
+  }
+  return false
+}
+
+export function loadDelivery(actor: string): PendingDeliveryIds | null {
+  try {
+    const value = JSON.parse(sessionStorage.getItem(deliveryKey(actor)) ?? 'null')
+    if (
+      value &&
+      uuid.test(value.clientDraftId) &&
+      uuid.test(value.clientMessageId) &&
+      (value.threadId === null || (Number.isSafeInteger(value.threadId) && value.threadId > 0))
+    )
+      return {
+        clientDraftId: value.clientDraftId,
+        clientMessageId: value.clientMessageId,
+        threadId: value.threadId,
+      }
+  } catch {
+    // 损坏或旧版本标识不能变成一次新的写入。
+  }
+  saveDelivery(actor, null)
+  return null
+}
+
+// 即使聊天窗口已卸载，退出登录也清掉内存历史和本标签页回执标识。
+watch(
+  accessToken,
+  (token) => {
+    if (token) return
+    clearHistory()
+    try {
+      for (let at = sessionStorage.length - 1; at >= 0; at--) {
+        const key = sessionStorage.key(at)
+        if (key?.startsWith('qw.agent.delivery.')) sessionStorage.removeItem(key)
+      }
+    } catch {
+      /* 存储不可用时不读取任何旧数据。 */
+    }
+  },
+  { flush: 'sync' },
+)
 
 /** 整个输入框只有 `/前缀` 时，列出匹配的斜杠命令；否则为 null。 */
 export function slashMatches(text: string): SlashCommand[] | null {

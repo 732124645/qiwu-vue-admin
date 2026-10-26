@@ -1,4 +1,3 @@
-import { seedOaAttendance } from './oa-attendance.seed.js'
 import { seedOaSeal } from './oa-seal.seed.js'
 import { seedOaGeneric } from './oa-generic.seed.js'
 import { seedOaExpense } from './oa-expense.seed.js'
@@ -21,5 +20,4 @@ export const PROJECT_TENANT_SEEDS: TenantSeed[] = [
   seedOaExpense,
   seedOaSeal,
   seedOaGeneric,
-  seedOaAttendance,
 ]

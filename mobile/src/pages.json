@@ -123,10 +123,6 @@
         {
           "path": "oa-seal/view",
           "style": {}
-        },
-        {
-          "path": "oa-clock/index",
-          "style": {}
         }
       ]
     },

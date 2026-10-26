@@ -4,6 +4,35 @@
 
 All notable product changes are recorded here in Keep a Changelog style. The initial release below summarizes the delivered features. Planned work is identified explicitly.
 
+## [1.11.0] - 2026-10-27
+
+### Added
+
+- Per-model credit rates for ordinary input, output, cache reads and cache writes, with separate per-turn, user-daily and tenant-daily budgets. Zero explicitly means unlimited. Usage retains provider, exact model identifier, input/output/cache/reasoning details and the original rate snapshot; missing usage stays unknown. Pending, completed and interrupted calls are distinguished in the ledger.
+- Durable draft and message acceptance receipts. An uncertain response is checked by its stable identifier; reconnecting does not automatically resend the message. Saved streamed prefixes carry revisions and offsets so reconnects can fill gaps without duplicating text.
+- Recovery barriers for uncertain writes and image generation, with an inbox entry even for short temporary tasks. The owner must check the actual effect before allowing future actions; active local work must end first. Affected automations stop and lose pre-approval. Existing queued messages and unknown operations are not automatically replayed.
+
+### Changed
+
+- The assistant opens from the floating button beside the current business page, with collapsible or expanded conversation space, readable subtask progress and a detail view. Existing conversation links remain available.
+- Answers support richer safe Markdown, code copying and wrapping, raw-text viewing, expanded reading and Markdown download. Model-provided HTML remains text and remote images do not load automatically.
+- Development rebuilds report changed files, elapsed time and restart results. Shared-package output is coordinated so a single change does not cause repeated backend restarts; failed compilation keeps the previous working server available. Locale edits preserve the current page.
+- Graceful shutdown pauses new work and saves interrupted state before closing connections within a bounded wait. Forced process exits are detected through persistent invocation records and leases; reported usage and parent/subtask totals are settled once.
+
+### Fixed
+
+- Fully masked audit routes now suppress complete payloads, URL queries and free-form error text. Static data-scope checks also verify delegated locking paths and reject ambiguous service names.
+
+- Restored page state and model selections survive asynchronous configuration loading without being replaced by late default options.
+- Existing reported issues around development reloads and assistant controls are covered by the corresponding integration and page checks.
+
+### Upgrade notes and limits
+
+- Back up the database and keep Redis and `APP_SECRET`. Run migrations and seeds; never reset an existing database to upgrade. Configure rates for existing models before calling them; old Token budgets are retained only for history and are not converted to credits. Budgets check recorded spending before each call, so in-flight requests can cross a threshold.
+- On the first upgrade from a release without recovery checkpoints, finish old tasks or manually reconcile their effects before stopping every old worker. Previously unsaved output and invocation starts cannot be reconstructed. Do not mix old workers with the new recovery barriers or roll back to code that ignores them.
+- Recovery restores saved conversation and task state, not an upstream token stream. An interrupted model step may need regeneration and additional actual upstream charges. Browser storage keeps isolated delivery identifiers, not message bodies; a full refresh does not preserve an unsent text draft. Non-idempotent external operations still require verification in the external system.
+- The public distribution now contains basic office requests and the existing approval engine only. Native attendance and office-application assistant tools were present in v1.10.0 and its history is preserved; they are outside the current public distribution. Its upgrade migration disables their old menus, grants and retention jobs while preserving historical business rows. Existing users must review their own dependencies and retain backups before upgrading.
+
 ## [1.10.0] - 2026-10-23
 
 ### Added

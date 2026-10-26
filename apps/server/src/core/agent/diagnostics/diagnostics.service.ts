@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { InjectDataSource } from '@nestjs/typeorm'
-import { type AgentDiagnosticsVo, Err } from '@qiwu/shared'
+import { type AgentDiagnosticsVo, agentModelPricing, Err } from '@qiwu/shared'
 import { DataSource, MoreThanOrEqual } from 'typeorm'
 import { allTenants } from '../../context/tenant.js'
 import { BizError } from '../../http/biz-error.js'
@@ -16,6 +16,8 @@ import {
 import { AGENT_TURN_QUEUE } from '../runtime/turn-queue.js'
 import { type AgentSearchKind, SEARCH_ENDPOINTS, WebSearch } from '../web/web-search.js'
 import { AgentSweepStats } from './sweep-stats.js'
+import type { Principal } from '../../auth/principal.js'
+import { UsageBook } from '../runtime/usage-book.js'
 
 /** The answer of a connectivity test: how long it took, and a short reason code when it failed. */
 export interface AgentProbeResult {
@@ -72,6 +74,7 @@ export class AgentDiagnosticsService {
     private readonly connector: McpConnector,
     private readonly queues: QueueService,
     private readonly sweeps: AgentSweepStats,
+    private readonly usage: UsageBook,
   ) {}
 
   /** 诊断概况：只读，一次请求汇总配置、队列、轮次计数、最近失败与清理统计。 */
@@ -179,12 +182,17 @@ export class AgentDiagnosticsService {
    * 测一个模型提供方（停用的也能测，便于启用前确认）：用它的第一个模型做一次极短的补全，不重试、
    * 有总超时。不存在 404。
    */
-  async testProvider(id: number): Promise<AgentProbeResult> {
+  async testProvider(id: number, p: Principal): Promise<AgentProbeResult> {
     const row = (await this.providers.rows()).find((r) => Number(r.id) === id)
     if (!row) throw new BizError(Err.NOT_FOUND)
+    const model = row.models[0]
+    if (!model) throw new BizError(Err.AGENT_NOT_CONFIGURED, { reason: 'no_model' })
+    if (!model.pricing) throw new BizError(Err.AGENT_PRICING_REQUIRED)
+    const pricing = agentModelPricing.safeParse(model.pricing)
+    if (!pricing.success) throw new BizError(Err.AGENT_CREDIT_CONFIG_INVALID)
+    const over = await this.usage.overDaily(p.userId)
+    if (over) throw new BizError(Err.AGENT_LIMIT, { which: over })
     return this.timed('provider', async () => {
-      const model = row.models[0]
-      if (!model) throw new BizError(Err.AGENT_NOT_CONFIGURED, { reason: 'no_model' })
       const chat = this.registry.connect({
         baseUrl: row.baseUrl,
         apiKey: this.providers.openKey(row),
@@ -192,12 +200,25 @@ export class AgentDiagnosticsService {
         timeoutMs: this.timeoutMs,
         retries: 0,
       })
-      await chat.complete({
+      const target = {
+        providerId: Number(row.id),
+        providerName: row.name,
         model: model.id,
-        messages: [{ role: 'user', content: 'ping' }],
-        maxTokens: 8,
-        signal: AbortSignal.timeout(this.timeoutMs),
-      })
+        pricing: pricing.data,
+      }
+      await this.usage.invoke(
+        p.userId,
+        target,
+        {},
+        (receipt) =>
+          chat.complete({
+            model: model.id,
+            messages: [{ role: 'user', content: 'ping' }],
+            maxTokens: 8,
+            ...receipt,
+          }),
+        AbortSignal.timeout(this.timeoutMs),
+      )
     })
   }
 

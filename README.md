@@ -29,7 +29,7 @@
 - **工作流**：树形与 BPMN 流程设计、审批中心、业务表单与动态表单。
 - **常用能力**：Excel 导入导出、本地与 S3 存储、定时任务、基于 Redis 的任务队列、站内信、邮件与短信、OAuth2 / SSO、Socket.IO 推送、中英文界面。
 - **按开关启用**：[多租户](docs/multi-tenancy.md)、[微信公众号管理](docs/wxoa.md)、[MCP 智能体接入](docs/mcp.md)，默认关闭，关闭时模块不加载。
-- **后台智能体**：「智能助手」对话页，接入兼容 OpenAI 的模型（DeepSeek、通义千问、Kimi、智谱、Ollama 等），可联网搜索、调用外部 MCP 与技能，改数据前逐条人工确认，可对列表批量执行（[后台智能体](docs/agent.md)，默认关闭）。
+- **后台智能体**：业务页右侧悬浮聊天面板，支持子任务进度、断线恢复与按模型积分限额，接入兼容 OpenAI 的模型（DeepSeek、通义千问、Kimi、智谱、Ollama 等），可联网搜索、调用外部 MCP 与技能，改数据前逐条人工确认，可对列表批量执行（[后台智能体](docs/agent.md)，默认关闭）。
 - **移动端**：可选的 uni-app 员工端，可出 H5、App 与微信小程序；只做 PC 可整个删除。
 - **工程化**：`pnpm verify` 静态检查与 `pnpm ci:local` 完整本地闸门（单元、端到端、Playwright、冒烟）；Redis 共享限流与多服务实例支持，部署边界见 [多实例部署](docs/scale-out.md)。
 
@@ -96,21 +96,21 @@ pnpm.cmd dev
 
 教程与功能介绍见文档站 [qiwuadmin.com](https://qiwuadmin.com)；下表是随代码一起版本化的技术参考。
 
-| 入口                                                                 | 内容                                                 |
-| -------------------------------------------------------------------- | ---------------------------------------------------- |
-| [设计说明](docs/design-notes.md)                                     | 分层、会话、权限与公共契约                           |
-| [升级模板版本](docs/upgrade.md)                                      | 项目合并模板新版本的步骤、常见冲突与合并后检查       |
-| [部署](docs/deploy.md)                                               | 构建产物、nginx、CSP、文件目录、演示模式与可选 PM2   |
-| [代码生成](docs/codegen.md) / [黄金样板](docs/codegen-golden.md)     | 项目域与 CRUD 约定                                   |
-| [实时推送](docs/realtime.md) / [多实例部署](docs/scale-out.md)       | 推送、共享状态与扩容前置条件                         |
-| [任务队列](docs/queue.md)                                            | 后台任务、重试、租户规则与队列监控                   |
-| [OAuth2](docs/oauth2.md)                                             | 第三方接入与 SSO                                     |
-| [多租户](docs/multi-tenancy.md)                                      | 开关、数据隔离与租户感知的项目代码                   |
-| [MCP](docs/mcp.md) / [微信公众号](docs/wxoa.md)                      | 智能体接入与公众号管理（均默认关闭）                 |
-| [后台智能体](docs/agent.md)                                          | 智能助手对话页、模型与联网配置、安全模型（默认关闭） |
-| [BPMN](docs/workflow-bpmn.md) / [流程超时](docs/workflow-timeout.md) | 流程设计与处理边界                                   |
-| [移动端](docs/mobile.md)                                             | uni-app 员工客户端与「只要 PC」删除步骤              |
-| [用 AI 开发](docs/ai.md)                                             | AI 编程工具的规则入口、项目规则、配方与完成线        |
+| 入口                                                                 | 内容                                                           |
+| -------------------------------------------------------------------- | -------------------------------------------------------------- |
+| [设计说明](docs/design-notes.md)                                     | 分层、会话、权限与公共契约                                     |
+| [升级模板版本](docs/upgrade.md)                                      | 项目合并模板新版本的步骤、常见冲突与合并后检查                 |
+| [部署](docs/deploy.md)                                               | 构建产物、nginx、CSP、文件目录、演示模式与可选 PM2             |
+| [代码生成](docs/codegen.md) / [黄金样板](docs/codegen-golden.md)     | 项目域与 CRUD 约定                                             |
+| [实时推送](docs/realtime.md) / [多实例部署](docs/scale-out.md)       | 推送、共享状态与扩容前置条件                                   |
+| [任务队列](docs/queue.md)                                            | 后台任务、重试、租户规则与队列监控                             |
+| [OAuth2](docs/oauth2.md)                                             | 第三方接入与 SSO                                               |
+| [多租户](docs/multi-tenancy.md)                                      | 开关、数据隔离与租户感知的项目代码                             |
+| [MCP](docs/mcp.md) / [微信公众号](docs/wxoa.md)                      | 智能体接入与公众号管理（均默认关闭）                           |
+| [后台智能体](docs/agent.md)                                          | 悬浮聊天、恢复与积分预算、模型与联网配置、安全模型（默认关闭） |
+| [BPMN](docs/workflow-bpmn.md) / [流程超时](docs/workflow-timeout.md) | 流程设计与处理边界                                             |
+| [移动端](docs/mobile.md)                                             | uni-app 员工客户端与「只要 PC」删除步骤                        |
+| [用 AI 开发](docs/ai.md)                                             | AI 编程工具的规则入口、项目规则、配方与完成线                  |
 
 `apps/server` 是后端，`apps/web` 是 Web，`packages/shared` 是共享 schema、类型与 i18n；`mobile/` 是独立于根 workspace 的可选移动端，PC 项目可按移动端文档删除。业务代码放项目域目录，保留 `@qiwu/*` 包 scope，不需要全仓替换模板内部命名。
 

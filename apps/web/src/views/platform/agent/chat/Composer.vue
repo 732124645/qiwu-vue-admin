@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import {
@@ -16,6 +16,7 @@ import { useAuthStore } from '@/core/stores/auth'
 import { comboOf, DEFAULT_SHORTCUTS } from './shortcuts'
 import {
   loadHistory,
+  clearHistory,
   mentionedSkill,
   mentionPrefix,
   pushHistory,
@@ -40,6 +41,8 @@ export interface ComposerMessage {
   skill?: string
   fileIds?: number[]
   mode?: 'steer' | 'queue'
+  /** 仅在页面内核对发送时的草稿，不随请求正文送到服务端。 */
+  draftRevision?: number
 }
 
 /**
@@ -129,8 +132,26 @@ function toggleFast() {
     modelKey.value = `${f.providerId}|${f.id}`
   }
 }
+const reasoningChoices = computed(() =>
+  current.value?.reasoningStyle === 'vllm' ? (['off', 'medium'] as const) : AGENT_REASONING,
+)
+const reasoningLabel = (value: string) =>
+  current.value?.reasoningStyle === 'vllm' && value !== 'off'
+    ? t('agent.admin.model.reasoningOn')
+    : t(`agent.chat.reasoning.${value}`)
+const defaultReasoningLabel = computed(() => {
+  const value = current.value?.reasoningDefault ?? 'provider'
+  return t('agent.chat.composer.reasoningDefault', {
+    value: value === 'provider' ? t('agent.admin.model.reasoningProvider') : reasoningLabel(value),
+  })
+})
 const reasoning = computed({
-  get: () => settings.value.reasoning,
+  get: () =>
+    current.value?.reasoningStyle === 'vllm' &&
+    settings.value.reasoning &&
+    settings.value.reasoning !== 'off'
+      ? ('medium' as const)
+      : settings.value.reasoning,
   set: (value) => set({ reasoning: value || null }),
 })
 const approvalMode = computed({
@@ -190,7 +211,7 @@ const suggestions = computed<Suggestion[]>(() => {
   }
   if (pickingHistory.value) {
     const q = text.value.trim().toLowerCase()
-    return loadHistory(auth.me?.user.id ?? 0)
+    return loadHistory(auth.me?.user.id ?? 0, auth.tenant?.id ?? 1)
       .reverse()
       .filter((h) => h.toLowerCase().includes(q))
       .map((h) => ({ kind: 'history', value: h, label: h, hint: '' }))
@@ -217,6 +238,21 @@ const suggestions = computed<Suggestion[]>(() => {
     .map((s) => ({ kind: 'skill', value: s.name, label: `$${s.name}`, hint: s.description }))
 })
 const listId = `agent-suggest-${Math.random().toString(36).slice(2, 8)}`
+const suggestionList = ref<HTMLUListElement>()
+
+// 只移动候选容器，不用 scrollIntoView，避免页面滚动或输入框丢失焦点。
+watch([suggestions, highlighted], async ([list], [previous]) => {
+  if (list !== previous) highlighted.value = 0
+  await nextTick()
+  const container = suggestionList.value
+  const selected = container?.querySelector<HTMLElement>('[aria-selected="true"]')
+  if (!container || !selected) return
+  const top = selected.offsetTop
+  const bottom = top + selected.offsetHeight
+  if (top < container.scrollTop) container.scrollTop = top
+  else if (bottom > container.scrollTop + container.clientHeight)
+    container.scrollTop = bottom - container.clientHeight
+})
 
 function syncCaret() {
   caret.value = box.value?.textarea?.selectionStart ?? text.value.length
@@ -287,7 +323,7 @@ let histPos = -1
 function browse(step: -1 | 1): boolean {
   if (histPos < 0) {
     if (step > 0 || text.value) return false
-    history = loadHistory(auth.me?.user.id ?? 0)
+    history = loadHistory(auth.me?.user.id ?? 0, auth.tenant?.id ?? 1)
     if (!history.length) return false
     histPos = history.length
   }
@@ -364,7 +400,55 @@ function onKeydown(e: KeyboardEvent) {
 // ---- 发送 ----
 const sendMode = ref<'steer' | 'queue'>('steer')
 const sending = ref(false)
+let sendEpoch = 0
+let draftRevision = 0
+watch(
+  () =>
+    JSON.stringify({
+      text: text.value,
+      files: files.value.map((file) => file.id),
+      settings: settings.value,
+      mode: sendMode.value,
+    }),
+  () => draftRevision++,
+  { flush: 'sync' },
+)
+watch(
+  () => `${auth.me?.user.id ?? 0}:${auth.tenant?.id ?? 1}`,
+  (_next, previous) => {
+    if (previous) {
+      sendEpoch++
+      sending.value = false
+      clearHistory()
+      text.value = ''
+      files.value = []
+      history = []
+      histPos = -1
+    } else clearHistory(0)
+  },
+  { immediate: true, flush: 'sync' },
+)
 const canSend = computed(() => !disabled && !sending.value && !!text.value.trim())
+function matchesDraft(msg?: ComposerMessage): boolean {
+  return (
+    !!msg &&
+    (msg.draftRevision === undefined || msg.draftRevision === draftRevision) &&
+    text.value.trim() === msg.text.trim() &&
+    JSON.stringify(files.value.map((file) => file.id)) === JSON.stringify(msg.fileIds ?? [])
+  )
+}
+
+/** 迟到的接收回执只清发送时未再编辑的草稿，不能清掉随后准备的新正文、模型或队列模式。 */
+function acknowledge(msg?: ComposerMessage) {
+  if (!msg) return
+  pushHistory(auth.me?.user.id ?? 0, msg.text, { temporary, tenantId: auth.tenant?.id ?? 1 })
+  histPos = -1
+  if (!matchesDraft(msg)) return
+  text.value = ''
+  files.value = []
+  showFiles.value = false
+  caret.value = 0
+}
 /** 发送：`$名称` 若是可用技能则一并带上；图片附件只给能看图的模型；请求成功后才清空。 */
 async function send() {
   if (!canSend.value) return
@@ -373,24 +457,20 @@ async function send() {
     return
   }
   const value = text.value.trim()
+  const epoch = sendEpoch
   sending.value = true
   try {
-    const msg: ComposerMessage = { text: value }
+    const msg: ComposerMessage = { text: value, draftRevision }
     const names = options?.skills.map((s) => s.name) ?? []
     const skill =
       skillOf(value, names) ?? mentionedSkill(value, t('agent.chat.mention.skill'), names)
     if (skill) msg.skill = skill
     if (files.value.length) msg.fileIds = files.value.map((f) => f.id)
     if (running) msg.mode = sendMode.value
-    if (!(await submit(msg))) return
-    pushHistory(auth.me?.user.id ?? 0, value, { temporary })
-    histPos = -1
-    if (text.value.trim() === value) text.value = ''
-    files.value = []
-    showFiles.value = false
-    caret.value = 0
+    if (!(await submit(msg)) || epoch !== sendEpoch) return
+    acknowledge(msg)
   } finally {
-    sending.value = false
+    if (epoch === sendEpoch) sending.value = false
   }
 }
 
@@ -405,6 +485,14 @@ function openSelect(r: Openable | undefined) {
   r?.toggleMenu?.()
 }
 defineExpose({
+  acknowledge,
+  matchesDraft,
+  resetDraft: () => {
+    text.value = ''
+    files.value = []
+    history = []
+    histPos = -1
+  },
   focus: () => box.value?.focus(),
   /** 填入文字（开场提示、编辑上一条消息） */
   setText,
@@ -431,22 +519,32 @@ defineExpose({
       <ul
         v-if="suggestions.length"
         :id="listId"
+        ref="suggestionList"
         class="agent-composer__suggest"
         role="listbox"
         :aria-label="t('agent.chat.composer.suggestions')"
       >
-        <li
+        <el-tooltip
           v-for="(s, i) in suggestions"
-          :id="`${listId}-${i}`"
           :key="`${s.kind}-${s.label}`"
-          role="option"
-          :aria-selected="i === highlighted"
-          :class="{ 'is-active': i === highlighted }"
-          @mousedown.prevent="pick(s)"
+          placement="top-start"
+          popper-class="agent-composer__tooltip"
         >
-          <span class="agent-composer__label">{{ s.label }}</span>
-          <span class="agent-composer__hint">{{ s.hint }}</span>
-        </li>
+          <li
+            :id="`${listId}-${i}`"
+            role="option"
+            :aria-selected="i === highlighted"
+            :class="{ 'is-active': i === highlighted }"
+            @mousedown.prevent="pick(s)"
+          >
+            <span class="agent-composer__label">{{ s.label }}</span>
+            <span class="agent-composer__hint">{{ s.hint }}</span>
+          </li>
+          <template #content>
+            <strong>{{ s.label }}</strong>
+            <div v-if="s.hint">{{ s.hint }}</div>
+          </template>
+        </el-tooltip>
       </ul>
       <el-input
         ref="box"
@@ -483,6 +581,9 @@ defineExpose({
       :limit="10"
       class="agent-composer__files"
     />
+    <p v-if="current && !current.pricing" class="agent-composer__pricing" role="status">
+      {{ t('agent.admin.model.pricingMissing') }}
+    </p>
     <div class="agent-composer__bar">
       <IconButton
         icon="lucide:paperclip"
@@ -540,14 +641,10 @@ defineExpose({
         size="small"
         clearable
         :aria-label="t('agent.chat.composer.reasoning')"
-        :placeholder="t('agent.chat.composer.reasoning')"
+        :placeholder="defaultReasoningLabel"
+        :title="defaultReasoningLabel"
       >
-        <el-option
-          v-for="r in AGENT_REASONING"
-          :key="r"
-          :value="r"
-          :label="t(`agent.chat.reasoning.${r}`)"
-        />
+        <el-option v-for="r in reasoningChoices" :key="r" :value="r" :label="reasoningLabel(r)" />
       </el-select>
       <el-select
         ref="modeSelect"
@@ -575,7 +672,7 @@ defineExpose({
       </el-button>
       <span class="agent-composer__spacer" />
       <label v-if="contextPercent != null" class="agent-composer__context">
-        {{ t('agent.chat.composer.context', { percent: contextPercent }) }}
+        {{ t('agent.chat.composer.contextEstimate', { percent: contextPercent }) }}
         <meter
           min="0"
           :max="context!.window"

@@ -1,7 +1,8 @@
 import { Inject, Injectable, Logger } from '@nestjs/common'
 import { InjectDataSource } from '@nestjs/typeorm'
-import type { AgentItemPayloads, AgentTurnStatus } from '@qiwu/shared'
-import type { DataSource } from 'typeorm'
+import { Err, type AgentItemPayloads, type AgentTurnStatus } from '@qiwu/shared'
+import { BizError } from '../../http/biz-error.js'
+import { IsNull, type DataSource } from 'typeorm'
 import { z } from 'zod'
 import {
   AgentBuiltinTool,
@@ -60,7 +61,7 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
  * 数据权限与租户运行，不用记忆；子会话只有父会话此刻可用的只读工具（运行时按 `keepForSubagent` 收紧：不能
  * 再分派、不能反问、不写图表报告图片），可读链接只有父轮此刻的那份，步数上限更小。子轮次在父轮的这次调用里
  * 直接推进（不经队列；并发名额由父轮占着，子轮次不另算，所以一个父轮最多再带 3 路模型调用），受急停、每日
- * 额度与父轮剩下的单轮 token 约束，用量计入父轮（发起人名下已由子轮次记过）。父轮被停止、急停或超限时子任务
+ * 额度与父轮剩下的单轮积分约束，用量计入父轮（发起人名下已由子轮次记过）。父轮被停止、急停或超限时子任务
  * 一起停。它们的回答读过网页，作为不可信内容交回父模型，读过与搜到的链接计入父轮可读链接；写入只能作为建议
  * 带回，由父会话里的写入工具走正常审批。
  *
@@ -184,8 +185,14 @@ export class AgentSubagents {
             const turn = await w.m.getRepository(AgentTurn).findOneOrFail({
               where: { threadId: found.id },
               order: { id: 'ASC' },
-              select: { id: true },
+              select: { id: true, parentTurnId: true },
             })
+            if (turn.parentTurnId === null) {
+              // 旧运行按本父会话及调用映射找到的子轮，只绑定未来调用，不追补旧账。
+              await w.m
+                .getRepository(AgentTurn)
+                .update({ id: turn.id, parentTurnId: IsNull() }, { parentTurnId: ctx.turnId })
+            } else if (Number(turn.parentTurnId) !== ctx.turnId) throw new BizError(Err.CONFLICT)
             return { title: found.title, threadId: Number(found.id), turnId: Number(turn.id) }
           }
           const thread = await threads.save(
@@ -203,6 +210,7 @@ export class AgentSubagents {
             }),
           )
           const turn = await w.createTurn(Number(thread.id), Number(parent.userId))
+          await w.m.getRepository(AgentTurn).update({ id: turn.id }, { parentTurnId: ctx.turnId })
           await w.append(Number(thread.id), Number(turn.id), 'user', {
             text: taskText(task),
             internal: { tools, urls: urls.slice(0, 200) },
@@ -221,7 +229,7 @@ export class AgentSubagents {
    */
   private async drive(c: Child, ctx: AgentToolContext): Promise<void> {
     const hooks: ChildHooks = {
-      onUsage: (model, u) => ctx.recordUsage(model, u, { daily: false }),
+      onUsage: (target, u, credits) => ctx.recordUsage(target, u, { daily: false, credits }),
       overBudget: () => ctx.overBudget(),
     }
     const status = async () =>

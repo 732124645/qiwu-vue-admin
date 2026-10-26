@@ -6,10 +6,12 @@ import type {
   AgentItemKind,
   AgentItemPayloads,
   AgentMessageSend,
+  AgentModelPricing,
   AgentNotifySettings,
   AgentQuestionAnswer,
   AgentSkillScope,
   AgentSource,
+  AgentTokenUsage,
   ErrorDef,
   McpToolKind,
 } from '@qiwu/shared'
@@ -161,7 +163,7 @@ export interface AgentRunProfile {
   scope: 'user' | 'tenant'
   providerId: number | null
   model: string | null
-  reasoning: 'low' | 'medium' | 'high' | null
+  reasoning: 'off' | 'low' | 'medium' | 'high' | null
   approvalMode: AgentApprovalMode
   /** 允许的工具名；null 为不限 */
   tools: string[] | null
@@ -262,20 +264,35 @@ export interface AgentToolWait {
   readonly questions: AgentToolQuestion[]
 }
 
+/** 扩展模型调用的持久入口：先留调用记录，再发上游，统一使用当前轮次与父轮的预算。 */
+export interface AgentModelCalls {
+  invokeModel<T extends { usage?: AgentModelUsage | null }>(
+    target: AgentUsageTarget,
+    work: (receipt: { signal: AbortSignal; onUsage(usage: AgentModelUsage): void }) => Promise<T>,
+    signal?: AbortSignal,
+  ): Promise<T>
+}
+
 /** 内置工具执行时拿到的上下文。 */
-export interface AgentToolContext extends AgentRunContext {
+export interface AgentToolContext extends AgentRunContext, AgentModelCalls {
   /** 模型这次调用的 id */
   callId: string
   items: AgentToolItems
   /** 本次运行提供给模型的工具（名字与类型，模式、策略与技能清单都已算进去） */
   tools: readonly { name: string; kind: McpToolKind }[]
   /**
-   * 记一次工具自己的模型调用（如生成图片）：计入本轮的 token 计数（受单轮上限约束）与发起人的每日用量；
-   * `daily: false` 只计入本轮（用量已经由别处记到发起人名下，如子智能体的轮次）
+   * 兼容旧扩展的事后观测；真正上游调用应使用 invokeModel，才能保留进程中断时的已发出请求。
+   * 子任务的当前计量已由持久父轮关联原子汇总，不再事后重复累加。
    */
-  recordUsage(model: string, usage: AgentModelUsage, opts?: { daily?: boolean }): Promise<void>
-  /** 本轮 token 或本人、本租户今日 token 已用完时返回是哪一项（此时不该再调用模型），否则 null */
-  overBudget(): Promise<'turn_tokens' | 'user_daily' | 'tenant_daily' | null>
+  recordUsage(
+    target: AgentUsageTarget,
+    usage: AgentModelUsage,
+    opts?: { daily?: boolean; credits?: string | null; failed?: boolean },
+  ): Promise<void>
+  /** 已发出的收费请求没有可信产物时，持久登记风险并停止本轮，不能让模型再次尝试。 */
+  requireRecovery(error?: AgentToolResult['error']): Promise<never>
+  /** 本轮积分 或本人、本租户今日积分 已用完时返回是哪一项（此时不该再调用模型），否则 null */
+  overBudget(): Promise<'turn_credits' | 'user_daily' | 'tenant_daily' | null>
   /** 本轮可读的链接（用户给的、搜索带回的；与 `web.fetch` 同一份） */
   readableUrls(): Promise<TurnUrls>
   /**
@@ -390,17 +407,23 @@ export interface AgentReviewVerdict {
 }
 
 /** 一次模型调用的用量（与 ChatModel 报的同一形状）。 */
-export interface AgentModelUsage {
-  promptTokens: number
-  completionTokens: number
+export type AgentModelUsage = AgentTokenUsage
+
+/** 计费目标由调用前解析的提供方和模型决定，不能按可重名的模型标识事后猜费率。 */
+export interface AgentUsageTarget {
+  providerId: number
+  providerName: string
+  model: string
+  pricing: AgentModelPricing | null
+  kind?: 'chat' | 'image'
 }
 
 /** 审查者拿到的本次运行：在运行上下文之外，可以把自己的模型调用记进本轮与发起人的用量。 */
-export interface AgentReviewContext extends AgentRunContext {
-  /** 记一次审查者自己的模型调用：计入本轮的 token 计数（受单轮上限约束）与发起人的每日用量 */
-  recordUsage(model: string, usage: AgentModelUsage): Promise<void>
-  /** 本轮 token 或本人、本租户今日 token 已用完时返回是哪一项（此时不该再调用模型），否则 null */
-  overBudget(): Promise<'turn_tokens' | 'user_daily' | 'tenant_daily' | null>
+export interface AgentReviewContext extends AgentRunContext, AgentModelCalls {
+  /** 兼容旧审查者的事后观测；新调用使用 invokeModel，原始用量与积分统一持久登记。 */
+  recordUsage(target: AgentUsageTarget, usage: AgentModelUsage): Promise<void>
+  /** 本轮积分 或本人、本租户今日积分 已用完时返回是哪一项（此时不该再调用模型），否则 null */
+  overBudget(): Promise<'turn_credits' | 'user_daily' | 'tenant_daily' | null>
 }
 
 /**

@@ -8,7 +8,7 @@ import { toastRest } from '@/core/composables/use-crud'
 
 /**
  * 一个外部 MCP 服务器的工具（对话框内容，`openDialog(McpTools, { server, canModify })`）：逐个启用并设审批策略。
- * 服务器声明的“只读”不可信：只有声明只读的工具才提供“自动”，且选它前要管理员确认；其余只能询问或禁用。
+ * 服务器声明的“只读”不等于安全；管理员可逐工具明示信任，但选择“自动”前必须确认服务器、工具及风险。
  * 关闭后页面重新载入服务器列表。
  */
 defineOptions({ name: 'AgentMcpTools' })
@@ -22,28 +22,30 @@ const tools = ref<AgentExternalToolVo[]>([...server.tools])
 /** 正在保存的工具 id：其控件加载并禁用，防止重复提交 */
 const busy = ref<number>()
 
-/** 一个工具可选的策略：声明只读的才有“自动”；都可设“自动审查”（外部工具一律当作可能写入）。 */
-const policies = (tool: AgentExternalToolVo): AgentToolPolicy[] =>
-  tool.readOnlyHint ? ['auto', 'ask', 'review', 'deny'] : ['ask', 'review', 'deny']
+const policies: AgentToolPolicy[] = ['auto', 'ask', 'review', 'deny']
 
 /** 保存一个工具的启用或策略；选“自动”先确认。成功后以服务端应答替换该行。 */
 async function update(
   tool: AgentExternalToolVo,
   dto: { enabled?: boolean; policy?: AgentToolPolicy },
 ) {
-  if (busy.value) return
-  if (dto.policy === 'auto') {
-    try {
-      await ElMessageBox.confirm(t('agent.admin.mcp.autoConfirm'), t('crud.confirm.title'), {
-        type: 'warning',
-        cancelButtonText: t('common.action.cancel'),
-      })
-    } catch {
-      return
-    }
-  }
+  if (busy.value || !canModify) return
   busy.value = tool.id
   try {
+    if (dto.policy === 'auto') {
+      try {
+        await ElMessageBox.confirm(
+          t('agent.admin.mcp.trustConfirm', { server: server.name, tool: tool.name }),
+          t('crud.confirm.title'),
+          {
+            type: 'warning',
+            cancelButtonText: t('common.action.cancel'),
+          },
+        )
+      } catch {
+        return
+      }
+    }
     const saved = await agentMcpServerApi.updateTool(server.id, tool.id, dto)
     tools.value = tools.value.map((x) => (x.id === tool.id ? saved : x))
   } catch (e) {
@@ -90,7 +92,7 @@ async function update(
           @change="update(row, { policy: $event as AgentToolPolicy })"
         >
           <el-option
-            v-for="p in policies(row)"
+            v-for="p in policies"
             :key="p"
             :value="p"
             :label="t(`agent.admin.policy.${p}`)"

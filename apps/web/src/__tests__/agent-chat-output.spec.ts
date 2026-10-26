@@ -209,7 +209,7 @@ describe('report', () => {
 })
 
 describe('subagents', () => {
-  it('lists each subtask with its status, summary and a link to its thread', async () => {
+  it('groups each subtask by real status and opens details without a new window', async () => {
     await render(
       item(13, 'subagent', {
         callId: 'c1',
@@ -220,16 +220,18 @@ describe('subagents', () => {
         ],
       }),
     )
-    const tasks = w.findAll('.agent-subagents__task')
+    const tasks = w.findAll('.agent-subtasks__list > li')
     expect(tasks).toHaveLength(3)
     expect(tasks[2]!.text()).toContain('Stopped')
     expect(tasks[0]!.text()).toContain('Done')
     expect(tasks[0]!.find('details').text()).toContain('Prices rose.')
     expect(tasks[1]!.text()).toContain('Running')
     expect(tasks[1]!.find('details').exists()).toBe(false)
-    expect(tasks[0]!.find('a').attributes()).toMatchObject({
-      href: '/agent/chat?thread=41',
-      target: '_blank',
-    })
+    expect(w.text()).toContain('Active 1 · Finished 2')
+    await tasks[0]!.find('button').trigger('click')
+    expect(w.emitted('inspectChild')).toEqual([[41]])
+    expect(w.find('a').exists()).toBe(false)
+    await w.setProps({ readonly: true })
+    expect(tasks[0]!.find('button').attributes('disabled')).toBeDefined()
   })
 })

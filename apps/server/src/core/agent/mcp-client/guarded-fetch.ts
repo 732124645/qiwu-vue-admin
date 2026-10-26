@@ -2,7 +2,6 @@ import type { LookupAddress } from 'node:dns'
 import http from 'node:http'
 import https from 'node:https'
 import type { LookupFunction } from 'node:net'
-import { Readable, Transform } from 'node:stream'
 import type { FetchLike } from '@modelcontextprotocol/sdk/shared/transport.js'
 import { assertPublicHost } from '../../net/net-guard.js'
 import { WEB_FETCH_USER_AGENT } from '../web/safe-fetcher.js'
@@ -102,12 +101,15 @@ export function guardedFetch(o: GuardedFetchOptions): FetchLike {
       ctl.abort(failed)
     }
     const client = url.protocol === 'https:' ? https : http
+    const method = (init.method ?? 'GET').toUpperCase()
 
     return new Promise<Response>((resolve, reject) => {
       const headersTimer = setTimeout(() => stop('timeout'), headersTimeoutMs)
+      let bodyDone = false
+      let bodyError: ((error: unknown) => void) | undefined
       const req = client.request(
         {
-          method: init.method ?? 'GET',
+          method,
           protocol: url.protocol,
           hostname: url.hostname.replace(/^\[(.*)\]$/, '$1'),
           port: url.port || undefined,
@@ -122,39 +124,94 @@ export function guardedFetch(o: GuardedFetchOptions): FetchLike {
           clearTimeout(headersTimer)
           const status = res.statusCode ?? 0
           // 可选的 GET 事件流被拒（405 等）是正常情况，不算失败原因
-          if (status >= 400 && (init.method ?? 'GET') !== 'GET') o.onFailure?.(`http_${status}`)
-          let size = 0
-          let idle: NodeJS.Timeout | undefined
-          // 正文静默超时：等用户回答 elicitation 时暂停计时（服务器此时本来就不发数据）
-          const arm = () => {
-            clearTimeout(idle)
-            idle = setTimeout(() => (o.paused?.() ? arm() : stop('timeout')), idleTimeoutMs)
-          }
-          const capped = new Transform({
-            transform(chunk: Buffer, _enc, cb) {
-              arm()
-              size += chunk.length
-              if (size > maxBytes) {
-                stop('too_large')
-                cb(failed)
-              } else cb(null, chunk)
-            },
-          })
-          arm()
-          res.on('error', (e) => capped.destroy(failed ?? e))
-          capped.on('close', () => {
-            clearTimeout(idle)
-            res.destroy()
-          })
-          res.pipe(capped)
+          if (status >= 400 && method !== 'GET') o.onFailure?.(`http_${status}`)
           const h = new Headers()
           for (const [k, v] of Object.entries(res.headers))
             if (typeof v === 'string') h.set(k, v)
             else if (Array.isArray(v)) h.set(k, v.join(', '))
-          const empty = status === 204 || status === 205 || status === 304 || init.method === 'HEAD'
-          if (empty) capped.destroy()
+          const empty = status === 204 || status === 205 || status === 304 || method === 'HEAD'
+          let stream: ReadableStream<Uint8Array> | null = null
+          if (empty) {
+            bodyDone = true
+            res.on('error', () => undefined)
+            res.destroy()
+          } else {
+            let size = 0
+            let idle: NodeJS.Timeout | undefined
+            let controller: ReadableStreamDefaultController<Uint8Array>
+            // 取消后先关状态，再销毁 Node 响应；排队中的 readable/error 不得再 enqueue 或 close。
+            const cleanup = () => {
+              clearTimeout(idle)
+              signal.removeEventListener('abort', aborted)
+              res.off('readable', pump).off('end', ended).off('aborted', truncated)
+            }
+            const errored = (error: unknown) => {
+              if (bodyDone) return
+              bodyDone = true
+              cleanup()
+              controller.error(error)
+              res.destroy()
+              req.destroy()
+            }
+            const aborted = () => errored(failed ?? signal.reason)
+            const truncated = () => errored(failed ?? fail('network'))
+            const ended = () => {
+              if (bodyDone) return
+              if (!res.complete) return truncated()
+              bodyDone = true
+              cleanup()
+              controller.close()
+            }
+            // 等待本人回答 elicitation 时不把正常静默误报为网络超时。
+            const arm = () => {
+              clearTimeout(idle)
+              idle = setTimeout(() => (o.paused?.() ? arm() : stop('timeout')), idleTimeoutMs)
+            }
+            // readable 模式按 Web 消费端的需求取数据，保留 Node 的背压，避免 data 事件桥接取消竞态。
+            const pump = () => {
+              while (!bodyDone && (controller.desiredSize ?? 0) > 0) {
+                const chunk = res.read() as Buffer | null
+                if (chunk === null) break
+                arm()
+                size += chunk.length
+                if (size > maxBytes) {
+                  stop('too_large')
+                  return
+                }
+                controller.enqueue(chunk)
+              }
+            }
+            stream = new ReadableStream<Uint8Array>({
+              start(value) {
+                controller = value
+                bodyError = errored
+                res.on('readable', pump).on('end', ended).on('aborted', truncated)
+                // destroy 之后也可能已有排队的 error，保留接收器到 close，终态回调只做幂等返回。
+                const error = () => {
+                  if (!bodyDone)
+                    errored(failed ?? (init.signal?.aborted ? init.signal.reason : fail('network')))
+                }
+                res.on('error', error)
+                res.once('close', () => {
+                  if (!bodyDone && !res.complete) truncated()
+                  res.off('error', error)
+                })
+                signal.addEventListener('abort', aborted, { once: true })
+                arm()
+                if (signal.aborted) aborted()
+              },
+              pull: pump,
+              cancel() {
+                if (bodyDone) return
+                bodyDone = true
+                cleanup()
+                res.destroy()
+                req.destroy()
+              },
+            })
+          }
           resolve(
-            new Response(empty ? null : (Readable.toWeb(capped) as ReadableStream<Uint8Array>), {
+            new Response(stream, {
               status: status < 200 || status > 599 ? 502 : status,
               headers: h,
             }),
@@ -164,9 +221,10 @@ export function guardedFetch(o: GuardedFetchOptions): FetchLike {
       req.on('error', (e) => {
         clearTimeout(headersTimer)
         // 调用方中止原样抛出；我们自己的超时 / 上限给出原因码；其余一律 network
-        if (failed) reject(failed)
-        else if (init.signal?.aborted) reject(e)
-        else reject(fail('network'))
+        if (bodyDone) return
+        const error = failed ?? (init.signal?.aborted ? e : fail('network'))
+        if (bodyError) bodyError(error)
+        else reject(error)
       })
       req.end(body)
     })

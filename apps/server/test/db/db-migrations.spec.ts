@@ -9,6 +9,7 @@
 // Needs a fresh build (`pnpm db:reset` and ci:local build first).
 import { existsSync, readdirSync } from 'node:fs'
 import { DataSource } from 'typeorm'
+import { it as nativeIt } from 'vitest'
 import { GLOBAL_UNIQUE, PLATFORM_TABLES } from '../../src/core/db/tenant-tables.js'
 import { dataSourceOptions } from '../../src/db/data-source.js'
 import { Tenancy20261007100000 } from '../../src/db/migrations/20261007100000-tenant.js'
@@ -18,10 +19,13 @@ import {
   MIGRATION_NAMES as MIGRATIONS,
   MIGRATION_TABLES,
   runScript,
-  SCRIPT_TIMEOUT_MS,
+  SCRIPT_CASE_MS,
+  MigrationCaseFence,
+  migrationTests,
   SOURCE_MIGRATIONS,
 } from '../setup/migrations.js'
 import { restoreTestSchema } from '../setup/schema.js'
+import { recoverMigrationRun } from '../setup/migration-run-safety.js'
 
 /** 某个迁移在运行顺序里的位置；找不到就报错（迁移改名后用例不会悄悄失效）。 */
 const at = (name: string): number => {
@@ -45,12 +49,13 @@ const FOREIGN_KEYS = [
   'fk_msg_mail_template_account',
   'fk_msg_sms_template_channel',
 ]
-/** A case running dist scripts: room for each of them to use its whole timeout. */
-const SCRIPT_CASE_MS = SCRIPT_TIMEOUT_MS * 4
 
 /** The tables the migrations create (present in the migrated database at the start). */
 let ALL_TABLES: string[] = []
 let ds: DataSource
+const fence = new MigrationCaseFence()
+/** 本文件的全部普通/参数化用例都使用可取消迁移保护与同一份预算。 */
+const it = migrationTests(nativeIt, fence)
 
 const migrateCli = (command: 'run' | 'revert') => {
   const r = runScript('dist/db/migrate.js', [command])
@@ -134,6 +139,7 @@ beforeAll(async () => {
   if (!existsSync('dist/db/reset.js') || stale.length)
     throw new Error(`dist is missing or stale (${stale}): pnpm --filter @qiwu/server build`)
   ds = await new DataSource({ ...dataSourceOptions(), migrations: SOURCE_MIGRATIONS }).initialize()
+  fence.install(ds)
   // globalSetup migrated everything: the tables the migrations name that exist (one created and
   // dropped again by later migrations is none of them)
   const present = new Set(await everyTable())
@@ -142,15 +148,25 @@ beforeAll(async () => {
 
 // a script killed by its timeout may have left a migration half done: the later cases of this file
 // would only fail on that state, so they are skipped and afterAll rebuilds the database
-beforeEach(({ skip }) => {
-  if (killed.script) skip(`${killed.script} was killed: the database is rebuilt in afterAll`)
+beforeEach((context) => {
+  if (killed.script || fence.unsafe)
+    context.skip('a prior migration case failed; the database is rebuilt in afterAll')
+  fence.begin(context.signal)
 })
+
+// 等待原异步函数的 finally 真正退出；超过可配置预算时 fence 终止 worker，不与恢复并行。
+afterEach(async ({ task, signal }) => {
+  await fence.drain(task.result?.state === 'fail' || signal.aborted)
+}, SCRIPT_CASE_MS)
 
 afterAll(async () => {
   // leave the globalSetup state (migrated, hardened, seeded) behind, whatever a failed case reverted
+  await fence.drain(false)
   if (ds?.isInitialized) {
-    if (killed.script) await ds.dropDatabase()
-    await restoreTestSchema(ds)
+    await recoverMigrationRun(async () => {
+      if (killed.script || fence.unsafe) await ds.dropDatabase()
+      await restoreTestSchema(ds)
+    })
   }
   await ds?.destroy()
 }, SCRIPT_CASE_MS)
@@ -367,7 +383,7 @@ it('ProjectPaths moves the stored view paths of the moved views, down moves them
     await runAll()
   }
   await expectApplied(MIGRATIONS.length)
-}, 120_000)
+})
 
 it('dist reset.js refuses production and databases without a _dev/_test/_e2e suffix', () => {
   for (const env of [{ NODE_ENV: 'production' }, { DB_NAME: 'qiwu' }]) {
@@ -404,7 +420,7 @@ describe('DDL conventions', () => {
     expect(bad).toEqual([])
   })
 
-  it('Every table soft-deleted, a unique key besides the primary one ends with alive, no foreign keys', async () => {
+  it('every table is soft-deleted, ordinary unique keys end with alive, effect and delivery keys stay durable, and no foreign keys remain', async () => {
     const hard = await ds.query(
       `SELECT t.table_name AS t FROM information_schema.tables t WHERE t.table_schema = DATABASE()
          AND t.table_name IN (?) AND NOT EXISTS (SELECT 1 FROM information_schema.columns c
@@ -421,13 +437,30 @@ describe('DDL conventions', () => {
       [ALL_TABLES],
     )
     expect(keys.length).toBeGreaterThan(20)
-    expect(keys.filter((k) => !k.cols.endsWith(',alive'))).toEqual([])
-    const alive = await ds.query(
-      `SELECT CONCAT(table_name, ' ', generation_expression) AS c FROM information_schema.columns
+    // 效果与投递键永久占用；缺键、添加 alive 或增加其它例外都必须由精确比较检出。
+    expect(
+      keys.filter((k) => !k.cols.endsWith(',alive')).sort((a, b) => a.k.localeCompare(b.k)),
+    ).toEqual([
+      {
+        k: 'agent_message_receipt.uk_agent_message_client',
+        cols: 'tenant_id,user_id,client_message_id',
+      },
+      {
+        k: 'agent_thread.uk_agent_thread_client',
+        cols: 'tenant_id,user_id,client_draft_id',
+      },
+    ])
+    const alive = await ds.query<{ t: string; c: string }[]>(
+      `SELECT table_name AS t, CONCAT(table_name, ' ', generation_expression) AS c FROM information_schema.columns
         WHERE table_schema = DATABASE() AND table_name IN (?) AND column_name = 'alive'`,
       [ALL_TABLES],
     )
-    expect(alive.length).toBe(new Set(keys.map((k) => k.k.split('.')[0])).size)
+    // 永久收据表不靠 alive 释放唯一键；其他次级唯一键所在表仍必须有正确的生成列。
+    expect(
+      [...new Set(keys.map((k) => k.k.split('.')[0]))].filter(
+        (table) => table !== 'agent_message_receipt' && !alive.some((column) => column.t === table),
+      ),
+    ).toEqual([])
     for (const { c } of alive) expect(c).toMatch(/ if\(\(`deleted_at` is null\),1,NULL\)$/)
     expect(await foreignKeys()).toEqual([])
   })
@@ -785,7 +818,7 @@ describe('Dict single default', () => {
       await runAll()
     }
     await expectApplied(MIGRATIONS.length)
-  }, 30_000)
+  })
 })
 
 describe('Audit user_type', () => {
@@ -910,7 +943,7 @@ describe('Audit user_type', () => {
       await runAll()
     }
     await expectApplied(MIGRATIONS.length)
-  }, 30_000)
+  })
 })
 
 describe('OAuth2 clients and consents', () => {
@@ -1215,7 +1248,7 @@ describe('Tenancy', () => {
     }
     await expectApplied(MIGRATIONS.length)
     expect(await tenancyState()).toEqual(before)
-  }, 30_000)
+  })
 
   it('up fails in bounded time while another session holds a table it alters, and finishes once released', async () => {
     const holder = ds.createQueryRunner()
@@ -1252,5 +1285,5 @@ describe('Tenancy', () => {
       await new Tenancy20261007100000().up(runner) // whatever failed above
       await runner.release()
     }
-  }, 30_000)
+  })
 })

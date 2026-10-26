@@ -237,6 +237,19 @@ const frames = computed(() =>
 .app-layout--fixed .app-layout__main {
   overflow: auto;
 }
+/* Workspace pages fill the remaining layout height; ordinary pages keep their scrolling behavior. */
+.app-layout:has(.qw-workspace) {
+  height: 100vh;
+}
+.app-layout:has(.qw-workspace) .app-layout__aside {
+  position: static;
+  height: auto;
+}
+.app-layout__main:has(> .qw-workspace) {
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+}
 @media (max-width: 767px) {
   .app-layout__main {
     padding: 16px;
@@ -250,11 +263,13 @@ const frames = computed(() =>
   .app-layout__footer {
     display: none;
   }
-  .app-layout--fixed {
+  .app-layout--fixed,
+  .app-layout:has(.qw-workspace) {
     height: auto;
   }
   .app-layout__main,
-  .app-layout--fixed .app-layout__main {
+  .app-layout--fixed .app-layout__main,
+  .app-layout__main:has(> .qw-workspace) {
     padding: 0;
     overflow: visible;
     background: none;

@@ -14,7 +14,8 @@ import {
 } from '../agent-ports.js'
 import { AgentItem } from '../entities/agent-thread.entity.js'
 import type { ChatMessage } from '../provider/chat-model.js'
-import { ProviderRegistry } from '../provider/provider-registry.js'
+import { ProviderRegistry, usageTarget } from '../provider/provider-registry.js'
+import { InvocationLeaseLost } from './usage-book.js'
 import { copiesSuggestion, type ItemInternal } from './item-store.js'
 import { TurnQueue } from './turn-queue.js'
 
@@ -212,7 +213,7 @@ export function parseReviewAnswer(text: string): z.infer<typeof reviewAnswer> | 
 /**
  * 自动审查（see docs/agent.md）：管理员把一个写入工具设成 `review`、会话选了“自动审查”模式时，写入停下
  * 等人之前先交给平台参数 `agent.review.model` 指定的审查模型判断，放行、驳回或交给人。其余情形（包括没有
- * 指定审查模型）一律返回 null（照常等人）；指定的模型不可用、本轮或今日 token 用完、本轮送审次数到顶、
+ * 指定审查模型）一律返回 null（照常等人）；指定的模型不可用、本轮或今日积分 用完、本轮送审次数到顶、
  * 同一工具本轮已被驳回两次、写入太大看不全、调用出错、超时或回答不合格时交给人并写明原因，从不默认放行。
  * 审查模型只看到用户本人在本会话的最近几条消息、工具、改动预览、参数和来源的链接与标题，不看任何工具
  * 的输出或网页正文；用量经运行时记进本轮与发起人的每日用量。运行时还会核对放行的资格
@@ -249,7 +250,7 @@ export class AgentAutoReviewer implements AgentApprovalReviewer {
     if (!target) return null
     const capped = await this.turnCap(ctx.turnId, call.tool)
     if (capped) return handOver(capped)
-    // 审查也是模型调用：本轮或今日 token 用完就不调，交给人
+    // 审查也是模型调用：本轮或今日积分 用完就不调，交给人
     if (await ctx.overBudget()) return handOver('limit')
     let model: Awaited<ReturnType<ProviderRegistry['resolve']>>
     try {
@@ -263,18 +264,23 @@ export class AgentAutoReviewer implements AgentApprovalReviewer {
     // 本轮的中断（停止、急停、丢锁）与审查自己的超时都会中止这次请求
     const signal = AbortSignal.any([ctx.signal, AbortSignal.timeout(this.timeoutMs)])
     let text: string
+    const targetUsage = usageTarget(model)
     try {
-      const res = await model.chat.complete({
-        model: model.model.id,
-        messages,
-        maxTokens: REVIEW_MAX_TOKENS,
+      const res = await ctx.invokeModel(
+        targetUsage,
+        (receipt) =>
+          model.chat.complete({
+            model: model.model.id,
+            messages,
+            maxTokens: REVIEW_MAX_TOKENS,
+            ...receipt,
+          }),
         signal,
-      })
-      // 先记账再解析：回答不合格也已经花了 token
-      await ctx.recordUsage(model.model.id, res.usage)
+      )
       text = res.text
     } catch (e) {
       if (ctx.signal.aborted) throw ctx.signal.reason
+      if (e instanceof InvocationLeaseLost) throw e
       this.logger.warn({ err: e instanceof Error ? e.name : 'Error' }, 'agent auto review failed')
       return handOver('failed')
     }

@@ -2,7 +2,6 @@ import { Inject, Injectable } from '@nestjs/common'
 import { TransactionHost } from '@nestjs-cls/transactional'
 import type { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm'
 import {
-  AGENT_LIMIT_PARAMS,
   AGENT_PAUSED_PARAM,
   AGENT_SKILL_BODY_MAX,
   AGENT_SKILL_NAME,
@@ -27,7 +26,7 @@ import { ParamService } from '../../settings/param.service.js'
 import type { AgentSkillRef, LoadedSkill, SkillLookup, SkillSource } from '../agent-ports.js'
 import { AgentPlatformSkill, AgentSkill } from '../entities/agent-skill.entity.js'
 import { AgentItem, AgentThread } from '../entities/agent-thread.entity.js'
-import { ProviderRegistry } from '../provider/provider-registry.js'
+import { ProviderRegistry, usageTarget } from '../provider/provider-registry.js'
 import { UsageBook } from '../runtime/usage-book.js'
 import { wrapUntrusted } from '../web/web-tools.js'
 import { formatSkillMd, parseSkillMd } from './skill-md.js'
@@ -199,7 +198,7 @@ export class AgentSkillService extends BaseCrudService<AgentSkill> implements Sk
    * 把本人的一个会话存成技能草稿：取会话里用户与助手的文字（最新的 {@link SKILL_DRAFT_SOURCE_MAX} 字），
    * 交给默认模型起草名称、描述与正文，存为停用的个人技能等本人检查后启用。会话内容按不可信数据交给模型；
    * 草稿不合规报 AGENT_SKILL_INVALID；名字已被本人占用时加序号。
-   * 这也是一次模型调用：急停时 503、本人或本租户今日 token 用完时 429（同发消息），用量记进同一本账；
+   * 这也是一次模型调用：急停时 503、本人或本租户今日积分 用完时 429（同发消息），用量记进同一本账；
    * 同一会话 {@link SKILL_DRAFT_WINDOW_MS} 内只起草一次（不论请求体，重复的 429），失败时放开重试。
    */
   async fromThread(
@@ -231,17 +230,12 @@ export class AgentSkillService extends BaseCrudService<AgentSkill> implements Sk
     if (!thread) throw new BizError(Err.NOT_FOUND)
   }
 
-  /** 模型调用前的检查（同轮次）：急停、本人与本租户今日 token 限额。 */
+  /** 模型调用前的检查（同轮次）：急停、本人与本租户今日积分 限额。 */
   private async assertBudget(p: Principal): Promise<void> {
     if ((await this.params.get(AGENT_PAUSED_PARAM))?.trim().toLowerCase() === 'true')
       throw new BizError(Err.AGENT_PAUSED)
-    const limit = (key: string, fallback: number) => this.params.int(key, 1, 1e12, fallback)
-    const userMax = await limit(AGENT_LIMIT_PARAMS.userDailyTokens, 1_000_000)
-    if ((await this.usage.usedToday(p.userId)) >= userMax)
-      throw new BizError(Err.AGENT_LIMIT, { which: 'user_daily' })
-    const tenantMax = await limit(AGENT_LIMIT_PARAMS.tenantDailyTokens, 10_000_000)
-    if ((await this.usage.usedToday()) >= tenantMax)
-      throw new BizError(Err.AGENT_LIMIT, { which: 'tenant_daily' })
+    const over = await this.usage.overDaily(p.userId)
+    if (over) throw new BizError(Err.AGENT_LIMIT, { which: over })
   }
 
   /** 起草并保存（{@link fromThread} 占位之后）：取会话文字 → 检查额度 → 调模型并记账 → 存草稿。 */
@@ -261,15 +255,23 @@ export class AgentSkillService extends BaseCrudService<AgentSkill> implements Sk
     if (!transcript.trim()) throw new BizError(Err.AGENT_SKILL_INVALID, { reason: 'empty' })
     await this.assertBudget(p)
     const model = await this.registry.resolve()
-    const answer = await model.chat.complete({
-      model: model.model.id,
-      messages: [
-        { role: 'system', content: DRAFT_PROMPT },
-        { role: 'user', content: wrapUntrusted(`thread ${threadId}`, transcript) },
-      ],
-      maxTokens: 4000,
-    })
-    await this.usage.record(p, model.model.id, answer.usage)
+    const target = usageTarget(model)
+    const answer = await this.usage.invoke(
+      p.userId,
+      target,
+      { threadId },
+      (receipt) =>
+        model.chat.complete({
+          model: model.model.id,
+          messages: [
+            { role: 'system', content: DRAFT_PROMPT },
+            { role: 'user', content: wrapUntrusted(`thread ${threadId}`, transcript) },
+          ],
+          maxTokens: 4000,
+          ...receipt,
+        }),
+      undefined,
+    )
     const draft = parseDraft(answer.text)
     const parsed = agentSkillSave.safeParse({
       scope: 'user',

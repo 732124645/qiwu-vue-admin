@@ -728,9 +728,9 @@ describe('@HomeTenant() and @RequireFeature on the routes', () => {
       'LeaveController.get',
     ]
     expect(approvals.filter((key) => feature.get(key) !== 'workflow')).toEqual([])
-    expect([...new Set(feature.values())].sort()).toEqual(['oa', 'workflow'])
+    expect([...new Set(feature.values())].sort()).toEqual(['workflow'])
     for (const name of ['punch', 'today', 'request', 'mine'])
-      expect(feature.get(`ClockController.${name}`)).toBe('oa')
+      expect(feature.has(`ClockController.${name}`)).toBe(false)
   })
 })
 

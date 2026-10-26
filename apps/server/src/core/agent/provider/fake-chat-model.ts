@@ -7,6 +7,7 @@ import type {
   ChatToolCall,
   ChatUsage,
 } from './chat-model.js'
+import { usageOf as normalizeUsage } from './usage.js'
 
 /** One scripted answer of `FakeChatModel`. */
 export interface FakeTurn {
@@ -51,10 +52,12 @@ export class FakeChatModel implements ChatModel {
 
   async complete(req: ChatRequest): Promise<ChatCompletion> {
     const { turn, calls } = await this.take(req)
+    const usage = usageOf(turn)
+    if (usage.usageReported) req.onUsage?.(usage)
     return {
       text: turn.text ?? '',
       toolCalls: calls,
-      usage: usageOf(turn),
+      usage,
       finishReason: finishOf(turn),
     }
   }
@@ -77,10 +80,14 @@ export class FakeChatModel implements ChatModel {
   }
 }
 
-const usageOf = (t: FakeTurn): ChatUsage => ({
-  promptTokens: t.usage?.promptTokens ?? 10,
-  completionTokens: t.usage?.completionTokens ?? 5,
-})
+const usageOf = (t: FakeTurn): ChatUsage => {
+  const promptTokens = t.usage?.promptTokens === undefined ? 10 : t.usage.promptTokens
+  const completionTokens = t.usage?.completionTokens === undefined ? 5 : t.usage.completionTokens
+  return {
+    ...normalizeUsage({ prompt_tokens: promptTokens, completion_tokens: completionTokens }),
+    ...t.usage,
+  }
+}
 
 const finishOf = (t: FakeTurn): ChatFinishReason =>
   t.finishReason ?? (t.toolCalls?.length ? 'tool_calls' : 'stop')

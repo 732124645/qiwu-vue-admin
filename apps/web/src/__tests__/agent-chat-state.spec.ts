@@ -6,8 +6,13 @@ import { mount } from '@vue/test-utils'
 import dayjs from 'dayjs'
 import type { AgentItemVo, AgentThreadVo, AgentTurnVo } from '@qiwu/shared'
 import { MarkdownText } from '@/views/platform/agent/chat/markdown'
+import { i18n } from '@/core/i18n'
+import { accessToken } from '@/core/request/http'
 import {
   applyItemEvent,
+  clearHistory,
+  loadDelivery,
+  saveDelivery,
   catchUpSeq,
   chatRows,
   formFields,
@@ -16,6 +21,7 @@ import {
   mentionedSkill,
   mentionPrefix,
   mergeItems,
+  mergeThread,
   pushHistory,
   skillOf,
   skillPrefix,
@@ -32,6 +38,66 @@ const item = (
 ) => ({ id, seq, turnId: 1, kind, status, payload, createdAt: AT }) as AgentItemVo
 
 describe('items and events', () => {
+  it('ignores duplicate and stale committed deltas and snapshots without losing newer text', () => {
+    const first = { ...item(2, 2, 'assistant', { text: 'Hello' }, 'running'), revision: 1 }
+    const delta = {
+      threadId: 7,
+      type: 'delta' as const,
+      itemId: 2,
+      revision: 2,
+      offset: 5,
+      delta: ' world',
+    }
+    const current = applyItemEvent([first], delta)!
+    expect(current[0]!.payload).toEqual({ text: 'Hello world' })
+    expect(applyItemEvent(current, delta)![0]!.payload).toEqual({ text: 'Hello world' })
+    expect(mergeItems(current, [first])[0]!.payload).toEqual({ text: 'Hello world' })
+    expect(mergeItems(current, [{ ...first, revision: undefined }])[0]!.payload).toEqual({
+      text: 'Hello world',
+    })
+    const done = {
+      ...first,
+      revision: 3,
+      status: 'done' as const,
+      payload: { text: 'Hello world' },
+    } as AgentItemVo
+    expect(applyItemEvent([done], delta)![0]).toEqual(done)
+  })
+
+  it('asks for a snapshot on offset gaps or mismatching overlap and counts UTF-16 offsets', () => {
+    const first = { ...item(2, 2, 'assistant', { text: '🙂' }, 'running'), revision: 1 }
+    const delta = {
+      threadId: 7,
+      type: 'delta' as const,
+      itemId: 2,
+      revision: 2,
+      offset: 2,
+      delta: '你好',
+    }
+    expect(applyItemEvent([first], delta)![0]!.payload).toEqual({ text: '🙂你好' })
+    expect(applyItemEvent([first], { ...delta, offset: 4 })).toBeNull()
+    expect(applyItemEvent([first], { ...delta, offset: 1 })).toBeNull()
+    expect(
+      applyItemEvent([first], { threadId: 7, type: 'delta', itemId: 2, delta: 'legacy' }),
+    ).toBeNull()
+    const snapshot = { ...first, revision: 3, payload: { text: '🙂你好!' } } as AgentItemVo
+    expect(applyItemEvent(mergeItems([first], [snapshot]), delta)![0]!.payload).toEqual({
+      text: '🙂你好!',
+    })
+  })
+
+  it('keeps a newer recovery generation when an older thread snapshot arrives', () => {
+    const current = { id: 7, recoveryRequired: true, recoveryRevision: 3 } as AgentThreadVo
+    const stale = { id: 7, recoveryRequired: false, recoveryRevision: 2 } as AgentThreadVo
+    expect(mergeThread(current, stale)).toMatchObject({
+      recoveryRequired: true,
+      recoveryRevision: 3,
+    })
+    expect(mergeThread(current, { ...stale, id: 8 })).toMatchObject({
+      id: 8,
+      recoveryRequired: false,
+    })
+  })
   it('merges by id in seq order and appends streamed text to an assistant item', () => {
     const a = item(2, 2, 'assistant', { text: 'Hel' }, 'running')
     const u = item(1, 1, 'user', { text: 'hi' })
@@ -192,6 +258,7 @@ describe('form schema and input history', () => {
   })
 
   it("keeps each user's sent messages, newest last, without duplicates, and survives a blocked storage", () => {
+    clearHistory()
     sessionStorage.clear()
     localStorage.clear()
     pushHistory(1, 'a')
@@ -209,6 +276,7 @@ describe('form schema and input history', () => {
   })
 
   it('keeps the history in this tab only, never from a temporary thread, capped in count and size', () => {
+    clearHistory()
     sessionStorage.clear()
     localStorage.clear()
     pushHistory(1, 'kept')
@@ -227,10 +295,69 @@ describe('form schema and input history', () => {
     expect(list).toHaveLength(100)
     expect(list.at(-1)).toBe('m119')
   })
+
+  it('keeps content only in tenant-isolated memory and removes legacy plaintext history', () => {
+    clearHistory()
+    sessionStorage.clear()
+    localStorage.clear()
+    sessionStorage.setItem('qw.agent.history.1', JSON.stringify(['legacy private text']))
+    clearHistory(0)
+    expect(sessionStorage.getItem('qw.agent.history.1')).toBeNull()
+    pushHistory(1, 'private tenant one', { tenantId: 1 })
+    pushHistory(1, 'private tenant two', { tenantId: 2 })
+    expect(loadHistory(1, 1)).toEqual(['private tenant one'])
+    expect(loadHistory(1, 2)).toEqual(['private tenant two'])
+    expect(sessionStorage.length).toBe(0)
+    expect(localStorage.length).toBe(0)
+    clearHistory()
+    expect(loadHistory(1, 1)).toEqual([])
+    expect(loadHistory(1, 2)).toEqual([])
+  })
+
+  it('persists only delivery identifiers and isolates them by actor and tenant', () => {
+    sessionStorage.clear()
+    const pending = {
+      clientDraftId: crypto.randomUUID(),
+      clientMessageId: crypto.randomUUID(),
+      threadId: 7,
+    }
+    saveDelivery('1:1', { ...pending, text: 'must not persist' } as typeof pending)
+    expect(loadDelivery('1:1')).toEqual(pending)
+    expect(loadDelivery('1:2')).toBeNull()
+    expect(sessionStorage.getItem('qw.agent.delivery.1:1')).not.toContain('must not persist')
+    expect(
+      Object.keys(JSON.parse(sessionStorage.getItem('qw.agent.delivery.1:1')!)).sort(),
+    ).toEqual(['clientDraftId', 'clientMessageId', 'threadId'])
+    saveDelivery('1:1', null)
+    expect(loadDelivery('1:1')).toBeNull()
+    const blocked = vi.spyOn(sessionStorage, 'setItem').mockImplementation(() => {
+      throw new Error('blocked')
+    })
+    try {
+      expect(saveDelivery('1:1', pending)).toBe(false)
+      expect(blocked).toHaveBeenCalledTimes(1)
+    } finally {
+      blocked.mockRestore()
+    }
+  })
+
+  it('clears memory history and receipt identifiers on sign-out even without a mounted chat', () => {
+    accessToken.value = 'fixture-session'
+    pushHistory(1, 'Private in-memory history')
+    saveDelivery('1:1', {
+      clientDraftId: crypto.randomUUID(),
+      clientMessageId: crypto.randomUUID(),
+      threadId: 7,
+    })
+    accessToken.value = ''
+    expect(loadHistory(1)).toEqual([])
+    expect(loadDelivery('1:1')).toBeNull()
+  })
 })
 
 describe('markdown', () => {
-  const html = (text: string) => mount(MarkdownText, { props: { text } })
+  const html = (text: string) =>
+    mount(MarkdownText, { props: { text }, global: { plugins: [i18n] } })
 
   it('renders paragraphs, lists, code, tables and links', () => {
     const w = html(

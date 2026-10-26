@@ -8,7 +8,7 @@ import { ConfigService } from '@nestjs/config'
 import type { NestExpressApplication } from '@nestjs/platform-express'
 import { Test } from '@nestjs/testing'
 import { getDataSourceToken } from '@nestjs/typeorm'
-import { AGENT_TRUST_MODE_PARAM, agentPerms } from '@qiwu/shared'
+import { AGENT_TRUST_MODE_PARAM, agentPerms, Err } from '@qiwu/shared'
 import request from 'supertest'
 import type { DataSource } from 'typeorm'
 import { AppModule } from '../../src/app.module.js'
@@ -236,6 +236,9 @@ describe('options', () => {
         reasoning: false,
         vision: false,
         fast: true,
+        pricing: null,
+        reasoningDefault: 'provider',
+        reasoningStyle: 'standard',
         contextWindow: 32000,
       },
       {
@@ -244,6 +247,9 @@ describe('options', () => {
         reasoning: true,
         vision: true,
         fast: false,
+        pricing: null,
+        reasoningDefault: 'provider',
+        reasoningStyle: 'standard',
         contextWindow: 128000,
       },
     ])
@@ -584,6 +590,17 @@ describe('threads', () => {
     await addItem(id, 10, 'reasoning', { text: 'thinking' }, { turnId: live, status: 'expired' })
     await addItem(id, 11, 'assistant', { text: '  ' }, { turnId: live, status: 'done' })
     await addItem(id, 12, 'user', { text: 'ran' }, { turnId: live })
+    const busy = await http()
+      .post(`/api/agent/threads/${id}/fork`)
+      .set(bearer(tok.a))
+      .send({ seq: 12 })
+    expect(busy.status).toBe(409)
+    expect(busy.body.code).toBe(Err.AGENT_THREAD_BUSY.code)
+    // 这里的轮次直接以行构造，没有实际 worker；结束夹具后仍须验证未完成条目不会进入历史。
+    await ds.query(
+      "UPDATE agent_turn SET status = 'failed', ended_at = NOW(3) WHERE tenant_id = 1 AND id = ?",
+      [live],
+    )
     const all = await http()
       .post(`/api/agent/threads/${id}/fork`)
       .set(bearer(tok.a))
@@ -800,7 +817,7 @@ describe('threads', () => {
     )
     const day = new Date().toISOString().slice(0, 10)
     await ds.query(
-      'INSERT INTO agent_usage (tenant_id, user_id, day, model, calls, prompt_tokens, completion_tokens) VALUES (1, ?, ?, ?, 1, 100, 20), (1, ?, ?, ?, 1, 1000, 0)',
+      'INSERT INTO agent_usage (tenant_id, user_id, day, model, calls, prompt_tokens, completion_tokens, legacy_calls) VALUES (1, ?, ?, ?, 1, 100, 20, 1), (1, ?, ?, ?, 1, 1000, 0, 1)',
       [ids.a, day, `${PREFIX}m`, ids.b, day, `${PREFIX}m`],
     )
     const res = await http().get(`/api/agent/threads/${id}/status`).set(bearer(tok.a))
@@ -816,8 +833,10 @@ describe('threads', () => {
     expect(s.turn.id).toBe(turn)
     expect(s.today.userTokens).toBe(120)
     expect(s.today.tenantTokens).toBeGreaterThanOrEqual(1120)
-    expect(s.today.userLimit).toBeGreaterThan(0)
-    expect(s.today.tenantLimit).toBeGreaterThan(0)
+    expect(s.today.userLimit).toBe('0.000000')
+    expect(s.today.tenantLimit).toBe('0.000000')
+    expect(s.today.userCredits).toBe('0.000000')
+    expect(s.today.userLegacyCalls).toBe(1)
     expect((await http().get(`/api/agent/threads/${id}/status`).set(bearer(tok.b))).status).toBe(
       404,
     )
@@ -1058,8 +1077,8 @@ describe('usage', () => {
   it('sums the current tenant by day, user or model; 403 without agent.usage.browse, 400 for a bad range', async () => {
     const day = '2026-01-15'
     await ds.query(
-      `INSERT INTO agent_usage (tenant_id, user_id, day, model, calls, prompt_tokens, completion_tokens)
-       VALUES (1, ?, ?, ?, 2, 100, 10), (1, ?, ?, ?, 3, 200, 20), (?, ?, ?, ?, 5, 999, 99)`,
+      `INSERT INTO agent_usage (tenant_id, user_id, day, model, calls, prompt_tokens, completion_tokens, legacy_calls)
+       VALUES (1, ?, ?, ?, 2, 100, 10, 2), (1, ?, ?, ?, 3, 200, 20, 3), (?, ?, ?, ?, 5, 999, 99, 5)`,
       [
         ids.a,
         day,
@@ -1077,23 +1096,53 @@ describe('usage', () => {
       http().get(`/api/agent/usage?from=${day}&to=${day}&groupBy=${groupBy}`).set(bearer(token))
     const byDay = (await get('day')).body.data
     expect(byDay).toEqual([
-      { key: day, label: day, calls: 5, promptTokens: 300, completionTokens: 30 },
+      {
+        key: day,
+        label: day,
+        calls: 5,
+        promptTokens: 300,
+        completionTokens: 30,
+        totalTokens: 330,
+        credits: '0.000000',
+        cacheReadTokens: null,
+        cacheWriteTokens: null,
+        reasoningTokens: null,
+        unpricedCalls: 0,
+        unreportedCalls: 0,
+        legacyCalls: 5,
+      },
     ])
     const byModel = (await get('model')).body.data
     expect(byModel).toEqual([
       {
-        key: `${PREFIX}u2`,
+        key: `0:${PREFIX}u2`,
         label: `${PREFIX}u2`,
         calls: 3,
         promptTokens: 200,
         completionTokens: 20,
+        totalTokens: 220,
+        credits: '0.000000',
+        cacheReadTokens: null,
+        cacheWriteTokens: null,
+        reasoningTokens: null,
+        unpricedCalls: 0,
+        unreportedCalls: 0,
+        legacyCalls: 3,
       },
       {
-        key: `${PREFIX}u1`,
+        key: `0:${PREFIX}u1`,
         label: `${PREFIX}u1`,
         calls: 2,
         promptTokens: 100,
         completionTokens: 10,
+        totalTokens: 110,
+        credits: '0.000000',
+        cacheReadTokens: null,
+        cacheWriteTokens: null,
+        reasoningTokens: null,
+        unpricedCalls: 0,
+        unreportedCalls: 0,
+        legacyCalls: 2,
       },
     ])
     const byUser = (await get('user')).body.data

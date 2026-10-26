@@ -1,5 +1,7 @@
 import type {
   AgentApprovalDecide,
+  AgentDraftReceiptVo,
+  AgentMessageReceiptVo,
   AgentFeedbackSave,
   AgentMessageSend,
   AgentNotifySettings,
@@ -34,16 +36,31 @@ export const agentApi = {
   threads: (params: AgentThreadParams) =>
     api.get<Page<AgentThreadVo>>('/agent/threads', { params }),
   createThread: (dto: Partial<AgentThreadCreate>) => api.post<AgentThreadVo>('/agent/threads', dto),
+  draftReceipt: (clientDraftId: string) =>
+    api.get<AgentDraftReceiptVo>(
+      `/agent/threads/client-drafts/${encodeURIComponent(clientDraftId)}`,
+    ),
+  messageReceipt: (id: number, clientMessageId: string) =>
+    api.get<AgentMessageReceiptVo>(
+      `/agent/threads/${id}/messages/${encodeURIComponent(clientMessageId)}/receipt`,
+    ),
+  acknowledgeRecovery: (id: number, revision: number) =>
+    api.post<AgentThreadVo>(`/agent/threads/${id}/recovery/acknowledge`, { revision }),
   /** 改名、归档 / 恢复、置顶、换模型或模式 */
   updateThread: (id: number, dto: AgentThreadUpdate) =>
     api.patch<AgentThreadVo>(`/agent/threads/${id}`, dto),
   removeThread: (id: number) => api.delete(`/agent/threads/${id}`),
   /** 复制到第 `seq` 条（含）为止的内容成为新会话 */
-  fork: (id: number, seq: number) => api.post<AgentThreadVo>(`/agent/threads/${id}/fork`, { seq }),
+  fork: (id: number, seq: number, clientDraftId?: string) =>
+    api.post<AgentThreadVo>(`/agent/threads/${id}/fork`, {
+      seq,
+      ...(clientDraftId && { clientDraftId }),
+    }),
   /** 会话、条目（`afterSeq` 之后的，断线补齐用）与最近一轮 */
-  items: (id: number, afterSeq?: number) =>
+  items: (id: number, afterSeq?: number, signal?: AbortSignal) =>
     api.get<AgentThreadDetailVo>(`/agent/threads/${id}/items`, {
       params: afterSeq == null ? undefined : { afterSeq },
+      signal,
     }),
   /** 发送消息；本轮还在运行时按 `mode` 追加到当前步骤后（steer）或排到下一轮（queue） */
   send: (id: number, dto: Partial<AgentMessageSend> & { text: string }) =>

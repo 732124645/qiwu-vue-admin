@@ -5,6 +5,7 @@
 // hardened yet. Needs a fresh build (`pnpm --filter @qiwu/server build`).
 import { existsSync } from 'node:fs'
 import { DataSource } from 'typeorm'
+import { it as nativeIt } from 'vitest'
 import { PLATFORM_TABLES } from '../../src/core/db/tenant-tables.js'
 import { dataSourceOptions } from '../../src/db/data-source.js'
 import { Tenancy20261007100000 } from '../../src/db/migrations/20261007100000-tenant.js'
@@ -14,18 +15,21 @@ import {
   MIGRATION_NAMES,
   MIGRATION_TABLES,
   runScript,
-  SCRIPT_TIMEOUT_MS,
+  SCRIPT_CASE_MS,
+  MigrationCaseFence,
+  migrationTests,
   SOURCE_MIGRATIONS,
 } from '../setup/migrations.js'
 import { restoreTestSchema } from '../setup/schema.js'
+import { recoverMigrationRun } from '../setup/migration-run-safety.js'
 
 const TENANCY = new Tenancy20261007100000().name
 const FAST = { seconds: 1, attempts: 2, pauseMs: 100 }
 
 let ds: DataSource
-
-/** A case running dist scripts: room for each of them to use its whole timeout. */
-const SCRIPT_CASE_MS = SCRIPT_TIMEOUT_MS * 3
+const fence = new MigrationCaseFence()
+/** 本文件的全部普通/参数化用例都使用可取消迁移保护与同一份预算。 */
+const it = migrationTests(nativeIt, fence)
 
 // a hung script is killed (runScript fails the case at once and says so)
 const migrate = (multiTenant: boolean) => {
@@ -80,19 +84,30 @@ beforeAll(async () => {
   if (!existsSync('dist/db/tenancy-harden.js') || !existsSync('dist/db/migrate.js'))
     throw new Error('dist is missing: pnpm --filter @qiwu/server build')
   ds = await new DataSource({ ...dataSourceOptions(), migrations: SOURCE_MIGRATIONS }).initialize()
+  fence.install(ds)
 })
 
 // a script killed by its timeout may have left a migration half done: the later cases are skipped and
 // afterAll rebuilds the database
-beforeEach(({ skip }) => {
-  if (killed.script) skip(`${killed.script} was killed: the database is rebuilt in afterAll`)
+beforeEach((context) => {
+  if (killed.script || fence.unsafe)
+    context.skip('a prior migration case failed; the database is rebuilt in afterAll')
+  fence.begin(context.signal)
 })
+
+// 等待原异步函数的 finally 真正退出；超过可配置预算时 fence 终止 worker，不与恢复并行。
+afterEach(async ({ task, signal }) => {
+  await fence.drain(task.result?.state === 'fail' || signal.aborted)
+}, SCRIPT_CASE_MS)
 
 afterAll(async () => {
   // back to the globalSetup state, whatever a failed case left
+  await fence.drain(false)
   if (ds?.isInitialized) {
-    if (killed.script) await ds.dropDatabase()
-    await restoreTestSchema(ds)
+    await recoverMigrationRun(async () => {
+      if (killed.script || fence.unsafe) await ds.dropDatabase()
+      await restoreTestSchema(ds)
+    })
   }
   await ds?.destroy()
 }, SCRIPT_CASE_MS)
@@ -300,4 +315,4 @@ it('fails in bounded time while another session holds a tenant table, and finish
     await holder.release()
     await hardenTenancy(ds) // whatever failed above
   }
-}, 30_000)
+})

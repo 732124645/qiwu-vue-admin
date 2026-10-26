@@ -1,7 +1,13 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
 import type { FormItemRule } from 'element-plus'
-import { agentProviderSave, type AgentProviderSave } from '@qiwu/shared'
+import {
+  AGENT_REASONING,
+  agentCreditAmount,
+  agentProviderSave,
+  type AgentModelPricing,
+  type AgentProviderSave,
+} from '@qiwu/shared'
 import { agentProviderApi, dropEmpty } from '@/api/platform/agent-admin'
 import QwEditTable from '@/core/components/QwEditTable.vue'
 import { useCrudForm } from '@/core/composables/use-crud'
@@ -25,14 +31,18 @@ const newModel = (): Model => ({
   fast: false,
   contextWindow: 64_000,
   image: false,
+  pricing: null,
+  reasoningDefault: 'provider',
+  reasoningStyle: 'standard',
 })
 const { model, row, formRef, rules, loading, submitting, submit } = useCrudForm({
   api: {
     get: agentProviderApi.get,
     // 密钥只写：空串不发送，服务端保留已保存的密钥
-    create: (dto: AgentProviderSave) => agentProviderApi.create(dropEmpty(dto, 'apiKey')),
+    create: (dto: AgentProviderSave) =>
+      agentProviderApi.create(dropEmpty(agentProviderSave.parse(dto), 'apiKey')),
     update: (pid: number, dto: AgentProviderSave) =>
-      agentProviderApi.update(pid, dropEmpty(dto, 'apiKey')),
+      agentProviderApi.update(pid, dropEmpty(agentProviderSave.parse(dto), 'apiKey')),
   },
   schema: agentProviderSave,
   emptyModel: () => ({
@@ -64,6 +74,29 @@ const modelColumns = [
   { prop: 'image', label: 'agent.admin.model.image', width: 80 },
   { prop: 'contextWindow', label: 'agent.admin.model.contextWindow', width: 170 },
 ]
+
+const rates = ['input', 'output', 'cacheRead', 'cacheWrite', 'imageCredits'] as const
+const rateLabel = (key: (typeof rates)[number]) =>
+  `agent.admin.model.${key === 'imageCredits' ? key : `${key}Credits`}`
+/** 未配置与免费分开；可选费率留空才继承，明确的0保持原样。 */
+function setRate(pricing: AgentModelPricing, key: (typeof rates)[number], value: string) {
+  if (key === 'input' || key === 'output') pricing[key] = value
+  else pricing[key] = value || null
+}
+const rateRule = (required: boolean): FormItemRule => ({
+  validator: (_rule, value, done) =>
+    done(
+      (!required && value == null) || agentCreditAmount.safeParse(value).success
+        ? undefined
+        : new Error(t('agent.admin.param.creditInvalid')),
+    ),
+})
+/** 切换到开关协议时不再保留虚假的低/高等级。 */
+function setReasoningStyle(m: Model, value: 'standard' | 'vllm') {
+  m.reasoningStyle = value
+  if (value === 'vllm' && ['low', 'high'].includes(m.reasoningDefault ?? ''))
+    m.reasoningDefault = 'medium'
+}
 </script>
 
 <template>
@@ -130,6 +163,104 @@ const modelColumns = [
     </QwEditTable>
     <!-- the list itself (at least one model) reports here -->
     <el-form-item class="provider-form__models" prop="models" :rules="modelsRule" />
+    <el-collapse class="provider-form__config">
+      <el-collapse-item v-for="(m, index) in model.models" :key="index" :name="index">
+        <template #title>
+          {{ m.label || m.id || t('agent.admin.model.id') }} ·
+          {{ t('agent.admin.model.configure') }}
+          <el-tag size="small" :type="m.pricing ? 'success' : 'warning'">
+            {{
+              t(
+                m.pricing
+                  ? 'agent.admin.model.pricingConfigured'
+                  : 'agent.admin.model.pricingMissing',
+              )
+            }}
+          </el-tag>
+        </template>
+        <el-checkbox
+          :model-value="!!m.pricing"
+          :disabled="submitting"
+          @change="
+            m.pricing = $event
+              ? { input: '', output: '', cacheRead: null, cacheWrite: null, imageCredits: null }
+              : null
+          "
+        >
+          {{ t('agent.admin.model.pricingEnabled') }}
+        </el-checkbox>
+        <p class="provider-form__hint">{{ t('agent.admin.model.pricingHint') }}</p>
+        <div v-if="m.pricing" class="provider-form__rates">
+          <el-form-item
+            v-for="rate in rates"
+            :key="rate"
+            :label="t(rateLabel(rate))"
+            :prop="`models.${index}.pricing.${rate}`"
+            :rules="rateRule(rate === 'input' || rate === 'output')"
+          >
+            <el-input
+              :model-value="m.pricing[rate] ?? ''"
+              inputmode="decimal"
+              maxlength="19"
+              :disabled="submitting"
+              :aria-label="t(rateLabel(rate))"
+              :placeholder="
+                rate === 'cacheRead' || rate === 'cacheWrite'
+                  ? t('agent.admin.model.cacheFallback')
+                  : ''
+              "
+              @update:model-value="setRate(m.pricing!, rate, $event)"
+            />
+          </el-form-item>
+        </div>
+        <p v-if="m.pricing" class="provider-form__hint">
+          {{ t('agent.admin.model.imageFallback') }}
+        </p>
+        <p class="provider-form__hint">{{ t('agent.admin.model.reasoningHint') }}</p>
+        <div class="provider-form__rates">
+          <el-form-item :label="t('agent.admin.model.reasoningStyle')">
+            <el-select
+              :model-value="m.reasoningStyle ?? 'standard'"
+              :disabled="!m.reasoning || submitting"
+              :aria-label="t('agent.admin.model.reasoningStyle')"
+              @change="setReasoningStyle(m, $event)"
+            >
+              <el-option value="standard" :label="t('agent.admin.model.reasoningStandard')" />
+              <el-option value="vllm" :label="t('agent.admin.model.reasoningVllm')" />
+            </el-select>
+          </el-form-item>
+          <el-form-item :label="t('agent.admin.model.reasoningDefault')">
+            <el-select
+              :model-value="m.reasoningDefault ?? 'provider'"
+              @update:model-value="m.reasoningDefault = $event"
+              :disabled="!m.reasoning || submitting"
+              :aria-label="t('agent.admin.model.reasoningDefault')"
+            >
+              <el-option value="provider" :label="t('agent.admin.model.reasoningProvider')" />
+              <el-option
+                v-for="value in m.reasoningStyle === 'vllm' ? ['off', 'medium'] : AGENT_REASONING"
+                :key="value"
+                :value="value"
+                :label="
+                  m.reasoningStyle === 'vllm' && value === 'medium'
+                    ? t('agent.admin.model.reasoningOn')
+                    : t(`agent.chat.reasoning.${value}`)
+                "
+              />
+            </el-select>
+          </el-form-item>
+        </div>
+        <p class="provider-form__hint">
+          {{
+            t(
+              m.reasoningStyle === 'vllm'
+                ? 'agent.admin.model.vllmHint'
+                : 'agent.admin.model.standardOffHint',
+            )
+          }}
+        </p>
+      </el-collapse-item>
+    </el-collapse>
     <el-form-item :label="t('field.agent.provider.enabled')" prop="enabled">
       <el-switch v-model="model.enabled" />
     </el-form-item>
@@ -139,7 +270,7 @@ const modelColumns = [
   </el-form>
   <div class="qw-dialog-footer">
     <el-button @click="emit('cancel')">{{ t('common.action.cancel') }}</el-button>
-    <el-button type="primary" :loading="submitting" @click="submit">
+    <el-button type="primary" :loading="submitting" :disabled="submitting" @click="submit">
       {{ t('crud.action.save') }}
     </el-button>
   </div>
@@ -148,5 +279,22 @@ const modelColumns = [
 <style scoped>
 .provider-form__stored {
   margin-left: 8px;
+}
+.provider-form__config {
+  margin: 16px 0;
+}
+.provider-form__config :deep(.el-tag) {
+  margin: 0 8px;
+}
+.provider-form__rates {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: 0 16px;
+}
+.provider-form__hint {
+  margin: 8px 0;
+  color: var(--qw-text-3);
+  font-size: 12px;
+  line-height: 1.5;
 }
 </style>

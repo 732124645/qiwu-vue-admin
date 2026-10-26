@@ -13,7 +13,8 @@ import ElementPlus, {
 import { createI18n, useI18n } from 'vue-i18n'
 import { changePasswordBody, DEFAULT_PASSWORD_POLICY, positionCreate } from '@qiwu/shared'
 import { DemoNoteCreate } from '@qiwu/shared/testing'
-import { sharedMessages, zodRules } from '@/core/form/zod-rules'
+import { zodRules } from '@/core/form/zod-rules'
+import { sharedMessages } from '@/core/i18n/messages'
 
 const NoteForm = defineComponent({
   setup(_, { expose }) {

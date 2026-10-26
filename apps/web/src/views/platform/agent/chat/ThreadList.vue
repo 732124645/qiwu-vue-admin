@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, shallowRef } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useDebounceFn } from '@vueuse/core'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -17,7 +17,10 @@ import { groupThreads } from './thread-state'
  * `refresh` 防抖地重读第 1 页（推送来未列出的会话、轮次状态变化、断线重连后）；临时会话从不列出。
  */
 defineOptions({ name: 'AgentThreadList' })
-const { activeId = null } = defineProps<{ activeId?: number | null }>()
+const { activeId = null, active = true } = defineProps<{
+  activeId?: number | null
+  active?: boolean
+}>()
 const emit = defineEmits<{ open: [thread: AgentThreadVo]; create: []; gone: [id: number] }>()
 const { t } = useI18n()
 
@@ -34,6 +37,7 @@ let seq = 0
 
 /** 读第 `page` 页；第 1 页替换列表，之后的页接在后面。 */
 async function load(next = 1) {
+  if (!active) return
   const mine = ++seq
   loading.value = true
   try {
@@ -45,7 +49,7 @@ async function load(next = 1) {
       view: view.value,
       ...(keyword.value.trim() ? { keyword: keyword.value.trim() } : {}),
     })
-    if (mine !== seq) return
+    if (mine !== seq || !active) return
     const known =
       next === 1 ? [] : threads.value.filter((x) => !res.items.some((y) => y.id === x.id))
     threads.value = [...known, ...res.items]
@@ -61,7 +65,7 @@ const search = useDebounceFn(() => load(1), 300)
 // 卸载后不再补发延迟的重读
 let alive = true
 onBeforeUnmount(() => (alive = false))
-const refresh = useDebounceFn(() => alive && load(1), 1000)
+const refresh = useDebounceFn(() => alive && active && load(1), 1000)
 const groups = computed(() => groupThreads(threads.value))
 
 /** 新建、分叉或推送更新的会话：已在列表里的替换，属于当前视图的新会话放到最前面。 */
@@ -197,7 +201,14 @@ function bumpUnread(id: number) {
   const th = threads.value.find((x) => x.id === id)
   if (th) upsert({ ...th, unread: th.unread + 1 })
 }
-void load(1)
+watch(
+  () => active,
+  (value) => {
+    if (value) void load(1)
+    else seq++
+  },
+  { immediate: true },
+)
 defineExpose({ load, refresh, upsert, patch, has, bumpUnread })
 </script>
 

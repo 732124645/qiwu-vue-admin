@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { Inject, Injectable, Optional } from '@nestjs/common'
 import { InjectDataSource } from '@nestjs/typeorm'
 import {
@@ -13,6 +14,7 @@ import { I18nService } from 'nestjs-i18n'
 import { type DataSource, IsNull, MoreThan } from 'typeorm'
 import type { Principal } from '../../auth/principal.js'
 import { BizError } from '../../http/biz-error.js'
+import { canonicalJson } from '../../guard/idempotent.js'
 import { currentLocale } from '../../i18n/locale.js'
 import { ProviderRegistry } from '../provider/provider-registry.js'
 import { ParamService } from '../../settings/param.service.js'
@@ -24,7 +26,12 @@ import {
   type SkillSource,
   type TurnControl,
 } from '../agent-ports.js'
-import { AgentItem, AgentThread, AgentTurn } from '../entities/agent-thread.entity.js'
+import {
+  AgentItem,
+  AgentMessageReceipt,
+  AgentThread,
+  AgentTurn,
+} from '../entities/agent-thread.entity.js'
 import { type ItemInternal, ItemStore, type ItemWriter, StaleItem } from './item-store.js'
 import { ACTIVE_TURN, TurnQueue } from './turn-queue.js'
 import { TurnRunner } from './turn-runner.js'
@@ -32,6 +39,7 @@ import { isTrusted, trustEntry } from './turn-tools.js'
 import { HumanConfirmation } from './human-confirmation.js'
 
 const notFound = () => new BizError(Err.NOT_FOUND)
+type AcceptedMessage = { turnId: number; first: boolean; start: boolean }
 
 /**
  * 对话页的操作（会话接口与批量任务共用，see docs/agent.md）：发消息开一轮或追加 / 排队、中断、手动压缩、
@@ -69,6 +77,25 @@ export class TurnControlService implements TurnControl {
     // 进入其他租户的平台人员不经智能体操作那个租户：轮次以会话所有人的身份在会话的租户里执行
     if (p.actingTenantId !== undefined && p.actingTenantId !== p.tenantId)
       throw new BizError(Err.FORBIDDEN)
+    const requestHash = createHash('sha256')
+      .update(
+        canonicalJson({
+          threadId,
+          text: msg.text,
+          skill: msg.skill ?? null,
+          fileIds: msg.fileIds ?? [],
+          mode: msg.mode ?? 'steer',
+        }),
+      )
+      .digest('hex')
+    // 查证已接受的请求不重新校验附件、配置或启动轮次，权限变化也不能让同一发送变成第二次执行。
+    const prior = msg.clientMessageId
+      ? await this.store.tx(async (w) => {
+          await this.own(w, p, threadId)
+          return this.accepted(w, p, threadId, msg.clientMessageId!, requestHash)
+        })
+      : null
+    if (prior) return { turnId: prior.turnId }
     if (await this.runner.paused()) throw new BizError(Err.AGENT_PAUSED)
     if (msg.skill && !(await this.skills?.load(p, msg.skill))) throw notFound()
     const attachments = msg.fileIds?.length
@@ -76,51 +103,108 @@ export class TurnControlService implements TurnControl {
       : undefined
     const files = attachments && { attachments }
     const limits = await this.runner.limits()
-    const res = await this.store.tx(async (w) => {
-      const thread = await this.own(w, p, threadId)
-      // 自动化开的会话只跑这次运行的那一轮、子智能体的会话只跑分派时的那一轮：不能再发消息（新的一轮、
-      // 追加、排队都不行），审批与提问照常
-      if (thread.automationRunId !== null || thread.parentThreadId !== null)
-        throw new BizError(Err.CONFLICT)
-      const turns = w.m.getRepository(AgentTurn)
-      const active = await turns.findOne({ where: { threadId, status: ACTIVE_TURN } })
-      if (active) {
-        if (msg.mode === 'queue')
-          await w.append(
-            threadId,
-            null,
-            'user',
-            { text: msg.text, ...(msg.skill && { skill: msg.skill }), ...files, mode: 'queue' },
-            'pending',
-          )
-        else
-          await w.append(threadId, Number(active.id), 'user', {
-            text: msg.text,
-            ...files,
-            mode: 'steer',
+    const accept = () =>
+      this.store.tx(async (w): Promise<AcceptedMessage> => {
+        const thread = await this.own(w, p, threadId)
+        if (msg.clientMessageId) {
+          const duplicate = await this.accepted(w, p, threadId, msg.clientMessageId, requestHash)
+          if (duplicate) return duplicate
+        }
+        const record = async (item: AgentItem, turnId: number, first: boolean, start: boolean) => {
+          if (msg.clientMessageId)
+            await w.m.getRepository(AgentMessageReceipt).save({
+              userId: p.userId,
+              threadId,
+              clientMessageId: msg.clientMessageId,
+              requestHash,
+              itemId: Number(item.id),
+              acceptedTurnId: turnId,
+            })
+          return { turnId, first, start }
+        }
+        // 自动化开的会话只跑这次运行的那一轮、子智能体的会话只跑分派时的那一轮：不能再发消息（新的一轮、
+        // 追加、排队都不行），审批与提问照常
+        if (thread.automationRunId !== null || thread.parentThreadId !== null)
+          throw new BizError(Err.CONFLICT)
+        const turns = w.m.getRepository(AgentTurn)
+        const active = await turns.findOne({ where: { threadId, status: ACTIVE_TURN } })
+        if (active) {
+          let item: AgentItem
+          if (msg.mode === 'queue')
+            item = await w.append(
+              threadId,
+              null,
+              'user',
+              { text: msg.text, ...(msg.skill && { skill: msg.skill }), ...files, mode: 'queue' },
+              'pending',
+            )
+          else
+            item = await w.append(threadId, Number(active.id), 'user', {
+              text: msg.text,
+              ...files,
+              mode: 'steer',
+            })
+          return record(item, Number(active.id), false, false)
+        }
+        // 上限：并发数是软限制（两个同时到的请求都可能通过），够用；续跑与排队的开始在 TurnQueue 里按用户串行
+        if ((await this.queue.busy(p.userId, w.m)) >= limits.userConcurrentTurns)
+          throw new BizError(Err.AGENT_LIMIT, {
+            reason: String(
+              this.i18n.translate('agent.runtime.limit.concurrency', { lang: currentLocale() }),
+            ),
           })
-        return { turnId: Number(active.id), first: false, start: false }
-      }
-      // 上限：并发数是软限制（两个同时到的请求都可能通过），够用；续跑与排队的开始在 TurnQueue 里按用户串行
-      if ((await this.queue.busy(p.userId, w.m)) >= limits.userConcurrentTurns)
-        throw new BizError(Err.AGENT_LIMIT, {
-          reason: String(
-            this.i18n.translate('agent.runtime.limit.concurrency', { lang: currentLocale() }),
-          ),
+        const first = !(await turns.existsBy({ threadId }))
+        const turn = await w.createTurn(threadId, p.userId)
+        const item = await w.append(threadId, Number(turn.id), 'user', {
+          text: msg.text,
+          ...(msg.skill && { skill: msg.skill }),
+          ...files,
+          ...(first && thread.context && { context: thread.context }),
         })
-      const first = !(await turns.existsBy({ threadId }))
-      const turn = await w.createTurn(threadId, p.userId)
-      await w.append(threadId, Number(turn.id), 'user', {
-        text: msg.text,
-        ...(msg.skill && { skill: msg.skill }),
-        ...files,
-        ...(first && thread.context && { context: thread.context }),
+        return record(item, Number(turn.id), first, true)
       })
-      return { turnId: Number(turn.id), first, start: true }
-    })
+    let res: AcceptedMessage
+    try {
+      res = await accept()
+    } catch (error) {
+      // 同一用户误把同一 UUID 发到两个线程时，永久唯一键仍是最后防线；失败事务不留轮次或条目。
+      const duplicate = msg.clientMessageId
+        ? await this.store.tx(async (w) => {
+            await this.own(w, p, threadId)
+            return this.accepted(w, p, threadId, msg.clientMessageId!, requestHash)
+          })
+        : null
+      if (!duplicate) throw error
+      res = duplicate
+    }
     if (res.start) await this.queue.kick(res.turnId)
     if (res.first) await this.queue.dropTemporary(p.userId, threadId)
     return { turnId: res.turnId }
+  }
+
+  /** 同一持久标识只回报原接受结果；异载荷或已撤回的消息拒绝复用，不复活业务效果。 */
+  private async accepted(
+    w: ItemWriter,
+    p: Principal,
+    threadId: number,
+    clientMessageId: string,
+    requestHash: string,
+  ): Promise<AcceptedMessage | null> {
+    const receipt = await w.m.getRepository(AgentMessageReceipt).findOne({
+      where: { userId: p.userId, clientMessageId },
+      withDeleted: true,
+    })
+    if (!receipt) return null
+    if (Number(receipt.threadId) !== threadId || receipt.requestHash !== requestHash)
+      throw new BizError(Err.CONFLICT)
+    const item = await w.m
+      .getRepository(AgentItem)
+      .existsBy({ id: Number(receipt.itemId), threadId })
+    const turn = await w.m
+      .getRepository(AgentTurn)
+      .existsBy({ id: Number(receipt.acceptedTurnId), threadId })
+    if (!item || !turn) throw new BizError(Err.CONFLICT)
+    return { turnId: Number(receipt.acceptedTurnId), first: false, start: false }
   }
 
   /**

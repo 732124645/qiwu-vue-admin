@@ -26,6 +26,7 @@ import {
   In,
   IsNull,
   LessThan,
+  LessThanOrEqual,
   MoreThan,
   Not,
 } from 'typeorm'
@@ -34,6 +35,8 @@ import { AuditWriter } from '../../audit/audit-writer.js'
 import { PermVersion } from '../../auth/perm-version.js'
 import type { Principal } from '../../auth/principal.js'
 import { allTenants, tenantId, withTenant } from '../../context/tenant.js'
+import { QueueService } from '../../queue/queue.service.js'
+import { AgentAutomation, AgentAutomationRun } from '../automation/automation.entity.js'
 import { RedisLock } from '../../guard/redis-lock.js'
 import { BizError } from '../../http/biz-error.js'
 import { McpRegistry, type RegisteredTool } from '../../mcp/mcp-registry.js'
@@ -44,11 +47,15 @@ import { REDIS, type Redis } from '../../redis/redis.module.js'
 import { ParamService } from '../../settings/param.service.js'
 import {
   type AgentModelUsage,
+  type AgentModelCalls,
+  type AgentUsageTarget,
   type AgentReviewContext,
   type AgentReviewVerdict,
   type AgentRunContext,
   type AgentToolContext,
   type AgentToolWait,
+  AGENT_IMAGE_STORE,
+  type AgentImageStore,
   ATTACHMENT_SOURCE,
   type AgentBuiltinToolMeta,
   type AttachmentSource,
@@ -68,7 +75,9 @@ import { AutomationPreApproval } from '../automation/pre-approval.js'
 import { AgentSweepStats } from '../diagnostics/sweep-stats.js'
 import { AgentItem, AgentThread, AgentTurn } from '../entities/agent-thread.entity.js'
 import type { ChatFinishReason, ChatToolCall, ChatUsage } from '../provider/chat-model.js'
-import { ProviderRegistry, type ResolvedModel } from '../provider/provider-registry.js'
+import { ProviderRegistry, type ResolvedModel, usageTarget } from '../provider/provider-registry.js'
+import { usageOf } from '../provider/usage.js'
+import { creditLimitReached } from './billing.js'
 import { trustModeOn } from '../threads/thread-vo.js'
 import { AgentToolPolicies, effectivePolicy } from '../tools/tool-policy.js'
 import { TurnUrls } from '../web/turn-urls.js'
@@ -78,13 +87,16 @@ import {
   copiesSuggestion,
   type ItemInternal,
   ItemStore,
+  StaleItem,
   ThreadGone,
 } from './item-store.js'
 import { AgentNotices } from './notify-settings.js'
 import {
   citationsOf,
+  compactionBoundary,
   COMPACT_AT,
   COMPACT_PROMPT,
+  CHARS_PER_TOKEN,
   contextMessage,
   estimateTokens,
   historyMessages,
@@ -96,13 +108,15 @@ import {
   transcript,
 } from './turn-prompt.js'
 import { ACTIVE_TURN, openCards, TurnQueue } from './turn-queue.js'
-import { UsageBook, usageDay } from './usage-book.js'
+import { automationRecoveryRequired } from './recovery.js'
+import { InvocationLeaseLost, UsageBook, usageDay } from './usage-book.js'
 import { AgentExtensions, isToolItemKind, runThread, toolItemPayload } from './agent-extensions.js'
 import {
   isTrusted,
   keepForSubagent,
   type OfferedTool,
   SUBAGENT_STEPS,
+  IMAGE_TOOL,
   trustKey,
 } from './turn-tools.js'
 
@@ -154,9 +168,7 @@ interface TurnClock {
 interface Limits {
   turnSteps: number
   turnSeconds: number
-  turnTokens: number
-  userDailyTokens: number
-  tenantDailyTokens: number
+  turnCredits: string
   userConcurrentTurns: number
   /** research mode's step and time limits (a turn started with the platform research skill) */
   researchSteps: number
@@ -166,9 +178,9 @@ interface Limits {
 /** What a subagent's turn reports to the parent run (see TurnRunner.runChild). */
 export interface ChildHooks {
   /** a model call of the subagent: counted in the parent turn too */
-  onUsage(model: string, u: ChatUsage): Promise<void>
+  onUsage(target: AgentUsageTarget, u: ChatUsage, credits: string | null): Promise<void>
   /** the parent turn's or the owner's budget is spent: the subagent stops before its next step */
-  overBudget(): Promise<'turn_tokens' | 'user_daily' | 'tenant_daily' | null>
+  overBudget(): Promise<'turn_credits' | 'user_daily' | 'tenant_daily' | null>
 }
 
 /** The skill a turn was started with, with where it comes from. */
@@ -191,6 +203,10 @@ interface RunCtx {
   readOnly: boolean
   skill: { name: string; body: string; tools: string[] | null } | null
   signal: AbortSignal
+  /** 独立保留执行租约，用户先取消时也不能遮住稍后真正丢锁。 */
+  leaseLost?: AbortSignal
+  /** 主动释放也会失去执行权；lost 信号只表示异常丢锁，不涵盖 release。 */
+  leaseHeld?: () => boolean
   limits: Limits
   /** the turn's items, reloaded at each step */
   items: AgentItem[]
@@ -254,6 +270,45 @@ const orphanKey = (turnId: number) => redisKey('lock', `agent-orphan-${turnId}`)
  */
 @Injectable()
 export class TurnRunner {
+  private draining = false
+  private readonly activeRuns = new Map<number, AbortController>()
+  private readonly activeContexts = new Map<number, RunCtx>()
+  private readonly liveWork = new Map<number, Set<Promise<unknown>>>()
+
+  /** 关闭队列前通知运行保存；发布中断按丢租约恢复，不冒充用户取消。 */
+  onModuleInit(): void {
+    this.queues.onDrain(async () => {
+      this.draining = true
+      // 用量服务可能先中断流并移除 live map；快照保留关闭前仍需终态化的条目。
+      const contexts = [...this.activeContexts.values()]
+      const until = Date.now() + 3000
+      while (this.activeRuns.size && Date.now() < until)
+        await new Promise<void>((resolve) => setTimeout(resolve, 25))
+      for (const ctrl of this.activeRuns.values()) ctrl.abort(new LeaseLost())
+      for (const ctx of contexts) {
+        if (ctx.leaseLost?.aborted || ctx.leaseHeld?.() === false) continue
+        try {
+          // qw:cross-tenant 关闭钩子仅恢复持有租约的原会话租户并落盘，不使用当前请求身份。
+          await withTenant(ctx.thread.tenantId, async () => {
+            ctx.items = await this.turnItems(ctx.turn)
+            try {
+              await this.recover(ctx)
+            } catch (error) {
+              if (error instanceof TurnStop && error.err === Err.AGENT_RECOVERY_REQUIRED)
+                await this.stopped(ctx.turn, error, ctx.lang)
+              else throw error
+            }
+          })
+        } catch (error) {
+          this.logger.warn(
+            { err: error instanceof Error ? error.name : 'Error' },
+            'agent shutdown checkpoint failed',
+          )
+        }
+      }
+    })
+  }
+
   private readonly logger = new Logger(TurnRunner.name)
   /** 子智能体的轮次 → 父轮的钩子：用量也计入父轮，父轮的额度用完时子轮也停（见 {@link runChild}） */
   private readonly rollUp = new Map<number, ChildHooks>()
@@ -262,6 +317,7 @@ export class TurnRunner {
     @InjectDataSource() private readonly ds: DataSource,
     private readonly store: ItemStore,
     private readonly queue: TurnQueue,
+    private readonly queues: QueueService,
     private readonly providers: ProviderRegistry,
     private readonly host: ToolHost,
     private readonly confirmation: HumanConfirmation,
@@ -284,6 +340,7 @@ export class TurnRunner {
     @Optional() @Inject(INSTRUCTION_SOURCE) private readonly instructions?: InstructionSource,
     @Optional() @Inject(ATTACHMENT_SOURCE) private readonly attachments?: AttachmentSource,
     @Optional() @Inject(PROFILE_SOURCE) private readonly profiles?: ProfileSource,
+    @Optional() @Inject(AGENT_IMAGE_STORE) private readonly images?: AgentImageStore,
   ) {}
 
   /**
@@ -292,18 +349,25 @@ export class TurnRunner {
    * 否则它的用量不计入父轮、父轮的额度也管不住它。
    */
   async run(turnId: number): Promise<void> {
+    if (this.draining) throw new LeaseLost()
     if (!this.rollUp.has(turnId) && (await this.childTurn(turnId))) return
     const key = turnLockKey(turnId)
     const until = Date.now() + LOCK_WAIT_MS
     let lease = await this.lock.acquire(key, TURN_LOCK_TTL_MS)
-    while (!lease && Date.now() < until) {
+    while (!lease && Date.now() < until && !this.draining) {
       await new Promise((r) => setTimeout(r, 250))
       lease = await this.lock.acquire(key, TURN_LOCK_TTL_MS)
     }
-    if (!lease) throw new Error(`agent turn ${turnId} is held by another run`)
+    if (!lease) {
+      if (this.draining) throw new LeaseLost()
+      throw new Error(`agent turn ${turnId} is held by another run`)
+    }
     try {
-      await this.runLocked(turnId, lease.lost)
+      if (this.draining) throw new LeaseLost()
+      await this.runLocked(turnId, lease.lost, () => lease.held)
     } finally {
+      // 等待真实本地写完成才释放执行租约；超时/取消只结束模型等待，不能证明物理工作停止。
+      await Promise.allSettled(this.liveWork.get(turnId) ?? [])
       await lease.release()
     }
   }
@@ -346,9 +410,7 @@ export class TurnRunner {
     return {
       turnSteps: await n(AGENT_LIMIT_PARAMS.turnSteps, 20),
       turnSeconds: await n(AGENT_LIMIT_PARAMS.turnSeconds, 300),
-      turnTokens: await n(AGENT_LIMIT_PARAMS.turnTokens, 200_000),
-      userDailyTokens: await n(AGENT_LIMIT_PARAMS.userDailyTokens, 1_000_000),
-      tenantDailyTokens: await n(AGENT_LIMIT_PARAMS.tenantDailyTokens, 10_000_000),
+      turnCredits: await this.usage.limit(AGENT_LIMIT_PARAMS.turnCredits),
       userConcurrentTurns: await n(AGENT_LIMIT_PARAMS.userConcurrentTurns, 2),
       researchSteps: await n(AGENT2_PARAMS.researchSteps, 60),
       researchSeconds: await n(AGENT2_PARAMS.researchSeconds, 1200),
@@ -361,7 +423,7 @@ export class TurnRunner {
    * 外部服务器表单时进程死掉了（活着的运行握着锁，轮不到这里），置回 running 后由 recover 作废表单、
    * 把那次调用记为结果未知。
    */
-  private async runLocked(turnId: number, lost: AbortSignal): Promise<void> {
+  private async runLocked(turnId: number, lost: AbortSignal, held?: () => boolean): Promise<void> {
     const turn = await this.ds.getRepository(AgentTurn).findOneBy({ id: turnId })
     if (!turn) return
     if (turn.status === 'waiting' && !(await this.adoptStranded(turn))) return
@@ -369,6 +431,7 @@ export class TurnRunner {
     const thread = await this.ds.getRepository(AgentThread).findOneBy({ id: turn.threadId })
     if (!thread) return
     const ctrl = new AbortController()
+    this.activeRuns.set(turnId, ctrl)
     // 锁在读库的这段时间里就丢了：监听器不会再触发，直接按丢锁处理（不写任何条目，重新入队）
     if (lost.aborted) ctrl.abort(new LeaseLost())
     else lost.addEventListener('abort', () => ctrl.abort(new LeaseLost()), { once: true })
@@ -413,17 +476,29 @@ export class TurnRunner {
       }
       arm()
       const ctx = await this.context(turn, thread, p, ctrl.signal, limits, clock, skill)
+      ctx.leaseLost = lost
+      ctx.leaseHeld = held
+      this.activeContexts.set(turnId, ctx)
       await this.recover(ctx)
       await this.loop(ctx)
     } catch (e) {
-      const reason =
-        ctrl.signal.reason instanceof LeaseLost
+      const reason = lost.aborted
+        ? new LeaseLost()
+        : ctrl.signal.reason instanceof LeaseLost
           ? ctrl.signal.reason
           : ctrl.signal.aborted && !isStop(e)
             ? ctrl.signal.reason
             : e
-      await this.stopped(turn, reason, lang)
+      await this.stopped(
+        turn,
+        reason instanceof InvocationLeaseLost || reason instanceof StaleItem
+          ? new LeaseLost()
+          : reason,
+        lang,
+      )
     } finally {
+      this.activeRuns.delete(turnId)
+      this.activeContexts.delete(turnId)
       clearInterval(watch)
       clearTimeout(timer)
     }
@@ -664,7 +739,9 @@ export class TurnRunner {
    * 作废；执行到一半的工具调用不重做（可能已经写入），记一条“结果未知、请先核对”的结果给模型。
    */
   private async recover(ctx: RunCtx): Promise<void> {
+    if (ctx.leaseLost?.aborted || ctx.leaseHeld?.() === false) throw new LeaseLost()
     for (const i of ctx.items) {
+      if (ctx.leaseLost?.aborted || ctx.leaseHeld?.() === false) throw new LeaseLost()
       if ((i.kind === 'assistant' || i.kind === 'reasoning') && i.status === 'running')
         await this.store.update(i, { status: 'failed' })
       else if (i.kind === 'question' && i.status === 'pending' && pl<'question'>(i).form)
@@ -673,20 +750,42 @@ export class TurnRunner {
     const done = new Set(
       ctx.items.filter((i) => i.kind === 'tool_result').map((i) => pl<'tool_result'>(i).callId),
     )
-    for (const call of ctx.items)
+    let uncertainWrite = false
+    for (const call of ctx.items) {
+      if (ctx.leaseLost?.aborted || ctx.leaseHeld?.() === false) throw new LeaseLost()
       if (
-        call.kind === 'tool_call' &&
-        call.status === 'running' &&
-        !done.has(pl<'tool_call'>(call).callId)
+        call.kind !== 'tool_call' ||
+        call.status !== 'running' ||
+        done.has(pl<'tool_call'>(call).callId)
       )
-        await this.finish(ctx, call, {
+        continue
+      const c = pl<'tool_call'>(call)
+      if (
+        c.tool === IMAGE_TOOL &&
+        (await this.images?.find(ctx.p, `${ctx.thread.id}:${c.callId}`))
+      ) {
+        await this.store.update(call, { status: 'pending' })
+        continue // 已有本人的持久产物可直接补 UI，绝不再次向上游生成。
+      }
+      if (c.kind === 'read' && c.tool !== IMAGE_TOOL) {
+        await this.store.update(call, { status: 'pending' })
+        continue
+      }
+      await this.finish(
+        ctx,
+        call,
+        {
           ok: false,
           content:
-            'This call was interrupted by a restart; its outcome is unknown. Read the data again before ' +
-            'deciding whether to repeat it.',
+            'This write was interrupted; its outcome is unknown. The owner must verify the business record before writes can resume.',
           untrusted: false,
           error: { code: 'interrupted', message: 'interrupted' },
-        })
+        },
+        true,
+      )
+      uncertainWrite = true
+    }
+    if (uncertainWrite) throw new TurnStop(Err.AGENT_RECOVERY_REQUIRED)
   }
 
   /** 主循环：先把这一步的工具调用处理完，再请模型走下一步；答完或要等人时返回。 */
@@ -736,26 +835,25 @@ export class TurnRunner {
   }
 
   /**
-   * 每一步前检查限额：步数、本轮 token、本人与本租户今日 token；子智能体的轮次还看父轮（父轮剩下的单轮 token
+   * 每一步前检查限额：步数、本轮积分、本人与本租户今日积分；子智能体的轮次还看父轮（父轮剩下的单轮积分
    * 由它的子任务分着用，父轮用完时子轮也停）。
    */
   private async checkLimits(ctx: RunCtx): Promise<void> {
+    await this.usage.recoverExpired(false)
+    Object.assign(ctx.turn, await this.ds.getRepository(AgentTurn).findOneBy({ id: ctx.turn.id }))
     const l = ctx.limits
     if (ctx.turn.steps >= l.turnSteps) throw new TurnStop(Err.AGENT_LIMIT, { which: 'steps' })
-    if (ctx.turn.promptTokens + ctx.turn.completionTokens >= l.turnTokens)
-      throw new TurnStop(Err.AGENT_LIMIT, { which: 'turn_tokens' })
+    if (creditLimitReached(ctx.turn.credits ?? '0', l.turnCredits, ctx.turn.unpricedCalls))
+      throw new TurnStop(Err.AGENT_LIMIT, { which: 'turn_credits' })
     const parent = await this.rollUp.get(Number(ctx.turn.id))?.overBudget()
     if (parent) throw new TurnStop(Err.AGENT_LIMIT, { which: parent })
-    const over = await this.overDaily(ctx.p.userId, l)
+    const over = await this.overDaily(ctx.p.userId)
     if (over) throw new TurnStop(Err.AGENT_LIMIT, { which: over })
   }
 
   /** 本人或本租户今日的 token 是否已用完（模型调用之前查，手动压缩也查）：用完时返回是哪一项。 */
-  async overDaily(userId: number, limits?: Limits): Promise<'user_daily' | 'tenant_daily' | null> {
-    const l = limits ?? (await this.limits())
-    if ((await this.usage.usedToday(userId)) >= l.userDailyTokens) return 'user_daily'
-    if ((await this.usage.usedToday()) >= l.tenantDailyTokens) return 'tenant_daily'
-    return null
+  async overDaily(userId: number): Promise<'user_daily' | 'tenant_daily' | null> {
+    return this.usage.overDaily(userId)
   }
 
   /**
@@ -763,21 +861,27 @@ export class TurnRunner {
    * 就是最终回答（取出后续建议、附上引用），否则逐个记下工具调用（pending），下一圈处理。
    */
   private async step(ctx: RunCtx): Promise<void> {
-    let { system, history, sentSeq } = await this.request(ctx)
+    // 长轮次中配置可能已调价；每次实际模型调用前重新固定模型及费率，而不是沿用整轮旧价格。
+    ctx.model = await this.providers.resolve(ctx.model.providerId, ctx.model.model.id)
+    let { system, history, sentSeq, items } = await this.request(ctx)
     const chatTools = [...ctx.tools.values()].map((t) => ({
       name: t.name,
       description: t.description,
       parameters: t.parameters,
     }))
     const estimate = estimateTokens([{ role: 'system', content: system }, ...history], chatTools)
-    const firstSeq = ctx.items[0]?.seq ?? 0
-    if (
-      estimate > COMPACT_AT * ctx.model.model.contextWindow &&
-      firstSeq - 1 > ctx.thread.summarySeq
-    ) {
-      await this.compact(ctx.thread, firstSeq - 1, true, ctx.model, ctx.turn, ctx.signal)
-      ;({ system, history, sentSeq } = await this.request(ctx))
+    const boundary = compactionBoundary(items, ctx.thread.summarySeq, ctx.items[0]?.seq ?? 0)
+    if (estimate > COMPACT_AT * ctx.model.model.contextWindow && boundary !== null) {
+      await this.compact(ctx.thread, boundary, true, ctx.model, ctx.turn, ctx.signal)
+      await this.checkLimits(ctx)
+      ctx.model = await this.providers.resolve(ctx.model.providerId, ctx.model.model.id)
+      ;({ system, history, sentSeq, items } = await this.request(ctx))
     }
+    if (
+      estimateTokens([{ role: 'system', content: system }, ...history], chatTools) >
+      ctx.model.model.contextWindow
+    )
+      throw new TurnStop(Err.AGENT_LIMIT, { which: 'context' })
     ctx.sentSeq = sentSeq
     await this.store.tx((w) => w.patchTurn(ctx.turn, { steps: ctx.turn.steps + 1 }))
     const tid = Number(ctx.thread.id)
@@ -790,35 +894,96 @@ export class TurnRunner {
     let usage: ChatUsage | null = null
     let finish: ChatFinishReason = 'other'
     const calls: ChatToolCall[] = []
+    const target = usageTarget(ctx.model)
+    const invocation = await this.usage.begin(
+      ctx.p.userId,
+      target,
+      { threadId: tid, turnId },
+      ctx.signal,
+    )
+    let flushChain = Promise.resolve()
+    let flushError: unknown
+    const flush = () => {
+      flushChain = flushChain.then(async () => {
+        invocation.signal.throwIfAborted()
+        if (assistant)
+          await this.store.checkpoint(owner, assistant, text, invocation.signal, invocation.fence)
+        if (reasoning)
+          await this.store.checkpoint(
+            owner,
+            reasoning,
+            thought,
+            invocation.signal,
+            invocation.fence,
+          )
+      })
+      void flushChain.catch((error: unknown) => {
+        flushError = error
+      })
+      return flushChain
+    }
+    const checkpointTimer = setInterval(() => {
+      void flush().catch(() => {})
+    }, 200)
+    checkpointTimer.unref()
     try {
       for await (const ev of ctx.model.chat.stream({
         model: ctx.model.model.id,
         messages: [{ role: 'system', content: system }, ...history],
         tools: chatTools,
         reasoning: ctx.thread.reasoning ?? undefined,
-        signal: ctx.signal,
+        signal: invocation.signal,
       })) {
+        if (ev.type === 'usage') {
+          usage = ev.usage
+          await invocation.observe(usage)
+          invocation.signal.throwIfAborted()
+          continue
+        }
+        invocation.signal.throwIfAborted()
+        if (flushError) throw flushError
         if (ev.type === 'text') {
           assistant ??= await this.store.append(tid, turnId, 'assistant', { text: '' }, 'running')
           text += ev.delta
-          this.store.delta(owner, tid, Number(assistant.id), ev.delta)
+          if (text.length - String((assistant.payload as { text: string }).text).length >= 4096)
+            await flush()
         } else if (ev.type === 'reasoning') {
           reasoning ??= await this.store.append(tid, turnId, 'reasoning', { text: '' }, 'running')
           thought += ev.delta
-          this.store.delta(owner, tid, Number(reasoning.id), ev.delta)
+          if (thought.length - String((reasoning.payload as { text: string }).text).length >= 4096)
+            await flush()
         } else if (ev.type === 'tool_call') calls.push(ev.call)
-        else if (ev.type === 'usage') usage = ev.usage
         else if (ev.type === 'finish') finish = ev.reason
       }
+      clearInterval(checkpointTimer)
+      await flush()
+      invocation.signal.throwIfAborted()
+      await invocation.settle(usage ?? usageOf(null))
     } catch (e) {
-      // 没答完的回答留着已经出来的文字，标为失败，不再发给模型
-      if (assistant) await this.store.update(assistant, { payload: { text }, status: 'failed' })
-      if (reasoning)
-        await this.store.update(reasoning, { payload: { text: thought }, status: 'failed' })
-      if (usage) await this.recordUsage(ctx.p.userId, ctx.model.model.id, usage, ctx.turn)
-      throw e
+      // 不确定的租约不再发布；已提交的前缀由接管者标为中断，原调用只结算自己的回执。
+      clearInterval(checkpointTimer)
+      await flushChain.catch(() => {})
+      let settlementError: unknown
+      try {
+        await invocation.settle(usage ?? usageOf(null), true)
+      } catch (error) {
+        settlementError = error
+      }
+      // 计量租约丢失不等于本轮失去执行权；即使结算抛错，也要结束仍归本轮的已保存前缀。
+      for (const item of [assistant, reasoning]) {
+        if (!item || ctx.leaseLost?.aborted || ctx.signal.reason instanceof LeaseLost) continue
+        try {
+          await this.store.tx((w) => w.update(item, { status: 'failed' }, 'running'))
+        } catch (error) {
+          if (!(error instanceof StaleItem)) throw error
+        }
+      }
+      throw settlementError ?? e
+    } finally {
+      clearInterval(checkpointTimer)
+      invocation.release()
     }
-    if (usage) await this.recordUsage(ctx.p.userId, ctx.model.model.id, usage, ctx.turn)
+    await this.store.tx((w) => w.patchTurn(ctx.turn, {}))
     if (reasoning)
       await this.store.update(reasoning, { payload: { text: thought }, status: 'done' })
     // 这一步的推理文字跟着这一步存（见 ItemInternal.reasoning）；被截断或过滤的回答在末尾注明
@@ -954,9 +1119,21 @@ export class TurnRunner {
     const history = [
       ...parts.map(contextMessage),
       ...(ctx.thread.summary ? [summaryMessage(ctx.thread.summary)] : []),
+      ...historyMessages(
+        await this.ds.getRepository(AgentItem).find({
+          where: {
+            threadId: ctx.thread.id,
+            turnId: ctx.turn.id,
+            kind: 'user',
+            seq: LessThanOrEqual(ctx.thread.summarySeq),
+          },
+          order: { seq: 'ASC' },
+        }),
+        { files: ctx.attached, vision: ctx.model.model.vision },
+      ),
       ...historyMessages(items, { files: ctx.attached, vision: ctx.model.model.vision }),
     ]
-    return { system, history, sentSeq: items.at(-1)?.seq ?? 0 }
+    return { system, history, items, sentSeq: items.at(-1)?.seq ?? 0 }
   }
 
   /**
@@ -1013,22 +1190,19 @@ export class TurnRunner {
    */
   private async recordUsage(
     userId: number,
-    model: string,
+    target: AgentUsageTarget,
     u: ChatUsage | AgentModelUsage,
     turn: AgentTurn | null,
     daily = true,
+    _rolledCredits?: string | null,
+    failed = false,
   ): Promise<void> {
-    if (turn) {
-      const n = (v: number) => Math.max(0, Math.trunc(Number(v)) || 0)
-      await this.store.tx(async (w) => {
-        const repo = w.m.getRepository(AgentTurn)
-        await repo.increment({ id: turn.id }, 'promptTokens', n(u.promptTokens))
-        await repo.increment({ id: turn.id }, 'completionTokens', n(u.completionTokens))
-        await w.patchTurn(turn, {})
-      })
-      await this.rollUp.get(Number(turn.id))?.onUsage(model, u)
-    }
-    if (daily) await this.usage.add(userId, model, u)
+    if (!daily) return // 子轮现由同一账本事务原子计入持久父轮，禁止再次累加。
+    await this.usage.add(userId, target, u, {
+      ...(turn && { threadId: Number(turn.threadId), turnId: Number(turn.id) }),
+      failed,
+    })
+    if (turn) await this.store.tx((w) => w.patchTurn(turn, {}))
   }
 
   /**
@@ -1038,6 +1212,10 @@ export class TurnRunner {
    */
   private async resolveCall(ctx: RunCtx, call: AgentItem): Promise<'done' | 'wait'> {
     const c = pl<'tool_call'>(call)
+    if (c.kind === 'write' || c.tool === IMAGE_TOOL) {
+      const thread = await this.ds.getRepository(AgentThread).findOneBy({ id: ctx.thread.id })
+      if (thread?.recoveryRequired) throw new TurnStop(Err.AGENT_RECOVERY_REQUIRED)
+    }
     const of = (kind: 'approval' | 'question') =>
       ctx.items.find(
         (i) => i.kind === kind && (i.payload as { callId?: string }).callId === c.callId,
@@ -1141,6 +1319,33 @@ export class TurnRunner {
     return this.execute(ctx, call, def, c.args)
   }
 
+  /** 扩展入口也先检查持久积分，不要求扩展模块反向导入智能体运行时模块。 */
+  private async extensionBudget(
+    ctx: RunCtx,
+  ): Promise<'turn_credits' | 'user_daily' | 'tenant_daily' | null> {
+    await this.usage.recoverExpired(false)
+    Object.assign(ctx.turn, await this.ds.getRepository(AgentTurn).findOneBy({ id: ctx.turn.id }))
+    if (creditLimitReached(ctx.turn.credits ?? '0', ctx.limits.turnCredits, ctx.turn.unpricedCalls))
+      return 'turn_credits'
+    const parent = await this.rollUp.get(Number(ctx.turn.id))?.overBudget()
+    return parent ?? this.overDaily(ctx.p.userId)
+  }
+
+  /** 一次扩展调用绑定当前身份及轮次，不能只在完成后补计量。 */
+  private modelInvoker(ctx: RunCtx): AgentModelCalls['invokeModel'] {
+    return async (target, work, signal) => {
+      const over = await this.extensionBudget(ctx)
+      if (over) throw new TurnStop(Err.AGENT_LIMIT, { which: over })
+      return this.usage.invoke(
+        ctx.p.userId,
+        target,
+        { threadId: Number(ctx.thread.id), turnId: Number(ctx.turn.id) },
+        work,
+        signal ? AbortSignal.any([ctx.signal, signal]) : ctx.signal,
+      )
+    }
+  }
+
   /**
    * 写入调用要停下等人之前问审批审查者（没有登记的审查者时什么也不做）。从不问的情形——每一项都在此刻
    * 重新读取，不用本次运行开始时的快照：会话是只读或计划模式（运行开始后才切过去的也算）、智能体已急停、
@@ -1161,14 +1366,24 @@ export class TurnRunner {
     if (!now || now.approvalMode === 'read_only' || now.planMode) return null
     const policy = await this.policyNow(ctx, def)
     if (policy !== 'ask' && policy !== 'review') return null
-    // 审查者自己的模型调用与正常的一步同样记账：计入本轮 token（受单轮上限约束）与发起人的每日用量
+    // 审查者自己的模型调用与正常的一步同样记账：计入本轮积分（受单轮上限约束）与发起人的每日用量
     const review: AgentReviewContext = {
       ...ctx.view,
-      recordUsage: (model, u) => this.recordUsage(ctx.p.userId, model, u, ctx.turn),
-      overBudget: async () =>
-        ctx.turn.promptTokens + ctx.turn.completionTokens >= ctx.limits.turnTokens
-          ? 'turn_tokens'
-          : this.overDaily(ctx.p.userId, ctx.limits),
+      invokeModel: this.modelInvoker(ctx),
+      recordUsage: (target, u) => this.recordUsage(ctx.p.userId, target, u, ctx.turn),
+      overBudget: async () => {
+        Object.assign(
+          ctx.turn,
+          await this.ds.getRepository(AgentTurn).findOneBy({ id: ctx.turn.id }),
+        )
+        return creditLimitReached(
+          ctx.turn.credits ?? '0',
+          ctx.limits.turnCredits,
+          ctx.turn.unpricedCalls,
+        )
+          ? 'turn_credits'
+          : this.overDaily(ctx.p.userId)
+      },
     }
     const v = await this.ext.review(review, {
       callId: card.callId,
@@ -1403,30 +1618,69 @@ export class TurnRunner {
    * 结果落库。本系统工具走 ToolHost 的护栏并由它记操作日志；联网、外部与写入类内置工具在这里记同样形状
    * 的日志。只读的内置工具另走 {@link readBuiltin}。
    */
+  /** 本地写 Promise 的物理生命周期独立于 timeout/cancel 结果，不能提前解除核对闸。 */
+  private trackWork(turnId: number, work: Promise<unknown>): void {
+    const active = this.liveWork.get(turnId) ?? new Set<Promise<unknown>>()
+    active.add(work)
+    this.liveWork.set(turnId, active)
+    const remove = () => {
+      active.delete(work)
+      if (!active.size) this.liveWork.delete(turnId)
+    }
+    void work.then(remove, remove)
+  }
+
   private async execute(
     ctx: RunCtx,
     call: AgentItem,
     def: OfferedTool,
     args: unknown,
   ): Promise<'done' | 'wait'> {
-    if (def.origin === 'builtin' && def.kind === 'read')
+    if (def.origin === 'builtin' && def.kind === 'read' && def.name !== IMAGE_TOOL)
       return this.readBuiltin(ctx, call, def, args)
-    await this.store.update(call, { status: 'running' })
+    await this.store.tx(async (w) => {
+      const thread = await w.thread(Number(ctx.thread.id))
+      if (!thread) throw new ThreadGone()
+      if (def.kind === 'write' || def.name === IMAGE_TOOL) {
+        if (thread.recoveryRequired) throw new TurnStop(Err.AGENT_RECOVERY_REQUIRED)
+        if (thread.automationRunId !== null) {
+          const run = await w.m
+            .getRepository(AgentAutomationRun)
+            .findOneBy({ id: thread.automationRunId })
+          if (run && (await automationRecoveryRequired(w.m, Number(run.automationId))))
+            throw new TurnStop(Err.AGENT_RECOVERY_REQUIRED)
+        }
+      }
+      ctx.signal.throwIfAborted()
+      await w.update(call, { status: 'running' })
+    })
     let out: Outcome
+    let entered = false
     try {
       if (def.origin === 'builtin')
         out = await this.logged(ctx, def, args, async () => {
           // 与 ToolHost 一样：急停时写入一律拒绝（确认与执行之间可能刚急停）
           if (await this.paused()) throw new BizError(Err.AGENT_PAUSED)
-          const r = await this.builtin(ctx, call, def, args)
+          entered = true
+          const work = this.builtin(ctx, call, def, args)
+          if (def.kind === 'write') this.trackWork(Number(ctx.turn.id), work)
+          const r = await work
           if ('wait' in r) throw new Error(`built-in write tool ${def.name} cannot ask`)
           return r
         })
       else if (def.origin === 'local') {
         let renewed = false
+        let uncertain = false
         const r = await this.host.call(ctx.p, def.name, args, {
           threadId: Number(ctx.thread.id),
           turnId: Number(ctx.turn.id),
+          onExecution: (work) => {
+            entered = true
+            if (def.kind === 'write') this.trackWork(Number(ctx.turn.id), work)
+          },
+          onUncertain: () => {
+            uncertain = true
+          },
           ...(def.perCallConfirmation && {
             confirmPerCall: async (_tool: RegisteredTool, raw: unknown) => {
               const c = pl<'tool_call'>(call)
@@ -1459,6 +1713,23 @@ export class TurnRunner {
           await this.queue.release(ctx.p.userId)
           return 'wait'
         }
+        if (uncertain) {
+          await this.finish(
+            ctx,
+            call,
+            {
+              ok: false,
+              content:
+                'The write ran but its reliable result was lost. The owner must verify the business record before further writes.',
+              untrusted: false,
+              error: r.ok
+                ? { code: 'unknown', message: 'result unavailable' }
+                : { code: r.error.code, message: r.error.message },
+            },
+            true,
+          )
+          throw new TurnStop(Err.AGENT_RECOVERY_REQUIRED)
+        }
         // 自动化的会话没人实时看着，读到的业务数据可能是别人写的（事件触发的那条记录就是）：结果按不可信
         // 内容交给模型，免得记录里写的“指示”被当成要做的事
         const outsider = ctx.thread.automationRunId !== null
@@ -1479,19 +1750,32 @@ export class TurnRunner {
       if (ctx.signal.aborted) {
         // 外部服务器的调用被中断（停止、急停、限额）：它可能已经执行了，记成结果未知，免得调用一直显示
         // 执行中、续跑时也不会重做
-        if (def.origin === 'mcp')
-          await this.finish(ctx, call, {
-            ok: false,
-            content:
-              'This call was stopped before it answered; its outcome is unknown. Read the data again ' +
-              'before deciding whether to repeat it.',
-            untrusted: false,
-            error: { code: 'unknown', message: 'stopped' },
-          })
+        if (def.origin === 'mcp' || def.kind === 'write' || def.name === IMAGE_TOOL)
+          await this.finish(
+            ctx,
+            call,
+            {
+              ok: false,
+              content:
+                'This call was stopped before it answered; its outcome is unknown. Read the data again ' +
+                'before deciding whether to repeat it.',
+              untrusted: false,
+              error: { code: 'unknown', message: 'stopped' },
+            },
+            def.kind === 'write' || def.name === IMAGE_TOOL,
+          )
         throw ctx.signal.reason
       }
-      if (isStop(e)) throw e
+      if (isStop(e) || e instanceof InvocationLeaseLost) throw e
       out = this.outcomeOf(e, ctx.lang)
+      if (entered && def.kind === 'write') {
+        await this.finish(ctx, call, out, true)
+        throw new TurnStop(Err.AGENT_RECOVERY_REQUIRED)
+      }
+    }
+    if ((def.origin === 'mcp' || entered) && def.kind === 'write' && !out.ok) {
+      await this.finish(ctx, call, out, true)
+      throw new TurnStop(Err.AGENT_RECOVERY_REQUIRED)
     }
     return this.finish(ctx, call, out)
   }
@@ -1704,7 +1988,7 @@ export class TurnRunner {
       out = r
     } catch (e) {
       if (ctx.signal.aborted) throw ctx.signal.reason
-      if (isStop(e)) throw e
+      if (isStop(e) || e instanceof InvocationLeaseLost) throw e
       out = this.outcomeOf(e, ctx.lang)
     }
     return this.finish(ctx, call, out)
@@ -1765,12 +2049,45 @@ export class TurnRunner {
         },
       },
       tools: [...ctx.tools.values()].map((t) => ({ name: t.name, kind: t.kind })),
-      recordUsage: (model, u, opts) =>
-        this.recordUsage(ctx.p.userId, model, u, ctx.turn, opts?.daily !== false),
-      overBudget: async () =>
-        ctx.turn.promptTokens + ctx.turn.completionTokens >= ctx.limits.turnTokens
-          ? 'turn_tokens'
-          : this.overDaily(ctx.p.userId, ctx.limits),
+      invokeModel: this.modelInvoker(ctx),
+      recordUsage: (target, u, opts) =>
+        this.recordUsage(
+          ctx.p.userId,
+          target,
+          u,
+          ctx.turn,
+          opts?.daily !== false,
+          opts?.credits,
+          opts?.failed,
+        ),
+      requireRecovery: async (error) => {
+        await this.finish(
+          ctx,
+          call,
+          {
+            ok: false,
+            content:
+              'A paid image request has no verified result. The owner must verify the provider outcome before another attempt.',
+            untrusted: false,
+            error: error ?? { code: 'unknown', message: 'result unavailable' },
+          },
+          true,
+        )
+        throw new TurnStop(Err.AGENT_RECOVERY_REQUIRED)
+      },
+      overBudget: async () => {
+        Object.assign(
+          ctx.turn,
+          await this.ds.getRepository(AgentTurn).findOneBy({ id: ctx.turn.id }),
+        )
+        return creditLimitReached(
+          ctx.turn.credits ?? '0',
+          ctx.limits.turnCredits,
+          ctx.turn.unpricedCalls,
+        )
+          ? 'turn_credits'
+          : this.overDaily(ctx.p.userId)
+      },
       readableUrls: () => this.readableUrls(ctx),
       ask: (questions) => {
         if (def.kind === 'write') throw new Error(`built-in write tool ${def.name} cannot ask`)
@@ -1794,7 +2111,99 @@ export class TurnRunner {
    * ctx.items。在会话行锁里先看这个调用是否已有结果，有就什么也不写：卡住的旧运行（锁已过期）与接手的
    * 新运行可能先后到这里，一个调用有两条结果的话，之后每次请求都带两条工具消息，接口会拒绝。
    */
-  private async finish(ctx: RunCtx, call: AgentItem, out: Outcome): Promise<'done'> {
+  /** 风险标记与被中断的调用同事务保存；已记录的风险不重复提升确认版本。 */
+  private async requireRecovery(
+    m: EntityManager,
+    thread: AgentThread,
+    call: AgentItem,
+  ): Promise<void> {
+    const internal = (call.payload as { internal?: ItemInternal }).internal ?? {}
+    if (internal.uncertain) return
+    await m.getRepository(AgentThread).update(
+      { id: thread.id },
+      {
+        recoveryRequired: true,
+        recoveryRevision: () => 'recovery_revision + 1',
+      },
+    )
+    call.payload = { ...(call.payload as object), internal: { ...internal, uncertain: true } }
+    // 风险可能出现在短轮次、临时或隐藏会话中；与首次风险同事务留下本人可找回的入口。
+    await this.notices.send(
+      thread,
+      AGENT_NOTICE.waiting,
+      'waiting',
+      call.turnId === null ? undefined : Number(call.turnId),
+      m,
+    )
+    // 原队列不在解除风险后自动复活；用户核对后重新发出意图。
+    await m
+      .getRepository(AgentItem)
+      .update(
+        { threadId: thread.id, kind: 'user', turnId: IsNull(), status: 'pending' },
+        { status: 'expired', revision: () => 'revision + 1' },
+      )
+    if (thread.automationRunId !== null) {
+      const run = await m
+        .getRepository(AgentAutomationRun)
+        .findOneBy({ id: thread.automationRunId })
+      if (run) {
+        await m
+          .getRepository(AgentAutomation)
+          .update({ id: run.automationId }, { enabled: false, nextRunAt: null, preApproved: null })
+        // 尚未开始的旧自动运行也不能在将来解除风险后静默重放。
+        const waiting = await m
+          .getRepository(AgentAutomationRun)
+          .findBy({ automationId: run.automationId, status: In(['running', 'waiting']) })
+        for (const r of waiting) {
+          if (
+            r.threadId === null ||
+            !(await m.getRepository(AgentItem).existsBy({
+              threadId: r.threadId,
+              kind: 'user',
+              turnId: IsNull(),
+              status: 'pending',
+            }))
+          )
+            continue
+          await m
+            .getRepository(AgentAutomationRun)
+            .update(
+              { id: r.id },
+              { status: 'cancelled', endedAt: new Date(), errorCode: 'recovery_required' },
+            )
+          if (r.threadId !== null)
+            await m
+              .getRepository(AgentItem)
+              .update(
+                { threadId: r.threadId, kind: 'user', turnId: IsNull(), status: 'pending' },
+                { status: 'expired', revision: () => 'revision + 1' },
+              )
+        }
+      }
+    }
+  }
+
+  /** 本人核对之前，原执行者必须已退出租约；取消状态本身不能证明写操作已经停止。 */
+  async assertRecoveryReady(threadId: number, m: EntityManager = this.ds.manager): Promise<void> {
+    const calls = await m.getRepository(AgentItem).find({ where: { threadId, kind: 'tool_call' } })
+    for (const call of calls)
+      if (
+        (call.payload as { internal?: ItemInternal }).internal?.uncertain &&
+        call.turnId !== null
+      ) {
+        if (this.liveWork.get(Number(call.turnId))?.size)
+          throw new BizError(Err.AGENT_RECOVERY_BUSY)
+        if (await this.redis.exists(turnLockKey(Number(call.turnId))))
+          throw new BizError(Err.AGENT_RECOVERY_BUSY)
+      }
+  }
+
+  private async finish(
+    ctx: RunCtx,
+    call: AgentItem,
+    out: Outcome,
+    uncertainWrite = false,
+  ): Promise<'done'> {
     const c = pl<'tool_call'>(call)
     const internal: ItemInternal = {
       content: out.content,
@@ -1804,7 +2213,9 @@ export class TurnRunner {
     }
     const tid = Number(ctx.thread.id)
     const result = await this.store.tx(async (w) => {
-      if (!(await w.thread(tid))) throw new ThreadGone(`agent thread ${tid} is gone`)
+      const thread = await w.thread(tid)
+      if (ctx.leaseLost?.aborted || ctx.leaseHeld?.() === false) throw new LeaseLost()
+      if (!thread) throw new ThreadGone(`agent thread ${tid} is gone`)
       const answered = await w.m
         .getRepository(AgentItem)
         .createQueryBuilder('i')
@@ -1817,6 +2228,8 @@ export class TurnRunner {
         })
         .getExists()
       if (answered) return null
+      const current = await w.m.getRepository(AgentItem).findOneByOrFail({ id: call.id })
+      if (uncertainWrite) await this.requireRecovery(w.m, thread, current)
       const added = await w.append(tid, Number(ctx.turn.id), 'tool_result', {
         callId: c.callId,
         ok: out.ok,
@@ -1825,7 +2238,8 @@ export class TurnRunner {
         ...(out.error && { error: out.error }),
         internal,
       })
-      await w.update(call, { status: (out.ok ? 'done' : 'failed') satisfies AgentItemStatus })
+      await w.update(current, { status: (out.ok ? 'done' : 'failed') satisfies AgentItemStatus })
+      Object.assign(call, current)
       return added
     })
     if (result) {
@@ -2001,8 +2415,17 @@ export class TurnRunner {
         )
       : new Set<string>()
     for (const i of open)
-      if (i.kind !== 'tool_call' || !answered.has(pl<'tool_call'>(i).callId))
+      if (i.kind !== 'tool_call' || !answered.has(pl<'tool_call'>(i).callId)) {
+        if (
+          i.kind === 'tool_call' &&
+          i.status === 'running' &&
+          (pl<'tool_call'>(i).kind !== 'read' || pl<'tool_call'>(i).tool === IMAGE_TOOL)
+        ) {
+          const thread = await m.getRepository(AgentThread).findOneBy({ id: turn.threadId })
+          if (thread) await this.requireRecovery(m, thread, i)
+        }
         await update(i, 'expired')
+      }
   }
 
   /**
@@ -2022,16 +2445,35 @@ export class TurnRunner {
       order: { seq: 'ASC' },
     })
     if (!items.length) return
-    const earlier = thread.summary ? `Earlier summary:\n${thread.summary}\n\n` : ''
-    const res = await model.chat.complete({
-      model: model.model.id,
-      messages: [
-        { role: 'system', content: COMPACT_PROMPT },
-        { role: 'user', content: `${earlier}Conversation:\n${transcript(items)}` },
-      ],
+    const room = Math.max(
+      0,
+      Math.floor(model.model.contextWindow * CHARS_PER_TOKEN * COMPACT_AT) -
+        COMPACT_PROMPT.length -
+        128,
+    )
+    const earlier = thread.summary
+      ? `Earlier summary:\n${thread.summary.slice(-Math.floor(room / 3))}\n\n`
+      : ''
+    const target = usageTarget(model)
+    const res = await this.usage.invoke(
+      Number(thread.userId),
+      target,
+      { threadId: Number(thread.id), ...(turn && { turnId: Number(turn.id) }) },
+      (receipt) =>
+        model.chat.complete({
+          model: model.model.id,
+          messages: [
+            { role: 'system', content: COMPACT_PROMPT },
+            {
+              role: 'user',
+              content: `${earlier}Conversation:\n${transcript(items, Math.max(0, room - earlier.length))}`,
+            },
+          ],
+          ...receipt,
+        }),
       signal,
-    })
-    await this.recordUsage(Number(thread.userId), model.model.id, res.usage, turn)
+    )
+    if (turn) await this.store.tx((w) => w.patchTurn(turn, {}))
     const summary = res.text.trim().slice(0, 50_000)
     await this.store.tx(async (w) => {
       await w.thread(Number(thread.id))
@@ -2052,6 +2494,7 @@ export class TurnRunner {
    * 一直在死）就记错误条目、置为失败。卡片都已处理、在等并发名额的轮次只补名额。返回处理的轮次数。
    */
   async sweepOrphans(): Promise<number> {
+    await this.usage.recoverExpired()
     const cutoff = new Date(Date.now() - ORPHAN_AFTER_MS)
     const queued = await this.queue.pendingTurnIds()
     // qw:cross-tenant the sweep only lists stale turn ids per tenant; each one is handled inside its own tenant below

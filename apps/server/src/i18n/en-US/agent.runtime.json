@@ -5,9 +5,11 @@
         "steps": "the steps of this turn are used up",
         "seconds": "this turn ran out of time",
         "turn_tokens": "the tokens of this turn are used up",
-        "user_daily": "your tokens for today are used up",
-        "tenant_daily": "the tenant's tokens for today are used up",
-        "concurrency": "you have the most turns running at once; wait for one to finish"
+        "user_daily": "your daily credit budget was reached or includes unpriced calls",
+        "tenant_daily": "the tenant daily credit budget was reached or includes unpriced calls",
+        "concurrency": "you have the most turns running at once; wait for one to finish",
+        "turn_credits": "this turn reached its credit budget or has unpriced calls",
+        "context": "the context still exceeds this model window; shorten the request or select a larger window"
       },
       "truncated": {
         "length": "the answer hit the length limit and was cut off",

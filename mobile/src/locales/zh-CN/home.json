@@ -9,8 +9,7 @@
   "shortcut": {
     "start": "发起审批",
     "leave": "请假",
-    "bulletin": "公告",
-    "clock": "打卡"
+    "bulletin": "公告"
   },
   "recent": "待我审批",
   "viewAll": "全部"

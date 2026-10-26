@@ -155,6 +155,11 @@
     "mcp_server_failed": "The external MCP server could not be reached: {reason}",
     "skill_invalid": "The skill file is not valid: {reason}",
     "web_failed": "Reading the web or searching failed: {reason}",
-    "key_required": "Enter the key again after changing the address or kind"
+    "key_required": "Enter the key again after changing the address or kind",
+    "pricing_required": "This model has no credit pricing. Ask the platform administrator to configure its rates.",
+    "credit_config_invalid": "The credit budget or model rates are invalid. Ask the platform administrator to check the settings.",
+    "recovery_required": "A previous operation may have taken effect or incurred a charge. Check the actual result before resuming.",
+    "thread_busy": "Stop the running or waiting task before continuing this operation.",
+    "recovery_busy": "An operation may still be executing. Wait for it to finish and check its actual result before resuming."
   }
 }

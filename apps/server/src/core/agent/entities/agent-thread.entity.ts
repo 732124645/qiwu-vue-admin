@@ -18,6 +18,13 @@ export class AgentThread extends BaseEntity {
   @Column({ name: 'user_id', type: 'bigint', unsigned: true })
   userId: number
 
+  /** 同一客户端草稿的永久接收标识；删除后也不能拿原标识复活。 */
+  @Column({ name: 'client_draft_id', type: 'varchar', length: 36, nullable: true })
+  clientDraftId: string | null
+
+  @Column({ name: 'client_draft_hash', type: 'char', length: 64, nullable: true })
+  clientDraftHash: string | null
+
   /** 标题 */
   @Column({ length: 200 })
   title: string
@@ -41,6 +48,14 @@ export class AgentThread extends BaseEntity {
   /** 审批模式（read_only、ask、trust、auto_review） */
   @Column({ name: 'approval_mode', type: 'varchar', length: 16, default: 'ask' })
   approvalMode: AgentApprovalMode
+
+  /** 执行结果未知的写入需要本人核对，任何信任或自动策略都不能越过。 */
+  @Column({ name: 'recovery_required', type: 'boolean', default: false })
+  recoveryRequired: boolean
+
+  /** 每次新增不确定结果递增，旧界面的核对不能清除后来发生的风险。 */
+  @Column({ name: 'recovery_revision', type: 'int', unsigned: true, default: 0 })
+  recoveryRevision: number
 
   /** 计划模式（先出计划、只读） */
   @Column({ name: 'plan_mode', type: 'boolean', default: false })
@@ -121,6 +136,10 @@ export class AgentTurn extends BaseEntity {
   @Column({ name: 'thread_id', type: 'bigint', unsigned: true })
   threadId: number
 
+  /** 子任务所消耗的父轮预算，重启后仍可原子归集。 */
+  @Column({ name: 'parent_turn_id', type: 'bigint', unsigned: true, nullable: true })
+  parentTurnId: number | null
+
   /** 发起人 ID */
   @Column({ name: 'user_id', type: 'bigint', unsigned: true })
   userId: number
@@ -134,12 +153,26 @@ export class AgentTurn extends BaseEntity {
   steps: number
 
   /** 输入 token 数 */
-  @Column({ name: 'prompt_tokens', type: 'int', default: 0 })
+  @Column({ name: 'prompt_tokens', type: 'bigint', unsigned: true, default: 0 })
   promptTokens: number
 
   /** 输出 token 数 */
-  @Column({ name: 'completion_tokens', type: 'int', default: 0 })
+  @Column({ name: 'completion_tokens', type: 'bigint', unsigned: true, default: 0 })
   completionTokens: number
+
+  /** 本轮已计价积分；原始 Token 保留作观测，不再作为消费额度单位。 */
+  @Column({ type: 'decimal', precision: 24, scale: 6, default: '0' })
+  credits: string
+
+  @Column({ name: 'unpriced_calls', type: 'int', unsigned: true, default: 0 })
+  unpricedCalls: number
+
+  @Column({ name: 'unreported_calls', type: 'int', unsigned: true, default: 0 })
+  unreportedCalls: number
+
+  /** 升级前的轮次没有费率快照，不能追溯伪造积分消耗。 */
+  @Column({ name: 'legacy_usage', type: 'boolean', default: false })
+  legacyUsage: boolean
 
   /** 失败原因代码 */
   @Column({ name: 'error_code', type: 'varchar', length: 32, nullable: true })
@@ -180,6 +213,10 @@ export class AgentItem extends BaseEntity {
   /** 会话内顺序号 */
   @Column({ type: 'int' })
   seq: number
+
+  /** 持久快照版本；增量只在该版本提交后广播。 */
+  @Column({ type: 'int', unsigned: true, default: 0 })
+  revision: number
 
   /** 类型（user、assistant、tool_call、tool_result、approval、plan、error） */
   @Column({ type: 'varchar', length: 16 })
@@ -262,6 +299,31 @@ export class AgentBatch extends BaseEntity {
   /** 失败数 */
   @Column({ type: 'int', default: 0 })
   failed: number
+
+  @TenantColumn()
+  tenantId: number
+}
+
+/** 投递效果收据只保留标识与摘要，线程删除后也不允许相同发送意图再次触发模型。 */
+@Entity('agent_message_receipt')
+export class AgentMessageReceipt extends BaseEntity {
+  @Column({ name: 'user_id', type: 'bigint', unsigned: true })
+  userId: number
+
+  @Column({ name: 'thread_id', type: 'bigint', unsigned: true })
+  threadId: number
+
+  @Column({ name: 'client_message_id', type: 'varchar', length: 36 })
+  clientMessageId: string
+
+  @Column({ name: 'request_hash', type: 'char', length: 64 })
+  requestHash: string
+
+  @Column({ name: 'item_id', type: 'bigint', unsigned: true })
+  itemId: number
+
+  @Column({ name: 'accepted_turn_id', type: 'bigint', unsigned: true })
+  acceptedTurnId: number
 
   @TenantColumn()
   tenantId: number

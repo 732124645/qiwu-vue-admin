@@ -1,3 +1,5 @@
+import { Err } from '@qiwu/shared'
+import { automationRecoveryRequired } from '../runtime/recovery.js'
 import {
   type BeforeApplicationShutdown,
   Inject,
@@ -89,7 +91,7 @@ const schedulerId = (id: number) => `agent-automation-${id}`
  */
 export const eventMark = (a: Pick<AgentAutomation, 'id' | 'createdAt'>, what: string) =>
   redisKey('lock', `agent-auto-${what}-${a.id}-${new Date(a.createdAt).getTime()}`)
-/** 一条自动化今天（UTC 日，与智能体的 token 额度相同）的运行计数的键；带创建时间，id 被重新使用时不继承计数。 */
+/** 自动化按 UTC 日计运行次数，与积分预算的日期一致；带创建时间，id 复用时不继承计数。 */
 const runsKey = (a: Pick<AgentAutomation, 'id' | 'createdAt'>) =>
   redisKey(
     'agentAutoRuns',
@@ -236,6 +238,8 @@ export class AgentAutomationRunner
     event?: HeardEvent,
     quiet: readonly RunError[] = [],
   ): Promise<{ run: AgentAutomationRun | null; reason: RunError | null }> {
+    if (await automationRecoveryRequired(this.ds.manager, Number(a.id)))
+      throw new BizError(Err.AGENT_RECOVERY_REQUIRED)
     const { reason, owner } = await this.check(a)
     if (reason || !owner) {
       const why = reason ?? 'owner_inactive'
@@ -291,6 +295,8 @@ export class AgentAutomationRunner
           .getRepository(AgentAutomation)
           .findOne({ where: { id: a.id }, lock: { mode: 'pessimistic_write' } })
         if (!fresh || (trigger !== 'manual' && !fresh.enabled)) return null
+        if (await automationRecoveryRequired(w.m, Number(a.id)))
+          throw new BizError(Err.AGENT_RECOVERY_REQUIRED)
         const runs = w.m.getRepository(AgentAutomationRun)
         // 同一条自动化同时只跑一次：检查之后、锁住之前别的触发已经开了一次的，这次跳过
         if (await runs.existsBy({ automationId: a.id, status: OPEN_RUN })) return 'overlap' as const

@@ -13,7 +13,6 @@ vi.stubGlobal('uni', {
   login: vi.fn(),
   uploadFile: vi.fn(),
   downloadFile: vi.fn(),
-  getLocation: vi.fn(),
   openDocument: vi.fn(),
   previewImage: vi.fn(),
   showToast: vi.fn(),

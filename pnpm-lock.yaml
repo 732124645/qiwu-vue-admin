@@ -353,6 +353,9 @@ importers:
       go-captcha-vue:
         specifier: 2.0.7
         version: 2.0.7(vue@3.5.43(typescript@6.0.3))
+      marked:
+        specifier: 17.0.6
+        version: 17.0.6
       pinia:
         specifier: ^4.0.3
         version: 4.0.3(@vue/devtools-api@8.2.1)(typescript@6.0.3)(vue@3.5.43(typescript@6.0.3))

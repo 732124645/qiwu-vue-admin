@@ -3,16 +3,25 @@ import { InjectDataSource } from '@nestjs/typeorm'
 import { myInboxItemVo, type MyInboxQuery } from '@qiwu/shared'
 import type { DataSource } from 'typeorm'
 import { tenantId } from '../../../../core/context/tenant.js'
+import { AgentThread } from '../../../../core/agent/entities/agent-thread.entity.js'
 import { paginate } from '../../../../core/db/page.js'
 import { Inbox } from './inbox.entity.js'
 
-const item = (row: Inbox) =>
+const item = (row: Inbox, threadId?: number) =>
   myInboxItemVo.parse({
     ...row,
     id: Number(row.id),
     readAt: row.readAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
+    action: threadId === undefined ? undefined : { kind: 'agent-thread', threadId },
   })
+
+/** 仅系统会话通知可以给出站内入口，正文和任意 URL 从不决定跳转目标。 */
+function noticeThread(row: Inbox): number | undefined {
+  if (!['agent.turn.waiting', 'agent.turn.completed'].includes(row.templateCode)) return
+  const id = (row.params as { threadId?: unknown } | null)?.threadId
+  return typeof id === 'number' && Number.isSafeInteger(id) && id > 0 ? id : undefined
+}
 
 @Injectable()
 export class MyInboxService {
@@ -30,7 +39,7 @@ export class MyInboxService {
       ...query,
       sort: query.sort ?? [{ field: 'createdAt', order: 'DESC' }],
     })
-    return { items: page.items.map(item), total: page.total }
+    return { items: await this.items(userId, page.items), total: page.total }
   }
 
   async get(userId: number, id: number) {
@@ -40,7 +49,28 @@ export class MyInboxService {
       .where('t.id = :id AND t.userId = :userId', { id, userId })
       .getOne()
     if (!row) throw new NotFoundException()
-    return item(row)
+    return (await this.items(userId, [row]))[0]!
+  }
+
+  /** 批量核对本人、当前租户仍存在的会话；误投或已删除会话不暴露编号入口。 */
+  private async items(userId: number, rows: Inbox[]) {
+    const ids = [...new Set(rows.map(noticeThread).filter((id) => id !== undefined))]
+    const owned = new Set<number>()
+    // 智能体模块关闭时实体可能未注册，历史通知仍可作为普通文本读取。
+    if (ids.length && this.ds.hasMetadata(AgentThread)) {
+      const threads = await this.ds
+        .getRepository(AgentThread)
+        .createQueryBuilder('t')
+        .select(['t.id'])
+        .where('t.id IN (:...ids)', { ids })
+        .andWhere('t.userId = :userId AND t.tenantId = :tenantId', { userId, tenantId: tenantId() })
+        .getMany()
+      for (const thread of threads) owned.add(Number(thread.id))
+    }
+    return rows.map((row) => {
+      const id = noticeThread(row)
+      return item(row, id !== undefined && owned.has(id) ? id : undefined)
+    })
   }
 
   async unread(userId: number) {

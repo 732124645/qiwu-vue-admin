@@ -6,7 +6,8 @@
 // and expects its canvas tool, settings panel and our widget group to render without "Failed to resolve
 // component". On a cold cache Vite may discover a dependency late, re-optimize and reload the page
 // (504 Outdated Optimize Dep): then the pass runs again (at most MAX_PASSES). Bounded: TIMEOUT_MS.
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -18,6 +19,17 @@ const TIMEOUT_MS = 240_000
 const MAX_PASSES = 4
 // per run: two checkouts may run it at once
 const cacheDir = mkdtempSync(join(tmpdir(), 'qw-web-dev-smoke-'))
+const hmrName = `qwsmoke${randomUUID().replaceAll('-', '')}`
+const hmrFiles = [
+  [join(webDir, 'src/locales/en-US', `${hmrName}web.json`), `${hmrName}web`],
+  [
+    join(webDir, '../../packages/shared/src/i18n/en-US', `${hmrName}shared.json`),
+    `${hmrName}shared`,
+  ],
+]
+const cleanHmrFiles = () => {
+  for (const [file] of hmrFiles) rmSync(file, { force: true })
+}
 
 const files = readdirSync(join(webDir, 'src'), { recursive: true })
   .map((f) => f.split('\\').join('/'))
@@ -45,10 +57,14 @@ const lazyDeps = [
 const SMOKE_URL = '/src/__qw_web_dev_smoke__.ts'
 const SMOKE_ID = join(webDir, SMOKE_URL).split('\\').join('/')
 const smokeModule = `
-import { createApp } from 'vue'
+import { createApp, h } from 'vue'
 import { createPinia } from 'pinia'
 import { i18n } from '@/core/i18n'
 import FormDesigner from '@/views/platform/formkit/FormDesigner.vue'
+export { i18n }
+export function mountLocaleProbe(el, keys) {
+  return createApp({ render: () => h('output', { id: 'qw-hmr-values' }, keys.map(k => i18n.global.t(k)).join('|')) }).use(i18n).mount(el)
+}
 export const lazy = { ${lazyDeps.map((d) => `'${d}': () => import('${d}')`).join(', ')} }
 export function mountDesigner(el) {
   const schema = { rule: [{ type: 'input', field: 'f1', title: 'F1' }], option: {} }
@@ -111,18 +127,83 @@ async function designer(page) {
   return unresolved
 }
 
+/** 修改真实文案文件，由开发服务的操作系统监听触发浏览器热更新。 */
+async function localeHmr(page) {
+  const keys = hmrFiles.map(([, namespace]) => `${namespace}.value`)
+  await page.evaluate(
+    async ([smoke, keys]) => {
+      const m = await import(smoke)
+      m.i18n.global.locale.value = 'en-US'
+      window.__qwLocaleBefore = m.i18n
+      const el = document.body.appendChild(document.createElement('div'))
+      el.id = 'qw-hmr-probe'
+      m.mountLocaleProbe(el, keys)
+      const input = document.body.appendChild(document.createElement('input'))
+      input.id = 'qw-hmr-state'
+      input.value = 'preserved'
+    },
+    [SMOKE_URL, keys],
+  )
+  const values = page.locator('#qw-hmr-values')
+  await values.filter({ hasText: 'before|before' }).waitFor({ timeout: 10_000 })
+  for (const [file, namespace] of hmrFiles) {
+    writeFileSync(file, JSON.stringify({ value: 'after' }))
+    await page.waitForFunction(
+      async ([smoke, namespace]) => {
+        const { i18n } = await import(smoke)
+        return (
+          i18n === window.__qwLocaleBefore &&
+          i18n.global.locale.value === 'en-US' &&
+          i18n.global.t(`${namespace}.value`) === 'after' &&
+          !i18n.global.te(`${namespace}.removed`)
+        )
+      },
+      [SMOKE_URL, namespace],
+      { timeout: 10_000 },
+    )
+    rmSync(file)
+    await page.waitForFunction(
+      async ([smoke, namespace]) => {
+        const { i18n } = await import(smoke)
+        return i18n === window.__qwLocaleBefore && !i18n.global.te(`${namespace}.value`)
+      },
+      [SMOKE_URL, namespace],
+      { timeout: 10_000 },
+    )
+    writeFileSync(file, JSON.stringify({ value: 'added' }))
+    await page.waitForFunction(
+      async ([smoke, namespace]) => {
+        const { i18n } = await import(smoke)
+        return i18n === window.__qwLocaleBefore && i18n.global.t(`${namespace}.value`) === 'added'
+      },
+      [SMOKE_URL, namespace],
+      { timeout: 10_000 },
+    )
+  }
+  if ((await page.locator('#qw-hmr-state').inputValue()) !== 'preserved')
+    throw new Error('locale hot update lost the page state')
+  // 翻译替换同步完成，组件渲染在下一轮；断言真实 DOM，而不是只读翻译接口。
+  await page.waitForFunction(
+    () => document.querySelector('#qw-hmr-values')?.textContent === 'added|added',
+    undefined,
+    { timeout: 10_000 },
+  )
+}
+
 async function main() {
   const started = Date.now()
   const { createServer } = await import(pathToFileURL(req.resolve('vite')).href)
   const { chromium } = req('@playwright/test')
   let server, browser
   try {
+    for (const [file] of hmrFiles)
+      writeFileSync(file, JSON.stringify({ value: 'before', removed: 'old' }))
     server = await createServer({
       root: webDir,
       cacheDir,
       logLevel: 'warn',
       plugins: [smokePlugin],
-      server: { host: '127.0.0.1', port: 0, strictPort: true, watch: null, forwardConsole: false },
+      server: { host: '127.0.0.1', port: 0, strictPort: true, forwardConsole: false },
     })
     await server.listen()
     const base = server.resolvedUrls.local[0]
@@ -157,19 +238,22 @@ async function main() {
       for (const msg of broken) console.error(`  ✗ ${msg}`)
       throw new Error(`the form designer does not render in dev mode (${secs()}s)`)
     }
+    await localeHmr(result.page)
     console.log(
       `smoke:web-dev OK: ${modules.length} .vue modules + ${lazyDeps.length} lazy deps import, ` +
-        `the form designer renders (${secs()}s)`,
+        `the form designer renders; web/shared locales hot-update without reloading (${secs()}s)`,
     )
   } finally {
     await browser?.close()
     await server?.close()
+    cleanHmrFiles()
     rmSync(cacheDir, { recursive: true, force: true })
   }
 }
 
 const hard = setTimeout(() => {
   console.error(`smoke:web-dev FAIL: timeout ${TIMEOUT_MS} ms`)
+  cleanHmrFiles()
   rmSync(cacheDir, { recursive: true, force: true })
   process.exit(1) // Playwright kills its browser on exit; the dev server is in-process
 }, TIMEOUT_MS)

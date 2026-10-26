@@ -1,6 +1,6 @@
 // Opening a tenant (TenantProvisioner, see docs/design-notes.md#tenancy), multi-tenancy on. One transaction
 // makes the tenant row, its tenant seeds (a root dept named after it, the builtin tenant_admin role, the
-// process templates, its office models and attendance policy) and its administrator (the owner: tenant_admin, root dept, the
+// process templates, its office models) and its administrator (the owner: tenant_admin, root dept, the
 // initial password to be changed at the first sign-in); a failing step leaves none of it. The initial
 // password is random per tenant, returned once and stored only as a SecretBox box, and new users of the
 // tenant made without a password get it, never the default tenant's param. A user of the new tenant
@@ -64,7 +64,6 @@ const tables = [
   'iam_user',
   'iam_user_roles',
   'wf_form',
-  'oa_attendance_policy',
   'wf_model',
   'wf_version',
 ]
@@ -103,7 +102,7 @@ afterAll(async () => {
 })
 
 describe('opening a tenant', () => {
-  it('makes its root dept, builtin tenant_admin role, process templates, office models, attendance policy and the administrator who owns it', async () => {
+  it('makes its root dept, builtin tenant_admin role, process templates, office models and the administrator who owns it', async () => {
     const t = await tenant(`${PREFIX}Acme`)
     const dept = await rootDept(t.id)
     expect(
@@ -159,20 +158,11 @@ describe('opening a tenant', () => {
         next: { type: 'review', assignee: { kind: 'roles', ids: [role] } },
       })
     }
-    expect(
-      await ds.query(
-        'SELECT enabled, timezone, location_mode, retention_days FROM oa_attendance_policy WHERE tenant_id = ?',
-        [t.id],
-      ),
-    ).toEqual([
-      { enabled: 1, timezone: 'Asia/Shanghai', location_mode: 'none', retention_days: 180 },
-    ])
     for (const table of [
       'oa_trip_request',
       'oa_expense_claim',
       'oa_expense_item',
       'oa_seal_request',
-      'oa_clock_record',
     ])
       expect(await one(`SELECT COUNT(*) AS n FROM ${table} WHERE tenant_id = ?`, [t.id])).toEqual({
         n: 0,

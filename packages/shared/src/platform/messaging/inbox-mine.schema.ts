@@ -28,6 +28,10 @@ export const myInboxItemVo = z.object({
   title: z.string(),
   /** Plain text: never `v-html`; the web uses `white-space: pre-line`. */
   body: z.string(),
+  /** 仅由服务器白名单生成的站内操作，不接收模板中的任意网址。 */
+  action: z
+    .object({ kind: z.literal('agent-thread'), threadId: z.number().int().positive().safe() })
+    .optional(),
   readAt: z.iso.datetime().nullable(),
   createdAt: z.iso.datetime(),
 })

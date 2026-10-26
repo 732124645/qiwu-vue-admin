@@ -1,3 +1,4 @@
+import { TEST_AGENT_PRICING, clearAgentUsage } from '../setup/agent-pricing.js'
 // Agent skills and instructions (see docs/agent.md): own skills for anyone on the chat page, tenant-wide
 // ones behind agent.skill.*, platform skills root-only on the platform page; another user's own skill and
 // another tenant's are 404; the skill source resolves a name own > tenant > platform and lists one per name;
@@ -162,7 +163,7 @@ afterAll(async () => {
     )
     await ds.query('DELETE FROM agent_thread WHERE tenant_id = 1 AND title LIKE ?', [`${PREFIX}%`])
     if (providerId) await ds.query('DELETE FROM agent_provider WHERE id = ?', [providerId])
-    await ds.query('DELETE FROM agent_usage WHERE tenant_id = 1 AND user_id = ?', [memberId])
+    await clearAgentUsage(ds, [memberId])
     await ds.query('UPDATE cfg_param SET param_value = ? WHERE param_key = ?', [
       platformBefore ?? '',
       AGENT_INSTRUCTIONS_PARAM,
@@ -418,7 +419,7 @@ describe('skill from a thread', () => {
       .send({
         name: `${PREFIX}model`,
         baseUrl: 'https://api.example.com/v1',
-        models: [{ id: 'm1' }],
+        models: [{ id: 'm1', pricing: TEST_AGENT_PRICING }],
         isDefault: true,
         sort: -1000,
       })
@@ -523,7 +524,7 @@ describe('skill from a thread', () => {
     const params = app.get(ParamService)
     const before = {
       paused: (await params.get(AGENT_PAUSED_PARAM)) ?? 'false',
-      limit: (await params.get(AGENT_LIMIT_PARAMS.userDailyTokens)) ?? '1000000',
+      limit: (await params.get(AGENT_LIMIT_PARAMS.userDailyCredits)) ?? '1000000',
     }
     try {
       await setParam(AGENT_PAUSED_PARAM, 'true')
@@ -532,14 +533,14 @@ describe('skill from a thread', () => {
       expect(paused.body.code).toBe(Err.AGENT_PAUSED.code)
       await setParam(AGENT_PAUSED_PARAM, 'false')
       // the earlier drafts of this user already used more than one token today
-      await setParam(AGENT_LIMIT_PARAMS.userDailyTokens, '1')
+      await setParam(AGENT_LIMIT_PARAMS.userDailyCredits, '1')
       const limited = await draft('limited')
       expect(limited.status).toBe(429)
       expect(limited.body.code).toBe(Err.AGENT_LIMIT.code)
       expect(fake.requests).toHaveLength(0)
     } finally {
       await setParam(AGENT_PAUSED_PARAM, before.paused)
-      await setParam(AGENT_LIMIT_PARAMS.userDailyTokens, before.limit)
+      await setParam(AGENT_LIMIT_PARAMS.userDailyCredits, before.limit)
     }
   })
 })

@@ -4,7 +4,7 @@
 // in a hidden thread, its history shows the summary, the result notice is in the inbox, and the hidden
 // thread opens from the history with the answer in it.
 import type { APIRequestContext } from '@playwright/test'
-import { fakeModel } from './agent-fake.ts'
+import { fakeModel, TEST_MODEL_PRICING } from './agent-fake.ts'
 import { serverEnv } from './env.ts'
 import { bearer, expect, msg, signIn, test } from './fixtures.ts'
 
@@ -28,7 +28,7 @@ test.beforeAll(async ({ playwright }) => {
       name: 'E2E automation model',
       baseUrl: fake.url,
       apiKey: 'e2e-dummy-key-not-a-secret',
-      models: [{ id: MODEL }],
+      models: [{ id: MODEL, pricing: TEST_MODEL_PRICING }],
       isDefault: true,
     },
   })

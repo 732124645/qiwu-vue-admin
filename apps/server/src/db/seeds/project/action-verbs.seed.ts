@@ -20,7 +20,7 @@ export type ProjectActionVerb = [
   tagType?: (typeof DICT_TAG_TYPES)[number],
 ]
 
-export const PROJECT_ACTION_VERBS: ProjectActionVerb[] = [['punch', '打卡', 'Clock punch']]
+export const PROJECT_ACTION_VERBS: ProjectActionVerb[] = []
 
 export async function seedProjectActionVerbs(
   q: EntityManager,

@@ -1,3 +1,4 @@
+import { TEST_AGENT_PRICING, clearAgentUsage } from '../setup/agent-pricing.js'
 // The agent runtime's extension points (see docs/agent.md) with test-only providers: built-in tools declared
 // with `@AgentBuiltinTool`, context contributors and approval reviewers, discovered at start like a module's
 // own (aliases of the same instance count once). Covered: a write built-in stops for approval like any write
@@ -439,7 +440,15 @@ beforeAll(async () => {
   providerId = await insertRow(ds.manager, 'agent_provider', {
     name: `${PREFIX}provider`,
     base_url: 'http://127.0.0.1:9/v1',
-    models: [{ id: 'm1', label: 'm1', reasoning: false, contextWindow: 64_000 }],
+    models: [
+      {
+        id: 'm1',
+        label: 'm1',
+        reasoning: false,
+        pricing: TEST_AGENT_PRICING,
+        contextWindow: 64_000,
+      },
+    ],
     enabled: 1,
   })
   vi.spyOn(app.get(ProviderRegistry), 'connect').mockImplementation(() => fake)
@@ -479,7 +488,7 @@ afterAll(async () => {
     }
     if (ownerId) {
       await ds.query('DELETE FROM agent_skill WHERE owner_user_id = ? AND tenant_id = 1', [ownerId])
-      await ds.query('DELETE FROM agent_usage WHERE user_id = ? AND tenant_id = 1', [ownerId])
+      await clearAgentUsage(ds, [ownerId])
       await ds.query('DELETE FROM iam_user_roles WHERE user_id = ?', [ownerId])
       await ds.query('DELETE FROM iam_user WHERE id = ?', [ownerId])
     }

@@ -150,12 +150,16 @@
         "context": "Context {percent}%",
         "sendMode": "Sending while running",
         "steer": "Add to this turn",
-        "historyPlaceholder": "Type to search your sent messages, Enter fills in, Esc cancels"
+        "historyPlaceholder": "Type to search your sent messages, Enter fills in, Esc cancels",
+        "reasoningDefault": "Model default: {value}",
+        "contextEstimate": "Context estimate {percent}%",
+        "queueExpired": "Queued message expired and was not automatically executed"
       },
       "reasoning": {
         "low": "Low",
         "medium": "Medium",
-        "high": "High"
+        "high": "High",
+        "off": "Off"
       },
       "mode": {
         "read_only": "Read only",
@@ -187,7 +191,14 @@
         "context": "Context",
         "of": "{used} / {limit}",
         "userToday": "You today",
-        "tenantToday": "Tenant today"
+        "tenantToday": "Tenant today",
+        "credits": "Turn credits",
+        "userCreditsToday": "Your credits today",
+        "tenantCreditsToday": "Tenant credits today",
+        "unpricedHint": "Unpriced calls: {n}",
+        "unreportedHint": "Calls without reported usage: {n}",
+        "legacyHint": "Includes legacy records without usage details",
+        "unlimited": "Unlimited"
       },
       "action": {
         "copy": "Copy",
@@ -278,6 +289,71 @@
           "waiting": "Waiting for my confirmation or answer",
           "automation": "Automation results"
         }
+      },
+      "panel": {
+        "open": "Work panel",
+        "close": "Close work panel",
+        "tasks": "Tasks",
+        "sources": "Sources",
+        "outputs": "Outputs",
+        "scope": "Only the loaded conversation is summarized here. Approvals stay in the conversation cards.",
+        "noPlan": "No plan in this conversation",
+        "tools": "Tool activity",
+        "noTools": "No tool activity in this conversation",
+        "noSources": "No web sources in this conversation",
+        "noOutputs": "No outputs yet. Expand an answer to read it here.",
+        "answer": "Answer · {n}",
+        "reading": "Expanded reading",
+        "chooseOutput": "Choose an output to view"
+      },
+      "markdown": {
+        "plainText": "Plain text",
+        "wrap": "Wrap long lines",
+        "unwrap": "Keep original lines",
+        "copyCode": "Copy code block",
+        "source": "View Markdown source",
+        "rendered": "Read formatted message",
+        "download": "Download Markdown",
+        "expand": "Expand reading"
+      },
+      "dock": {
+        "currentPage": "Assistant beside your work",
+        "restore": "Restore width",
+        "expand": "Expand window",
+        "close": "Minimize assistant",
+        "escapeHint": "In the message box, Esc minimizes the window while work continues. Use Stop or a shortcut with a modifier key to stop."
+      },
+      "subtask": {
+        "counts": "Active {active} · Finished {finished}",
+        "back": "Back to main task",
+        "details": "Subtask details",
+        "readonly": "Read-only subtask. Return to the main task for actions and follow-up instructions.",
+        "failed": "This subtask could not be loaded. Please retry.",
+        "empty": "This subtask has no output yet."
+      },
+      "connection": {
+        "reconnecting": "Connection interrupted. Reconnecting; saved content will be caught up after recovery.",
+        "down": "Not connected. Check uncertain delivery before retrying; minimizing does not cancel background work."
+      },
+      "delivery": {
+        "uncertain": "The previous delivery is unconfirmed. Recovery checks its receipt without automatically resending.",
+        "check": "Check delivery",
+        "clear": "Discard this unconfirmed delivery",
+        "clearConfirm": "The previous request may have been accepted. Discarding its local identity does not cancel server work. A later send will be a new message. Continue?",
+        "different": "Check the previous delivery or explicitly discard it before sending different content.",
+        "accepted": "The previous message was accepted. View it in its conversation; your later draft is preserved.",
+        "removed": "The previous message or conversation was removed and will not be resent.",
+        "missing": "No acceptance record was found. To retry, keep the original message and click Send again.",
+        "memoryLost": "Message text was not saved locally. Check its receipt; explicitly discard this delivery before typing a replacement.",
+        "storageUnavailable": "This browser cannot save receipt identifiers. Keep this page open; after refreshing, manually verify the previous delivery."
+      },
+      "recovery": {
+        "required": "A previous operation may have taken effect or incurred a charge. Writes and image generation are paused. Read-only questions remain available and model calls are still metered.",
+        "acknowledge": "I checked the operation result",
+        "confirm": "First confirm that the previous operation has ended, then check its actual effect or charge in the business system or provider records. This only allows future operations; it does not rerun old work, queued messages or re-enable an automation."
+      },
+      "message": {
+        "interrupted": "Generation interrupted; showing saved content"
       }
     }
   }

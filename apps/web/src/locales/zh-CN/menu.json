@@ -119,9 +119,6 @@
     "office": "办公工作台",
     "trip": "我的出差",
     "expense": "我的报销",
-    "seal": "我的用印",
-    "attendance": "考勤记录",
-    "attendancePolicy": "考勤规则",
-    "attendanceSites": "办公地点"
+    "seal": "我的用印"
   }
 }

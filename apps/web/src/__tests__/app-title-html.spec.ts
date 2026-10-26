@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, expect, it, vi } from 'vitest'
-import { build, createLogger, loadEnv } from 'vite'
+import { build, createLogger, loadConfigFromFile, loadEnv } from 'vite'
 import common from '../locales/zh-CN/common.json'
 import { appTitle, msg } from '../../e2e/fixtures.ts'
 // @ts-expect-error The Node architecture guard is plain JavaScript without a declaration file.
@@ -102,4 +102,13 @@ it('renders configured and default HTML titles through the actual Vite config', 
   } finally {
     await rm(root, { recursive: true, force: true })
   }
+})
+
+it('keeps locale files out of the Vite config dependency graph', async () => {
+  const loaded = await loadConfigFromFile(
+    { command: 'serve', mode: 'development' },
+    fileURLToPath(new URL('../../vite.config.ts', import.meta.url)),
+  )
+  expect(loaded).not.toBeNull()
+  expect(loaded?.dependencies.filter((path) => /[/\\](locales|i18n)[/\\]/.test(path))).toEqual([])
 })

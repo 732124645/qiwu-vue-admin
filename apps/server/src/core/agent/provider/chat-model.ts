@@ -48,10 +48,9 @@ export interface ChatTool {
   parameters: Record<string, unknown>
 }
 
-export interface ChatUsage {
-  promptTokens: number
-  completionTokens: number
-}
+import type { AgentTokenUsage } from '@qiwu/shared'
+
+export type ChatUsage = AgentTokenUsage
 
 /** Why the model stopped: done, wants tools run, hit the token limit, was filtered, or anything else. */
 export type ChatFinishReason = 'stop' | 'tool_calls' | 'length' | 'content_filter' | 'other'
@@ -74,11 +73,13 @@ export interface ChatRequest {
   messages: ChatMessage[]
   tools?: ChatTool[]
   /** reasoning effort; sent only to models flagged `reasoning`, ignored for the others */
-  reasoning?: 'low' | 'medium' | 'high'
+  reasoning?: 'off' | 'low' | 'medium' | 'high'
   /** aborting it ends the request at once with the signal's reason (never an AGENT_PROVIDER_FAILED) */
   signal?: AbortSignal
   /** the longest answer in tokens */
   maxTokens?: number
+  /** 本次非流调用的实际用量，正文校验失败前回报；仅保留在本次调用闭包，不随错误对象共享。 */
+  onUsage?: (usage: ChatUsage) => void
 }
 
 /** The whole answer of `complete()`. */
@@ -96,6 +97,8 @@ export interface ImageRequest {
   prompt: string
   size?: (typeof IMAGE_SIZES)[number]
   signal?: AbortSignal
+  /** 收到实际用量后即时回报，图片正文错误也能记账；不发给提供方。 */
+  onUsage?: (usage: ChatUsage) => void
 }
 /** The image's bytes and the usage the provider reported (null when it reports none). */
 export interface ImageResult {

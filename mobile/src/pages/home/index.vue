@@ -111,7 +111,6 @@ interface Shortcut {
 }
 // the approval center and the bulletin feed need a sign-in only (see docs/design-notes.md#workflow)
 const SHORTCUTS: Shortcut[] = [
-  { name: 'clock', icon: 'clock', tone: 'brand', url: '/pages-biz/oa-clock/index' },
   {
     name: 'start',
     icon: 'send',

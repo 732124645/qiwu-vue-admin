@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRoute, useRouter } from 'vue-router'
 import { type AgentItemVo, markdownTables } from '@qiwu/shared'
 import { agentOutputApi } from '@/api/platform/agent-output'
 import QwChart from '@/core/components/QwChart.vue'
@@ -9,6 +8,7 @@ import { toastRest } from '@/core/composables/use-crud'
 import { Icon } from '@/core/icons'
 import { saveBlob } from '@/core/request/http'
 import { MarkdownText } from './markdown'
+import SubtaskCard from './SubtaskCard.vue'
 import { chartOption, fileName, reportMarkdown } from './output'
 
 type OutputItem = Extract<AgentItemVo, { kind: 'chart' | 'image' | 'report' | 'subagent' }>
@@ -16,14 +16,13 @@ type OutputItem = Extract<AgentItemVo, { kind: 'chart' | 'image' | 'report' | 's
 /**
  * 智能体产出的卡片：图表（声明式配置交给 QwChart，表格类直接渲染成表格）、生成的图片（按本人的权限取私有
  * 文件预览）、研究报告（Markdown 安全子集、编号来源、未核实的标出；导出 Markdown、打印为 PDF、逐张表格导出
- * xlsx）、子任务（各自的状态与摘要，可在新窗口打开子会话）。颜色只用 `--qw-*`；模型给的文字一律作为文本渲染。
+ * xlsx）、子任务（分组状态、摘要与当前工作区内的只读详情）。颜色只用 `--qw-*`；模型给的文字一律作为文本渲染。
  * `readonly`（分享的快照）时不提供导出与下载。
  */
 defineOptions({ name: 'AgentOutputCard' })
 const { item, readonly = false } = defineProps<{ item: OutputItem; readonly?: boolean }>()
 const { t } = useI18n()
-const route = useRoute()
-const router = useRouter()
+const emit = defineEmits<{ inspectChild: [id: number] }>()
 
 // ---- 导出（同一时间只做一件，按钮在请求期间转圈并禁用）----
 const busy = ref<string | null>(null)
@@ -109,18 +108,6 @@ function printReport() {
   window.addEventListener('afterprint', done)
   window.print()
 }
-
-// ---- 子任务 ----
-const STATUS_TAG = {
-  queued: 'info',
-  running: 'info',
-  waiting: 'warning',
-  completed: 'success',
-  failed: 'danger',
-  cancelled: 'warning',
-} as const
-const threadHref = (threadId: number) =>
-  router.resolve({ path: route.path, query: { thread: String(threadId) } }).href
 </script>
 
 <template>
@@ -236,35 +223,12 @@ const threadHref = (threadId: number) =>
     </template>
   </article>
 
-  <section
+  <SubtaskCard
     v-else-if="item.kind === 'subagent'"
-    class="agent-card agent-output"
-    :aria-label="t('agent.output.subagent.title')"
-  >
-    <span class="agent-card__title">{{ t('agent.output.subagent.title') }}</span>
-    <ul class="agent-subagents">
-      <li v-for="task in item.payload.tasks" :key="task.threadId" class="agent-subagents__task">
-        <div class="agent-subagents__head">
-          <span class="agent-subagents__name">{{ task.title }}</span>
-          <el-tag size="small" :type="STATUS_TAG[task.status]">
-            {{ t(`agent.output.subagent.status.${task.status}`) }}
-          </el-tag>
-          <a
-            v-if="!readonly"
-            class="agent-subagents__open"
-            :href="threadHref(task.threadId)"
-            target="_blank"
-            rel="noopener"
-            >{{ t('agent.output.subagent.open') }}</a
-          >
-        </div>
-        <details v-if="task.summary" class="agent-subagents__summary">
-          <summary>{{ t('agent.output.subagent.summary') }}</summary>
-          <MarkdownText :text="task.summary" />
-        </details>
-      </li>
-    </ul>
-  </section>
+    :item
+    :readonly
+    @inspect="emit('inspectChild', $event)"
+  />
 </template>
 
 <style scoped>
@@ -325,37 +289,6 @@ const threadHref = (threadId: number) =>
   display: flex;
   gap: 6px;
   align-items: center;
-}
-.agent-subagents {
-  display: grid;
-  gap: 6px;
-  padding: 0;
-  margin: 0;
-  list-style: none;
-}
-.agent-subagents__task {
-  padding: 6px 8px;
-  background: var(--qw-surface-2);
-  border-radius: var(--qw-radius-sm);
-}
-.agent-subagents__head {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-.agent-subagents__name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.agent-subagents__open {
-  color: var(--qw-brand-text);
-}
-.agent-subagents__summary summary {
-  color: var(--qw-text-3);
-  cursor: pointer;
 }
 </style>
 

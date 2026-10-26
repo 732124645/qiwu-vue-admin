@@ -139,7 +139,6 @@ describe('signup', () => {
     const routes = (nodes: MenuNode[]): string[] =>
       nodes.flatMap((node) => [node.routeName!, ...routes(node.children)])
     expect(routes(menus.find((node) => node.routeName === 'oa')!.children).sort()).toEqual([
-      'oa-clock-records',
       'oa-expense',
       'oa-expense-new',
       'oa-expense-view',

@@ -1,3 +1,4 @@
+import { TEST_AGENT_PRICING, clearAgentUsage } from '../setup/agent-pricing.js'
 // The agent's turn engine (see docs/agent.md) through its chat routes, multi-tenancy on, with a scripted
 // FakeChatModel standing in for the provider (`registry.connect`) and test tools registered on the shared
 // tool host. Turns run as queue jobs; every step is stored, so a turn resumes from its items. Covered: a
@@ -161,6 +162,12 @@ beforeAll(async () => {
   app = setupApp(mod.createNestApplication<NestExpressApplication>({ logger: false }))
   await app.init()
   ds = app.get<DataSource>(getDataSourceToken())
+  for (const key of [
+    AGENT_LIMIT_PARAMS.turnCredits,
+    AGENT_LIMIT_PARAMS.userDailyCredits,
+    AGENT_LIMIT_PARAMS.tenantDailyCredits,
+  ])
+    await setParam(key, '0')
 
   const reg = app.get(McpRegistry)
   reg.add(
@@ -174,6 +181,13 @@ beforeAll(async () => {
     },
     (i) => {
       calls.read++
+      if ([98, 99].includes((i as { id: number }).id))
+        return {
+          id: (i as { id: number }).id,
+          source: 'https://evidence.example/notes',
+          title: `verified note ${(i as { id: number }).id}`,
+          content: 'fact '.repeat(3600),
+        }
       return { id: (i as { id: number }).id, title: 'Old title' }
     },
   )
@@ -227,8 +241,27 @@ beforeAll(async () => {
     name: `${PREFIX}provider`,
     base_url: 'http://127.0.0.1:9/v1',
     models: [
-      { id: 'm1', label: 'm1', reasoning: false, contextWindow: 64_000 },
-      { id: 'tiny', label: 'tiny', reasoning: false, contextWindow: 1024 },
+      {
+        id: 'm1',
+        label: 'm1',
+        reasoning: false,
+        pricing: TEST_AGENT_PRICING,
+        contextWindow: 64_000,
+      },
+      {
+        id: 'tiny',
+        label: 'tiny',
+        reasoning: false,
+        pricing: TEST_AGENT_PRICING,
+        contextWindow: 8192,
+      },
+      {
+        id: 'rolling',
+        label: 'rolling',
+        reasoning: false,
+        pricing: TEST_AGENT_PRICING,
+        contextWindow: 12000,
+      },
     ],
     enabled: 1,
   })
@@ -279,7 +312,7 @@ afterAll(async () => {
       await ds.query('DELETE FROM agent_skill WHERE owner_user_id IN (?) AND tenant_id = 1', [
         users,
       ])
-      await ds.query('DELETE FROM agent_usage WHERE user_id IN (?) AND tenant_id = 1', [users])
+      await clearAgentUsage(ds, users)
       await ds.query('DELETE FROM iam_user_roles WHERE user_id IN (?)', [users])
       await ds.query('DELETE FROM iam_user WHERE id IN (?)', [users])
     }
@@ -292,7 +325,9 @@ afterAll(async () => {
     await setParam(AGENT_PAUSED_PARAM, 'false')
     await setParam(AGENT_LIMIT_PARAMS.turnSteps, '20')
     await setParam(AGENT_LIMIT_PARAMS.turnSeconds, '300')
-    await setParam(AGENT_LIMIT_PARAMS.userDailyTokens, '1000000')
+    await setParam(AGENT_LIMIT_PARAMS.userDailyCredits, '0')
+    await setParam(AGENT_LIMIT_PARAMS.turnCredits, '0')
+    await setParam(AGENT_LIMIT_PARAMS.tenantDailyCredits, '0')
     await setParam(AGENT_LIMIT_PARAMS.userConcurrentTurns, '2')
     await setParam(AGENT_TRUST_MODE_PARAM, 'true')
   }
@@ -497,7 +532,7 @@ describe('approvals', () => {
 })
 
 describe('removed under a turn', () => {
-  it('an approval reverted away is 404; a thread deleted while its turn runs stops it quietly', async () => {
+  it('an approval reverted away is 404; an active thread must be stopped before deletion', async () => {
     script({ toolCalls: [update(11, 'R')] })
     const id = await thread()
     const turnId = await start(id, 'rename note 11')
@@ -508,8 +543,11 @@ describe('removed under a turn', () => {
 
     script({ text: 'slow', delayMs: 3000 })
     const id2 = await thread()
-    await start(id2, 'slow one')
+    const activeTurn = await start(id2, 'slow one')
     await sleep(200)
+    await http().delete(`/api/agent/threads/${id2}`).set(bearer(owner)).expect(409)
+    await http().post(`/api/agent/threads/${id2}/cancel`).set(bearer(owner)).expect(201)
+    expect(await settled(activeTurn, TERMINAL)).toBe('cancelled')
     await http().delete(`/api/agent/threads/${id2}`).set(bearer(owner)).expect(200)
     await sleep(1200)
     expect(fake.requests).toHaveLength(1)
@@ -819,7 +857,7 @@ describe('limits and the pause switch', () => {
 })
 
 describe('resume, steer, queue', () => {
-  it('a turn interrupted inside a write call resumes without repeating it or the finished read', async () => {
+  it('a turn interrupted inside a write stops for verification without repeating it or the finished read', async () => {
     script({ text: 'I will check note 10 before trying again.' })
     const id = await thread()
     const store = app.get(ItemStore)
@@ -866,12 +904,15 @@ describe('resume, steer, queue', () => {
       await app.get(TurnQueue).kick(tid)
       return tid
     })
-    expect(await settled(turnId)).toBe('completed')
+    expect(await settled(turnId)).toBe('failed')
     expect(calls).toMatchObject({ read: 0, update: [] })
-    const sent = toolMsgs(0)
-    expect(sent.map((m) => m.toolCallId)).toEqual(['c1', 'c2'])
-    expect(sent[0]!.content).toContain('stored result')
-    expect(sent[1]!.content).toMatch(/interrupted/)
+    expect(fake.requests).toHaveLength(0)
+    const savedResults = await items(id, 'tool_result')
+    expect(savedResults.map((r) => r.payload.callId)).toEqual(['c1', 'c2'])
+    expect(savedResults[0]!.payload.internal.content).toContain('stored result')
+    expect(savedResults[1]!.payload.error.code).toBe('interrupted')
+    const [risk] = await ds.query('SELECT recovery_required FROM agent_thread WHERE id = ?', [id])
+    expect(risk.recovery_required).toBe(1)
     expect((await items(id, 'tool_call')).map((c) => c.status)).toEqual(['done', 'failed'])
   })
 
@@ -976,7 +1017,13 @@ describe('questions, plans, compaction, the answer', () => {
     await inTenant1(async () => {
       const store = app.get(ItemStore)
       await store.append(id, null, 'user', { text: `old question ${'x'.repeat(3000)}` })
-      await store.append(id, null, 'assistant', { text: 'old answer' }, 'done')
+      await store.append(
+        id,
+        null,
+        'assistant',
+        { text: `old answer ${'y'.repeat(30_000)}` },
+        'done',
+      )
     })
     script({ text: 'SUMMARY-ONE' }, { text: 'fresh answer' })
     const turnId = await start(id, 'new question')
@@ -1012,7 +1059,80 @@ describe('questions, plans, compaction, the answer', () => {
     expect(await items(id, 'compaction')).toHaveLength(2)
   })
 
-  it('/compact refuses while paused and over the daily tokens', async () => {
+  it('compacts completed steps inside the first long turn, keeps its exact goal and does not replay tools', async () => {
+    const id = await thread(ownerId, { model: 'rolling' })
+    const goal = 'Read the two notes, keep the original goal, and do not change any data.'
+    const before = calls.read
+    script(
+      { toolCalls: [{ name: 'test.note.read', args: { id: 99 } }] },
+      { toolCalls: [{ name: 'test.note.read', args: { id: 98 } }] },
+      { text: 'Earlier completed note facts, source https://evidence.example/notes.' },
+      { text: 'Both notes are verified.' },
+    )
+    const turn = await start(id, goal)
+    expect(await settled(turn)).toBe('completed')
+    expect(calls.read - before).toBe(2)
+    expect(await items(id, 'compaction')).toHaveLength(1)
+    expect(fake.requests).toHaveLength(4)
+    const final = fake.requests.at(-1)!.messages
+    expect(final.some((m) => m.role === 'user' && m.content === goal)).toBe(true)
+    expect(final[0]!.content).not.toContain('Earlier completed note facts')
+    expect(final.some((m) => m.role === 'user' && String(m.content).includes('[Summary'))).toBe(
+      true,
+    )
+    const [usage] = await ds.query<{ n: string; credits: string }[]>(
+      'SELECT COUNT(*) n, SUM(credits) credits FROM agent_usage_entry WHERE tenant_id = 1 AND turn_id = ?',
+      [turn],
+    )
+    expect(Number(usage!.n)).toBe(4)
+    expect(Number(usage!.credits)).toBe(60)
+    expect(Number((await turnOf(turn)).credits)).toBe(60)
+  })
+
+  it('keeps the in-flight call price and uses a changed price for the next call of the same turn', async () => {
+    const [row] = await ds.query<{ models: unknown }[]>(
+      'SELECT models FROM agent_provider WHERE id = ?',
+      [providerId],
+    )
+    const original = typeof row!.models === 'string' ? JSON.parse(row!.models) : row!.models
+    const id = await thread()
+    script(
+      { toolCalls: [{ name: 'test.note.read', args: { id: 1 } }], delayMs: 300 },
+      { text: 'Read it.' },
+    )
+    try {
+      const turn = await start(id, 'read a note')
+      for (const until = Date.now() + 3000; !fake.requests.length;) {
+        if (Date.now() > until) throw new Error('model did not start')
+        await sleep(10)
+      }
+      const changed = (original as { id: string }[]).map((m) =>
+        m.id === 'm1'
+          ? { ...m, pricing: { ...TEST_AGENT_PRICING, input: '2000000', output: '2000000' } }
+          : m,
+      )
+      await ds.query('UPDATE agent_provider SET models = ? WHERE id = ?', [
+        JSON.stringify(changed),
+        providerId,
+      ])
+      expect(await settled(turn)).toBe('completed')
+      const entries = await ds.query<{ credits: string }[]>(
+        'SELECT credits FROM agent_usage_entry WHERE tenant_id = 1 AND turn_id = ? ORDER BY id',
+        [turn],
+      )
+      expect(entries.map((e) => Number(e.credits))).toEqual([15, 30])
+      expect(Number((await turnOf(turn)).credits)).toBe(45)
+    } finally {
+      await ds.query('UPDATE agent_provider SET models = ? WHERE id = ?', [
+        JSON.stringify(original),
+        providerId,
+      ])
+    }
+  })
+
+  it('/compact refuses while paused and over the daily credits', async () => {
+    const previousLimit =
+      (await app.get(ParamService).get(AGENT_LIMIT_PARAMS.userDailyCredits)) ?? '0'
     const id = await thread()
     await inTenant1(async () => {
       const store = app.get(ItemStore)
@@ -1027,17 +1147,17 @@ describe('questions, plans, compaction, the answer', () => {
     } finally {
       await setParam(AGENT_PAUSED_PARAM, 'false')
     }
-    await setParam(AGENT_LIMIT_PARAMS.userDailyTokens, '1')
+    await setParam(AGENT_LIMIT_PARAMS.userDailyCredits, '1')
     try {
       await ds.query(
-        "INSERT INTO agent_usage (tenant_id, user_id, day, model, prompt_tokens, completion_tokens, calls) VALUES (1, ?, UTC_DATE(), 'm1', 5, 5, 1) ON DUPLICATE KEY UPDATE calls = calls",
+        "INSERT INTO agent_usage (tenant_id, user_id, day, model, prompt_tokens, completion_tokens, calls, credits) VALUES (1, ?, UTC_DATE(), 'm1', 5, 5, 1, 10) ON DUPLICATE KEY UPDATE calls = calls",
         [ownerId],
       )
       const res = await compact()
       expect(res.status).toBe(429)
       expect(res.body.code).toBe(Err.AGENT_LIMIT.code)
     } finally {
-      await setParam(AGENT_LIMIT_PARAMS.userDailyTokens, '1000000')
+      await setParam(AGENT_LIMIT_PARAMS.userDailyCredits, previousLimit)
     }
     expect(fake.requests).toHaveLength(0)
   })
@@ -1111,8 +1231,16 @@ describe('reasoning, recovery, slots and the turn clock', () => {
     const turnId = await start(id, 'slow')
     await sleep(500)
     expect(await app.get(REDIS).del(redisKey('lock', `agent-turn-${turnId}`))).toBe(1)
-    expect(await settled(turnId, TERMINAL, 25_000)).toBe('completed')
+    await settled(turnId, TERMINAL, 25_000)
+    const ended = await turnOf(turnId)
+    expect({ status: ended.status, code: ended.error_code, message: ended.error_msg }).toEqual({
+      status: 'completed',
+      code: null,
+      message: null,
+    })
     expect(fake.requests).toHaveLength(2)
+    expect(Number(ended.unpriced_calls)).toBe(1)
+    expect(Number(ended.credits)).toBe(15)
     expect((await items(id, 'assistant')).at(-1)!.payload.text).toBe('done after the requeue')
   }, 40_000)
 
@@ -1149,7 +1277,7 @@ describe('reasoning, recovery, slots and the turn clock', () => {
     }
   })
 
-  it('a run that died while an external form waited: the form expires, the call is unknown, the turn goes on', async () => {
+  it('a run that died inside an external write expires its form and waits for owner verification', async () => {
     script({ text: 'I will check whether it went through.' })
     const id = await thread()
     const store = app.get(ItemStore)
@@ -1184,9 +1312,12 @@ describe('reasoning, recovery, slots and the turn clock', () => {
       await app.get(TurnQueue).kick(tid)
       return { tid, qid: Number(q.id) }
     })
-    expect(await settled(tid, TERMINAL)).toBe('completed')
+    expect(await settled(tid, TERMINAL)).toBe('failed')
     expect((await items(id, 'question'))[0]!.status).toBe('expired')
-    expect(toolMsgs(0)[0]!.content).toMatch(/outcome is unknown/)
+    expect(fake.requests).toHaveLength(0)
+    expect((await items(id, 'tool_result'))[0]!.payload.internal.content).toMatch(
+      /outcome is unknown/,
+    )
     expect((await answerForm(qid, { a: 1 })).body.code).toBe(Err.AGENT_APPROVAL_CLOSED.code)
   })
 
@@ -1485,13 +1616,16 @@ describe('races, duplicates and slots', () => {
     }
   })
 
-  it('a turn stopped by deleting its thread still gives its slot back', async () => {
+  it('a turn explicitly stopped before deleting its thread still gives its slot back', async () => {
     const release = vi.spyOn(app.get(TurnQueue), 'release')
     mocks.push(release)
     script({ text: 'slow', delayMs: 3000 })
     const id = await thread()
-    await start(id, 'slow one')
+    const turnId = await start(id, 'slow one')
     await sleep(200)
+    await http().delete(`/api/agent/threads/${id}`).set(bearer(owner)).expect(409)
+    await http().post(`/api/agent/threads/${id}/cancel`).set(bearer(owner)).expect(201)
+    expect(await settled(turnId, TERMINAL)).toBe('cancelled')
     await http().delete(`/api/agent/threads/${id}`).set(bearer(owner)).expect(200)
     for (const until = Date.now() + 5000; !release.mock.calls.length && Date.now() < until;)
       await sleep(50)

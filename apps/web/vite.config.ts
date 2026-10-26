@@ -1,11 +1,10 @@
-import { existsSync, readdirSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath, URL } from 'node:url'
 import { defineConfig, defaultClientConditions } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import Components from 'unplugin-vue-components/vite'
 import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
 import { SPA_CSP } from './csp.ts'
-import common from './src/locales/zh-CN/common.json' with { type: 'json' }
 
 // dev → the local server (3000); Playwright points it at the e2e server (3200)
 const api = process.env.API_PROXY_TARGET || 'http://127.0.0.1:3000'
@@ -60,7 +59,14 @@ export default defineConfig({
       // Remove an unset/empty marker before Vite's env hook can warn; HTML defaults to zh-CN.
       transformIndexHtml: {
         order: 'pre',
-        handler: (html) => (appTitle ? html : html.replace('%VITE_APP_TITLE%', common.app.title)),
+        handler(html) {
+          if (appTitle) return html
+          // 文案不是启动配置依赖；请求 HTML 时读取，修改文案无需重启开发服务。
+          const common = JSON.parse(
+            readFileSync(new URL('./src/locales/zh-CN/common.json', import.meta.url), 'utf8'),
+          ) as { app: { title: string } }
+          return html.replace('%VITE_APP_TITLE%', common.app.title)
+        },
       },
     },
     // cropperjs 2 is a set of custom elements (<cropper-canvas>, …): AvatarCropper uses them in its template

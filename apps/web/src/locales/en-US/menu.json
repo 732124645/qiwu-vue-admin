@@ -119,9 +119,6 @@
     "office": "Office workspace",
     "trip": "My trips",
     "expense": "My expenses",
-    "seal": "My seal requests",
-    "attendance": "Attendance records",
-    "attendancePolicy": "Attendance policy",
-    "attendanceSites": "Office sites"
+    "seal": "My seal requests"
   }
 }

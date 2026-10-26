@@ -1,3 +1,4 @@
+import { TEST_AGENT_PRICING, clearAgentUsage } from '../setup/agent-pricing.js'
 import assert from 'node:assert/strict'
 // Agent memories (see docs/agent.md): each user's own, listed, added, changed, deleted and forgotten all at once
 // (current password required); secrets are masked before anything is stored and the same content is kept once;
@@ -6,7 +7,7 @@ import assert from 'node:assert/strict'
 // trace; temporary chats and chats with memory off neither read nor write them. Memory text and chat messages
 // never reach the action log. `memory.save` is a write tool only a person approves (an administrator's auto or
 // review policy and the approval reviewers do not count): it stops for approval, saves only once approved and
-// only while the chat still uses memory, and a full memory tells the model so. The background distiller reads
+// only while the chat still uses memory; refused saves retain their reason and pause further writes. The background distiller reads
 // only the user's own messages (no answers, tool output or followed suggestions) of ordinary chats (no
 // subagent, automation or batch ones), masks, keeps daily caps, records usage, stops while paused, skips a full
 // memory without a model call and never distils the same part twice, a fork included. No session 401, no
@@ -167,6 +168,15 @@ async function remember(who: keyof typeof users, content: string): Promise<numbe
       hasPermVersion: !!res.headers['x-perm-ver'],
     }),
   )
+  assert.equal(
+    Number.isSafeInteger(res.body.data.id),
+    true,
+    JSON.stringify({
+      code: res.body.code,
+      id: res.body.data.id,
+      fields: Object.keys(res.body.data),
+    }),
+  )
   return res.body.data.id as number
 }
 
@@ -253,7 +263,15 @@ beforeAll(async () => {
   providerId = await insertRow(ds.manager, 'agent_provider', {
     name: `${PREFIX}provider`,
     base_url: 'http://127.0.0.1:9/v1',
-    models: [{ id: 'mm1', label: 'mm1', reasoning: false, contextWindow: 64_000 }],
+    models: [
+      {
+        id: 'mm1',
+        label: 'mm1',
+        reasoning: false,
+        pricing: TEST_AGENT_PRICING,
+        contextWindow: 64_000,
+      },
+    ],
     enabled: 1,
   })
   vi.spyOn(app.get(ProviderRegistry), 'connect').mockImplementation(() => fake)
@@ -294,7 +312,7 @@ afterAll(async () => {
         await ds.query('DELETE FROM agent_thread WHERE id IN (?)', [tids])
       }
       await ds.query('DELETE FROM agent_memory WHERE tenant_id = 1 AND user_id IN (?)', [ids])
-      await ds.query('DELETE FROM agent_usage WHERE tenant_id = 1 AND user_id IN (?)', [ids])
+      await clearAgentUsage(ds, ids)
       await ds.query('DELETE FROM iam_user_roles WHERE user_id IN (?)', [ids])
       await ds.query('DELETE FROM iam_user WHERE id IN (?)', [ids])
     }
@@ -388,7 +406,12 @@ describe('my memories', () => {
     await http().post(URL).set(as('member')).send({ content: '   ' }).expect(400)
     await http().post(`${URL}/forget-all`).set(as('member')).send({}).expect(400)
     const id = await remember('member', `${PREFIX}private note`)
-    await http().put(`${URL}/${id}`).set(as('peer')).send({ content: 'mine now' }).expect(404)
+    const foreign = await http().put(`${URL}/${id}`).set(as('peer')).send({ content: 'mine now' })
+    assert.equal(
+      foreign.status,
+      404,
+      JSON.stringify({ id, code: foreign.body.code, message: foreign.body.msg }),
+    )
     await http().delete(`${URL}/${id}`).set(as('peer')).expect(404)
     const peerList = await http().get(URL).set(as('peer')).expect(200)
     expect(JSON.stringify(peerList.body.data)).not.toContain('private note')
@@ -589,10 +612,20 @@ describe('memories in a chat', () => {
       .set(as('member'))
       .send({ memoryEnabled: false })
       .expect(200)
-    expect(await settled(second, ['completed', 'failed', 'cancelled'])).toBe('completed')
+    expect(await settled(second, ['completed', 'failed', 'cancelled'])).toBe('failed')
     expect(await rows('member')).toHaveLength(0)
-    const tool = fake.requests[1]!.messages.filter((m) => m.role === 'tool').at(-1)
-    expect(String(tool?.content)).toContain('memory is switched off')
+    expect(fake.requests).toHaveLength(1)
+    const [result] = await ds.query(
+      'SELECT payload FROM agent_item WHERE thread_id = ? AND turn_id = ? AND tenant_id = 1 AND kind = ?',
+      [id, second, 'tool_result'],
+    )
+    const payload = typeof result.payload === 'string' ? JSON.parse(result.payload) : result.payload
+    expect(String(payload.internal.content)).toContain('memory is switched off')
+    const [risk] = await ds.query(
+      'SELECT recovery_required FROM agent_thread WHERE id = ? AND tenant_id = 1',
+      [id],
+    )
+    expect(risk.recovery_required).toBe(1)
   })
 
   it('memory.save always waits for a person: neither an auto nor a review policy lets it through', async () => {
@@ -622,7 +655,7 @@ describe('memories in a chat', () => {
     expect(await rows('member')).toHaveLength(0)
   })
 
-  it('a full memory saves nothing and the model is told to ask for a clean-up', async () => {
+  it('a full memory saves nothing and retains the clean-up reason while stopping further writes', async () => {
     await clear('full')
     const values = Array.from({ length: MEMORY_MAX }, (_, i) => [
       1,
@@ -657,10 +690,20 @@ describe('memories in a chat', () => {
       .set(as('full'))
       .send({ decision: 'approve' })
       .expect(201)
-    expect(await settled(turnId, ['completed', 'failed', 'cancelled'])).toBe('completed')
+    expect(await settled(turnId, ['completed', 'failed', 'cancelled'])).toBe('failed')
     expect(await rows('full')).toHaveLength(MEMORY_MAX)
-    const tool = fake.requests[1]!.messages.filter((m) => m.role === 'tool').at(-1)
-    expect(String(tool?.content)).toContain('memory is full')
+    expect(fake.requests).toHaveLength(1)
+    const [result] = await ds.query(
+      'SELECT payload FROM agent_item WHERE thread_id = ? AND turn_id = ? AND tenant_id = 1 AND kind = ?',
+      [id, turnId, 'tool_result'],
+    )
+    const payload = typeof result.payload === 'string' ? JSON.parse(result.payload) : result.payload
+    expect(String(payload.internal.content)).toContain('memory is full')
+    const [risk] = await ds.query(
+      'SELECT recovery_required FROM agent_thread WHERE id = ? AND tenant_id = 1',
+      [id],
+    )
+    expect(risk.recovery_required).toBe(1)
     await clear('full')
   })
 })

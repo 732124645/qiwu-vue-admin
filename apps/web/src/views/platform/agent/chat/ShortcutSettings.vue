@@ -20,6 +20,7 @@ import {
  */
 defineOptions({ name: 'AgentShortcutSettings' })
 const model = defineModel<Shortcuts>({ required: true })
+const { escapeCloses = false } = defineProps<{ escapeCloses?: boolean }>()
 const { t } = useI18n()
 
 /** 正在录入的动作 */
@@ -94,7 +95,9 @@ function reset() {
         </el-button>
         <p v-if="problem[a]" role="alert" class="agent-shortcuts__problem">{{ problem[a] }}</p>
       </div>
-      <p class="agent-shortcuts__hint">{{ t('agent.chat.shortcut.stopHint') }}</p>
+      <p class="agent-shortcuts__hint">
+        {{ t(escapeCloses ? 'agent.chat.dock.escapeHint' : 'agent.chat.shortcut.stopHint') }}
+      </p>
       <el-button size="small" link type="primary" @click="reset">
         {{ t('agent.chat.shortcut.reset') }}
       </el-button>

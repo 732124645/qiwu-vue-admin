@@ -34,10 +34,11 @@ import {
   AgentBatch,
   AgentFeedback,
   AgentItem,
+  AgentMessageReceipt,
   AgentThread,
   AgentTurn,
 } from './entities/agent-thread.entity.js'
-import { AgentUsage } from './entities/agent-usage.entity.js'
+import { AgentUsage, AgentUsageEntry } from './entities/agent-usage.entity.js'
 import { AgentOptionsService } from './threads/agent-options.service.js'
 import { AgentThreadService } from './threads/thread.service.js'
 import { AgentChatController, AgentThreadController } from './threads/threads.controller.js'
@@ -93,6 +94,7 @@ import { AgentWebModule } from './web/agent-web.module.js'
       AgentThread,
       AgentTurn,
       AgentItem,
+      AgentMessageReceipt,
       AgentBatch,
       AgentFeedback,
       AgentSkill,
@@ -100,6 +102,7 @@ import { AgentWebModule } from './web/agent-web.module.js'
       AgentInstruction,
       AgentPrompt,
       AgentUsage,
+      AgentUsageEntry,
       AgentMcpServer,
       AgentMcpTool,
       McpToolSwitch,

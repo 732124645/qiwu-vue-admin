@@ -19,6 +19,15 @@ export interface WireBody {
 /** One scripted answer: text, or a call of the offered tool whose wire name matches `tool`. */
 export type FakeReply = { text: string } | { tool: RegExp; args: object }
 
+/** 浏览器夹具显式定价，走正式模型校验与积分记账，不把未定价模型当免费。 */
+export const TEST_MODEL_PRICING = {
+  input: '1000000',
+  output: '1000000',
+  cacheRead: null,
+  cacheWrite: null,
+  imageCredits: null,
+}
+
 const USAGE = { prompt_tokens: 120, completion_tokens: 30, total_tokens: 150 }
 
 const chunk = (model: string, delta: object, finish: string | null = null) => ({

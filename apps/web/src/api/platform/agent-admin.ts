@@ -16,6 +16,9 @@ import type {
   AgentToolPolicy,
   AgentToolVo,
   AgentUsageQuery,
+  AgentUsageEntriesQuery,
+  AgentUsageEntryVo,
+  Page,
   AgentUsageRowVo,
   ParameterCreate,
   ParameterUpdate,
@@ -109,9 +112,11 @@ export const agentInstructionApi = {
   saveTenant: (body: string) => api.put('/agent/instructions/tenant', { body }),
 }
 
-/** /api/agent/usage：按日、用户或模型汇总的调用次数与 token。 */
+/** /api/agent/usage：按日、用户或模型汇总积分和原始用量，并分页读取当次明细。 */
 export const agentUsageApi = {
   list: (query: AgentUsageQuery) => api.get<AgentUsageRowVo[]>('/agent/usage', { params: query }),
+  entries: (query: Omit<AgentUsageEntriesQuery, 'sort'> & { sort?: string }) =>
+    api.get<Page<AgentUsageEntryVo>>('/agent/usage/entries', { params: query }),
 }
 
 /**

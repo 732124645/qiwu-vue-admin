@@ -1,3 +1,4 @@
+import { TEST_AGENT_PRICING, clearAgentUsage } from '../setup/agent-pricing.js'
 // Subagents (see docs/agent.md#子智能体): `agent.delegate` runs 1–3 subtasks in parallel as hidden threads of
 // the owner (`parent_thread_id`), on the parent's read tools only (no writes, no delegating again, no
 // questions, no read tool that would wait for approval, nothing the parent lacked), with a smaller step limit.
@@ -233,7 +234,15 @@ beforeAll(async () => {
   providerId = await insertRow(ds.manager, 'agent_provider', {
     name: `${PREFIX}provider`,
     base_url: 'http://127.0.0.1:9/v1',
-    models: [{ id: 'm1', label: 'm1', reasoning: false, contextWindow: 64_000 }],
+    models: [
+      {
+        id: 'm1',
+        label: 'm1',
+        reasoning: false,
+        pricing: TEST_AGENT_PRICING,
+        contextWindow: 64_000,
+      },
+    ],
     enabled: 1,
   })
   vi.spyOn(app.get(ProviderRegistry), 'connect').mockImplementation(() => model)
@@ -294,7 +303,7 @@ afterAll(async () => {
       await ds.query('DELETE FROM agent_skill WHERE owner_user_id IN (?) AND tenant_id = 1', [
         users,
       ])
-      await ds.query('DELETE FROM agent_usage WHERE user_id IN (?) AND tenant_id = 1', [users])
+      await clearAgentUsage(ds, users)
       await ds.query('DELETE FROM iam_user_roles WHERE user_id IN (?)', [users])
       await ds.query('DELETE FROM iam_user WHERE id IN (?)', [users])
     }
@@ -313,7 +322,7 @@ afterAll(async () => {
 beforeEach(async () => {
   model = new RouterModel()
   calls.write = 0
-  await ds.query('DELETE FROM agent_usage WHERE user_id = ? AND tenant_id = 1', [ownerId])
+  await clearAgentUsage(ds, [ownerId])
   await setParam(AGENT_PAUSED_PARAM, 'false')
 })
 
@@ -553,7 +562,7 @@ describe('subagent boundaries', () => {
   const mocks: { mockRestore(): void }[] = []
   afterEach(async () => {
     for (const m of mocks.splice(0)) m.mockRestore()
-    await setParam(AGENT_LIMIT_PARAMS.turnTokens, '200000')
+    await setParam(AGENT_LIMIT_PARAMS.turnCredits, '0')
     await setParam(AGENT_LIMIT_PARAMS.userConcurrentTurns, '2')
   })
   const page = (url: string) => ({
@@ -638,8 +647,8 @@ describe('subagent boundaries', () => {
     expect(report!.payload.citations).toEqual([{ title: 'Found', url: 'https://found.example/a' }])
   })
 
-  it('shares what is left of the parent turn’s token budget', async () => {
-    await setParam(AGENT_LIMIT_PARAMS.turnTokens, '40')
+  it('shares what is left of the parent turn’s credit budget', async () => {
+    await setParam(AGENT_LIMIT_PARAMS.turnCredits, '40')
     model.set('parent', { toolCalls: [delegate('K')] }, { text: 'never' })
     model.set('K', ...Array.from({ length: 5 }, () => ({ toolCalls: [{ name: 'test.dlg.read' }] })))
     const id = await thread()

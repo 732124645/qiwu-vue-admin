@@ -29,7 +29,7 @@
     "wfTaskRemind": "Send overdue to-do reminders",
     "wxoaMessagePurge": "Purge expired Official Account messages",
     "wxoaFanSync": "Sync Official Account fans",
-    "clockRetention": "Purge expired attendance records"
+    "clockRetention": "Legacy attendance retention (retired)"
   },
   "inboxTemplate": {
     "schedulerJobTimeout": "Job timeout alert"

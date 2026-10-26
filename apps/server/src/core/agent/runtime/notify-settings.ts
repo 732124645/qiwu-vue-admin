@@ -1,3 +1,4 @@
+import type { EntityManager } from 'typeorm'
 import { Body, Controller, Get, Inject, Injectable, Logger, Optional, Put } from '@nestjs/common'
 import { ApiOperation, ApiTags } from '@nestjs/swagger'
 import { TransactionHost } from '@nestjs-cls/transactional'
@@ -104,28 +105,35 @@ export class AgentNotices {
   /**
    * 写下提醒记录（没有配置模板的渠道什么也不写）：总是站内信，本人对这类提醒开了邮件再写邮件（没有邮箱的
    * 只记一条跳过的邮件记录；“等你”邮件按 `turnId` 一轮一封）。放在事务里写，投递由事务提交后的异步流程
-   * 完成（关闭时会等它）：轮次的推进不等 SMTP。参数只有会话编号（`title` 也是 `#编号`）。失败只记日志。
+   * 完成（关闭时会等它）：轮次的推进不等 SMTP。参数只有会话编号（`title` 也是 `#编号`）。普通提醒失败
+   * 只记日志；显式 manager 的风险提醒与调用方原生事务共同回滚，不发送幽灵通知。
    */
   async send(
     thread: AgentThread,
     template: string,
     event: AgentNoticeEvent,
     turnId?: number,
+    manager?: EntityManager,
   ): Promise<void> {
     try {
       const userId = Number(thread.userId)
       const channels = await this.settings.channels(userId, event, turnId)
-      await this.txHost.withTransaction(() =>
-        this.notifier.send({
-          template,
-          to: [userId],
-          channels,
-          // 不带会话标题：标题可能含业务内容，邮件会离开本系统；模板只给通用文字与会话路由。
-          // `title` 只为早先装好的模板（正文里还有 {title}）保留，值是不含内容的会话编号
-          params: { title: `#${thread.id}`, threadId: Number(thread.id) },
-        }),
-      )
+      const write = () =>
+        this.notifier.send(
+          {
+            template,
+            to: [userId],
+            channels,
+            // 不带会话标题与业务参数，只有本人的会话入口。
+            params: { title: `#${thread.id}`, threadId: Number(thread.id) },
+          },
+          manager,
+        )
+      if (manager) await write()
+      else await this.txHost.withTransaction(write)
     } catch (e) {
+      // 风险标记与入口必须同成同败，不能吞掉出箱写入错误后留下无法找到的待核对会话。
+      if (manager) throw e
       this.logger.warn({ err: e instanceof Error ? e.name : 'Error' }, 'agent notice skipped')
     }
   }

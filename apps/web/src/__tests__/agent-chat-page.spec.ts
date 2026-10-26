@@ -13,18 +13,22 @@ import ElementPlus, { ElDropdown, ElMessage, ElMessageBox } from 'element-plus'
 import type { AgentItemVo, AgentOptionsVo, AgentThreadVo, AgentTurnVo } from '@qiwu/shared'
 import { i18n, setLocale } from '@/core/i18n'
 import { vPerm } from '@/core/permission'
-import { accessToken } from '@/core/request/http'
+import { accessToken, ApiError } from '@/core/request/http'
 import { useAuthStore } from '@/core/stores/auth'
 import { useMenuStore } from '@/core/stores/menu'
 import FileUpload from '@/core/components/FileUpload.vue'
+import InboxMessageView from '@/core/layout/InboxMessageView.vue'
 import AgentEntry from '@/views/platform/agent/chat/AgentEntry.vue'
+import SubtaskDetail from '@/views/platform/agent/chat/SubtaskDetail.vue'
+import { agentApi } from '@/api/platform/agent'
+import { clearHistory, pushHistory } from '@/views/platform/agent/chat/thread-state'
 import ChatPage from '@/views/platform/agent/chat/index.vue'
 import {
   pendingContext,
   pendingRoute,
   useAgentContext,
 } from '@/views/platform/agent/chat/use-agent-context'
-import { me, mockApi, node, ok, type Route } from './mock-api'
+import { me, mockApi, node, ok, fail, type Route } from './mock-api'
 
 /** the fake socket: one handler per type, and the connection state the page watches */
 const rt = vi.hoisted(() => ({ handlers: new Map<string, (payload: unknown) => void>() }))
@@ -74,6 +78,10 @@ const turn = (p: Partial<AgentTurnVo> = {}): AgentTurnVo => ({
   steps: 3,
   promptTokens: 1200,
   completionTokens: 340,
+  credits: '0.123456',
+  unpricedCalls: 0,
+  unreportedCalls: 0,
+  legacyUsage: false,
   error: null,
   startedAt: NOW,
   endedAt: NOW,
@@ -146,13 +154,30 @@ const BASE: Record<string, Route> = {
     contextUsed: 12000,
     contextWindow: 64000,
     turn: turn({ status: 'running' }),
-    today: { userTokens: 5000, userLimit: 100000, tenantTokens: 9000, tenantLimit: 1000000 },
+    today: {
+      userTokens: 5000,
+      tenantTokens: 9000,
+      userCredits: '1.5',
+      tenantCredits: '2.75',
+      userLimit: '0',
+      tenantLimit: '10',
+      userUnpricedCalls: 1,
+      tenantUnpricedCalls: 2,
+    },
   }),
 }
 type Call = { method?: string; url?: string; params?: unknown; data?: unknown }
 const sent = (calls: Call[], method: string, url: string) =>
   calls.filter((c) => c.method === method && c.url === url)
 const body = (c: Call | undefined) => JSON.parse(String(c?.data)) as unknown
+const received = (clientMessageId: string) => ({
+  clientMessageId,
+  threadId: 7,
+  itemId: 20,
+  turnId: 1,
+  status: 'accepted' as const,
+  turn: turn({ status: 'running' }),
+})
 
 let w: VueWrapper
 let router: Router
@@ -192,6 +217,8 @@ const suggestions = () =>
   w.findAll('[role="option"]').map((o) => o.find('.agent-composer__label').text())
 
 beforeEach(() => {
+  clearHistory()
+  sessionStorage.clear()
   setActivePinia(createPinia())
   setLocale('en-US')
   accessToken.value = 'at'
@@ -329,7 +356,8 @@ describe('conversation', () => {
     expect(w.find('.agent-msg--assistant').text()).toBe('Rewritten')
     expect(w.find('.agent-chat__turn').text()).toBe('Completed')
     expect(button('Stop')).toBeUndefined()
-    expect(sent(calls, 'get', '/agent/threads/7/items')).toHaveLength(1)
+    // 终态补拉会话恢复标记，旧快照不能把刚收到的正文或轮次状态推回去。
+    expect(sent(calls, 'get', '/agent/threads/7/items')).toHaveLength(2)
   })
 
   it('catches up with afterSeq after a reconnect and after a delta for an unknown item', async () => {
@@ -400,6 +428,7 @@ describe('conversation', () => {
     await key('Enter')
     // no title: the server names the thread after its first turn
     expect(body(sent(calls, 'post', '/agent/threads')[0])).toEqual({
+      clientDraftId: expect.any(String),
       approvalMode: 'ask',
       planMode: false,
       providerId: 1,
@@ -418,7 +447,10 @@ describe('conversation', () => {
     release()
     await flushPromises()
     expect(sent(calls, 'post', '/agent/threads/9/messages')).toHaveLength(1)
-    expect(body(sent(calls, 'post', '/agent/threads/9/messages')[0])).toEqual({ text: 'Fill them' })
+    expect(body(sent(calls, 'post', '/agent/threads/9/messages')[0])).toEqual({
+      clientMessageId: expect.any(String),
+      text: 'Fill them',
+    })
     expect(sent(calls, 'get', '/agent/threads/9/items')[0]!.params).toEqual({ afterSeq: 0 })
     expect(textarea().element.value).toBe('')
     expect(w.find('.agent-chat__context').exists()).toBe(false)
@@ -437,6 +469,7 @@ describe('conversation', () => {
     release()
     await flushPromises()
     expect(body(sent(calls, 'post', '/agent/threads/9/messages')[1])).toEqual({
+      clientMessageId: expect.any(String),
       text: 'Then the phone',
       mode: 'queue',
     })
@@ -463,6 +496,7 @@ describe('conversation', () => {
   it('forks from a message into a new thread and opens it', async () => {
     const calls = mockApi({
       ...BASE,
+      'GET /agent/threads/7/items': ok({ thread: thread(7), items: ITEMS, turn: turn() }),
       'POST /agent/threads/7/fork': ok(thread(11, { title: 'Fork', forkedFromId: 7 })),
       'GET /agent/threads/11/items': ok({
         thread: thread(11, { title: 'Fork' }),
@@ -476,7 +510,10 @@ describe('conversation', () => {
       .find('.agent-msg--user button[aria-label="Fork a new conversation from here"]')
       .trigger('click')
     await flushPromises()
-    expect(body(sent(calls, 'post', '/agent/threads/7/fork')[0])).toEqual({ seq: 1 })
+    expect(body(sent(calls, 'post', '/agent/threads/7/fork')[0])).toEqual({
+      seq: 1,
+      clientDraftId: expect.any(String),
+    })
     expect(w.find('.agent-chat__title').text()).toBe('Fork')
     expect(router.currentRoute.value.query).toEqual({ thread: '11' })
   })
@@ -524,6 +561,57 @@ describe('conversation', () => {
 })
 
 describe('composer', () => {
+  it('keeps keyboard candidates visible through loops and filtering without moving page or focus', async () => {
+    mockApi(BASE)
+    await show()
+    await type('/')
+    const list = w.find<HTMLUListElement>('.agent-composer__suggest').element
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 80 })
+    for (const row of Array.from(list.children)) {
+      Object.defineProperty(row, 'offsetTop', {
+        configurable: true,
+        get: () => Array.from(list.children).indexOf(row) * 32,
+      })
+      Object.defineProperty(row, 'offsetHeight', { configurable: true, value: 32 })
+    }
+    textarea().element.focus()
+    const pageScroll = document.documentElement.scrollTop
+    const movePage = vi.spyOn(window, 'scrollTo')
+    await key('ArrowUp')
+    expect(w.find('[aria-selected="true"]').text()).toContain('/clear')
+    expect(list.scrollTop).toBe(240)
+    expect(document.activeElement).toBe(textarea().element)
+    await key('ArrowDown')
+    expect(w.find('[aria-selected="true"]').text()).toContain('/new')
+    expect(list.scrollTop).toBe(0)
+    for (let i = 0; i < 9; i++) await key('ArrowDown')
+    expect(list.scrollTop).toBe(240)
+    await type('/c')
+    expect(suggestions()).toEqual(['/compact', '/clear'])
+    expect(w.find('[aria-selected="true"]').text()).toContain('/compact')
+    expect(list.scrollTop).toBe(0)
+    expect(document.activeElement).toBe(textarea().element)
+    expect(document.documentElement.scrollTop).toBe(pageScroll)
+    expect(movePage).not.toHaveBeenCalled()
+  })
+
+  it('shows the complete skill name and multiline description on hover', async () => {
+    const skill = {
+      name: `record-${'x'.repeat(57)}`,
+      description: `First paragraph ${'description '.repeat(35)}\nSecond paragraph with details`,
+      scope: 'user',
+    }
+    mockApi({ ...BASE, 'GET /agent/options': ok({ ...OPTIONS, skills: [skill] }) })
+    await show()
+    await type('$')
+    await w.find('[role="option"]').trigger('mouseenter')
+    await vi.waitFor(() => {
+      const tooltip = document.querySelector('.agent-composer__tooltip')
+      expect(tooltip?.textContent).toContain(`$${skill.name}`)
+      expect(tooltip?.textContent).toContain(skill.description)
+    })
+  })
+
   it('slash commands: completion, /status, /compact, /new and /mcp without the settings page', async () => {
     const calls = mockApi({ ...BASE, 'POST /agent/threads/7/compact': ok(null) })
     await show()
@@ -548,9 +636,10 @@ describe('composer', () => {
     const status = w.find('.agent-chat__status').text()
     expect(status).toContain('1200 in / 340 out')
     expect(status).toContain('Running')
-    expect(status).toContain('You today5000 / 100000')
-    expect(status).toContain('Tenant today9000 / 1000000')
-    expect(status).toContain('Context12000 / 64000')
+    expect(status).toContain('Your credits today1.5 / Unlimited')
+    expect(status).toContain('Turn credits0.123456')
+    expect(status).toContain('Tenant credits today2.75 / 10')
+    expect(status).toContain('Context estimate 19%12000 / 64000')
 
     await type('/compact')
     await key('Enter')
@@ -602,6 +691,7 @@ describe('composer', () => {
     await type('please $fill-customer for Acme')
     await key('Enter')
     expect(body(sent(calls, 'post', '/agent/threads/7/messages')[0])).toEqual({
+      clientMessageId: expect.any(String),
       text: 'please $fill-customer for Acme',
       skill: 'fill-customer',
       // the turn of thread 7 is still running: the message joins it
@@ -724,8 +814,12 @@ describe('thread views and conversation actions', () => {
     expect(w.find('.agent-chat__context').text()).toContain('Editing the last message')
     await type('Who is Acme Ltd?')
     await key('Enter')
-    expect(body(sent(calls, 'post', '/agent/threads/7/fork')[0])).toEqual({ seq: 0 })
+    expect(body(sent(calls, 'post', '/agent/threads/7/fork')[0])).toEqual({
+      seq: 0,
+      clientDraftId: expect.any(String),
+    })
     expect(body(sent(calls, 'post', '/agent/threads/11/messages')[0])).toEqual({
+      clientMessageId: expect.any(String),
       text: 'Who is Acme Ltd?',
     })
     expect(sent(calls, 'post', '/agent/threads/7/messages')).toHaveLength(0)
@@ -833,6 +927,7 @@ describe('composer extras', () => {
     expect(button('Fast')!.attributes('aria-pressed')).toBe('true')
     await key('Enter')
     expect(body(sent(calls, 'post', '/agent/threads/7/messages')[0])).toEqual({
+      clientMessageId: expect.any(String),
       text: 'Read this card',
       fileIds: [41],
     })
@@ -877,7 +972,7 @@ describe('composer extras', () => {
     await open()
     const meter = w.find('meter')
     expect(meter.attributes()).toMatchObject({ max: '64000', value: '12000' })
-    expect(w.find('.agent-composer__context').text()).toContain('Context 19%')
+    expect(w.find('.agent-composer__context').text()).toContain('Context estimate 19%')
     await key('Escape')
     expect(sent(calls, 'post', '/agent/threads/7/cancel')).toHaveLength(1)
     for (const mod of [{ ctrlKey: true }, { metaKey: true }]) {
@@ -979,6 +1074,7 @@ describe('live list, trust, plans and mentions', () => {
     await button('Also the phone')!.trigger('click')
     await flushPromises()
     expect(body(sent(calls, 'post', '/agent/threads/7/messages')[0])).toEqual({
+      clientMessageId: expect.any(String),
       text: 'Also the phone',
     })
   })
@@ -1003,6 +1099,7 @@ describe('live list, trust, plans and mentions', () => {
     expect(order).toEqual(['patch', 'send'])
     expect(body(sent(calls, 'patch', '/agent/threads/7')[0])).toEqual({ planMode: false })
     expect(body(sent(calls, 'post', '/agent/threads/7/messages')[0])).toEqual({
+      clientMessageId: expect.any(String),
       text: 'Go ahead with the plan',
     })
     expect(button('Plan mode')!.attributes('aria-pressed')).toBe('false')
@@ -1068,6 +1165,7 @@ describe('live list, trust, plans and mentions', () => {
     await type(`${textarea().element.value}now`)
     await key('Enter')
     expect(body(sent(calls, 'post', '/agent/threads/9/messages')[0])).toEqual({
+      clientMessageId: expect.any(String),
       text: 'Check @record:demo.customer#4 with @skill:fill-customer now',
       skill: 'fill-customer',
     })
@@ -1075,10 +1173,7 @@ describe('live list, trust, plans and mentions', () => {
 
   it('Ctrl+R searches the sent messages, newest first; Esc puts the draft back', async () => {
     sessionStorage.clear()
-    sessionStorage.setItem(
-      'qw.agent.history.1',
-      JSON.stringify(['Weekly report', 'Find Acme', 'Weekly sales']),
-    )
+    for (const text of ['Weekly report', 'Find Acme', 'Weekly sales']) pushHistory(1, text)
     mockApi(BASE)
     await show()
     await type('half a thought')
@@ -1098,7 +1193,8 @@ describe('live list, trust, plans and mentions', () => {
 })
 
 describe('entry button', () => {
-  it('shows only with the chat page in the menu and carries the page and its published selection', async () => {
+  it('opens beside the business page with its selection, keeps its URL and clears after access is revoked', async () => {
+    mockApi(BASE)
     const router = createRouter({
       history: createMemoryHistory(),
       routes: [
@@ -1127,21 +1223,28 @@ describe('entry button', () => {
         routePath: '/',
         routeName: 'agent-chat',
         component: 'platform/agent/chat/index',
+        visible: false,
       }),
     ]
     await flushPromises()
     await entry.find('button[aria-label="Assistant"]').trigger('click')
     await flushPromises()
-    expect(pendingContext.value).toEqual({
+    const chat = entry.findComponent(ChatPage)
+    expect(chat.props('entryContext')).toEqual({
       route: '/demo/customers?page=2',
       title: 'Customers',
       target: 'demo.customer',
       ids: [3, 4],
     })
-    expect(pendingRoute.value).toBe('demo-customer')
-    expect(router.currentRoute.value.name).toBe('agent-chat')
-    // on the chat page itself the button hides
-    expect(entry.find('button').exists()).toBe(false)
+    expect(chat.props('entryRoute')).toBe('demo-customer')
+    expect(router.currentRoute.value.fullPath).toBe('/demo/customers?page=2')
+    expect(chat.props('embedded')).toBe(true)
+    expect(chat.props('active')).toBe(true)
+    expect(pendingContext.value).toBeNull()
+    useAuthStore().me = me([])
+    await flushPromises()
+    expect(entry.findComponent(ChatPage).exists()).toBe(false)
+    expect(entry.find('.agent-entry').exists()).toBe(false)
     entry.unmount()
   })
 
@@ -1167,6 +1270,7 @@ describe('entry button', () => {
           routePath: '/',
           routeName: 'agent-chat',
           component: 'platform/agent/chat/index',
+          visible: false,
         }),
       ]
       await router.push('/plain')
@@ -1179,4 +1283,840 @@ describe('entry button', () => {
       entry.unmount()
     },
   )
+})
+
+describe('work panel scope', () => {
+  it('starts collapsed, expands a current answer, and clears preview and sources before another thread responds', async () => {
+    let release!: () => void
+    const waiting = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const first = item(2, 2, 'assistant', {
+      text: '# First answer',
+      citations: [{ title: 'Old source', url: 'https://old.test/' }],
+    })
+    const second = item(20, 1, 'assistant', {
+      text: '# Second answer',
+      citations: [{ title: 'New source', url: 'https://new.test/' }],
+    })
+    const calls = mockApi({
+      ...BASE,
+      'GET /agent/threads/7/items': ok({ thread: thread(7), items: [first], turn: turn() }),
+      'GET /agent/threads/8/items': async () => {
+        await waiting
+        return ok({ thread: thread(8), items: [second], turn: turn() })
+      },
+      'GET /agent/threads/8/status': ok({
+        threadId: 8,
+        model: 'm1',
+        contextUsed: 0,
+        contextWindow: 64000,
+        turn: null,
+        today: {
+          userTokens: null,
+          tenantTokens: null,
+          userCredits: '0',
+          tenantCredits: '0',
+          userLimit: '0',
+          tenantLimit: '0',
+          userUnpricedCalls: 0,
+          tenantUnpricedCalls: 0,
+        },
+      }),
+    })
+    await show()
+    await open()
+    expect(w.findComponent({ name: 'AgentContextPanel' }).exists()).toBe(false)
+    const answer = w.findComponent({ name: 'AgentChatItem' })
+    answer.vm.$emit('inspect', 2)
+    await flushPromises()
+    expect(w.find('.agent-context__preview').text()).toContain('First answer')
+    await w
+      .findAll('.agent-context [role="tab"]')
+      .find((node) => node.text() === 'Sources')!
+      .trigger('click')
+    await flushPromises()
+    expect(w.find('.agent-context__sources').text()).toContain('Old source')
+    answer.vm.$emit('inspect', 2)
+    await flushPromises()
+    expect(w.find('.agent-context [role="tab"][aria-selected="true"]').text()).toBe('Outputs')
+    await open('Old one')
+    expect(w.find('.agent-context__preview').exists()).toBe(false)
+    expect(w.findAll('.agent-context__sources a')).toHaveLength(0)
+    expect(w.find('.agent-context').text()).not.toContain('Old source')
+    release()
+    await flushPromises()
+    await w
+      .findAll('.agent-context [role="tab"]')
+      .find((node) => node.text() === 'Sources')!
+      .trigger('click')
+    await flushPromises()
+    expect(w.find('.agent-context__sources').text()).toContain('New source')
+    expect(w.find('.agent-context').text()).not.toContain('Old source')
+    expect(
+      calls.some((call) => call.url === '/agent/usage' || call.url === '/agent/usage/entries'),
+    ).toBe(false)
+    await button('New conversation')!.trigger('click')
+    await flushPromises()
+    expect(w.findAll('.agent-context__sources a')).toHaveLength(0)
+  })
+})
+
+describe('embedded chat and subtasks', () => {
+  it('preserves chosen model and approval mode when draft options arrive late', async () => {
+    const selected = { model: 'm2', approvalMode: 'read_only' as const, planMode: true }
+    const created = thread(9, selected)
+    const calls = mockApi({
+      ...BASE,
+      'POST /agent/threads': ok(created),
+      'POST /agent/threads/9/messages': ok(turn({ threadId: 9 })),
+      'GET /agent/threads/9/items': ok({ thread: created, items: [], turn: turn({ threadId: 9 }) }),
+    })
+    await show('/other')
+    await w.setProps({ embedded: true, entryRoute: 'other' })
+    let release!: (options: AgentOptionsVo) => void
+    const waiting = new Promise<AgentOptionsVo>((resolve) => (release = resolve))
+    vi.spyOn(agentApi, 'options').mockImplementationOnce(() => waiting)
+    await w.find('.agent-chat__head button[aria-label="New conversation"]').trigger('click')
+    const composer = w.findComponent({ name: 'AgentComposer' })
+    composer.vm.$emit('update:settings', { ...composer.props('settings'), ...selected })
+    await flushPromises()
+    release(OPTIONS)
+    await flushPromises()
+    expect(composer.props('settings')).toMatchObject(selected)
+    await type('Use my chosen model')
+    await key('Enter')
+    expect(body(sent(calls, 'post', '/agent/threads')[0])).toMatchObject(selected)
+  })
+
+  it('keeps only options for the latest draft and source', async () => {
+    mockApi(BASE)
+    await show('/other')
+    await w.setProps({
+      embedded: true,
+      entryRoute: 'first-page',
+      entryContext: { route: '/first', title: 'First page' },
+    })
+    let first!: (options: AgentOptionsVo) => void, second!: (options: AgentOptionsVo) => void
+    const firstOptions = new Promise<AgentOptionsVo>((resolve) => (first = resolve))
+    const secondOptions = new Promise<AgentOptionsVo>((resolve) => (second = resolve))
+    const load = vi
+      .spyOn(agentApi, 'options')
+      .mockImplementationOnce(() => firstOptions)
+      .mockImplementationOnce(() => secondOptions)
+    const create = () =>
+      w.find('.agent-chat__head button[aria-label="New conversation"]').trigger('click')
+    await create()
+    await w.setProps({
+      entryRoute: 'second-page',
+      entryContext: { route: '/second', title: 'Second page' },
+    })
+    await create()
+    const current: AgentOptionsVo = {
+      ...OPTIONS,
+      defaults: { providerId: 1, model: 'm2' },
+      approvalModes: ['read_only'],
+      starters: ['Current page starter'],
+    }
+    second(current)
+    await flushPromises()
+    const composer = w.findComponent({ name: 'AgentComposer' })
+    expect(composer.props('settings')).toMatchObject({ model: 'm2', approvalMode: 'read_only' })
+    first({ ...OPTIONS, starters: ['Previous page starter'] })
+    await flushPromises()
+    expect(composer.props('options')).toEqual(current)
+    expect(composer.props('settings')).toMatchObject({ model: 'm2', approvalMode: 'read_only' })
+    expect(w.find('.agent-chat__context').text()).toContain('Second page')
+    expect(w.text()).toContain('Current page starter')
+    expect(w.text()).not.toContain('Previous page starter')
+    expect(load.mock.calls).toEqual([['first-page'], ['second-page']])
+  })
+
+  it('applies the first options defaults to an untouched embedded draft', async () => {
+    mockApi(BASE)
+    await show('/other')
+    w.unmount()
+    let release!: (options: AgentOptionsVo) => void
+    const waiting = new Promise<AgentOptionsVo>((resolve) => (release = resolve))
+    const load = vi.spyOn(agentApi, 'options').mockImplementationOnce(() => waiting)
+    w = mount(ChatPage, {
+      props: { embedded: true, entryRoute: 'first-page' },
+      global: { plugins: [ElementPlus, i18n, router] },
+    })
+    const composer = w.findComponent({ name: 'AgentComposer' })
+    expect(composer.props('settings').model).toBeNull()
+    release({ ...OPTIONS, defaults: { providerId: 1, model: 'm2' }, approvalModes: ['read_only'] })
+    await flushPromises()
+    expect(composer.props('settings')).toMatchObject({ model: 'm2', approvalMode: 'read_only' })
+    expect(load.mock.calls).toEqual([['first-page']])
+  })
+
+  it('retains the submitted model while thread creation and options refresh overlap', async () => {
+    const created = thread(9)
+    mockApi({
+      ...BASE,
+      'POST /agent/threads/9/messages': ok(turn({ threadId: 9 })),
+      'GET /agent/threads/9/items': ok({ thread: created, items: [], turn: turn({ threadId: 9 }) }),
+    })
+    await show('/other')
+    await w.setProps({ embedded: true, entryRoute: 'other' })
+    let options!: (options: AgentOptionsVo) => void, complete!: (value: AgentThreadVo) => void
+    const refreshing = new Promise<AgentOptionsVo>((resolve) => (options = resolve))
+    const creating = new Promise<AgentThreadVo>((resolve) => (complete = resolve))
+    vi.spyOn(agentApi, 'options').mockImplementationOnce(() => refreshing)
+    const create = vi.spyOn(agentApi, 'createThread').mockImplementationOnce(() => creating)
+    await w.find('.agent-chat__head button[aria-label="New conversation"]').trigger('click')
+    await type('Send with the displayed model')
+    await key('Enter')
+    expect(create.mock.calls[0]?.[0]).toMatchObject({ providerId: 1, model: 'm1' })
+    options({ ...OPTIONS, defaults: { providerId: 1, model: 'm2' } })
+    await flushPromises()
+    expect(w.findComponent({ name: 'AgentComposer' }).props('settings').model).toBe('m1')
+    complete(created)
+    await flushPromises()
+    expect(w.findComponent({ name: 'AgentComposer' }).props('settings').model).toBe('m1')
+  })
+
+  it('keeps the business query and draft while hidden, then catches up without cancelling the turn', async () => {
+    const calls = mockApi(BASE)
+    await show('/other?filter=mine')
+    await w.setProps({
+      embedded: true,
+      active: true,
+      entryContext: { route: '/other?filter=mine' },
+    })
+    await type('Keep this private draft')
+    await open()
+    expect(router.currentRoute.value.fullPath).toBe('/other?filter=mine')
+    await type('My next question')
+    await w.setProps({ active: false })
+    const before = sent(calls, 'get', '/agent/threads/7/items').length
+    push({
+      type: 'item',
+      threadId: 7,
+      item: item(88, 88, 'assistant', { text: 'Hidden event' }, 'done'),
+    })
+    await flushPromises()
+    expect(w.text()).not.toContain('Hidden event')
+    expect(sent(calls, 'get', '/agent/threads/7/items')).toHaveLength(before)
+    expect(sent(calls, 'post', '/agent/threads/7/cancel')).toHaveLength(0)
+    await w.setProps({ active: true })
+    await flushPromises()
+    expect(textarea().element.value).toBe('My next question')
+    expect(sent(calls, 'get', '/agent/threads/7/items').length).toBeGreaterThan(before)
+    expect(router.currentRoute.value.fullPath).toBe('/other?filter=mine')
+  })
+
+  it('opens an authorized child read-only without changing the parent or offering another approval', async () => {
+    const calls = mockApi({
+      ...BASE,
+      'GET /agent/threads/7/items': ok({
+        thread: thread(7),
+        turn: turn(),
+        items: [
+          ...ITEMS,
+          item(10, 10, 'subagent', {
+            callId: 'children',
+            tasks: [{ title: 'Check stock', threadId: 41, status: 'running' }],
+          }),
+        ],
+      }),
+      'GET /agent/threads/41/items': ok({
+        thread: thread(41, { parentThreadId: 7 }),
+        turn: turn({ threadId: 41 }),
+        items: [
+          item(21, 1, 'assistant', { text: 'Stock is available.' }, 'done'),
+          item(
+            22,
+            2,
+            'approval',
+            {
+              callId: 'write',
+              tool: 'custom.write',
+              title: 'Child write',
+              sources: [],
+              args: {},
+              perCallConfirmation: true,
+            },
+            'pending',
+          ),
+        ],
+      }),
+    })
+    await show()
+    await open()
+    const parentUrl = router.currentRoute.value.fullPath
+    await w.find('.agent-subtasks__task').trigger('click')
+    await flushPromises()
+    const child = w.find('.agent-child')
+    expect(child.text()).toContain('Stock is available.')
+    expect(child.find('textarea').exists()).toBe(false)
+    expect(
+      child.find(`button[aria-label="${i18n.global.t('agent.chat.markdown.expand')}"]`).exists(),
+    ).toBe(false)
+    expect(
+      child.find(`button[aria-label="${i18n.global.t('agent.chat.markdown.source')}"]`).exists(),
+    ).toBe(true)
+    expect(
+      child.find(`button[aria-label="${i18n.global.t('agent.chat.markdown.download')}"]`).exists(),
+    ).toBe(true)
+    expect(child.findAll('button').some((b) => b.text() === 'Approve once')).toBe(false)
+    expect(w.find('.agent-chat__title').text()).toBe('Thread 7')
+    expect(router.currentRoute.value.fullPath).toBe(parentUrl)
+    await w.find('.agent-child button[aria-label="Back to main task"]').trigger('click')
+    expect(w.find('.agent-child').exists()).toBe(false)
+    expect(textarea().exists()).toBe(true)
+    expect(sent(calls, 'post', '/agent/approvals/22')).toHaveLength(0)
+  })
+
+  it('refuses details belonging to a different parent and hides input in a standalone child', async () => {
+    mockApi({
+      ...BASE,
+      'GET /agent/threads/7/items': ok({
+        thread: thread(7),
+        turn: turn(),
+        items: [
+          item(10, 10, 'subagent', {
+            callId: 'children',
+            tasks: [{ title: 'Check stock', threadId: 41, status: 'running' }],
+          }),
+        ],
+      }),
+      'GET /agent/threads/41/items': ok({
+        thread: thread(41, { parentThreadId: 8 }),
+        turn: turn({ threadId: 41 }),
+        items: [item(21, 1, 'assistant', { text: 'Must not enter this parent.' }, 'done')],
+      }),
+    })
+    await show()
+    await open()
+    await w.find('.agent-subtasks__task').trigger('click')
+    await flushPromises()
+    expect(w.find('.agent-child').text()).toContain('This subtask could not be loaded.')
+    expect(w.text()).not.toContain('Must not enter this parent.')
+    w.unmount()
+    await show('/?thread=41')
+    expect(textarea().exists()).toBe(false)
+    expect(button('Back to main task')).toBeDefined()
+  })
+})
+
+describe('durable delivery and recovery', () => {
+  it('reconciles a lost creation acknowledgement before explicitly sending into the same draft', async () => {
+    const created = thread(9)
+    const calls = mockApi({
+      ...BASE,
+      'POST /agent/threads/9/messages': ok(turn({ threadId: 9 })),
+      'GET /agent/threads/9/items': ok({ thread: created, items: [], turn: turn({ threadId: 9 }) }),
+    })
+    await show()
+    const create = vi
+      .spyOn(agentApi, 'createThread')
+      .mockRejectedValue(new ApiError(503, 'A0500', 'Acknowledgement unavailable'))
+    vi.spyOn(agentApi, 'draftReceipt').mockImplementation(async (clientDraftId) => ({
+      clientDraftId,
+      threadId: 9,
+      status: 'accepted',
+      thread: created,
+    }))
+    vi.spyOn(agentApi, 'messageReceipt').mockRejectedValue(
+      new ApiError(404, 'A0440', 'No message accepted'),
+    )
+    await type('Private creation intent')
+    await key('Enter')
+    const saved = JSON.parse(sessionStorage.getItem('qw.agent.delivery.1:1')!) as {
+      clientDraftId: string
+      clientMessageId: string
+    }
+    expect(create).toHaveBeenCalledTimes(1)
+    expect(create.mock.calls[0]?.[0]).toMatchObject({ clientDraftId: saved.clientDraftId })
+    expect(sent(calls, 'post', '/agent/threads/9/messages')).toHaveLength(0)
+    expect(textarea().element.value).toBe('Private creation intent')
+    await key('Enter')
+    expect(create).toHaveBeenCalledTimes(1)
+    expect(body(sent(calls, 'post', '/agent/threads/9/messages')[0])).toMatchObject({
+      clientMessageId: saved.clientMessageId,
+    })
+    expect(textarea().element.value).toBe('')
+    expect(w.find('.agent-chat__title').text()).toBe('Thread 9')
+  })
+  it('labels saved interrupted generation and expired queued intent without presenting them as completed output', async () => {
+    mockApi({
+      ...BASE,
+      'GET /agent/threads/7/items': ok({
+        thread: thread(7),
+        turn: turn({ status: 'failed' }),
+        items: [
+          item(20, 1, 'assistant', { text: 'Saved answer prefix' }, 'failed'),
+          item(21, 2, 'reasoning', { text: 'Saved thought prefix' }, 'failed'),
+          { ...item(22, 3, 'user', { text: 'Old queue', mode: 'queue' }, 'expired'), turnId: null },
+        ],
+      }),
+    })
+    await show()
+    await open()
+    expect(w.findAll('.agent-msg__interrupted')).toHaveLength(2)
+    expect(w.text()).toContain('Saved answer prefix')
+    expect(w.text()).toContain('Saved thought prefix')
+    expect(w.find('.agent-msg__queued-expired').exists()).toBe(true)
+  })
+  async function uncertainSend() {
+    const routes: Record<string, Route> = {
+      ...BASE,
+      'POST /agent/threads/7/messages': fail(503, 'A0500'),
+      'PATCH /agent/threads/7': (call: Call) => ok(thread(7, JSON.parse(String(call.data)))),
+    }
+    const calls = mockApi(routes)
+    const lookup = vi
+      .spyOn(agentApi, 'messageReceipt')
+      .mockRejectedValue(new ApiError(503, 'A0500', 'Unavailable'))
+    await show()
+    await open()
+    await type('Private uncertain message')
+    await key('Enter')
+    const message = body(sent(calls, 'post', '/agent/threads/7/messages')[0]) as {
+      clientMessageId: string
+    }
+    expect(message.clientMessageId).toMatch(/^[0-9a-f-]{36}$/i)
+    expect(w.find('.agent-chat__delivery').exists()).toBe(true)
+    return { routes, calls, lookup, id: message.clientMessageId }
+  }
+
+  it('checks a lost acknowledgement after reconnect without sending the accepted message again', async () => {
+    const { calls, lookup, id } = await uncertainSend()
+    expect(sessionStorage.getItem('qw.agent.delivery.1:1')).not.toContain(
+      'Private uncertain message',
+    )
+    lookup.mockResolvedValue(received(id))
+    socket.realtimeStatus.value = 'reconnecting'
+    await flushPromises()
+    socket.realtimeStatus.value = 'up'
+    await flushPromises()
+    expect(sent(calls, 'post', '/agent/threads/7/messages')).toHaveLength(1)
+    expect(textarea().element.value).toBe('')
+    expect(w.find('.agent-chat__delivery').exists()).toBe(false)
+    expect(sessionStorage.getItem('qw.agent.delivery.1:1')).toBeNull()
+  })
+
+  it('reuses the same message identity only for an explicit unchanged retry', async () => {
+    const { calls, routes, lookup, id } = await uncertainSend()
+    lookup.mockRejectedValue(new ApiError(404, 'A0440', 'Not found'))
+    routes['POST /agent/threads/7/messages'] = ok(turn())
+    await key('Enter')
+    expect(sent(calls, 'post', '/agent/threads/7/messages')).toHaveLength(2)
+    expect(body(sent(calls, 'post', '/agent/threads/7/messages')[1])).toMatchObject({
+      clientMessageId: id,
+    })
+    await type('A separate next message')
+    await key('Enter')
+    const next = body(sent(calls, 'post', '/agent/threads/7/messages')[2]) as {
+      clientMessageId: string
+    }
+    expect(next.clientMessageId).not.toBe(id)
+  })
+
+  it('a late receipt preserves later text, model and queue selection without creating another intent', async () => {
+    const { calls, lookup, id } = await uncertainSend()
+    let release!: (value: ReturnType<typeof received>) => void
+    const response = new Promise<ReturnType<typeof received>>((resolve) => (release = resolve))
+    lookup.mockImplementationOnce(() => response)
+    socket.realtimeStatus.value = 'reconnecting'
+    await flushPromises()
+    socket.realtimeStatus.value = 'up'
+    await flushPromises()
+    await type('A later private draft')
+    const composer = w.findComponent({ name: 'AgentComposer' })
+    composer.vm.$emit('update:settings', { ...composer.props('settings'), model: 'm2' })
+    await flushPromises()
+    await w.find('input[value="queue"]').setValue(true)
+    release(received(id))
+    await flushPromises()
+    expect(textarea().element.value).toBe('A later private draft')
+    expect(composer.props('settings').model).toBe('m2')
+    expect((w.find('input[value="queue"]').element as HTMLInputElement).checked).toBe(true)
+    expect(sent(calls, 'post', '/agent/threads/7/messages')).toHaveLength(1)
+  })
+
+  it('restores only identifiers after remount and queries receipt without replaying text', async () => {
+    const { calls, lookup, id } = await uncertainSend()
+    w.unmount()
+    lookup.mockResolvedValue(received(id))
+    await show('/?thread=7')
+    expect(sent(calls, 'post', '/agent/threads/7/messages')).toHaveLength(1)
+    expect(textarea().element.value).toBe('')
+    expect(sessionStorage.getItem('qw.agent.delivery.1:1')).toBeNull()
+  })
+
+  it('does not clear an identical-looking draft after the user opens a different conversation', async () => {
+    const { calls, routes, lookup, id } = await uncertainSend()
+    routes['GET /agent/threads/8/items'] = ok({ thread: thread(8), items: [], turn: null })
+    let release!: (value: ReturnType<typeof received>) => void
+    const response = new Promise<ReturnType<typeof received>>((resolve) => (release = resolve))
+    lookup.mockImplementationOnce(() => response)
+    socket.realtimeStatus.value = 'reconnecting'
+    await flushPromises()
+    socket.realtimeStatus.value = 'up'
+    await flushPromises()
+    await open('Old one')
+    release(received(id))
+    await flushPromises()
+    expect(w.find('.agent-chat__title').text()).toBe('Thread 8')
+    expect(textarea().element.value).toBe('Private uncertain message')
+    expect(sent(calls, 'post', '/agent/threads/7/messages')).toHaveLength(1)
+  })
+
+  it('ends a removed receipt without reviving or resending its message', async () => {
+    const { calls, lookup, id } = await uncertainSend()
+    lookup.mockResolvedValue({ ...received(id), status: 'removed', turn: null })
+    await w.find('.agent-chat__delivery button').trigger('click')
+    await flushPromises()
+    expect(sent(calls, 'post', '/agent/threads/7/messages')).toHaveLength(1)
+    expect(textarea().element.value).toBe('')
+    expect(w.find('.agent-chat__delivery').exists()).toBe(false)
+  })
+
+  it('does not overwrite live committed text with a slow snapshot and repairs a later offset gap', async () => {
+    const initial = {
+      thread: thread(7),
+      items: [{ ...ITEMS[1], revision: 1 }],
+      turn: turn({ status: 'running' }),
+    }
+    let release!: (value: ReturnType<typeof ok>) => void
+    const waiting = new Promise<ReturnType<typeof ok>>((resolve) => (release = resolve))
+    const routes: Record<string, Route> = {
+      ...BASE,
+      'GET /agent/threads/7/items': (call) =>
+        (call.params as { afterSeq?: number })?.afterSeq === undefined ? ok(initial) : waiting,
+    }
+    mockApi(routes)
+    await show()
+    await open()
+    socket.realtimeStatus.value = 'reconnecting'
+    await flushPromises()
+    socket.realtimeStatus.value = 'up'
+    await flushPromises()
+    push({ threadId: 7, type: 'delta', itemId: 2, revision: 2, offset: 7, delta: ' updated' })
+    release(ok(initial))
+    await flushPromises()
+    expect(w.find('.agent-msg--assistant').text()).toBe('Acme is updated')
+    routes['GET /agent/threads/7/items'] = ok({
+      ...initial,
+      items: [{ ...ITEMS[1], revision: 4, payload: { text: 'Acme is updated and complete' } }],
+    })
+    push({ threadId: 7, type: 'delta', itemId: 2, revision: 4, offset: 24, delta: 'ete' })
+    await flushPromises()
+    expect(w.find('.agent-msg--assistant').text()).toBe('Acme is updated and complete')
+  })
+
+  it('an old actor creation response cannot send a message or alter the new actor draft', async () => {
+    mockApi(BASE)
+    await show()
+    let release!: (value: AgentThreadVo) => void
+    const response = new Promise<AgentThreadVo>((resolve) => (release = resolve))
+    vi.spyOn(agentApi, 'createThread').mockImplementationOnce(() => response)
+    const send = vi.spyOn(agentApi, 'send')
+    await type('Previous actor text')
+    await key('Enter')
+    useAuthStore().me = { ...me(['*']), user: { ...me(['*']).user, id: 2 } }
+    await flushPromises()
+    await type('New actor draft')
+    release(thread(9))
+    await flushPromises()
+    expect(send).not.toHaveBeenCalled()
+    expect(textarea().element.value).toBe('New actor draft')
+    expect(w.find('.agent-chat__title').text()).toBe('New conversation')
+    expect(sessionStorage.getItem('qw.agent.delivery.1:1')).toBeNull()
+  })
+
+  it('an older recovery acknowledgement cannot clear a newer risk revision', async () => {
+    const routes = {
+      ...BASE,
+      'GET /agent/threads/7/items': ok({
+        thread: thread(7, { recoveryRequired: true, recoveryRevision: 2 }),
+        items: ITEMS,
+        turn: turn(),
+      }),
+    }
+    mockApi(routes)
+    await show()
+    await open()
+    let release!: (value: AgentThreadVo) => void
+    const response = new Promise<AgentThreadVo>((resolve) => (release = resolve))
+    vi.spyOn(ElMessageBox, 'confirm').mockResolvedValue('confirm' as never)
+    const acknowledge = vi
+      .spyOn(agentApi, 'acknowledgeRecovery')
+      .mockImplementationOnce(() => response)
+    await w.find('.agent-chat__recovery button').trigger('click')
+    await flushPromises()
+    expect(acknowledge).toHaveBeenCalledWith(7, 2)
+    routes['GET /agent/threads/7/items'] = ok({
+      thread: thread(7, { recoveryRequired: true, recoveryRevision: 3 }),
+      items: ITEMS,
+      turn: turn({ status: 'failed' }),
+    })
+    socket.realtimeStatus.value = 'reconnecting'
+    await flushPromises()
+    socket.realtimeStatus.value = 'up'
+    await flushPromises()
+    release(thread(7, { recoveryRequired: false, recoveryRevision: 2 }))
+    await flushPromises()
+    expect(w.find('.agent-chat__recovery').exists()).toBe(true)
+    expect(w.findComponent({ name: 'AgentComposer' }).props('disabled')).toBe(false)
+  })
+})
+
+it('drops late child responses even when the transport ignores cancellation', async () => {
+  mockApi(BASE)
+  await show()
+  w.unmount()
+  const data = (id: number, text: string) => ({
+    thread: thread(id, { parentThreadId: 7 }),
+    turn: turn({ threadId: id }),
+    items: [item(id, 1, 'assistant', { text }, 'done')],
+  })
+  let finish!: (value: ReturnType<typeof data>) => void
+  const stalled = new Promise<ReturnType<typeof data>>((resolve) => {
+    finish = resolve
+  })
+  const signals: (AbortSignal | undefined)[] = []
+  vi.spyOn(agentApi, 'items').mockImplementation((id, _seq, signal) => {
+    signals.push(signal)
+    return id === 41 ? stalled : Promise.resolve(data(42, 'Current child output'))
+  })
+  w = mount(SubtaskDetail, {
+    props: { parentId: 7, threadId: 41 },
+    global: { plugins: [ElementPlus, i18n, router] },
+  })
+  await flushPromises()
+  await w.setProps({ threadId: 42 })
+  await flushPromises()
+  expect(w.text()).toContain('Current child output')
+  expect(signals[0]!.aborted).toBe(true)
+  finish(data(41, 'Late old child output'))
+  await flushPromises()
+  expect(w.text()).not.toContain('Late old child output')
+  expect(w.text()).toContain('Current child output')
+})
+
+describe('editing identities and full conversation snapshots', () => {
+  it('uses a distinct draft identity for each edit after creating and successfully sending a conversation', async () => {
+    const detail = (id: number, text: string) => ({
+      thread: thread(id),
+      items: [
+        item(id * 10, 1, 'user', { text }),
+        item(id * 10 + 1, 2, 'assistant', { text: 'Done' }, 'done'),
+      ],
+      turn: turn({ threadId: id }),
+    })
+    const calls = mockApi({
+      ...BASE,
+      'POST /agent/threads': ok(thread(9)),
+      'POST /agent/threads/9/messages': ok(turn({ threadId: 9 })),
+      'GET /agent/threads/9/items': ok(detail(9, 'Original')),
+      'POST /agent/threads/9/fork': ok(thread(10)),
+      'GET /agent/threads/10/items': ok(detail(10, 'First edit')),
+      'POST /agent/threads/10/messages': ok(turn({ threadId: 10 })),
+      'POST /agent/threads/10/fork': ok(thread(11)),
+      'GET /agent/threads/11/items': ok(detail(11, 'Second edit')),
+      'POST /agent/threads/11/messages': ok(turn({ threadId: 11 })),
+    })
+    await show()
+    await type('Original')
+    await key('Enter')
+    for (const text of ['First edit', 'Second edit']) {
+      await w.find('button[aria-label="Edit and resend"]').trigger('click')
+      await flushPromises()
+      await type(text)
+      await key('Enter')
+      expect(textarea().element.value).toBe('')
+    }
+    const identities = [
+      body(sent(calls, 'post', '/agent/threads')[0]),
+      body(sent(calls, 'post', '/agent/threads/9/fork')[0]),
+      body(sent(calls, 'post', '/agent/threads/10/fork')[0]),
+    ] as { clientDraftId: string }[]
+    expect(identities.map((request) => request.clientDraftId)).toEqual([
+      expect.any(String),
+      expect.any(String),
+      expect.any(String),
+    ])
+    expect(new Set(identities.map((request) => request.clientDraftId)).size).toBe(3)
+    expect(sent(calls, 'post', '/agent/threads/11/messages')).toHaveLength(1)
+  })
+
+  it('keeps the fork identity when explicitly retrying the same edit after an unknown acknowledgement', async () => {
+    mockApi({
+      ...BASE,
+      'GET /agent/threads/7/items': ok({ thread: thread(7), items: ITEMS, turn: turn() }),
+      'GET /agent/threads/11/items': ok({ thread: thread(11), items: [], turn: null }),
+      'POST /agent/threads/11/messages': ok(turn({ threadId: 11 })),
+    })
+    const fork = vi
+      .spyOn(agentApi, 'fork')
+      .mockRejectedValueOnce(new ApiError(503, 'A0500', 'Unavailable'))
+      .mockResolvedValue(thread(11))
+    vi.spyOn(agentApi, 'draftReceipt').mockRejectedValue(new ApiError(404, 'A0440', 'Not found'))
+    await show()
+    await open()
+    await w.find('button[aria-label="Edit and resend"]').trigger('click')
+    await flushPromises()
+    await type('Same edited intent')
+    await key('Enter')
+    expect(fork).toHaveBeenCalledTimes(1)
+    expect(textarea().element.value).toBe('Same edited intent')
+    await key('Enter')
+    expect(fork).toHaveBeenCalledTimes(2)
+    expect(fork.mock.calls[1]).toEqual(fork.mock.calls[0])
+    expect(textarea().element.value).toBe('')
+  })
+
+  it('keeps newer committed text and turn state when reopening the current conversation returns an older snapshot', async () => {
+    const initial = {
+      thread: thread(7),
+      items: [{ ...ITEMS[1], revision: 1 }],
+      turn: turn({ status: 'running' }),
+    }
+    const routes: Record<string, Route> = { ...BASE, 'GET /agent/threads/7/items': ok(initial) }
+    mockApi(routes)
+    await show()
+    await open()
+    let release!: (value: ReturnType<typeof ok>) => void
+    const delayed = new Promise<ReturnType<typeof ok>>((resolve) => (release = resolve))
+    routes['GET /agent/threads/7/items'] = () => delayed
+    await threadButton('Thread 7').trigger('click')
+    await flushPromises()
+    push({ threadId: 7, type: 'delta', itemId: 2, revision: 2, offset: 7, delta: ' updated' })
+    push({ threadId: 7, type: 'turn', turn: turn({ status: 'waiting' }) })
+    await flushPromises()
+    expect(w.find('.agent-msg--assistant').text()).toBe('Acme is updated')
+    release(ok(initial))
+    await flushPromises()
+    expect(w.find('.agent-msg--assistant').text()).toBe('Acme is updated')
+    expect(w.find('.agent-chat__turn').text()).toBe('Waiting for you')
+    routes['GET /agent/threads/8/items'] = ok({ thread: thread(8), items: [], turn: null })
+    await open('Old one')
+    expect(w.find('.agent-msg--assistant').exists()).toBe(false)
+    expect(w.find('.agent-chat__turn').text()).toBe('')
+  })
+
+  it('applies deleted items from a full snapshot while retaining a new item received during the request', async () => {
+    const routes: Record<string, Route> = { ...BASE }
+    mockApi(routes)
+    await show()
+    await open()
+    let release!: (value: ReturnType<typeof ok>) => void
+    const delayed = new Promise<ReturnType<typeof ok>>((resolve) => (release = resolve))
+    routes['GET /agent/threads/7/items'] = () => delayed
+    await threadButton('Thread 7').trigger('click')
+    await flushPromises()
+    push({
+      threadId: 7,
+      type: 'item',
+      item: { ...item(99, 20, 'assistant', { text: 'New live item' }, 'running'), revision: 1 },
+    })
+    release(ok({ thread: thread(7), items: [], turn: null }))
+    await flushPromises()
+    expect(w.findAll('.agent-msg--assistant')).toHaveLength(1)
+    expect(w.find('.agent-msg--assistant').text()).toBe('New live item')
+    expect(w.text()).not.toContain('Who is Acme?')
+  })
+
+  it('opens a notification target while the conversation route is already mounted without duplicating its read', async () => {
+    const calls = mockApi({
+      ...BASE,
+      'GET /agent/threads/8/items': ok({ thread: thread(8), items: [], turn: null }),
+    })
+    await show('/?thread=7')
+    useMenuStore().tree = [
+      node({
+        id: 1,
+        routePath: '/',
+        routeName: 'agent-chat',
+        component: 'platform/agent/chat/index',
+      }),
+    ]
+    const notice = mount(InboxMessageView, {
+      props: {
+        message: {
+          id: 1,
+          category: 'business',
+          senderLabel: null,
+          title: 'Waiting',
+          body: 'Plain notice',
+          readAt: null,
+          createdAt: NOW,
+          action: { kind: 'agent-thread', threadId: 8 },
+        },
+      },
+      global: { plugins: [ElementPlus, i18n, router] },
+    })
+    try {
+      await notice
+        .findAll('button')
+        .find((button) => button.text() === 'Open conversation')!
+        .trigger('click')
+      await flushPromises()
+      expect(router.currentRoute.value.query.thread).toBe('8')
+      expect(w.find('.agent-chat__title').text()).toBe('Thread 8')
+      expect(sent(calls, 'get', '/agent/threads/8/items')).toHaveLength(1)
+    } finally {
+      notice.unmount()
+    }
+  })
+
+  it('keeps the latest query target when earlier navigation returns late and ignores invalid identifiers', async () => {
+    let release!: (value: ReturnType<typeof ok>) => void
+    const delayed = new Promise<ReturnType<typeof ok>>((resolve) => (release = resolve))
+    const calls = mockApi({
+      ...BASE,
+      'GET /agent/threads/8/items': () => delayed,
+      'GET /agent/threads/9/items': ok({ thread: thread(9), items: [], turn: null }),
+    })
+    await show('/?thread=7')
+    await router.push({ query: { thread: '8' } })
+    await flushPromises()
+    await router.push({ query: { thread: '9' } })
+    await flushPromises()
+    release(ok({ thread: thread(8), items: [], turn: null }))
+    await flushPromises()
+    expect(w.find('.agent-chat__title').text()).toBe('Thread 9')
+    expect(router.currentRoute.value.query.thread).toBe('9')
+    for (const invalid of ['9007199254740992', '8garbage', ['8', '9']]) {
+      await router.push({ query: { thread: invalid } })
+      await flushPromises()
+    }
+    expect(sent(calls, 'get', '/agent/threads/8/items')).toHaveLength(1)
+    expect(w.find('.agent-chat__title').text()).toBe('Thread 9')
+  })
+
+  it('preserves an uncertain delivery and later input when a query target opens another conversation', async () => {
+    const calls = mockApi({
+      ...BASE,
+      'POST /agent/threads/7/messages': fail(503, 'A0500'),
+      'GET /agent/threads/8/items': ok({ thread: thread(8), items: [], turn: null }),
+    })
+    const receipt = vi
+      .spyOn(agentApi, 'messageReceipt')
+      .mockRejectedValue(new ApiError(503, 'A0500', 'Unavailable'))
+    await show('/?thread=7')
+    await type('Uncertain original text')
+    await key('Enter')
+    const identity = sessionStorage.getItem('qw.agent.delivery.1:1')
+    await type('A later unsent draft')
+    await router.push({ query: { thread: '8' } })
+    await flushPromises()
+    expect(w.find('.agent-chat__title').text()).toBe('Thread 8')
+    expect(textarea().element.value).toBe('A later unsent draft')
+    expect(sessionStorage.getItem('qw.agent.delivery.1:1')).toBe(identity)
+    const original = body(sent(calls, 'post', '/agent/threads/7/messages')[0]) as {
+      clientMessageId: string
+    }
+    receipt.mockResolvedValue(received(original.clientMessageId))
+    await w.find('.agent-chat__delivery button').trigger('click')
+    await flushPromises()
+    expect(w.find('.agent-chat__title').text()).toBe('Thread 8')
+    expect(textarea().element.value).toBe('A later unsent draft')
+    expect(sent(calls, 'post', '/agent/threads/7/messages')).toHaveLength(1)
+    expect(sent(calls, 'post', '/agent/threads/8/messages')).toHaveLength(0)
+  })
 })

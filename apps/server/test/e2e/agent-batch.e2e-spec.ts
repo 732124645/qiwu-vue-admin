@@ -1,3 +1,4 @@
+import { TEST_AGENT_PRICING, clearAgentUsage } from '../setup/agent-pricing.js'
 // Batch runs of the in-app agent (see docs/agent.md) on the sample customers, multi-tenancy on, with a
 // scripted model standing in for the provider (`registry.connect`): each request is answered by the row it
 // belongs to (the record id in its first user message). Covered: a batch opens one thread per record and
@@ -200,7 +201,15 @@ beforeAll(async () => {
   providerId = await insertRow(ds.manager, 'agent_provider', {
     name: `${PREFIX}provider`,
     base_url: 'http://127.0.0.1:9/v1',
-    models: [{ id: 'm1', label: 'm1', reasoning: false, contextWindow: 64_000 }],
+    models: [
+      {
+        id: 'm1',
+        label: 'm1',
+        reasoning: false,
+        pricing: TEST_AGENT_PRICING,
+        contextWindow: 64_000,
+      },
+    ],
     enabled: 1,
     is_default: 1,
     sort: -1000,
@@ -272,7 +281,7 @@ afterAll(async () => {
       await ds.query('DELETE FROM agent_skill WHERE owner_user_id IN (?) AND tenant_id = 1', [
         userIds,
       ])
-      await ds.query('DELETE FROM agent_usage WHERE user_id IN (?)', [userIds])
+      await clearAgentUsage(ds, userIds)
       await ds.query('DELETE FROM iam_user_roles WHERE user_id IN (?)', [userIds])
       await ds.query('DELETE FROM iam_user WHERE id IN (?)', [userIds])
     }

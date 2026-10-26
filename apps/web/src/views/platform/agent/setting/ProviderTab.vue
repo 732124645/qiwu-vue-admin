@@ -83,7 +83,16 @@ async function openForm(id?: number) {
         </el-tag>
       </template>
       <template #cell-models="{ row }">
-        {{ row.models.map((m) => m.label || m.id).join(', ') }}
+        <div v-for="m in row.models" :key="m.id">
+          {{ m.label || m.id }} ·
+          {{
+            t(
+              m.pricing
+                ? 'agent.admin.model.pricingConfigured'
+                : 'agent.admin.model.pricingMissing',
+            )
+          }}
+        </div>
       </template>
       <template #actions="{ row }">
         <el-button

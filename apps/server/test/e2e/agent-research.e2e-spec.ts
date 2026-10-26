@@ -1,3 +1,4 @@
+import { TEST_AGENT_PRICING, clearAgentUsage } from '../setup/agent-pricing.js'
 // Research and outputs (see docs/agent.md#深度研究, #图表图片与导出): a turn started with the platform research
 // skill runs under the research step and time limits (a same-named personal skill does not); `report.write`
 // keeps only citations of links readable in this turn (the rest stay in place without a link);
@@ -21,7 +22,10 @@ import { AgentModule } from '../../src/core/agent/agent.module.js'
 import type { ChatRequest, ImageRequest } from '../../src/core/agent/provider/chat-model.js'
 import { FakeChatModel, type FakeTurn } from '../../src/core/agent/provider/fake-chat-model.js'
 import { ProviderRegistry } from '../../src/core/agent/provider/provider-registry.js'
-import { IMAGE_TOKENS, IMAGES_PER_TURN } from '../../src/core/agent/runtime/output-tools.js'
+import { IMAGES_PER_TURN } from '../../src/core/agent/runtime/output-tools.js'
+import { usageOf } from '../../src/core/agent/provider/usage.js'
+import { BizError } from '../../src/core/http/biz-error.js'
+import type { ChatUsage } from '../../src/core/agent/provider/chat-model.js'
 import { LeaseLost } from '../../src/core/agent/runtime/turn-runner.js'
 import { EnvSchema } from '../../src/core/config/env.schema.js'
 import { ParamService } from '../../src/core/settings/param.service.js'
@@ -48,9 +52,10 @@ class ImageFake extends FakeChatModel {
   /** what the provider answers (a PNG unless a test says otherwise) */
   data = PNG
   /** the usage it reports */
-  usage = { promptTokens: 7, completionTokens: 70 }
+  usage: ChatUsage | null = usageOf({ input_tokens: 7, output_tokens: 70 }, true)
   async image(req: ImageRequest) {
     this.images.push(req)
+    if (this.usage?.usageReported) req.onUsage?.(this.usage)
     return { data: this.data, usage: this.usage }
   }
 }
@@ -107,10 +112,9 @@ async function run(text: string, extra: object = {}) {
   expect(res.status).toBe(201)
   const turnId = res.body.data.id as number
   for (const until = Date.now() + 15_000; ; await sleep(40)) {
-    const [t] = await ds.query<{ status: string; steps: number; error_code: string | null }[]>(
-      'SELECT status, steps, error_code FROM agent_turn WHERE id = ?',
-      [turnId],
-    )
+    const [t] = await ds.query<
+      { id: number; status: string; steps: number; error_code: string | null }[]
+    >('SELECT id, status, steps, error_code FROM agent_turn WHERE id = ?', [turnId])
     if (t && ['completed', 'failed', 'cancelled'].includes(t.status)) return { id, turn: t }
     if (Date.now() > until) throw new Error(`turn ${turnId} is still ${t?.status}`)
   }
@@ -160,7 +164,15 @@ beforeAll(async () => {
   providerId = await insertRow(ds.manager, 'agent_provider', {
     name: `${PREFIX}provider`,
     base_url: 'http://127.0.0.1:9/v1',
-    models: [{ id: 'm1', label: 'm1', reasoning: false, contextWindow: 64_000 }],
+    models: [
+      {
+        id: 'm1',
+        label: 'm1',
+        reasoning: false,
+        pricing: TEST_AGENT_PRICING,
+        contextWindow: 64_000,
+      },
+    ],
     enabled: 1,
     sort: -100,
   })
@@ -227,7 +239,7 @@ afterAll(async () => {
       await ds.query('DELETE FROM agent_skill WHERE owner_user_id IN (?) AND tenant_id = 1', [
         users,
       ])
-      await ds.query('DELETE FROM agent_usage WHERE user_id IN (?) AND tenant_id = 1', [users])
+      await clearAgentUsage(ds, users)
       await ds.query('DELETE FROM iam_user_roles WHERE user_id IN (?)', [users])
       await ds.query('DELETE FROM iam_user WHERE id IN (?)', [users])
     }
@@ -394,7 +406,16 @@ describe('image.generate', () => {
     imageProviderId = await insertRow(ds.manager, 'agent_provider', {
       name: `${PREFIX}images`,
       base_url: 'http://127.0.0.1:9/v1',
-      models: [{ id: 'img1', label: 'img1', reasoning: false, contextWindow: 4096, image: true }],
+      models: [
+        {
+          id: 'img1',
+          label: 'img1',
+          reasoning: false,
+          pricing: TEST_AGENT_PRICING,
+          contextWindow: 4096,
+          image: true,
+        },
+      ],
       enabled: 1,
       sort: 100,
     })
@@ -469,6 +490,39 @@ describe('image.generate', () => {
     )
     expect(Number(n)).toBe(1)
   })
+  it('records reported tokens from a failed image response instead of losing them or applying the flat fallback', async () => {
+    const reported = usageOf({ input_tokens: 11, output_tokens: 22 }, true)
+    const error = new BizError(Err.AGENT_PROVIDER_FAILED, { reason: 'bad_response' })
+    script(
+      { toolCalls: [{ name: 'image.generate', args: { prompt: 'a simple shape' } }] },
+      { text: 'The image could not be returned.' },
+    )
+    const image = vi.spyOn(fake, 'image').mockImplementationOnce(async (req) => {
+      req.onUsage?.(reported)
+      throw error
+    })
+    try {
+      const { id, turn } = await run('draw a shape')
+      expect(turn.status).toBe('failed')
+      expect(fake.requests).toHaveLength(1)
+      const [risk] = await ds.query('SELECT recovery_required FROM agent_thread WHERE id = ?', [id])
+      expect(risk.recovery_required).toBe(1)
+      const [entry] = await ds.query<
+        { credits: string; usage_json: any; usage_reported: number }[]
+      >(
+        "SELECT credits, usage_json, usage_reported FROM agent_usage_entry WHERE tenant_id = 1 AND turn_id = ? AND model = 'img1'",
+        [turn.id],
+      )
+      expect(entry!.credits).toBe('33.000000')
+      expect(Number(entry!.usage_reported)).toBe(1)
+      expect(
+        typeof entry!.usage_json === 'string' ? JSON.parse(entry!.usage_json) : entry!.usage_json,
+      ).toMatchObject({ promptTokens: 11, completionTokens: 22, usageReported: true })
+      expect(await items(id, 'image')).toEqual([])
+    } finally {
+      image.mockRestore()
+    }
+  })
 })
 
 describe('image limits and cleanup', () => {
@@ -481,19 +535,19 @@ describe('image limits and cleanup', () => {
     ).map((r) => Number(r.id))
   const charged = async () => {
     const [u] = await ds.query<{ c: string | null }[]>(
-      "SELECT SUM(completion_tokens) c FROM agent_usage WHERE user_id = ? AND model = 'img1'",
+      "SELECT SUM(credits) c FROM agent_usage WHERE user_id = ? AND model = 'img1'",
       [ownerId],
     )
     return Number(u!.c ?? 0)
   }
 
-  it('draws at most four images a turn and charges a usage of zero as the fallback', async () => {
+  it('draws at most four images and uses the explicit image price when usage is not reported', async () => {
     const calls = Array.from({ length: IMAGES_PER_TURN + 1 }, (_, i) => ({
       name: 'image.generate',
       args: { prompt: `picture ${i}` },
     }))
     script({ toolCalls: calls }, { text: 'Done.' })
-    fake.usage = { promptTokens: 0, completionTokens: 0 }
+    fake.usage = null
     const before = await charged()
     const { id, turn } = await run('draw five pictures')
     expect(turn.status).toBe('completed')
@@ -502,7 +556,9 @@ describe('image limits and cleanup', () => {
     const failed = (await items(id, 'tool_result')).filter((r) => r.payload.ok === false)
     expect(failed).toHaveLength(1)
     expect(failed[0]!.payload.error).toMatchObject({ code: Err.AGENT_LIMIT.code })
-    expect((await charged()) - before).toBe(IMAGES_PER_TURN * IMAGE_TOKENS)
+    expect((await charged()) - before).toBe(
+      IMAGES_PER_TURN * Number(TEST_AGENT_PRICING.imageCredits),
+    )
   })
 
   it('removes the pictures of a reverted turn and of a deleted thread', async () => {

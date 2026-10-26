@@ -119,6 +119,30 @@ describe('reasoning sent back', () => {
     })
   })
 
+  it('applies model defaults, explicit off and the vllm thinking switch separately', async () => {
+    const configured = (
+      reasoningDefault: 'provider' | 'off' | 'low',
+      reasoningStyle: 'standard' | 'vllm' = 'standard',
+    ) =>
+      new OpenAiChatModel({
+        baseUrl,
+        apiKey: null,
+        retries: 0,
+        models: [{ id: 'think', reasoning: true, reasoningDefault, reasoningStyle }],
+      })
+    await collect(configured('off').stream({ model: 'think', messages: [] }))
+    expect(bodies.at(-1)).toMatchObject({ reasoning_effort: 'none' })
+    await collect(configured('low').stream({ model: 'think', messages: [] }))
+    expect(bodies.at(-1)).toMatchObject({ reasoning_effort: 'low' })
+    await collect(configured('low').stream({ model: 'think', messages: [], reasoning: 'off' }))
+    expect(bodies.at(-1)).toMatchObject({ reasoning_effort: 'none' })
+    await collect(configured('off', 'vllm').stream({ model: 'think', messages: [] }))
+    expect(bodies.at(-1)).toMatchObject({ chat_template_kwargs: { enable_thinking: false } })
+    expect(bodies.at(-1)).not.toHaveProperty('reasoning_effort')
+    await collect(configured('provider').stream({ model: 'think', messages: [] }))
+    expect(bodies.at(-1)).not.toHaveProperty('reasoning_effort')
+  })
+
   it('sends a reasoning text back only to the model that produced it', () => {
     const m: ChatMessage = {
       role: 'assistant',
@@ -159,13 +183,26 @@ describe('FakeChatModel', () => {
         type: 'tool_call',
         call: { id: 'call_1_0', name: 'demo.customer.search', arguments: '{"kw":"acme"}' },
       },
-      { type: 'usage', usage: { promptTokens: 10, completionTokens: 5 } },
+      {
+        type: 'usage',
+        usage: expect.objectContaining({
+          promptTokens: 10,
+          completionTokens: 5,
+          totalTokens: 15,
+          usageReported: true,
+        }),
+      },
       { type: 'finish', reason: 'tool_calls' },
     ])
     expect(await fake.complete({ model: 'm', messages: [] })).toEqual({
       text: 'done',
       toolCalls: [],
-      usage: { promptTokens: 1, completionTokens: 2 },
+      usage: expect.objectContaining({
+        promptTokens: 1,
+        completionTokens: 2,
+        totalTokens: 3,
+        usageReported: true,
+      }),
       finishReason: 'stop',
     })
     expect(fake.requests).toHaveLength(2)
@@ -177,7 +214,15 @@ describe('FakeChatModel', () => {
     expect(await collect(fake.stream({ model: 'm', messages: [] }))).toEqual([
       { type: 'reasoning', delta: 'thinking it over' },
       { type: 'text', delta: 'ok' },
-      { type: 'usage', usage: { promptTokens: 10, completionTokens: 5 } },
+      {
+        type: 'usage',
+        usage: expect.objectContaining({
+          promptTokens: 10,
+          completionTokens: 5,
+          totalTokens: 15,
+          usageReported: true,
+        }),
+      },
       { type: 'finish', reason: 'stop' },
     ])
   })

@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { Inject, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common'
 import { TransactionHost } from '@nestjs-cls/transactional'
 import type { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm'
@@ -7,6 +7,8 @@ import {
   AGENT_LIMIT_PARAMS,
   AGENT_TRUST_MODE_PARAM,
   type AgentFeedbackSave,
+  type AgentDraftReceiptVo,
+  type AgentMessageReceiptVo,
   type AgentModelVo,
   type AgentProviderVo,
   type AgentStatusVo,
@@ -20,11 +22,20 @@ import {
   type Page,
 } from '@qiwu/shared'
 import { I18nService } from 'nestjs-i18n'
-import { In, IsNull, LessThanOrEqual, MoreThan, type ObjectLiteral, type Repository } from 'typeorm'
+import {
+  In,
+  IsNull,
+  LessThanOrEqual,
+  MoreThan,
+  type EntityManager,
+  type ObjectLiteral,
+  type Repository,
+} from 'typeorm'
 import type { Principal } from '../../auth/principal.js'
 import { clsGet } from '../../context/cls.js'
 import { contains, paginate } from '../../db/page.js'
 import { BizError } from '../../http/biz-error.js'
+import { canonicalJson } from '../../guard/idempotent.js'
 import { currentLocale } from '../../i18n/locale.js'
 import { ParamService } from '../../settings/param.service.js'
 import {
@@ -37,10 +48,13 @@ import {
 import {
   AgentFeedback,
   AgentItem,
+  AgentMessageReceipt,
   AgentThread,
   AgentTurn,
 } from '../entities/agent-thread.entity.js'
-import { AgentUsage } from '../entities/agent-usage.entity.js'
+import { UsageBook } from '../runtime/usage-book.js'
+import { TurnRunner } from '../runtime/turn-runner.js'
+import { ACTIVE_TURN } from '../runtime/turn-queue.js'
 import { REDIS, type Redis } from '../../redis/redis.module.js'
 import { copyMemoryMark } from '../memory/memory-extract.js'
 import { ProviderSettingsService } from '../provider/provider-settings.service.js'
@@ -62,9 +76,6 @@ import {
 
 /** 估算上下文 token：每 token 约 3.5 个字符（中英文混合的粗略值，只用于输入框旁的用量环）。 */
 const CHARS_PER_TOKEN = 3.5
-/** 日限额参数缺失或无效时的默认值（与系统参数种子一致）。 */
-const USER_DAILY_DEFAULT = 1_000_000
-const TENANT_DAILY_DEFAULT = 10_000_000
 /** 复制进分叉会话时仍“待处理 / 运行中”的条目：分叉里没有对应的轮次，标为已失效，不再可操作。 */
 const OPEN_STATUSES = new Set(['pending', 'running'])
 
@@ -102,6 +113,8 @@ export class AgentThreadService {
     private readonly params: ParamService,
     private readonly i18n: I18nService,
     private readonly ext: AgentExtensions,
+    private readonly usage: UsageBook,
+    private readonly runner: TurnRunner,
     @Inject(REDIS) private readonly redis: Redis,
     @Optional() @Inject(PROFILE_SOURCE) private readonly profiles?: ProfileSource,
     @Optional() @Inject(AGENT_IMAGE_STORE) private readonly images?: AgentImageStore,
@@ -303,34 +316,126 @@ export class AgentThreadService {
    * 原样记下交给智能体；记忆默认开。
    */
   async create(p: Principal, dto: AgentThreadCreate): Promise<AgentThreadVo> {
+    const { clientDraftId, ...input } = dto
+    const hash = clientDraftId
+      ? createHash('sha256')
+          .update(canonicalJson({ kind: 'create', input }))
+          .digest('hex')
+      : null
+    const replay = async () => {
+      if (!clientDraftId) return null
+      const saved = await this.repo(AgentThread).findOne({
+        where: { userId: p.userId, clientDraftId },
+        withDeleted: true,
+      })
+      if (!saved) return null
+      if (saved.deletedAt || saved.clientDraftHash !== hash) throw new BizError(Err.CONFLICT)
+      return (await this.extras([saved]))[0]!
+    }
+    const existing = await replay()
+    if (existing) return existing
     const { profile, mode, choice, reasoning } = await this.withProfile(p, dto)
     await this.assertMode(mode)
-    const row = await this.repo(AgentThread).save(
-      this.repo(AgentThread).create({
-        userId: p.userId,
-        title: dto.title || this.t('untitled'),
-        status: 'active',
-        providerId: choice?.providerId ?? null,
-        model: choice?.model.id ?? null,
-        reasoning: this.reasoningFor(choice, reasoning),
-        approvalMode: mode,
-        planMode: dto.planMode,
-        profileId: profile?.id ?? null,
-        memoryEnabled: dto.memoryEnabled,
-        pinned: false,
-        temporary: dto.temporary,
-        readSeq: 0,
-        trusted: null,
-        forkedFromId: null,
-        batchId: null,
-        targetRef: null,
-        context: dto.context ?? null,
-        summary: null,
-        summarySeq: 0,
-        lastActiveAt: new Date(),
-      }),
-    )
+    let row: AgentThread
+    try {
+      row = await this.repo(AgentThread).save(
+        this.repo(AgentThread).create({
+          clientDraftId: clientDraftId ?? null,
+          clientDraftHash: hash,
+          userId: p.userId,
+          title: dto.title || this.t('untitled'),
+          status: 'active',
+          providerId: choice?.providerId ?? null,
+          model: choice?.model.id ?? null,
+          reasoning: this.reasoningFor(choice, reasoning),
+          approvalMode: mode,
+          planMode: dto.planMode,
+          profileId: profile?.id ?? null,
+          memoryEnabled: dto.memoryEnabled,
+          pinned: false,
+          temporary: dto.temporary,
+          readSeq: 0,
+          trusted: null,
+          forkedFromId: null,
+          batchId: null,
+          targetRef: null,
+          context: dto.context ?? null,
+          summary: null,
+          summarySeq: 0,
+          lastActiveAt: new Date(),
+        }),
+      )
+    } catch (error) {
+      // 并发唯一键或落库后响应异常都先按持久键查证，不能再建一个空会话。
+      const found = await replay()
+      if (found) return found
+      throw error
+    }
     return threadVo(row, { unread: 0, turnStatus: null })
+  }
+
+  /** 只按本人及当前租户核对创建回执，删除后的永久标识不会复活旧会话。 */
+  async draftReceipt(p: Principal, clientDraftId: string): Promise<AgentDraftReceiptVo> {
+    const row = await this.repo(AgentThread).findOne({
+      where: { userId: p.userId, clientDraftId },
+      withDeleted: true,
+    })
+    if (!row) throw new NotFoundException()
+    return {
+      clientDraftId,
+      threadId: num(row.id),
+      status: row.deletedAt ? 'removed' : 'accepted',
+      thread: row.deletedAt ? null : (await this.extras([row]))[0]!,
+    }
+  }
+
+  /** 消息接收回执独立于排队条目的后续移动；查证只读，不启动任何轮次或重放业务写入。 */
+  async messageReceipt(
+    p: Principal,
+    id: number,
+    clientMessageId: string,
+  ): Promise<AgentMessageReceiptVo> {
+    const thread = await this.repo(AgentThread).findOne({
+      where: { id, userId: p.userId },
+      withDeleted: true,
+    })
+    if (!thread) throw new NotFoundException()
+    const receipt = await this.repo(AgentMessageReceipt).findOneBy({
+      threadId: id,
+      userId: p.userId,
+      clientMessageId,
+    })
+    if (!receipt) throw new NotFoundException()
+    const item = await this.repo(AgentItem).findOneBy({ id: num(receipt.itemId), threadId: id })
+    const turn = await this.repo(AgentTurn).findOneBy({
+      id: num(receipt.acceptedTurnId),
+      threadId: id,
+    })
+    const removed = !!thread.deletedAt || !item || !turn
+    return {
+      clientMessageId,
+      threadId: id,
+      itemId: num(receipt.itemId),
+      turnId: num(receipt.acceptedTurnId),
+      status: removed ? 'removed' : 'accepted',
+      turn: removed || !turn ? null : turnVo(turn),
+    }
+  }
+
+  /** 本人明确核对后解除当前代风险闸；仍有原执行者时拒绝，且不续跑旧轮次或旧队列。 */
+  async acknowledgeRecovery(p: Principal, id: number, revision: number): Promise<AgentThreadVo> {
+    if (p.actingTenantId !== undefined && p.actingTenantId !== p.tenantId)
+      throw new BizError(Err.FORBIDDEN)
+    return this.txHost.withTransaction(async () => {
+      const thread = await this.own(p, id, { lock: true })
+      if (thread.recoveryRevision !== revision) throw new BizError(Err.CONFLICT)
+      if (thread.recoveryRequired) {
+        await this.runner.assertRecoveryReady(id, this.txHost.tx)
+        await this.repo(AgentThread).update(id, { recoveryRequired: false })
+        thread.recoveryRequired = false
+      }
+      return (await this.extras([thread]))[0]!
+    })
   }
 
   /**
@@ -381,7 +486,8 @@ export class AgentThreadService {
   /** 删除会话：会话、它的轮次与条目一起软删（分享链接随之失效），提交之后再删它生成的图片。 */
   async remove(p: Principal, id: number): Promise<null> {
     await this.txHost.withTransaction(async () => {
-      await this.own(p, id, { lock: true })
+      const row = await this.own(p, id, { lock: true })
+      await this.assertRemovable(row)
       await this.dropSubagents(id)
       await this.repo(AgentItem).softDelete({ threadId: id })
       await this.repo(AgentTurn).softDelete({ threadId: id })
@@ -396,15 +502,34 @@ export class AgentThreadService {
    * 删除自动化时：它的运行开的隐藏会话连同轮次、条目、子会话一起软删，再删这些会话生成的图片。会话里还在
    * 跑的轮次（调用方已先中断）随后发现会话已删，安静地停下。
    */
-  async dropHidden(threadIds: number[]): Promise<void> {
-    if (!threadIds.length) return
+  async dropHidden(
+    threadIds: number[],
+    beforeDelete?: (m: EntityManager) => Promise<void>,
+  ): Promise<void> {
+    if (!threadIds.length && !beforeDelete) return
     await this.txHost.withTransaction(async () => {
+      for (const id of [...new Set(threadIds)].sort((a, b) => a - b)) {
+        const row = await this.repo(AgentThread).findOne({
+          where: { id },
+          lock: { mode: 'pessimistic_write' },
+        })
+        if (row) await this.assertRemovable(row)
+      }
+      if (beforeDelete) await beforeDelete(this.txHost.tx)
+      if (!threadIds.length) return
       for (const id of threadIds) await this.dropSubagents(id)
       await this.repo(AgentItem).softDelete({ threadId: In(threadIds) })
       await this.repo(AgentTurn).softDelete({ threadId: In(threadIds) })
       await this.repo(AgentThread).softDelete({ id: In(threadIds) })
     })
     for (const id of threadIds) await this.dropImages(id)
+  }
+
+  /** 删除不能把活写入或未核对结果的证据藏掉；停止与本人核对均由明确入口办理。 */
+  private async assertRemovable(row: AgentThread): Promise<void> {
+    if (row.recoveryRequired) throw new BizError(Err.AGENT_RECOVERY_REQUIRED)
+    if (await this.repo(AgentTurn).existsBy({ threadId: num(row.id), status: ACTIVE_TURN }))
+      throw new BizError(Err.AGENT_THREAD_BUSY)
   }
 
   /**
@@ -467,9 +592,31 @@ export class AgentThreadService {
    * 审批与提问标为已失效），设置与上下文照抄，标题加“（分叉）”，记下来源；摘要只在完全落在复制范围内时
    * 带过去。从没跑过的排队消息、没答完或空的回答与推理不复制（{@link forkable}）。复制的条目全部算已读。
    */
-  async fork(p: Principal, id: number, seq: number): Promise<AgentThreadVo> {
+  async fork(
+    p: Principal,
+    id: number,
+    seq: number,
+    clientDraftId?: string,
+  ): Promise<AgentThreadVo> {
     return this.txHost.withTransaction(async () => {
       const src = await this.own(p, id, { lock: true })
+      const hash = clientDraftId
+        ? createHash('sha256')
+            .update(canonicalJson({ kind: 'fork', sourceThreadId: id, seq }))
+            .digest('hex')
+        : null
+      if (clientDraftId) {
+        const existing = await this.repo(AgentThread).findOne({
+          where: { userId: p.userId, clientDraftId },
+          withDeleted: true,
+        })
+        if (existing) {
+          if (existing.deletedAt || existing.clientDraftHash !== hash)
+            throw new BizError(Err.CONFLICT)
+          return (await this.extras([existing]))[0]!
+        }
+      }
+      await this.assertRemovable(src)
       // 自动化与子智能体的隐藏会话不能分叉：分叉出的是一个能继续发消息的普通会话，会带着隐藏会话里的
       // 事件数据与（预先同意的）技能绑定继续跑
       if (src.automationRunId !== null || src.parentThreadId !== null)
@@ -500,6 +647,10 @@ export class AgentThreadService {
           readSeq: items.at(-1)?.seq ?? 0,
           trusted: null,
           forkedFromId: num(src.id),
+          clientDraftId: clientDraftId ?? null,
+          clientDraftHash: hash,
+          recoveryRequired: false,
+          recoveryRevision: 0,
           batchId: null,
           targetRef: src.targetRef,
           context: src.context,
@@ -568,6 +719,7 @@ export class AgentThreadService {
     let callIds: string[] = []
     await this.txHost.withTransaction(async () => {
       const thread = await this.own(p, id, { lock: true })
+      if (thread.recoveryRequired) throw new BizError(Err.AGENT_RECOVERY_REQUIRED)
       const turn = await this.repo(AgentTurn).findOne({
         where: { threadId: id },
         order: { id: 'DESC' },
@@ -621,7 +773,7 @@ export class AgentThreadService {
 
   /**
    * `/status`：下一次调用模型约占多少上下文（上下文贡献者的各段 + 摘要 + 摘要之后条目的字符数 ÷ 3.5）与
-   * 模型窗口、最新一轮，以及今天（UTC）本人与本租户的 token 用量和限额。
+   * 模型窗口、最新一轮，以及今天（UTC）本人与本租户的原始 Token 用量及积分预算。
    */
   async status(p: Principal, id: number): Promise<AgentStatusVo> {
     const row = await this.own(p, id)
@@ -635,40 +787,48 @@ export class AgentThreadService {
     const prov = list.find((x) => x.id === num(row.providerId)) ?? list[0]
     const model = prov?.models.find((m) => m.id === row.model) ?? prov?.models[0]
     const turn = await this.latestTurn(id)
-    const day = new Date().toISOString().slice(0, 10)
-    // 不给 userId 为本租户全部用户（ORM 加当前租户条件）
-    const used = async (userId?: number) => {
-      const qb = this.repo(AgentUsage)
-        .createQueryBuilder('u')
-        .select('COALESCE(SUM(u.promptTokens + u.completionTokens), 0)', 'n')
-        .where('u.day = :day', { day })
-      if (userId !== undefined) qb.andWhere('u.userId = :userId', { userId })
-      return num((await qb.getRawOne<{ n: string }>())?.n ?? 0)
-    }
-    const max = Number.MAX_SAFE_INTEGER
+    const retained =
+      turn && ['running', 'waiting'].includes(turn.status)
+        ? await this.repo(AgentItem)
+            .createQueryBuilder('u')
+            .select('COALESCE(SUM(CHAR_LENGTH(u.text)), 0)', 'n')
+            .where(
+              'u.threadId = :id AND u.turnId = :turn AND u.kind = :kind AND u.seq <= :summary',
+              {
+                id,
+                turn: turn.id,
+                kind: 'user',
+                summary: row.summarySeq,
+              },
+            )
+            .getRawOne<{ n: string }>()
+        : null
+    const user = await this.usage.today(p.userId)
+    const tenant = await this.usage.today()
+    const tokens = (u: typeof user) =>
+      u.promptTokens === null || u.completionTokens === null
+        ? null
+        : u.promptTokens + u.completionTokens
     return {
       threadId: id,
       model: row.model ?? model?.id ?? null,
       contextUsed: Math.ceil(
-        (contributed + (row.summary?.length ?? 0) + num(chars?.n ?? 0)) / CHARS_PER_TOKEN,
+        (contributed + (row.summary?.length ?? 0) + num(chars?.n ?? 0) + num(retained?.n ?? 0)) /
+          CHARS_PER_TOKEN,
       ),
       contextWindow: model?.contextWindow ?? 0,
       turn: turn && turnVo(turn),
       today: {
-        userTokens: await used(p.userId),
-        userLimit: await this.params.int(
-          AGENT_LIMIT_PARAMS.userDailyTokens,
-          0,
-          max,
-          USER_DAILY_DEFAULT,
-        ),
-        tenantTokens: await used(),
-        tenantLimit: await this.params.int(
-          AGENT_LIMIT_PARAMS.tenantDailyTokens,
-          0,
-          max,
-          TENANT_DAILY_DEFAULT,
-        ),
+        userTokens: tokens(user),
+        userCredits: user.credits,
+        userLimit: await this.usage.limit(AGENT_LIMIT_PARAMS.userDailyCredits),
+        userUnpricedCalls: user.unpricedCalls,
+        userLegacyCalls: user.legacyCalls,
+        tenantTokens: tokens(tenant),
+        tenantCredits: tenant.credits,
+        tenantLimit: await this.usage.limit(AGENT_LIMIT_PARAMS.tenantDailyCredits),
+        tenantUnpricedCalls: tenant.unpricedCalls,
+        tenantLegacyCalls: tenant.legacyCalls,
       },
     }
   }

@@ -1,6 +1,9 @@
 {
   "notify": {
-    "tabs": { "bulletins": "Bulletins", "inbox": "Messages" },
+    "tabs": {
+      "bulletins": "Bulletins",
+      "inbox": "Messages"
+    },
     "inbox": {
       "pageTitle": "My messages",
       "viewAll": "View all messages",
@@ -18,7 +21,11 @@
       "read": "Read",
       "unread": "Unread",
       "view": "View",
-      "category": { "system": "System", "business": "Business" }
+      "category": {
+        "system": "System",
+        "business": "Business"
+      },
+      "openConversation": "Open conversation"
     }
   }
 }

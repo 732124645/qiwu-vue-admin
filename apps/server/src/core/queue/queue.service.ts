@@ -1,5 +1,5 @@
 import { WorkerHost } from '@nestjs/bullmq'
-import { Injectable } from '@nestjs/common'
+import { Injectable, Logger } from '@nestjs/common'
 import { DiscoveryService } from '@nestjs/core'
 import { type Job, type JobsOptions, Queue, type Worker } from 'bullmq'
 import { tenantId } from '../context/tenant.js'
@@ -13,8 +13,25 @@ import type { QueuedJob } from './tenant-job.processor.js'
 @Injectable()
 export class QueueService {
   private registry?: ReadonlyMap<string, Queue>
+  private readonly logger = new Logger(QueueService.name)
+  private readonly drains = new Set<() => Promise<void>>()
 
   constructor(private readonly discovery: DiscoveryService) {}
+
+  /** 发布关闭队列之前，通知持久任务停止上游调用并保存进度。 */
+  onDrain(fn: () => Promise<void>): void {
+    this.drains.add(fn)
+  }
+
+  /** 与停止领取新任务同时执行保存；总期限由队列关闭入口统一控制。 */
+  async drain(): Promise<void> {
+    const results = await Promise.allSettled([...this.drains].map((fn) => fn()))
+    for (const result of results)
+      if (result.status === 'rejected')
+        this.logger.warn(
+          'queue shutdown checkpoint failed; durable leases will recover pending work',
+        )
+  }
 
   /** Every queue registered in this app, by name (read once, after the modules were initialized). */
   queues(): ReadonlyMap<string, Queue> {

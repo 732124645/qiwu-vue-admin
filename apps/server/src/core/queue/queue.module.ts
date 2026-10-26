@@ -78,11 +78,23 @@ export class CoreQueueModule implements OnApplicationBootstrap, OnModuleDestroy 
   }
 
   /**
-   * Each worker finishes its current jobs while everything they may use still runs: the destroy phase
-   * comes before every `beforeApplicationShutdown` (the scheduler and the notification outbox stop
-   * there), the Socket.IO server close and the Redis and database closes.
+   * 先停领新任务并有界保存进度；7 秒后强制关 worker，仍未完成的调用保留持久记录供新进程核对。
+   * 在共享 Redis 与数据库关闭之前完成这一阶段，不把无限等待交给发布进程。
    */
   async onModuleDestroy() {
-    await Promise.all(this.queues.workers().map((w) => w.close()))
+    const workers = this.queues.workers()
+    let timer: NodeJS.Timeout | undefined
+    // pause(false) 停领新任务并等当前任务；超过发布期限后强制关 worker，持久租约负责接管。
+    try {
+      await Promise.race([
+        Promise.all([this.queues.drain(), ...workers.map((w) => w.pause(false))]),
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, 7000)
+        }),
+      ])
+    } finally {
+      clearTimeout(timer)
+      await Promise.all(workers.map((w) => w.close(true)))
+    }
   }
 }

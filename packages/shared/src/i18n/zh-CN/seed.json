@@ -29,7 +29,7 @@
     "wfTaskRemind": "发送待办超时提醒",
     "wxoaMessagePurge": "清理过期公众号消息",
     "wxoaFanSync": "同步公众号粉丝",
-    "clockRetention": "清理到期考勤记录"
+    "clockRetention": "历史考勤清理（已退役）"
   },
   "inboxTemplate": {
     "schedulerJobTimeout": "任务超时告警"

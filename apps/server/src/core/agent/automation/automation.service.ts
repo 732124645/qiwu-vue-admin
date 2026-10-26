@@ -213,14 +213,28 @@ export class AgentAutomationService {
    */
   async remove(p: Principal, id: number): Promise<null> {
     const a = await this.own(p, id)
-    await this.repo().softDelete({ id: a.id })
-    await this.runner.reschedule(a, true)
-    await this.runner.stopRuns(a, p)
     const runs = await this.ds.getRepository(AgentAutomationRun).find({
       where: { automationId: a.id, threadId: Not(IsNull()) },
       select: { id: true, threadId: true },
     })
-    await this.threads.dropHidden(runs.map((r) => Number(r.threadId)))
+    const ids = runs.map((r) => Number(r.threadId))
+    // 先锁会话并核对风险，再锁定义；与运行时“会话→定义”的风险登记使用相同锁序。
+    await this.threads.dropHidden(ids, async (m) => {
+      const fresh = await m.getRepository(AgentAutomation).findOne({
+        where: { id: a.id },
+        lock: { mode: 'pessimistic_write' },
+      })
+      if (!fresh || Number(fresh.userId) !== p.userId) throw notFound()
+      const current = await m.getRepository(AgentAutomationRun).find({
+        where: { automationId: a.id, threadId: Not(IsNull()) },
+        select: { threadId: true },
+      })
+      // 初查之后刚创建了运行：不要漏删新会话，也不在反向锁序中追锁正在写的会话。
+      if (current.some((r) => !ids.includes(Number(r.threadId))))
+        throw new BizError(Err.AGENT_THREAD_BUSY)
+      await m.getRepository(AgentAutomation).softDelete({ id: a.id })
+    })
+    await this.runner.reschedule(a, true)
     return null
   }
 

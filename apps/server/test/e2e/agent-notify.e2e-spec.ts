@@ -11,14 +11,16 @@ import { Test } from '@nestjs/testing'
 import { getDataSourceToken } from '@nestjs/typeorm'
 import { agentPerms } from '@qiwu/shared'
 import request from 'supertest'
-import type { DataSource } from 'typeorm'
+import type { DataSource, EntityManager } from 'typeorm'
 import { AppModule } from '../../src/app.module.js'
 import { setupApp } from '../../src/app.setup.js'
 import { AgentModule } from '../../src/core/agent/agent.module.js'
-import type { AgentThread } from '../../src/core/agent/entities/agent-thread.entity.js'
+import { AgentThread, AgentItem } from '../../src/core/agent/entities/agent-thread.entity.js'
+import { ItemStore } from '../../src/core/agent/runtime/item-store.js'
+import { insertRow } from '../../src/db/seeds/upsert.js'
 import { AGENT_NOTICE, TurnRunner } from '../../src/core/agent/runtime/turn-runner.js'
 import { EnvSchema } from '../../src/core/config/env.schema.js'
-import { NotifyChannels, NotifyDispatcher } from '../../src/core/notify/notify.js'
+import { Notifier, NotifyChannels, NotifyDispatcher } from '../../src/core/notify/notify.js'
 import { redisKey } from '../../src/core/redis/cache-namespaces.js'
 import { REDIS, type Redis } from '../../src/core/redis/redis.module.js'
 import { logOf } from '../setup/audit.js'
@@ -40,6 +42,8 @@ let oddId = 0
 let odd = ''
 const roleIds: number[] = []
 let other: PeopledTenant
+const recoveryThreads: number[] = []
+const rawTemplateCode = 'agent-notify-raw-manager'
 
 const http = () => request(app.getHttpServer())
 
@@ -114,9 +118,25 @@ afterAll(async () => {
     if (users.length) {
       await ds.query('DELETE FROM msg_inbox WHERE tenant_id = 1 AND user_id IN (?)', [users])
       await ds.query('DELETE FROM msg_mail_record WHERE tenant_id = 1 AND user_id IN (?)', [users])
+      await ds.query('DELETE FROM msg_sms_record WHERE tenant_id = 1 AND user_id IN (?)', [users])
       await ds.query('DELETE FROM iam_user_pref WHERE tenant_id = 1 AND user_id IN (?)', [users])
       await ds.query('DELETE FROM iam_user_roles WHERE user_id IN (?)', [users])
       await ds.query('DELETE FROM iam_user WHERE id IN (?)', [users])
+    }
+    if (recoveryThreads.length) {
+      await ds.query('DELETE FROM agent_item WHERE tenant_id = 1 AND thread_id IN (?)', [
+        recoveryThreads,
+      ])
+      await ds.query('DELETE FROM agent_turn WHERE tenant_id = 1 AND thread_id IN (?)', [
+        recoveryThreads,
+      ])
+      await ds.query('DELETE FROM agent_thread WHERE tenant_id = 1 AND id IN (?)', [
+        recoveryThreads,
+      ])
+    }
+    for (const table of ['msg_inbox_template', 'msg_mail_template', 'msg_sms_template']) {
+      // arch-allow: sql-concat fixed platform template tables; tenant: templates are platform-wide, only this fixture code is removed
+      await ds.query(`DELETE FROM ${table} WHERE code = ?`, [rawTemplateCode])
     }
     if (roleIds.length) {
       await ds.query('DELETE FROM iam_role_menus WHERE role_id IN (?)', [roleIds])
@@ -307,4 +327,164 @@ describe('turn notices', () => {
       slow.mockRestore()
     }
   }, 15_000)
+})
+
+describe('transactional recovery notices', () => {
+  it('joins native transactions in every channel and dispatches only committed outbox rows', async () => {
+    const channels = app.get(NotifyChannels)
+    const sends = ['inbox', 'mail', 'sms'].map((code) =>
+      vi
+        .spyOn(channels.get(code as 'inbox' | 'mail' | 'sms')!, 'deliver')
+        .mockResolvedValue(undefined),
+    )
+    const notifier = app.get(Notifier)
+    const write = async (m: EntityManager) => {
+      const common = {
+        code: rawTemplateCode,
+        locale: 'zh-CN',
+        name: 'Native transaction',
+        body: 'Transaction {marker}',
+        enabled: 1,
+      }
+      await insertRow(m, 'msg_inbox_template', {
+        ...common,
+        title: 'Transaction',
+        category: 'business',
+      })
+      await insertRow(m, 'msg_mail_template', { ...common, subject: 'Transaction' })
+      await insertRow(m, 'msg_sms_template', { ...common, purpose: 'notice' })
+      const ids = await notifier.send(
+        {
+          template: rawTemplateCode,
+          to: [oddId],
+          channels: ['inbox', 'mail', 'sms'],
+          params: { marker: 'marker' },
+        },
+        m,
+      )
+      expect(ids.inbox).toHaveLength(1)
+      expect(ids.mail).toHaveLength(1)
+      expect(ids.sms).toHaveLength(1)
+      for (const send of sends) expect(send).not.toHaveBeenCalled()
+      return ids
+    }
+    try {
+      await expect(
+        inTenant1(() =>
+          ds.transaction(async (m) => {
+            await write(m)
+            throw new Error('Rollback recovery outbox')
+          }),
+        ),
+      ).rejects.toThrow('Rollback recovery outbox')
+      await app.get(NotifyDispatcher).idle()
+      for (const send of sends) expect(send).not.toHaveBeenCalled()
+      for (const table of ['msg_inbox', 'msg_mail_record', 'msg_sms_record']) {
+        // arch-allow: sql-concat fixed notification record tables; tenant: each query explicitly checks tenant 1
+        const [row] = await ds.query(
+          `SELECT COUNT(*) AS n FROM ${table} WHERE tenant_id = 1 AND template_code = ?`,
+          [rawTemplateCode],
+        )
+        expect(Number(row.n)).toBe(0)
+      }
+      const committed = await inTenant1(() => ds.transaction(write))
+      await app.get(NotifyDispatcher).idle()
+      expect(sends[0]).toHaveBeenCalledExactlyOnceWith(committed.inbox![0])
+      expect(sends[1]).toHaveBeenCalledExactlyOnceWith(committed.mail![0])
+      expect(sends[2]).toHaveBeenCalledExactlyOnceWith(committed.sms![0])
+    } finally {
+      for (const send of sends) send.mockRestore()
+    }
+  })
+
+  it('keeps a short temporary risk reachable from its owner inbox, rolls back failed attempts and never repeats the notice', async () => {
+    const id = await inTenant1(() =>
+      insertRow(ds.manager, 'agent_thread', {
+        user_id: oddId,
+        title: 'PRIVATE_RECOVERY_TITLE',
+        temporary: true,
+      }),
+    )
+    recoveryThreads.push(id)
+    const store = app.get(ItemStore)
+    const { turn, call } = await inTenant1(() =>
+      store.tx(async (w) => {
+        const turn = await w.createTurn(id, oddId)
+        const call = await w.append(
+          id,
+          Number(turn.id),
+          'tool_call',
+          {
+            callId: 'uncertain-notice',
+            tool: 'test.recovery.write',
+            title: 'PRIVATE_TOOL_TITLE',
+            source: 'local',
+            kind: 'write',
+            args: { value: 'PRIVATE_BUSINESS_VALUE' },
+          },
+          'running',
+        )
+        return { turn, call }
+      }),
+    )
+    const runner = app.get(TurnRunner) as unknown as {
+      requireRecovery(m: EntityManager, thread: AgentThread, call: AgentItem): Promise<void>
+    }
+    const register = () =>
+      inTenant1(() =>
+        store.tx(async (w) => {
+          const thread = (await w.thread(id))!
+          const item = await w.m.getRepository(AgentItem).findOneByOrFail({ id: call.id })
+          await runner.requireRecovery(w.m, thread, item)
+          await w.update(item, { payload: item.payload })
+        }),
+      )
+    const count = async () => {
+      const [row] = await ds.query(
+        "SELECT COUNT(*) AS n FROM msg_inbox WHERE tenant_id = 1 AND user_id = ? AND template_code = ? AND JSON_EXTRACT(params, '$.threadId') = ?",
+        [oddId, AGENT_NOTICE.waiting, id],
+      )
+      return Number(row.n)
+    }
+    const before = await count()
+    const channel = app.get(NotifyChannels).get('inbox')!
+    const write = channel.write.bind(channel)
+    const failed = vi.spyOn(channel, 'write').mockImplementationOnce(async (...args) => {
+      await write(...args)
+      throw new Error('Recovery notice persistence failed')
+    })
+    try {
+      await expect(register()).rejects.toThrow('Recovery notice persistence failed')
+    } finally {
+      failed.mockRestore()
+    }
+    await app.get(NotifyDispatcher).idle()
+    expect(await count()).toBe(before)
+    expect(
+      await inTenant1(() => ds.getRepository(AgentThread).findOneByOrFail({ id })),
+    ).toMatchObject({ recoveryRequired: false, recoveryRevision: 0 })
+    await register()
+    await register()
+    await app.get(NotifyDispatcher).idle()
+    expect(await count()).toBe(before + 1)
+    const [notice] = await ds.query(
+      "SELECT id, title, body, params, created_at > DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 30 SECOND) AS recent FROM msg_inbox WHERE tenant_id = 1 AND user_id = ? AND template_code = ? AND JSON_EXTRACT(params, '$.threadId') = ? ORDER BY id DESC LIMIT 1",
+      [oddId, AGENT_NOTICE.waiting, id],
+    )
+    expect(Number(notice.recent)).toBe(1)
+    expect(notice.body).toContain(`/agent/chat?thread=${id}`)
+    expect(JSON.stringify(notice)).not.toContain('PRIVATE_RECOVERY_TITLE')
+    expect(JSON.stringify(notice)).not.toContain('PRIVATE_TOOL_TITLE')
+    expect(JSON.stringify(notice)).not.toContain('PRIVATE_BUSINESS_VALUE')
+    await http().get(`/api/messaging/inboxes/mine/${notice.id}`).set(bearer(odd)).expect(200)
+    await http().get(`/api/agent/threads/${id}/items`).set(bearer(odd)).expect(200)
+    await http().get(`/api/messaging/inboxes/mine/${notice.id}`).set(bearer(member)).expect(404)
+    await http().get(`/api/agent/threads/${id}/items`).set(bearer(member)).expect(404)
+    await http()
+      .get(`/api/messaging/inboxes/mine/${notice.id}`)
+      .set(bearer(otherMember))
+      .expect(404)
+    await http().get(`/api/agent/threads/${id}/items`).set(bearer(otherMember)).expect(404)
+    expect(Number(turn.id)).toBeGreaterThan(0)
+  })
 })

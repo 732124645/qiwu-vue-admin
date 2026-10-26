@@ -354,24 +354,27 @@ const PARAMS: ParamSeed[] = [
     nameI18n: { 'zh-CN': '智能体每轮最长秒数', 'en-US': 'Agent seconds per turn' },
   },
   {
-    key: AGENT_LIMIT_PARAMS.turnTokens,
-    value: 200_000,
-    nameI18n: { 'zh-CN': '智能体每轮 token 上限', 'en-US': 'Agent tokens per turn' },
-  },
-  {
-    key: AGENT_LIMIT_PARAMS.userDailyTokens,
-    value: 1_000_000,
+    key: AGENT_LIMIT_PARAMS.turnCredits,
+    value: 0,
     nameI18n: {
-      'zh-CN': '智能体每用户每日 token 上限（UTC 日）',
-      'en-US': 'Agent tokens per user per day (UTC)',
+      'zh-CN': '智能体每轮积分预算（0 不限额）',
+      'en-US': 'Agent credits per turn (0: unlimited)',
     },
   },
   {
-    key: AGENT_LIMIT_PARAMS.tenantDailyTokens,
-    value: 10_000_000,
+    key: AGENT_LIMIT_PARAMS.userDailyCredits,
+    value: 0,
     nameI18n: {
-      'zh-CN': '智能体每租户每日 token 上限（UTC 日）',
-      'en-US': 'Agent tokens per tenant per day (UTC)',
+      'zh-CN': '智能体每用户每日积分预算（UTC 日，0 不限额）',
+      'en-US': 'Agent credits per user per day (UTC, 0: unlimited)',
+    },
+  },
+  {
+    key: AGENT_LIMIT_PARAMS.tenantDailyCredits,
+    value: 0,
+    nameI18n: {
+      'zh-CN': '智能体每租户每日积分预算（UTC 日，0 不限额）',
+      'en-US': 'Agent credits per tenant per day (UTC, 0: unlimited)',
     },
   },
   {

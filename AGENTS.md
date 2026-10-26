@@ -23,6 +23,7 @@ NestJS 12（ESM）+ Vue 3.5 + Vite + Element Plus + TypeScript + MySQL + Redis�
 - Web `apps/web/src/views/<domain>/<business>/`、`apps/web/src/api/<domain>/`；
 - shared `packages/shared/src/<domain>/`，在 `packages/shared/src/index.ts` 导出。
 - 后台智能体（智能助手）用的工具写在模块的 `<business>.mcp-tools.ts`（`@McpTool`，写入工具加 `preview` 给审批卡片），列表批量执行的目标用 `@AgentBatchTarget`，项目自带的技能写成 `SEEDS.project` 里的种子，见 [docs/ai/recipes/agent-skill.md](docs/ai/recipes/agent-skill.md)。只在对话里有意义的内置工具（`@AgentBuiltinTool`）、每轮的背景上下文（`@AgentContextContributor`）与写入前的审批规则（`@AgentApprovalReviewer`）写在模块的 `<business>.agent.ts`，读写业务数据仍用 `@McpTool`；写入类内置工具走审批，只读类必须按调用幂等，见 [docs/ai/recipes/agent-extension.md](docs/ai/recipes/agent-extension.md)。
+- 内置写工具与审批审查扩展调用模型时，使用 `ctx.invokeModel()` 持久登记并检查积分预算，按提供方、精确模型标识和本次费率快照记录供应商真实用量；输入、输出、缓存等细分不重复累计，不用估算 Token 冒充收费。子任务只汇总已计算积分，不能重复记每日账目；见 [计量约定](docs/ai/recipes/agent-extension.md)。
 
 `biz`、`demo` 是模板自带的示例领域，可改可删；本文与配方里引用的示例路径（`demo/book` 等）只是可模仿的写法，项目删掉示例后它们可能已不存在。包作用域保持 `@qiwu/*`，不需要全仓改名。哪些文件属于项目、哪些属于模板见 [docs/upgrade.md](docs/upgrade.md)：尽量不改模板文件，升级时冲突才少。
 
@@ -55,6 +56,7 @@ NestJS 12（ESM）+ Vue 3.5 + Vite + Element Plus + TypeScript + MySQL + Redis�
 - 请求校验只用 `@qiwu/shared` 的 zod schema：`@Body({ schema })`、`@Query({ schema })`。校验消息是 `validation.*` 翻译键，schema 用 `.register(fieldDomains, { domain })` 登记字段领域；服务端不另建 `validation.json` / `field.json`。
 - 每个路由用 `@RequirePerm(xxxPerms.<verb>)` 检查权限；前端用 `v-perm` / `usePerm` 只控制显示，不代替服务端授权。
 - 数据库会话用 UTC，API 时间为 ISO-8601。
+- 私人业务请求的日志也要授权隔离：普通敏感字段用 `@Sensitive('fieldName')`，整份请求私有时用 `@Sensitive('*')` 遮蔽操作参数/结果、HTTP 请求摘要与故障消息；用真实成功和校验失败请求断言持久化日志，而不只检查装饰器。不要把私人内容放进 URL 路径或参数名。
 
 ## 多语言
 
@@ -148,9 +150,12 @@ NestJS 12（ESM）+ Vue 3.5 + Vite + Element Plus + TypeScript + MySQL + Redis�
 | `pnpm gen import\|render\|write <table>`                               | 代码生成器                                                                                                     |
 | `pnpm ai:map`                                                          | 重新生成项目地图 `docs/ai/project-map.md`（改了模块、表、接口、权限、菜单或种子后；`verify` 会检查它是否过期） |
 | `pnpm ci:local`                                                        | 完整本地闸门（构建、全部测试、Playwright、冒烟），耗时长，需要全部测试库；由开发者决定何时跑                   |
+| `pnpm smoke:boot --dev-reload`                                         | 默认测试通道的有限真实热重载检查；准备测试库后运行，自动还原临时探针源码和产物并退出                           |
 | `pnpm mobile:verify` / `pnpm mobile:test`                              | 移动端检查（有 `mobile/` 时）                                                                                  |
 
 `pnpm dev` 只由人在终端交互运行；AI 工具不要启动常驻的开发服务器。提交信息用 Conventional Commits（commitlint 检查），scope 建议写 `<domain>/<module>`，如 `feat(erp/sale-order): ...`。
+
+开发 runner 统一等待 shared 编译成功后执行 server 增量编译，成功后替换应用；无需另开 shared watcher。收到 `ready` 才表示端口监听完成，编译错误、业务日志、警告与错误仍保留。检查热重载使用上表的有限冒烟，不遗留开发服务。
 
 ## 常见错误
 
@@ -172,3 +177,9 @@ NestJS 12（ESM）+ Vue 3.5 + Vite + Element Plus + TypeScript + MySQL + Redis�
 | `originality:check`                             | 出现 `a:b:c` 形式的权限串                                                                                       |
 | `license:check`                                 | 依赖的许可不在允许列表或是禁用包                                                                                |
 | `typecheck` 找不到 `@qiwu/shared`               | 新检出或改了 shared 的导出后先运行 `pnpm --filter @qiwu/shared build`（Web 的 e2e 用例读它的构建产物）          |
+
+- 私有页面的敏感写入或上传可显式使用请求选项 `retryAuth: false` 禁止该请求在 401 后刷新重放，并用标准 `AbortSignal` 在上下文失效时取消；默认请求行为保持。`FileUpload` 的 `contextKey` 隔离迟到上传，`downloadFile` 可接业务授权后的二进制处理；`error` 事件保留当前有效上传的原始错误，业务可据此失效页面，旧上下文或已卸载的上传不通知业务；所有权限和版本仍由服务端复核。
+
+- 移动端私有页面沿现uni请求和附件helpers处理上下文。`QwUpload` 可监听 `error` 获取当前上传的原始错误、监听 `picking` 区分自己发起的原生选择，并可提供 `selectionReady(): Promise<boolean>`，在同一次选择返回后等待页面可见与身份核验；未提供时保持原路径。自己发起的选择或预览可能产生hide/show，隐藏期禁止提交，真正unload或身份失效必须退役，H5无hide也不能悬等。附件读取helpers可选传 `retryAuth: false` 禁止401刷新重放；现uni请求没有AbortSignal时用session、页面代次及权限复核迟到结果，不宣称已取消网络。已受理的上传或已启动的原生预览仍以服务端/系统资源合同为准。
+
+- 自由文本表单使用 `useCrudForm({ translateSeeded: false, ... })` 保留用户输入的 `seed.*` 字面文本；未指定时沿用框架种子标签的显示与还原。

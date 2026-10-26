@@ -1,4 +1,4 @@
-// In-app agent seed (see docs/agent.md): the top-level 智能体 menu group with its pages 智能助手 (chat),
+// In-app agent seed (see docs/agent.md): the top-level 智能体 menu group with its hidden chat route,
 // 技能管理, 智能体设置 (a platform page, PLATFORM_ONLY_ROUTES), 智能体用量 and 自动化, one action row per
 // permission, plus the hidden batch review page under the chat page. Seeded whatever APP_AGENT says: while it is off the group (and so its pages) is hidden by
 // core/auth/menu-features.ts (side menu and grant trees). Root sees every menu; other roles get the pages
@@ -71,7 +71,7 @@ const PAGES: PageSeed[] = [
 ]
 
 export async function seedAgent(q: EntityManager): Promise<string[]> {
-  // top level, right after 首页: the chat page is the one most users open
+  // 管理入口紧跟首页；业务对话由页面右侧悬浮入口打开。
   const groupId = await upsert(
     q,
     'iam_menu',
@@ -99,6 +99,8 @@ export async function seedAgent(q: EntityManager): Promise<string[]> {
         component: `platform/agent/${p.page}/index`,
         component_name: p.componentName,
         keep_alive: 1,
+        // 保留授权、通知与分享的旧链接；聊天本身从悬浮入口打开，不占侧栏菜单。
+        ...(p.page === 'chat' ? { visible: 0 } : {}),
         icon: p.icon,
         sort_no: (i + 1) * 10,
       },

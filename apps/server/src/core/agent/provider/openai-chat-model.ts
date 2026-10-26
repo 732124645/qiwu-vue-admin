@@ -2,6 +2,7 @@ import { Logger } from '@nestjs/common'
 import { Err } from '@qiwu/shared'
 import OpenAI, { APIConnectionError, APIError } from 'openai'
 import { BizError } from '../../http/biz-error.js'
+import { usageOf } from './usage.js'
 import type {
   ChatCompletion,
   ChatEvent,
@@ -10,7 +11,6 @@ import type {
   ChatModel,
   ChatRequest,
   ChatToolCall,
-  ChatUsage,
   ImageRequest,
   ImageResult,
 } from './chat-model.js'
@@ -24,7 +24,12 @@ export interface ChatModelConfig {
   /** null: the provider takes no key (a local Ollama) */
   apiKey: string | null
   /** the provider's models; `reasoning` ones get `reasoning_effort` */
-  models: readonly { id: string; reasoning: boolean }[]
+  models: readonly {
+    id: string
+    reasoning: boolean
+    reasoningDefault?: 'provider' | 'off' | 'low' | 'medium' | 'high'
+    reasoningStyle?: 'standard' | 'vllm'
+  }[]
   /** longest silence (no header, no chunk) before the request fails; default 60 s */
   timeoutMs?: number
   /** retries after a 429 or 5xx answer; default 2 */
@@ -165,6 +170,8 @@ export class OpenAiChatModel implements ChatModel {
       const res = await this.withRetry(call, () =>
         this.client.chat.completions.create(this.body(req, names.wire), { signal: call.signal }),
       )
+      const reported = usageOf(res.usage)
+      if (reported.usageReported) req.onUsage?.(reported)
       const choice = res.choices?.[0]
       if (!choice) throw failed('bad_response')
       const toolCalls: ChatToolCall[] = (choice.message.tool_calls ?? []).flatMap((c, i) =>
@@ -181,7 +188,7 @@ export class OpenAiChatModel implements ChatModel {
       return {
         text: choice.message.content ?? '',
         toolCalls,
-        usage: res.usage ? usageOf(res.usage) : { promptTokens: 0, completionTokens: 0 },
+        usage: reported,
         finishReason: FINISH[choice.finish_reason] ?? 'other',
       }
     } catch (e) {
@@ -211,15 +218,14 @@ export class OpenAiChatModel implements ChatModel {
           { signal: call.signal, timeout: IMAGE_TIMEOUT_MS },
         ),
       )
+      const reported = usageOf(res.usage, true)
+      if (reported.usageReported) req.onUsage?.(reported)
       const b64 = res.data?.[0]?.b64_json
       if (!b64) throw failed('bad_response')
       if (b64.length > IMAGE_B64_MAX) throw failed('too_large')
-      const u = res.usage
       return {
         data: Buffer.from(b64, 'base64'),
-        usage: u
-          ? { promptTokens: u.input_tokens ?? 0, completionTokens: u.output_tokens ?? 0 }
-          : null,
+        usage: reported,
       }
     } catch (e) {
       throw this.fail(e, call)
@@ -240,7 +246,15 @@ export class OpenAiChatModel implements ChatModel {
 
   /** 请求体：消息与工具换成线上格式；推理强度与 max_completion_tokens 只给标了推理的模型。 */
   private body(req: ChatRequest, wire: (name: string) => string) {
-    const reasoning = this.cfg.models.some((m) => m.id === req.model && m.reasoning)
+    const model = this.cfg.models.find((m) => m.id === req.model)
+    const reasoning = model?.reasoning ?? false
+    const effort = req.reasoning ?? model?.reasoningDefault ?? 'provider'
+    const thinking =
+      reasoning && effort !== 'provider'
+        ? model?.reasoningStyle === 'vllm'
+          ? { chat_template_kwargs: { enable_thinking: effort !== 'off' } }
+          : { reasoning_effort: effort === 'off' ? ('none' as const) : effort }
+        : {}
     const tools: WireTool[] | undefined = req.tools?.length
       ? req.tools.map((t) => ({
           type: 'function',
@@ -256,7 +270,7 @@ export class OpenAiChatModel implements ChatModel {
           ? { max_completion_tokens: req.maxTokens }
           : { max_tokens: req.maxTokens }
         : {}),
-      ...(reasoning && req.reasoning ? { reasoning_effort: req.reasoning } : {}),
+      ...thinking,
     }
   }
 
@@ -371,11 +385,6 @@ export function toWire(
       return { role: m.role, content: m.content }
   }
 }
-
-const usageOf = (u: { prompt_tokens?: number; completion_tokens?: number }): ChatUsage => ({
-  promptTokens: u.prompt_tokens ?? 0,
-  completionTokens: u.completion_tokens ?? 0,
-})
 
 /** 中断原因：signal 带的 Error，或一个标准的 AbortError。 */
 const abortReason = (s: AbortSignal): unknown =>

@@ -1,4 +1,4 @@
-import type { AGENT_SEARCH_KINDS } from '@qiwu/shared'
+import type { AGENT_SEARCH_KINDS, AgentModelPricing } from '@qiwu/shared'
 import { Column, Entity } from 'typeorm'
 import type { Sealed } from '../../crypto/secret-box.js'
 import { BaseEntity } from '../../db/base.entity.js'
@@ -15,6 +15,10 @@ export interface ProviderModel {
   /** 图片模型：作为内置工具 `image.generate` 提供给智能体 */
   image?: boolean
   contextWindow: number
+  /** null/缺失表示尚未配置积分费率，不视为免费模型。 */
+  pricing?: AgentModelPricing | null
+  reasoningDefault?: 'provider' | 'off' | 'low' | 'medium' | 'high'
+  reasoningStyle?: 'standard' | 'vllm'
 }
 
 /**

@@ -1,8 +1,9 @@
 import type { SearchConfig, SearchConfigSource } from '../web/web-search.js'
 import { Injectable } from '@nestjs/common'
-import { type AGENT_SEARCH_KINDS, type AgentModelVo, Err } from '@qiwu/shared'
+import { type AGENT_SEARCH_KINDS, type AgentModelVo, agentModelPricing, Err } from '@qiwu/shared'
 import { BizError } from '../../http/biz-error.js'
 import type { ChatModel } from './chat-model.js'
+import type { AgentUsageTarget } from '../agent-ports.js'
 import { type ChatModelConfig, OpenAiChatModel } from './openai-chat-model.js'
 import {
   ProviderSettingsService,
@@ -16,6 +17,15 @@ export interface ResolvedModel {
   model: AgentModelVo
   chat: ChatModel
 }
+
+/** 调用前固定提供方、模型和费率；同名模型和调用中的调价不会混淆历史账目。 */
+export const usageTarget = (m: ResolvedModel, kind?: 'chat' | 'image'): AgentUsageTarget => ({
+  providerId: m.providerId,
+  providerName: m.providerName,
+  model: m.model.id,
+  pricing: m.model.pricing ? structuredClone(m.model.pricing) : null,
+  ...(kind && { kind }),
+})
 
 /** The search provider web search uses, its key opened. */
 export interface ResolvedSearch {
@@ -45,6 +55,9 @@ export class ProviderRegistry {
     const row = providerId === undefined ? rows[0] : rows.find((r) => Number(r.id) === providerId)
     const m = row && (model === undefined ? row.models[0] : row.models.find((x) => x.id === model))
     if (!row || !m) throw new BizError(Err.AGENT_NOT_CONFIGURED)
+    if (!m.pricing) throw new BizError(Err.AGENT_PRICING_REQUIRED)
+    const pricing = agentModelPricing.safeParse(m.pricing)
+    if (!pricing.success) throw new BizError(Err.AGENT_CREDIT_CONFIG_INVALID)
     return {
       providerId: Number(row.id),
       providerName: row.name,
@@ -56,11 +69,15 @@ export class ProviderRegistry {
         fast: m.fast ?? false,
         contextWindow: m.contextWindow,
         image: m.image ?? false,
+        pricing: pricing.data,
+        reasoningDefault: m.reasoningDefault ?? 'provider',
+        reasoningStyle: m.reasoningStyle ?? 'standard',
       },
       chat: this.connect({
         baseUrl: row.baseUrl,
         apiKey: this.providers.openKey(row),
         models: row.models,
+        retries: 0, // 每次持久调用只发一个物理请求，5xx 结果不明时不自动重发付费请求。
       }),
     }
   }
@@ -71,7 +88,7 @@ export class ProviderRegistry {
    */
   async resolveImage(): Promise<ResolvedModel | null> {
     for (const row of (await this.providers.rows()).filter((r) => r.enabled)) {
-      const m = row.models.find((x) => x.image)
+      const m = row.models.find((x) => x.image && x.pricing)
       if (m) return this.resolve(Number(row.id), m.id)
     }
     return null

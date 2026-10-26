@@ -1,3 +1,4 @@
+import { TEST_AGENT_PRICING } from '../setup/agent-pricing.js'
 // Agent model and search providers (see docs/agent.md): the platform settings API keeps keys sealed and
 // write-only (never answered, masked in the action log, kept when a save leaves them out, required again
 // when the target changes, dropped with the row), one default per table, platform-only and behind
@@ -73,8 +74,8 @@ const providerBody = (name: string, extra: object = {}) => ({
   name: `${PREFIX}${name}`,
   baseUrl,
   models: [
-    { id: 'chat-1', label: 'Chat 1' },
-    { id: 'think-1', reasoning: true, contextWindow: 128_000 },
+    { id: 'chat-1', label: 'Chat 1', pricing: TEST_AGENT_PRICING },
+    { id: 'think-1', reasoning: true, pricing: TEST_AGENT_PRICING, contextWindow: 128_000 },
   ],
   ...extra,
 })
@@ -167,6 +168,9 @@ describe('provider settings', () => {
           reasoning: false,
           vision: false,
           fast: false,
+          reasoningDefault: 'provider',
+          reasoningStyle: 'standard',
+          pricing: TEST_AGENT_PRICING,
           contextWindow: 64_000,
         },
         {
@@ -175,6 +179,9 @@ describe('provider settings', () => {
           reasoning: true,
           vision: false,
           fast: false,
+          reasoningDefault: 'provider',
+          reasoningStyle: 'standard',
+          pricing: TEST_AGENT_PRICING,
           contextWindow: 128_000,
         },
       ],
@@ -390,7 +397,13 @@ describe('ProviderRegistry', () => {
     expect(first).toMatchObject({
       providerId: def,
       providerName: `${PREFIX}reg-default`,
-      model: { id: 'chat-1', label: 'Chat 1', reasoning: false, contextWindow: 64_000 },
+      model: {
+        id: 'chat-1',
+        label: 'Chat 1',
+        reasoning: false,
+        pricing: TEST_AGENT_PRICING,
+        contextWindow: 64_000,
+      },
     })
     expect((await reg.resolve(def, 'think-1')).model).toMatchObject({
       id: 'think-1',
@@ -486,7 +499,15 @@ describe('OpenAiChatModel against a Chat Completions server', () => {
     expect(out).toEqual([
       { type: 'text', delta: 'Hel' },
       { type: 'text', delta: 'lo' },
-      { type: 'usage', usage: { promptTokens: 12, completionTokens: 7 } },
+      {
+        type: 'usage',
+        usage: expect.objectContaining({
+          promptTokens: 12,
+          completionTokens: 7,
+          totalTokens: 19,
+          usageReported: true,
+        }),
+      },
       {
         type: 'tool_call',
         call: { id: 'call_a', name: 'demo.customer.search', arguments: '{"kw":"acme"}' },
@@ -662,7 +683,12 @@ describe('OpenAiChatModel against a Chat Completions server', () => {
     expect(await model().complete({ model: 'chat-1', tools, messages: [] })).toEqual({
       text: 'calling',
       toolCalls: [{ id: 'c1', name: 'plan.update', arguments: '{"a":1}' }],
-      usage: { promptTokens: 3, completionTokens: 2 },
+      usage: expect.objectContaining({
+        promptTokens: 3,
+        completionTokens: 2,
+        totalTokens: 5,
+        usageReported: true,
+      }),
       finishReason: 'tool_calls',
     })
     expect(seen[0]!.body.stream).toBeUndefined()

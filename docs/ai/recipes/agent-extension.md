@@ -110,7 +110,7 @@
    }
    ```
 
-   第一个非 `null` 的结论生效，`escalate` 也结束链条。运行时只承认有资格的放行：`by: 'review'` 的 `approve` 只在工具此刻的策略是 `review`、会话此刻是“自动审查”模式时算数，`by: 'pre_approved'` 只认自动化的预先同意本身复核过的；其余的放行一律降为交给人，所以自写的审查者主要用来驳回和交给人。审查者看不到工具输出；参数是助手写的，可能受外部内容影响，不能当成用户的意思。要调用模型时先 `ctx.overBudget()`，用完 `ctx.recordUsage()`，请求带上 `ctx.signal`（中断时运行时不再等它），写法照 `apps/server/src/core/agent/runtime/auto-reviewer.ts`。理由显示在卡片上，写成词条：服务端片段 `apps/server/src/i18n/{zh-CN,en-US}/` 下项目自己的 `<domain>.<business>.json`（见[多语言词条](i18n.md)）。
+   第一个非 `null` 的结论生效，`escalate` 也结束链条。运行时只承认有资格的放行：`by: 'review'` 的 `approve` 只在工具此刻的策略是 `review`、会话此刻是“自动审查”模式时算数，`by: 'pre_approved'` 只认自动化的预先同意本身复核过的；其余的放行一律降为交给人，所以自写的审查者主要用来驳回和交给人。审查者看不到工具输出；参数是助手写的，可能受外部内容影响，不能当成用户的意思。需要调用模型时使用 `ctx.invokeModel()` 并透传它给出的 `signal` 和 `onUsage`，写法照 `apps/server/src/core/agent/runtime/auto-reviewer.ts`。理由显示在卡片上，写成词条：服务端片段 `apps/server/src/i18n/{zh-CN,en-US}/` 下项目自己的 `<domain>.<business>.json`（见[多语言词条](i18n.md)）。
 
 5. **注册。** 把类加进模块的 `providers`；模块文件是生成物时在 `<business>.agent.ts` 里单独建一个小模块，加进 `apps/server/src/modules/project.module.ts` 的 `imports`。不需要迁移和菜单。新的内置工具出现在“智能体设置 → 工具策略”里（来源“内置”），root 可以停用或改策略。
 
@@ -127,6 +127,24 @@ pnpm verify
 - 内置工具：模型调用后得到预期结果；写入类停在审批上、只读模式下不提供；只读类重做一次（同一调用再执行）不多出条目。
 - 上下文贡献者：文字作为用户消息出现在历史前面、不在系统提示里；`/status`（`turnId` 为 `null`）不写库。
 - 审批审查者：命中规则时卡片交给人并带上理由；不命中时返回 `null`、后面的审查者照常判断；只读与计划模式下不被调用。
+
+模型调用记账必须传入提供方 ID、名称、精确模型标识和该次调用的费率快照，不能再只传模型名；同名模型可能属于不同提供方。`ctx.invokeModel(target, work)` 在请求前持久登记调用，并使用供应商实际返回的用量，未知字段保留空值，不用字符估算或固定图片 Token 冒充收费。子任务汇总复用已经计算的积分，不能重复写每日账本或按后来调价重算。
+
+非流式补全或图片调用用本次请求独立的 `onUsage` 闭包接收实际用量：HTTP 成功却因正文无效失败时也不能丢掉已报告消费。成功只记返回用量一次，失败记本次回执或未知；不要把用量挂在可复用的取消错误上，也不要包装错误改变取消/租约失效对象的身份。流式调用沿用用量事件。
+
+内置写工具与审批审查扩展取得本次最新模型后，可沿以下入口调用；上下文贡献者保持读取本地上下文，不另开模型请求。
+
+```ts
+await ctx.invokeModel(usageTarget(model), (receipt) =>
+  model.chat.complete({
+    model: model.model.id,
+    messages,
+    ...receipt,
+  }),
+)
+```
+
+`usageTarget` 来自核心 provider registry。每次调用前重新解析当前模型，不缓存旧费率；不要覆盖 receipt 的取消信号或回执。使用 `invokeModel` 后不要再次调用 `recordUsage` 或重复汇总父轮；旧 `recordUsage` 仅为兼容的事后观测接口，不能替代可恢复调用入口。
 
 ## 常见错误
 

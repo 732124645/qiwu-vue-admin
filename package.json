@@ -8,7 +8,7 @@
     "node": ">=22.22.1"
   },
   "scripts": {
-    "dev": "pnpm -r --parallel dev",
+    "dev": "pnpm -r --parallel --filter @qiwu/server --filter @qiwu/web dev",
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",

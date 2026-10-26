@@ -87,6 +87,48 @@
           }
         ]
       }
+    },
+    {
+      "files": [
+        "apps/server/test/db/db-migrations.spec.ts",
+        "apps/server/test/db/tenancy-harden.spec.ts",
+        "apps/server/test/db/agent-credits-migration.spec.ts",
+        "apps/server/test/db/agent-recovery-migration.spec.ts"
+      ],
+      "rules": {
+        "vitest/no-standalone-expect": [
+          "error",
+          {
+            "additionalTestBlockFunctions": ["test"]
+          }
+        ],
+        "vitest/expect-expect": [
+          "error",
+          {
+            "additionalTestBlockFunctions": ["test"]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "apps/server/test/db/db-migrations.spec.ts",
+        "apps/server/test/db/tenancy-harden.spec.ts"
+      ],
+      "rules": {
+        "vitest/no-standalone-expect": [
+          "error",
+          {
+            "additionalTestBlockFunctions": ["it", "it.each"]
+          }
+        ],
+        "vitest/expect-expect": [
+          "error",
+          {
+            "additionalTestBlockFunctions": ["it", "it.each"]
+          }
+        ]
+      }
     }
   ]
 }

@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import {
+  agentCreditAmount,
   AGENT_INSTRUCTIONS_PARAM,
   AGENT_LIMIT_PARAMS,
   AGENT_PAUSED_PARAM,
@@ -22,9 +23,15 @@ const LIMITS = Object.entries(AGENT_LIMIT_PARAMS) as [keyof typeof AGENT_LIMIT_P
 const instructions = ref('')
 /** 限额输入框的值（参数键 → 数字），跟随载入的参数 */
 const limits = reactive<Record<string, number | undefined>>({})
+const credits = reactive<Record<string, string>>({})
+const isCredits = (name: string) => name.endsWith('Credits')
 watch(params, (p) => {
   instructions.value = p[AGENT_INSTRUCTIONS_PARAM]?.paramValue ?? ''
-  for (const [, key] of LIMITS) {
+  for (const [name, key] of LIMITS) {
+    if (isCredits(name)) {
+      credits[key] = p[key]?.paramValue ?? ''
+      continue
+    }
     const v = Number(p[key]?.paramValue)
     limits[key] = Number.isFinite(v) ? v : undefined
   }
@@ -33,8 +40,19 @@ const on = (key: string) => params.value[key]?.paramValue === 'true'
 
 /** 保存全部限额（只发改过的）。空的输入框不保存。 */
 function saveLimits() {
+  if (
+    Object.values(credits).some(
+      (value) => value !== '' && !agentCreditAmount.safeParse(value).success,
+    )
+  ) {
+    ElMessage.error(t('agent.admin.param.creditInvalid'))
+    return
+  }
   const values = Object.fromEntries(
-    LIMITS.flatMap(([, key]) => (limits[key] == null ? [] : [[key, String(limits[key])]])),
+    LIMITS.flatMap(([name, key]) => {
+      const value = isCredits(name) ? credits[key] : limits[key]
+      return value == null || value === '' ? [] : [[key, String(value)]]
+    }),
   )
   return save(values, 'limits')
 }
@@ -105,18 +123,28 @@ async function setPaused(paused: boolean) {
     </el-button>
 
     <h3 class="param-tab__title">{{ t('agent.admin.param.limits') }}</h3>
+    <p class="param-tab__hint">{{ t('agent.admin.param.creditsHint') }}</p>
     <el-form label-position="top" class="param-tab__limits" @submit.prevent>
       <el-form-item
         v-for="[name, key] in LIMITS"
         :key="key"
         :label="t(`agent.admin.limit.${name}`)"
       >
+        <el-input
+          v-if="isCredits(name)"
+          v-model="credits[key]"
+          inputmode="decimal"
+          maxlength="19"
+          :disabled="!isRoot || saving != null"
+          :aria-label="t(`agent.admin.limit.${name}`)"
+        />
         <el-input-number
+          v-else
           v-model="limits[key]"
-          :min="0"
+          :min="1"
           :step="1"
           :precision="0"
-          :disabled="!isRoot"
+          :disabled="!isRoot || saving != null"
           controls-position="right"
           :aria-label="t(`agent.admin.limit.${name}`)"
         />

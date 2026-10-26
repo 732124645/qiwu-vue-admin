@@ -11,13 +11,14 @@ import {
 } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
-import { useDebounceFn, useEventListener, useMediaQuery } from '@vueuse/core'
+import { useDebounceFn, useEventListener, useElementSize, useMediaQuery } from '@vueuse/core'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import dayjs from 'dayjs'
 import {
   agentPerms,
   RT,
   type AgentContext,
+  type AgentThreadCreate,
   type AgentItemVo,
   type AgentOptionsVo,
   type AgentProfileVo,
@@ -30,16 +31,30 @@ import IconButton from '@/core/components/IconButton.vue'
 import { toastRest } from '@/core/composables/use-crud'
 import { usePerm } from '@/core/permission'
 import { onRealtime, realtimeStatus } from '@/core/realtime/socket'
-import { saveBlob } from '@/core/request/http'
+import { ApiError, saveBlob } from '@/core/request/http'
 import { useAuthStore } from '@/core/stores/auth'
 import ChatItem from './ChatItem.vue'
+import ContextPanel from './ContextPanel.vue'
+import SubtaskDetail from './SubtaskDetail.vue'
 import Composer, { type ComposerMessage, type ComposerSettings } from './Composer.vue'
 import NotifySettings from './NotifySettings.vue'
 import ProfileMemoryBar, { type ProfileDraft } from './ProfileMemoryBar.vue'
 import ShortcutSettings from './ShortcutSettings.vue'
 import { comboOf, loadShortcuts, saveShortcuts } from './shortcuts'
 import ThreadList from './ThreadList.vue'
-import { applyItemEvent, catchUpSeq, chatRows, mergeItems, type SlashCommand } from './thread-state'
+import {
+  applyItemEvent,
+  catchUpSeq,
+  chatRows,
+  mergeItems,
+  mergeTurn,
+  mergeThread,
+  loadDelivery,
+  saveDelivery,
+  clearHistory,
+  type PendingDeliveryIds,
+  type SlashCommand,
+} from './thread-state'
 import { pendingContext, pendingRoute } from './use-agent-context'
 
 /**
@@ -52,6 +67,25 @@ import { pendingContext, pendingRoute } from './use-agent-context'
  */
 // keep-alive 名称 = 菜单种子的 component_name
 defineOptions({ name: 'AgentChat' })
+const props = withDefaults(
+  defineProps<{
+    embedded?: boolean
+    active?: boolean
+    entryContext?: AgentContext | null
+    entryRoute?: string | null
+  }>(),
+  { embedded: false, active: true, entryContext: null, entryRoute: null },
+)
+const host = ref<HTMLElement>()
+const { width: hostWidth } = useElementSize(host)
+const historyOpen = ref(!props.embedded)
+const smallViewport = useMediaQuery('(max-width: 640px)')
+const smallPanelViewport = useMediaQuery('(max-width: 1279px)')
+const narrow = computed(() => (hostWidth.value > 0 ? hostWidth.value <= 640 : smallViewport.value))
+const panelNarrow = computed(() =>
+  hostWidth.value > 0 ? hostWidth.value < (props.embedded ? 900 : 1120) : smallPanelViewport.value,
+)
+const childId = ref<number | null>(null)
 
 const { t } = useI18n()
 const route = useRoute()
@@ -65,6 +99,7 @@ const composerRef = ref<InstanceType<typeof Composer>>()
 
 // ---- 选项 ----
 const options = shallowRef<AgentOptionsVo | null>(null)
+let optionsRequest = 0
 /** 未配置模型或已暂停时输入框不可用（接口也会拒绝） */
 const unavailable = computed(
   () => !options.value || options.value.paused || !options.value.defaults,
@@ -79,14 +114,34 @@ function defaultSettings(): ComposerSettings {
     planMode: false,
   }
 }
-/** 读输入框选项（`route`：入口按钮所在页面，开场提示随它）；新会话草稿随之换成默认模型与审批模式。 */
+/** 只接收最新草稿来源的选项；慢响应不能覆盖用户已选的模型、审批模式或方案。 */
 async function loadOptions(route?: string) {
+  const mine = ++optionsRequest
+  const selection = settings.value
   try {
-    options.value = await agentApi.options(route)
-    if (!thread.value) settings.value = defaultSettings()
+    const next = await agentApi.options(route)
+    if (mine !== optionsRequest) return
+    options.value = next
+    if (!thread.value && settings.value === selection) settings.value = defaultSettings()
   } catch (e) {
-    toastRest(e)
+    if (mine === optionsRequest) toastRest(e)
   }
+}
+
+/** 子任务只从当前已授权卡片选取，打开详情不切换主会话。 */
+function inspectChild(id: number) {
+  if (
+    loadingThread.value ||
+    readOnly.value ||
+    !thread.value ||
+    !items.value.some(
+      (item) => item.kind === 'subagent' && item.payload.tasks.some((task) => task.threadId === id),
+    )
+  )
+    return
+  childId.value = id
+  inspectedId.value = null
+  panelOpen.value = true
 }
 
 // ---- 当前会话 ----
@@ -100,14 +155,39 @@ const settings = ref<ComposerSettings>(defaultSettings())
 /** 新会话草稿是否是临时会话（不进列表，离开即删） */
 const temporary = ref(false)
 /** 窄屏（≤ 640px）：方案、记忆、通知、快捷键与新窗口收进“更多”展开的一行，避免头部横向溢出 */
-const narrow = useMediaQuery('(max-width: 640px)')
 const moreOpen = ref(false)
+const panelOpen = ref(false)
+const panelScope = ref(0)
+const inspectedId = ref<number | null>(null)
+const panelItems = computed(() => (loadingThread.value ? [] : items.value))
+/** 换会话时卸载旧预览；等待新应答期间不显示上一会话的来源或产物。 */
+function resetPanel() {
+  childId.value = null
+  inspectedId.value = null
+  panelScope.value++
+}
+/** 仅打开当前已加载并获准查看的正文，忽略旧组件或无效ID传来的事件。 */
+function inspectItem(id: number) {
+  if (
+    loadingThread.value ||
+    !items.value.some(
+      (item) => item.id === id && (item.kind === 'assistant' || item.kind === 'report'),
+    )
+  )
+    return
+  childId.value = null
+  inspectedId.value = id
+  panelScope.value++
+  panelOpen.value = true
+}
+
 /** 新会话草稿的配置方案（undefined：默认方案）与是否使用记忆 */
 const draft = ref<ProfileDraft>({ profileId: undefined, memoryEnabled: true })
 /** 正在编辑最后一条用户消息：发送时从它之前分叉出新会话再发 */
 const editing = ref<{ seq: number } | null>(null)
 /** 只读分享快照的 token */
 const sharedToken = ref<string | null>(null)
+const readOnly = computed(() => !!sharedToken.value || thread.value?.parentThreadId != null)
 const loadingThread = ref(false)
 const showStatus = ref(false)
 const stopping = ref(false)
@@ -138,6 +218,240 @@ const contextUse = computed(() =>
     : null,
 )
 let openSeq = 0
+let catchUpRequest = 0
+const auth = useAuthStore()
+const actor = computed(() => (auth.me ? `${auth.me.user.id}:${auth.tenant?.id ?? 1}` : ''))
+type Delivery = PendingDeliveryIds & {
+  request?: ComposerMessage
+  create?: Partial<AgentThreadCreate>
+  fork?: { threadId: number; seq: number }
+}
+const pendingDelivery = shallowRef<Delivery | null>(null)
+const checkingDelivery = ref(false)
+const deliveryStored = ref(true)
+const acknowledgingRecovery = ref(false)
+let deliveryEpoch = 0
+let clientDraftId: string = crypto.randomUUID()
+
+/** 仅保存回执标识；原始待确认消息只在组件内存，刷新后不能自动重放。 */
+function rememberDelivery(next: Delivery | null) {
+  pendingDelivery.value = next
+  if (actor.value) deliveryStored.value = saveDelivery(actor.value, next)
+}
+
+function sameDelivery(previous: ComposerMessage, next: ComposerMessage) {
+  if (
+    previous.draftRevision !== undefined &&
+    next.draftRevision !== undefined &&
+    previous.draftRevision !== next.draftRevision
+  )
+    return false
+  const normalized = (value: ComposerMessage, fallback: ComposerMessage) =>
+    JSON.stringify({
+      text: value.text.trim(),
+      skill: value.skill ?? fallback.skill ?? null,
+      fileIds: value.fileIds ?? [],
+      mode: value.mode ?? fallback.mode ?? 'steer',
+    })
+  return normalized(previous, previous) === normalized(next, previous)
+}
+
+/** 连接恢复只核对接收事实；任何 POST 重试仍须由用户再次点击发送。 */
+async function reconcileDelivery(
+  notify = false,
+): Promise<'accepted' | 'removed' | 'missing' | 'unknown'> {
+  const pending = pendingDelivery.value
+  if (
+    !pending ||
+    checkingDelivery.value ||
+    readOnly.value ||
+    (!props.embedded && typeof route.query.shared === 'string')
+  )
+    return 'unknown'
+  const owner = actor.value,
+    epoch = deliveryEpoch,
+    scope = openSeq
+  const current = () =>
+    owner === actor.value &&
+    epoch === deliveryEpoch &&
+    pendingDelivery.value?.clientMessageId === pending.clientMessageId
+  checkingDelivery.value = true
+  try {
+    if (!pending.threadId) {
+      const draftReceipt = await agentApi.draftReceipt(pending.clientDraftId)
+      if (!current()) return 'unknown'
+      if (draftReceipt.clientDraftId !== pending.clientDraftId) return 'unknown'
+      if (draftReceipt.status === 'removed') {
+        rememberDelivery(null)
+        if (!thread.value) clientDraftId = crypto.randomUUID()
+        composerRef.value?.acknowledge(pending.request)
+        ElMessage.info(t('agent.chat.delivery.removed'))
+        return 'removed'
+      }
+      pending.threadId = draftReceipt.threadId
+      rememberDelivery({ ...pending })
+    }
+    const receipt = await agentApi.messageReceipt(pending.threadId!, pending.clientMessageId)
+    if (!current()) return 'unknown'
+    if (
+      receipt.clientMessageId !== pending.clientMessageId ||
+      receipt.threadId !== pending.threadId
+    )
+      return 'unknown'
+    // 恢复新建会话时先取得当前轮次，不能把旧接受轮次当成排队消息现在所处的新轮次。
+    const restored =
+      receipt.status === 'accepted' &&
+      !thread.value &&
+      pending.request &&
+      openSeq === scope &&
+      composerRef.value?.matchesDraft(pending.request)
+        ? await agentApi.items(receipt.threadId).catch(() => null)
+        : null
+    if (!current()) return 'unknown'
+    rememberDelivery(null)
+    if (receipt.status === 'removed') {
+      if (!thread.value || thread.value.id === receipt.threadId)
+        composerRef.value?.acknowledge(pending.request)
+      if (thread.value?.id === receipt.threadId) {
+        thread.value = null
+        items.value = []
+        turn.value = null
+        status.value = null
+        setQuery({})
+      }
+      if (!thread.value) clientDraftId = crypto.randomUUID()
+      ElMessage.info(t('agent.chat.delivery.removed'))
+      return 'removed'
+    }
+    const sameFrame = !thread.value || thread.value.id === receipt.threadId
+    const untouched = sameFrame && (composerRef.value?.matchesDraft(pending.request) ?? false)
+    if (sameFrame) composerRef.value?.acknowledge(pending.request)
+    if (untouched && openSeq === scope) {
+      if (!thread.value && restored?.thread.id === receipt.threadId) {
+        thread.value = restored.thread
+        items.value = restored.items
+        settings.value = settingsOf(restored.thread)
+        turn.value = restored.turn
+        context.value = null
+        setQuery({ thread: receipt.threadId })
+        listRef.value?.upsert(restored.thread)
+      }
+      if (thread.value?.id === receipt.threadId) await catchUp()
+    }
+    if (!thread.value) clientDraftId = crypto.randomUUID()
+    if (notify && owner === actor.value && epoch === deliveryEpoch)
+      ElMessage.success(t('agent.chat.delivery.accepted'))
+    return 'accepted'
+  } catch (error) {
+    if (!current()) return 'unknown'
+    if (error instanceof ApiError && error.status === 404) {
+      if (notify)
+        ElMessage.warning(
+          t(pending.request ? 'agent.chat.delivery.missing' : 'agent.chat.delivery.memoryLost'),
+        )
+      return 'missing'
+    }
+    if (notify) toastRest(error)
+    return 'unknown'
+  } finally {
+    if (owner === actor.value && epoch === deliveryEpoch) checkingDelivery.value = false
+  }
+}
+
+/** 放弃本地待确认标识不等于停止服务器任务，必须明确提示后才允许另发新消息。 */
+async function discardDelivery(): Promise<boolean> {
+  if (!pendingDelivery.value) return true
+  const owner = actor.value,
+    epoch = deliveryEpoch,
+    id = pendingDelivery.value.clientMessageId
+  try {
+    await ElMessageBox.confirm(t('agent.chat.delivery.clearConfirm'), t('agent.chat.title'), {
+      type: 'warning',
+    })
+  } catch {
+    return false
+  }
+  if (
+    owner !== actor.value ||
+    epoch !== deliveryEpoch ||
+    pendingDelivery.value?.clientMessageId !== id
+  )
+    return false
+  deliveryEpoch++
+  checkingDelivery.value = false
+  rememberDelivery(null)
+  if (!thread.value) clientDraftId = crypto.randomUUID()
+  return true
+}
+
+/** 核对业务后仅解除当前风险代次；不续跑旧轮次、排队消息或自动化。 */
+async function acknowledgeRecovery() {
+  const target = thread.value
+  if (!target?.recoveryRequired || acknowledgingRecovery.value) return
+  const owner = actor.value,
+    epoch = deliveryEpoch
+  try {
+    await ElMessageBox.confirm(t('agent.chat.recovery.confirm'), t('agent.chat.title'), {
+      type: 'warning',
+    })
+  } catch {
+    return
+  }
+  if (
+    owner !== actor.value ||
+    epoch !== deliveryEpoch ||
+    thread.value?.id !== target.id ||
+    (thread.value.recoveryRevision ?? 0) !== (target.recoveryRevision ?? 0)
+  )
+    return
+  acknowledgingRecovery.value = true
+  try {
+    const next = await agentApi.acknowledgeRecovery(target.id, target.recoveryRevision ?? 0)
+    if (
+      owner !== actor.value ||
+      epoch !== deliveryEpoch ||
+      thread.value?.id !== target.id ||
+      (thread.value.recoveryRevision ?? 0) !== (target.recoveryRevision ?? 0)
+    )
+      return
+    catchUpRequest++
+    thread.value = next
+    listRef.value?.upsert(next)
+  } catch (error) {
+    if (owner === actor.value && epoch === deliveryEpoch) toastRest(error)
+  } finally {
+    if (owner === actor.value && epoch === deliveryEpoch) acknowledgingRecovery.value = false
+  }
+}
+
+watch(
+  actor,
+  (next, previous) => {
+    deliveryEpoch++
+    if (previous && previous !== next) {
+      saveDelivery(previous, null)
+      clearHistory()
+      optionsRequest++
+      openSeq++
+      thread.value = null
+      items.value = []
+      turn.value = null
+      options.value = null
+      context.value = null
+      resetPanel()
+      composerRef.value?.resetDraft()
+      if (next && props.active)
+        void loadOptions(props.embedded ? (props.entryRoute ?? undefined) : undefined)
+    }
+    const saved = next ? loadDelivery(next) : null
+    pendingDelivery.value = saved
+    deliveryStored.value = true
+    clientDraftId = saved?.clientDraftId ?? crypto.randomUUID()
+    checkingDelivery.value = false
+    acknowledgingRecovery.value = false
+  },
+  { immediate: true, flush: 'sync' },
+)
 
 const settingsOf = (th: AgentThreadVo): ComposerSettings => ({
   providerId: th.providerId,
@@ -147,6 +461,7 @@ const settingsOf = (th: AgentThreadVo): ComposerSettings => ({
   planMode: th.planMode,
 })
 function setQuery(p: { thread?: number; shared?: string }) {
+  if (props.embedded) return
   const query = { ...route.query }
   delete query.thread
   delete query.shared
@@ -163,15 +478,29 @@ function leaveTemporary(next: number | null) {
 
 /** 打开一个会话：读全部条目、最近一轮与上下文用量，滚到最新，标记已读。 */
 async function openThread(id: number) {
+  resetPanel()
   leaveTemporary(id)
   const mine = ++openSeq
+  const beforeItems = new Set(thread.value?.id === id ? items.value : [])
+  const beforeTurn = thread.value?.id === id ? turn.value : null
   loadingThread.value = true
   try {
     const d = await agentApi.items(id)
     if (mine !== openSeq) return
-    thread.value = d.thread
-    items.value = d.items
-    turn.value = d.turn
+    const sameThread = thread.value?.id === d.thread.id
+    const incomingIds = new Set(d.items.map((item) => item.id))
+    // 全量快照中的删除仍生效，只保留请求期间的新事件，以及快照里条目的较新本地版本。
+    const shown = sameThread
+      ? items.value.filter((item) => incomingIds.has(item.id) || !beforeItems.has(item))
+      : []
+    thread.value = mergeThread(thread.value, d.thread)
+    items.value = mergeItems(shown, d.items)
+    if (
+      !sameThread ||
+      turn.value === beforeTurn ||
+      (d.turn && (!turn.value || d.turn.id > turn.value.id))
+    )
+      turn.value = mergeTurn(sameThread ? turn.value : null, d.turn)
     context.value = null
     editing.value = null
     sharedToken.value = null
@@ -192,6 +521,7 @@ async function openThread(id: number) {
 
 /** 只读查看别人分享的会话快照（同租户；工具结果按查看者自己的权限显示）。 */
 async function openShared(token: string) {
+  resetPanel()
   leaveTemporary(null)
   const mine = ++openSeq
   loadingThread.value = true
@@ -213,7 +543,14 @@ async function openShared(token: string) {
 const sharedTitle = ref('')
 
 /** 新会话草稿（`/new`、`/clear`、新建按钮、Ctrl/⌘+K、入口按钮）：第一次发送时才在服务端创建。 */
-function newDraft(ctx: AgentContext | null = null) {
+async function newDraft(
+  ctx: AgentContext | null = props.embedded ? props.entryContext : null,
+  from: string | null = props.embedded ? props.entryRoute : null,
+) {
+  if (!(await discardDelivery())) return
+  clientDraftId = crypto.randomUUID()
+  if (props.embedded) historyOpen.value = false
+  resetPanel()
   leaveTemporary(null)
   openSeq++
   loadingThread.value = false
@@ -225,6 +562,7 @@ function newDraft(ctx: AgentContext | null = null) {
   editing.value = null
   sharedToken.value = null
   settings.value = defaultSettings()
+  void loadOptions(from ?? undefined)
   draft.value = { profileId: undefined, memoryEnabled: true }
   showStatus.value = false
   setQuery({})
@@ -237,13 +575,17 @@ function newDraft(ctx: AgentContext | null = null) {
  */
 async function catchUp() {
   const th = thread.value
-  if (!th) return
+  if (!th || !pageActive) return
+  const request = ++catchUpRequest,
+    scope = openSeq,
+    previousTurn = turn.value
   try {
     const d = await agentApi.items(th.id, catchUpSeq(items.value, turn.value))
-    if (thread.value?.id !== th.id) return
+    if (thread.value?.id !== th.id || openSeq !== scope || request !== catchUpRequest) return
     items.value = mergeItems(items.value, d.items)
-    turn.value = d.turn
-    thread.value = d.thread
+    if (turn.value === previousTurn || (d.turn && (!turn.value || d.turn.id > turn.value.id)))
+      turn.value = mergeTurn(turn.value, d.turn)
+    thread.value = mergeThread(thread.value, d.thread)
     markRead()
   } catch (e) {
     toastRest(e)
@@ -264,7 +606,7 @@ async function loadStatus() {
 
 // ---- 已读：页面显示着会话时，把看到的最后一条标为已读 ----
 let readSeq = 0
-let pageActive = true
+let pageActive = props.active
 const markRead = useDebounceFn(async () => {
   const th = thread.value
   const seq = items.value.at(-1)?.seq ?? 0
@@ -282,6 +624,7 @@ const markRead = useDebounceFn(async () => {
 /** 已为它加过未读数的条目：同一条目后续的改写（流式结束、审批决定）不再重复计数 */
 const counted = new Set<number>()
 onRealtime(RT.agentEvent, (ev) => {
+  if (!pageActive) return
   const list = listRef.value
   if (ev.type === 'turn')
     list?.patch(ev.threadId, {
@@ -302,8 +645,9 @@ onRealtime(RT.agentEvent, (ev) => {
   }
   if (ev.type === 'turn') {
     // 较早一轮迟到的状态不覆盖当前轮
-    if (!turn.value || ev.turn.id >= turn.value.id) turn.value = ev.turn
+    turn.value = mergeTurn(turn.value, ev.turn)
     if (ev.turn.status !== 'running') void loadStatus()
+    if (ev.turn.status !== 'running' && ev.turn.status !== 'waiting') void catchUp()
     return
   }
   const next = applyItemEvent(items.value, ev)
@@ -313,8 +657,9 @@ onRealtime(RT.agentEvent, (ev) => {
 })
 // 断线期间的事件不会重发：重新连上后补齐当前会话并重读列表
 watch(realtimeStatus, (now, before) => {
-  if (now !== 'up' || before === 'up') return
+  if (!pageActive || now !== 'up' || before === 'up') return
   void catchUp()
+  void reconcileDelivery()
   listRef.value?.refresh()
 })
 
@@ -336,10 +681,13 @@ watch(items, () => follow.value && void toBottom())
 /**
  * 新建会话（草稿设置、配置方案与记忆开关、带来的上下文、是否临时）；不带标题，服务端在第一轮后自动起名。
  */
-async function createThread() {
+async function createThread(delivery: Delivery) {
+  // 点击发送即锁定当时的选择，尚未返回的草稿选项不能再替换它。
+  optionsRequest++
   const s = settings.value
   const d = draft.value
-  const th = await agentApi.createThread({
+  const input = delivery.create ?? {
+    clientDraftId: delivery.clientDraftId,
     approvalMode: s.approvalMode,
     planMode: s.planMode,
     // undefined：服务端取本人的默认方案；null：明确不用方案
@@ -349,9 +697,10 @@ async function createThread() {
     ...(s.providerId != null && s.model ? { providerId: s.providerId, model: s.model } : {}),
     ...(s.reasoning ? { reasoning: s.reasoning } : {}),
     ...(context.value ? { context: context.value } : {}),
-  })
-  context.value = null
-  temporary.value = false
+  }
+  if (!delivery.create)
+    delivery.create = JSON.parse(JSON.stringify(input)) as Partial<AgentThreadCreate>
+  const th = await agentApi.createThread(delivery.create)
   return th
 }
 
@@ -371,7 +720,7 @@ function applyProfile(p: AgentProfileVo | null) {
 /** 会话的记忆开关已保存：换上服务端返回的会话。 */
 function onThreadUpdated(next: AgentThreadVo) {
   if (thread.value?.id !== next.id) return
-  thread.value = next
+  thread.value = mergeThread(thread.value, next)
   listRef.value?.upsert(next)
 }
 
@@ -380,12 +729,67 @@ function onThreadUpdated(next: AgentThreadVo) {
  * 运行中按输入框选的方式追加或排队。
  */
 async function submit(msg: ComposerMessage): Promise<boolean> {
+  const owner = actor.value,
+    epoch = deliveryEpoch
+  let delivery = pendingDelivery.value
+  if (delivery) {
+    const outcome = await reconcileDelivery()
+    if (owner !== actor.value || epoch !== deliveryEpoch) return false
+    if (outcome === 'accepted' || outcome === 'removed') {
+      // 本次点击只确认原意图；用户后写的新草稿必须再次明确点击才能成为另一条消息。
+      return (
+        (!thread.value || thread.value.id === delivery.threadId) &&
+        !!delivery.request &&
+        sameDelivery(delivery.request, msg)
+      )
+    } else if (outcome !== 'missing') return false
+    else if (
+      !delivery.request ||
+      !sameDelivery(delivery.request, msg) ||
+      (thread.value && delivery.threadId && thread.value.id !== delivery.threadId)
+    ) {
+      ElMessage.warning(t('agent.chat.delivery.different'))
+      return false
+    }
+  }
+  const fresh = !delivery
+  if (!delivery) {
+    delivery = {
+      // 编辑重发是新的分叉意图，不能复用原创建会话或前一次分叉的永久幂等标识。
+      clientDraftId: editing.value ? crypto.randomUUID() : clientDraftId,
+      clientMessageId: crypto.randomUUID(),
+      threadId: editing.value ? null : (thread.value?.id ?? null),
+      request: structuredClone(msg),
+      ...(editing.value && thread.value
+        ? { fork: { threadId: thread.value.id, seq: editing.value.seq - 1 } }
+        : {}),
+    }
+    rememberDelivery(delivery)
+  }
+  const selected = delivery
+  const current = () =>
+    owner === actor.value &&
+    epoch === deliveryEpoch &&
+    pendingDelivery.value?.clientMessageId === selected.clientMessageId
+  const scope = openSeq
   try {
     let th = thread.value
-    const fork = editing.value
-    if (th && fork) th = await agentApi.fork(th.id, fork.seq - 1)
-    else if (!th) th = await createThread()
-    if (th.id !== thread.value?.id) {
+    const fork = selected.fork
+    if (fork) th = await agentApi.fork(fork.threadId, fork.seq, selected.clientDraftId)
+    else if (!th || (selected.threadId && th.id !== selected.threadId)) {
+      if (selected.threadId) {
+        const receipt = await agentApi.draftReceipt(selected.clientDraftId)
+        if (receipt.status === 'removed' || !receipt.thread)
+          throw new Error(t('agent.chat.delivery.removed'))
+        th = receipt.thread
+      } else th = await createThread(selected)
+    }
+    if (!current()) return false
+    selected.threadId = th.id
+    rememberDelivery({ ...selected })
+    if (th.id !== thread.value?.id && openSeq === scope) {
+      context.value = null
+      temporary.value = false
       openSeq++
       thread.value = th
       items.value = []
@@ -396,12 +800,32 @@ async function submit(msg: ComposerMessage): Promise<boolean> {
       setQuery({ thread: th.id })
       if (fork) await openThread(th.id)
     }
-    turn.value = await agentApi.send(th.id, msg)
-    follow.value = true
-    await catchUp()
-    void loadStatus()
-    return true
+    const payload = { ...selected.request! }
+    delete payload.draftRevision
+    const result = await agentApi.send(th.id, {
+      ...payload,
+      clientMessageId: selected.clientMessageId,
+    })
+    if (!current()) return false
+    rememberDelivery(null)
+    if (thread.value?.id === th.id) {
+      turn.value = mergeTurn(turn.value, result)
+      follow.value = true
+      await catchUp()
+      void loadStatus()
+    }
+    return thread.value?.id === th.id
   } catch (e) {
+    if (!current()) return false
+    const outcome = await reconcileDelivery()
+    if (owner !== actor.value || epoch !== deliveryEpoch) return false
+    if (outcome === 'accepted' || outcome === 'removed')
+      return !thread.value || thread.value.id === selected.threadId
+    // 首次请求明确被业务拒绝时保留输入供修正；旧的未知尝试与短防重 429 仍必须继续核对。
+    if (fresh && e instanceof ApiError && e.status >= 400 && e.status < 500 && e.status !== 429) {
+      rememberDelivery(null)
+      if (!thread.value) clientDraftId = crypto.randomUUID()
+    }
     toastRest(e)
     return false
   }
@@ -424,7 +848,7 @@ async function stop() {
 // 已有会话时，换模型、推理强度、审批模式或计划模式立即保存到会话上
 watch(settings, async (s) => {
   const th = thread.value
-  if (!th) return
+  if (!th || readOnly.value) return
   const now = settingsOf(th)
   if (JSON.stringify(now) === JSON.stringify(s)) return
   try {
@@ -435,7 +859,7 @@ watch(settings, async (s) => {
       planMode: s.planMode,
     })
     if (thread.value?.id !== th.id) return
-    thread.value = next
+    thread.value = mergeThread(thread.value, next)
     listRef.value?.upsert(next)
   } catch (e) {
     toastRest(e)
@@ -447,8 +871,12 @@ watch(settings, async (s) => {
 async function fork(seq: number) {
   const th = thread.value
   if (!th) return
+  const owner = actor.value,
+    epoch = deliveryEpoch,
+    scope = openSeq
   try {
-    const next = await agentApi.fork(th.id, seq)
+    const next = await agentApi.fork(th.id, seq, crypto.randomUUID())
+    if (owner !== actor.value || epoch !== deliveryEpoch || scope !== openSeq) return
     listRef.value?.upsert(next)
     await openThread(next.id)
   } catch (e) {
@@ -570,7 +998,7 @@ async function runPlan() {
   try {
     const next = await agentApi.updateThread(th.id, { planMode: false })
     if (thread.value?.id !== th.id) return
-    thread.value = next
+    thread.value = mergeThread(thread.value, next)
     settings.value = settingsOf(next)
     listRef.value?.upsert(next)
     await submit({ text: t('agent.chat.planRun.text') })
@@ -601,9 +1029,17 @@ async function onCommand(cmd: SlashCommand) {
       if (perm.has(agentPerms.setting.browse) && router.hasRoute(SETTING_ROUTE))
         return void router.push({ name: SETTING_ROUTE })
       return ElMessage.warning(t('agent.chat.slash.noSetting'))
-    case 'status':
+    case 'status': {
       showStatus.value = true
-      return loadStatus()
+      await loadStatus()
+      await nextTick()
+      // 状态卡与消息共用滚动区，先展示本轮积分，不把输入框顶出工作区。
+      const stream = streamRef.value
+      const card = stream?.querySelector<HTMLElement>('.agent-chat__status')
+      if (stream && card)
+        stream.scrollTop += card.getBoundingClientRect().top - stream.getBoundingClientRect().top
+      return
+    }
   }
 }
 
@@ -618,7 +1054,7 @@ useEventListener(window, 'keydown', (e: KeyboardEvent) => {
   if (!combo) return
   if (combo === map.newChat) newDraft()
   else if (combo === map.focusComposer) composerRef.value?.focus()
-  else if (combo === map.togglePlan && !sharedToken.value)
+  else if (combo === map.togglePlan && !readOnly.value)
     settings.value = { ...settings.value, planMode: !settings.value.planMode }
   else return
   e.preventDefault()
@@ -629,7 +1065,7 @@ function openInWindow() {
   const th = thread.value
   if (!th) return
   window.open(
-    router.resolve({ path: route.path, query: { thread: th.id } }).href,
+    router.resolve({ name: 'agent-chat', query: { thread: th.id } }).href,
     '_blank',
     'noopener',
   )
@@ -641,41 +1077,127 @@ function takeContext() {
   const ctx = pendingContext.value
   if (!ctx) return false
   pendingContext.value = null
-  newDraft(ctx)
   const from = pendingRoute.value
   pendingRoute.value = null
-  if (from) void loadOptions(from)
+  newDraft(ctx, from)
   return true
 }
-if (!pendingRoute.value) void loadOptions()
+/** 地址中的会话编号只接受单个安全正整数；不把数组或截断后的字符串当成目标。 */
+function queryThreadId(value: unknown): number | null {
+  if (typeof value !== 'string' || !/^\d+$/.test(value)) return null
+  const id = Number(value)
+  return Number.isSafeInteger(id) && id > 0 ? id : null
+}
+
+// 同一路由的通知入口不会重建页面；沿用打开会话流程，保留未发送文字和待核对的原投递标识。
+watch(
+  () => [route.name, route.query.thread, route.query.shared],
+  () => {
+    if (props.embedded || route.name !== 'agent-chat') return
+    const shared = route.query.shared
+    if (typeof shared === 'string' && shared) {
+      if (shared !== sharedToken.value) void openShared(shared)
+      return
+    }
+    const id = queryThreadId(route.query.thread)
+    // 页面自己的 setQuery 已先应用会话，不能再发起一次同目标读取。
+    if (id !== null && id !== thread.value?.id) void openThread(id)
+  },
+)
 onMounted(() => {
+  if (props.embedded) return
   if (takeContext()) return
+  void loadOptions()
   const shared = route.query.shared
-  const id = Number(route.query.thread)
+  const id = queryThreadId(route.query.thread)
   if (typeof shared === 'string' && shared) void openShared(shared)
-  else if (Number.isInteger(id) && id > 0) void openThread(id)
+  else if (id !== null) void openThread(id)
 })
 onActivated(() => {
-  pageActive = true
+  pageActive = props.active
+  if (props.embedded) return
   if (!takeContext()) void catchUp()
 })
-onDeactivated(() => (pageActive = false))
+onDeactivated(() => {
+  pageActive = false
+  panelOpen.value = false
+  resetPanel()
+})
+
+watch(
+  () => props.active,
+  (active) => {
+    pageActive = active
+    if (!active) {
+      panelOpen.value = false
+      resetPanel()
+      return
+    }
+    if (props.embedded) {
+      if (!options.value) {
+        context.value = props.entryContext
+        void loadOptions(props.entryRoute ?? undefined)
+      }
+      void catchUp()
+      listRef.value?.refresh()
+    }
+    void reconcileDelivery()
+  },
+  { immediate: true },
+)
+
+watch(panelOpen, (open) => {
+  if (!open) childId.value = null
+})
 
 const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:ss') : '')
 </script>
 
 <template>
-  <div class="agent-chat">
+  <div
+    ref="host"
+    class="agent-chat qw-workspace"
+    :class="{
+      'agent-chat--embedded': props.embedded,
+      'agent-chat--narrow': narrow,
+      'agent-chat--compact': hostWidth > 0 && hostWidth < 1120 && (!props.embedded || historyOpen),
+    }"
+  >
     <ThreadList
+      v-show="historyOpen"
       ref="listRef"
+      :active="props.active"
       :active-id="thread?.id ?? null"
-      @open="(th) => openThread(th.id)"
+      @open="
+        (th) => {
+          openThread(th.id)
+          if (props.embedded) historyOpen = false
+        }
+      "
       @create="newDraft()"
       @gone="(id) => thread?.id === id && newDraft()"
     />
 
     <section class="agent-chat__main" :aria-label="t('agent.chat.title')">
       <header class="agent-chat__head">
+        <IconButton
+          icon="lucide:history"
+          :label="t('agent.chat.thread.list')"
+          :aria-expanded="historyOpen"
+          @click="historyOpen = !historyOpen"
+        />
+        <IconButton
+          v-if="props.embedded"
+          icon="lucide:plus"
+          :label="t('agent.chat.thread.new')"
+          @click="newDraft(props.entryContext)"
+        />
+        <el-button
+          v-if="thread?.parentThreadId"
+          size="small"
+          @click="openThread(thread.parentThreadId)"
+          >{{ t('agent.chat.subtask.back') }}</el-button
+        >
         <h2 class="agent-chat__title">
           {{ sharedToken ? sharedTitle : thread?.title || t('agent.chat.thread.new') }}
         </h2>
@@ -694,8 +1216,17 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
           </el-tag>
         </span>
         <span class="agent-composer__spacer" />
+        <el-button
+          size="small"
+          class="agent-chat__panel-toggle"
+          :aria-expanded="panelOpen"
+          aria-controls="agent-work-panel"
+          @click="panelOpen = !panelOpen"
+          >{{ t('agent.chat.panel.open') }}</el-button
+        >
+
         <el-switch
-          v-if="!thread && !sharedToken"
+          v-if="!thread && !readOnly"
           v-model="temporary"
           :active-text="t('agent.chat.temporary')"
           :aria-label="t('agent.chat.temporary')"
@@ -710,7 +1241,7 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
         />
         <div v-show="!narrow || moreOpen" id="agent-chat-tools" class="agent-chat__tools">
           <ProfileMemoryBar
-            v-if="!sharedToken"
+            v-if="!readOnly"
             v-model:draft="draft"
             :thread="thread"
             :options="options"
@@ -718,8 +1249,8 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
             @apply="applyProfile"
             @updated="onThreadUpdated"
           />
-          <NotifySettings v-if="!sharedToken" />
-          <ShortcutSettings v-model="shortcuts" />
+          <NotifySettings v-if="!readOnly" />
+          <ShortcutSettings v-model="shortcuts" :escape-closes="props.embedded" />
           <IconButton
             v-if="thread && !thread.temporary"
             icon="lucide:external-link"
@@ -727,7 +1258,7 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
             @click="openInWindow"
           />
         </div>
-        <el-dropdown v-if="thread" trigger="click" @command="onThreadCommand">
+        <el-dropdown v-if="thread && !readOnly" trigger="click" @command="onThreadCommand">
           <IconButton icon="lucide:ellipsis-vertical" :label="t('agent.chat.thread.menu')" />
           <template #dropdown>
             <el-dropdown-menu>
@@ -774,6 +1305,56 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
         :aria-label="t('agent.chat.messages')"
         @scroll="follow = atBottom()"
       >
+        <el-alert
+          v-if="!readOnly && realtimeStatus !== 'up'"
+          type="warning"
+          :closable="false"
+          show-icon
+          :title="
+            t(
+              realtimeStatus === 'reconnecting'
+                ? 'agent.chat.connection.reconnecting'
+                : 'agent.chat.connection.down',
+            )
+          "
+        />
+        <el-alert
+          v-if="!readOnly && pendingDelivery"
+          class="agent-chat__delivery"
+          type="warning"
+          :closable="false"
+          show-icon
+        >
+          <template #title>{{ t('agent.chat.delivery.uncertain') }}</template>
+          <p v-if="!pendingDelivery.request">{{ t('agent.chat.delivery.memoryLost') }}</p>
+          <p v-if="!deliveryStored">{{ t('agent.chat.delivery.storageUnavailable') }}</p>
+          <el-button
+            size="small"
+            :loading="checkingDelivery"
+            :disabled="checkingDelivery"
+            @click="reconcileDelivery(true)"
+            >{{ t('agent.chat.delivery.check') }}</el-button
+          >
+          <el-button size="small" :disabled="checkingDelivery" @click="discardDelivery">{{
+            t('agent.chat.delivery.clear')
+          }}</el-button>
+        </el-alert>
+        <el-alert
+          v-if="!readOnly && thread?.recoveryRequired"
+          class="agent-chat__recovery"
+          type="warning"
+          :closable="false"
+          show-icon
+        >
+          <template #title>{{ t('agent.chat.recovery.required') }}</template>
+          <el-button
+            size="small"
+            :loading="acknowledgingRecovery"
+            :disabled="acknowledgingRecovery"
+            @click="acknowledgeRecovery"
+            >{{ t('agent.chat.recovery.acknowledge') }}</el-button
+          >
+        </el-alert>
         <div v-if="!thread && !sharedToken && !items.length" class="agent-chat__welcome">
           <p class="agent-chat__hello">{{ t('agent.chat.welcome') }}</p>
           <div v-if="options?.starters.length" class="agent-chat__examples">
@@ -791,12 +1372,17 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
           v-for="(r, i) in rows"
           :key="r.key"
           :row="r"
-          :can-fork="!!thread"
+          :can-fork="!!thread && !readOnly && !running && !thread.recoveryRequired"
           :can-edit="
-            r.kind === 'item' && r.item.kind === 'user' && r.item.seq === lastUserSeq && !running
+            r.kind === 'item' &&
+            r.item.kind === 'user' &&
+            r.item.seq === lastUserSeq &&
+            !running &&
+            !thread?.recoveryRequired &&
+            !readOnly
           "
           :last="i === rows.length - 1 && !running"
-          :readonly="!!sharedToken"
+          :readonly="readOnly"
           :trust="options?.trustSession ?? false"
           :can-run-plan="canRunPlan && i === rows.length - 1"
           :running-plan="runningPlan"
@@ -805,70 +1391,112 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
           @suggest="(s) => composerRef?.suggest(s)"
           @changed="catchUp"
           @run-plan="runPlan"
+          @inspect="inspectItem"
+          @inspect-child="inspectChild"
         />
-      </div>
-
-      <div
-        v-if="showStatus && !sharedToken"
-        class="agent-card agent-chat__status"
-        role="region"
-        :aria-label="t('agent.chat.status.title')"
-      >
-        <header class="agent-card__head">
-          <span class="agent-card__title">{{ t('agent.chat.status.title') }}</span>
-          <IconButton
-            icon="lucide:x"
-            :label="t('agent.chat.status.close')"
-            @click="showStatus = false"
-          />
-        </header>
-        <dl v-if="status" class="agent-card__fields">
-          <template v-if="status.turn">
-            <dt>{{ t('agent.chat.status.state') }}</dt>
-            <dd>{{ t(`agent.chat.turn.${status.turn.status}`) }}</dd>
-            <dt>{{ t('agent.chat.status.steps') }}</dt>
-            <dd>{{ status.turn.steps }}</dd>
-            <dt>{{ t('agent.chat.status.tokens') }}</dt>
-            <dd>
+        <div
+          v-if="showStatus && !sharedToken"
+          class="agent-card agent-chat__status"
+          role="region"
+          :aria-label="t('agent.chat.status.title')"
+        >
+          <header class="agent-card__head">
+            <span class="agent-card__title">{{ t('agent.chat.status.title') }}</span>
+            <IconButton
+              icon="lucide:x"
+              :label="t('agent.chat.status.close')"
+              @click="showStatus = false"
+            />
+          </header>
+          <dl v-if="status" class="agent-card__fields">
+            <template v-if="status.turn">
+              <dt>{{ t('agent.chat.status.state') }}</dt>
+              <dd>{{ t(`agent.chat.turn.${status.turn.status}`) }}</dd>
+              <dt>{{ t('agent.chat.status.steps') }}</dt>
+              <dd>{{ status.turn.steps }}</dd>
+              <dt>{{ t('agent.chat.status.credits') }}</dt>
+              <dd>
+                {{ status.turn.credits }}
+                <p v-if="status.turn.unpricedCalls">
+                  {{ t('agent.chat.status.unpricedHint', { n: status.turn.unpricedCalls }) }}
+                </p>
+                <p v-if="status.turn.unreportedCalls">
+                  {{ t('agent.chat.status.unreportedHint', { n: status.turn.unreportedCalls }) }}
+                </p>
+                <p v-if="status.turn.legacyUsage">{{ t('agent.chat.status.legacyHint') }}</p>
+              </dd>
+              <dt>{{ t('agent.chat.status.tokens') }}</dt>
+              <dd>
+                {{
+                  t('agent.chat.status.tokenValue', {
+                    prompt: status.turn.promptTokens,
+                    completion: status.turn.completionTokens,
+                  })
+                }}
+              </dd>
+              <dt>{{ t('agent.chat.status.started') }}</dt>
+              <dd>{{ time(status.turn.startedAt) }}</dd>
+            </template>
+            <dt>
               {{
-                t('agent.chat.status.tokenValue', {
-                  prompt: status.turn.promptTokens,
-                  completion: status.turn.completionTokens,
+                t('agent.chat.composer.contextEstimate', {
+                  percent:
+                    status.contextWindow > 0
+                      ? Math.round((status.contextUsed / status.contextWindow) * 100)
+                      : 0,
                 })
               }}
+            </dt>
+            <dd>
+              {{
+                t('agent.chat.status.of', { used: status.contextUsed, limit: status.contextWindow })
+              }}
             </dd>
-            <dt>{{ t('agent.chat.status.started') }}</dt>
-            <dd>{{ time(status.turn.startedAt) }}</dd>
-          </template>
-          <dt>{{ t('agent.chat.status.context') }}</dt>
-          <dd>
-            {{
-              t('agent.chat.status.of', { used: status.contextUsed, limit: status.contextWindow })
-            }}
-          </dd>
-          <dt>{{ t('agent.chat.status.userToday') }}</dt>
-          <dd>
-            {{
-              t('agent.chat.status.of', {
-                used: status.today.userTokens,
-                limit: status.today.userLimit,
-              })
-            }}
-          </dd>
-          <dt>{{ t('agent.chat.status.tenantToday') }}</dt>
-          <dd>
-            {{
-              t('agent.chat.status.of', {
-                used: status.today.tenantTokens,
-                limit: status.today.tenantLimit,
-              })
-            }}
-          </dd>
-        </dl>
-        <p v-else class="agent-card__meta">{{ t('agent.chat.status.none') }}</p>
+            <dt>{{ t('agent.chat.status.userCreditsToday') }}</dt>
+            <dd>
+              {{
+                t('agent.chat.status.of', {
+                  used: status.today.userCredits,
+                  limit:
+                    Number(status.today.userLimit) === 0
+                      ? t('agent.chat.status.unlimited')
+                      : status.today.userLimit,
+                })
+              }}
+              <p v-if="status.today.userUnpricedCalls">
+                {{ t('agent.chat.status.unpricedHint', { n: status.today.userUnpricedCalls }) }}
+              </p>
+              <p v-if="status.today.userLegacyCalls">
+                {{ t('agent.admin.usage.legacyCalls') }}: {{ status.today.userLegacyCalls }}
+              </p>
+            </dd>
+            <dt>{{ t('agent.chat.status.tenantCreditsToday') }}</dt>
+            <dd>
+              {{
+                t('agent.chat.status.of', {
+                  used: status.today.tenantCredits,
+                  limit:
+                    Number(status.today.tenantLimit) === 0
+                      ? t('agent.chat.status.unlimited')
+                      : status.today.tenantLimit,
+                })
+              }}
+              <p v-if="status.today.tenantUnpricedCalls">
+                {{ t('agent.chat.status.unpricedHint', { n: status.today.tenantUnpricedCalls }) }}
+              </p>
+              <p v-if="status.today.tenantLegacyCalls">
+                {{ t('agent.admin.usage.legacyCalls') }}: {{ status.today.tenantLegacyCalls }}
+              </p>
+            </dd>
+          </dl>
+          <p v-else class="agent-card__meta">{{ t('agent.chat.status.none') }}</p>
+        </div>
       </div>
 
-      <template v-if="!sharedToken">
+      <p v-if="readOnly && thread?.parentThreadId" class="agent-card__meta">
+        {{ t('agent.chat.subtask.readonly') }}
+      </p>
+      <template v-if="!readOnly">
         <div v-if="context || editing" class="agent-chat__context">
           <el-tag v-if="context" closable type="info" @close="context = null">
             {{ t('agent.chat.context.from', { title: context.title || context.route }) }}
@@ -892,12 +1520,60 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
           :records
           :temporary="thread ? thread.temporary : temporary"
           :disabled="unavailable"
-          :stop-key="shortcuts.stop"
+          :stop-key="props.embedded && shortcuts.stop === 'Escape' ? '' : shortcuts.stop"
           @stop="stop"
           @command="onCommand"
         />
       </template>
     </section>
+    <SubtaskDetail
+      v-if="panelOpen && !panelNarrow && childId && thread && !readOnly"
+      :key="childId"
+      class="agent-chat__panel"
+      :parent-id="thread.id"
+      :thread-id="childId"
+      @close="panelOpen = false"
+    />
+    <ContextPanel
+      v-else-if="panelOpen && !panelNarrow"
+      :key="panelScope"
+      class="agent-chat__panel"
+      :items="panelItems"
+      :turn
+      :selected-id="inspectedId"
+      :readonly="readOnly"
+      @select="inspectedId = $event"
+      @inspect-child="inspectChild"
+      @close="panelOpen = false"
+    />
+    <el-drawer
+      v-if="panelNarrow"
+      v-model="panelOpen"
+      :title="t('agent.chat.panel.open')"
+      :with-header="false"
+      size="min(100vw, 480px)"
+      destroy-on-close
+      class="agent-context-drawer"
+    >
+      <SubtaskDetail
+        v-if="childId && thread && !readOnly"
+        :key="childId"
+        :parent-id="thread.id"
+        :thread-id="childId"
+        @close="panelOpen = false"
+      />
+      <ContextPanel
+        v-else
+        :key="panelScope"
+        :items="panelItems"
+        :turn
+        :selected-id="inspectedId"
+        :readonly="readOnly"
+        @select="inspectedId = $event"
+        @inspect-child="inspectChild"
+        @close="panelOpen = false"
+      />
+    </el-drawer>
   </div>
 </template>
 
@@ -905,8 +1581,27 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
 .agent-chat {
   display: flex;
   gap: 16px;
-  height: calc(100vh - 180px);
-  min-height: 480px;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  container-type: inline-size;
+}
+.agent-chat--compact {
+  flex-direction: column;
+}
+.agent-chat--embedded {
+  gap: 8px;
+}
+.agent-chat--embedded :deep(.agent-threads) {
+  width: 240px;
+  flex: none;
+}
+.agent-chat--embedded.agent-chat--narrow {
+  flex-direction: column;
+}
+.agent-chat--embedded.agent-chat--narrow :deep(.agent-threads) {
+  width: 100%;
+  max-height: 40%;
 }
 .agent-chat :deep(.agent-threads),
 .agent-chat__main {
@@ -921,12 +1616,17 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
   border-radius: var(--qw-radius);
   box-shadow: var(--qw-shadow-1);
 }
+.agent-chat__panel {
+  width: 340px;
+  flex: none;
+}
 .agent-chat__main {
   flex: 1;
   min-width: 0;
 }
 .agent-chat__head {
   display: flex;
+  flex: none;
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
@@ -979,20 +1679,42 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
 .agent-chat__examples .el-button {
   margin: 0;
 }
+.agent-chat__status p {
+  margin: 4px 0;
+}
 .agent-chat__context {
   display: flex;
 }
-@media (max-width: 1100px) {
+@container (max-width: 1100px) {
   .agent-chat {
     flex-direction: column;
-    height: auto;
   }
-  .agent-chat__stream {
-    height: 55vh;
+  .agent-chat :deep(.agent-threads) {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: auto auto minmax(0, 1fr);
+    width: 100%;
+    max-height: min(200px, 32%);
+  }
+  .agent-chat :deep(.agent-threads__scroll) {
+    grid-column: 1 / -1;
+  }
+  .agent-chat :deep(.agent-threads__views) {
+    align-self: center;
+  }
+  .agent-chat :deep(.agent-threads__label) {
+    margin-top: 0;
   }
 }
 /* narrow: switches without their text (the aria-label stays), the tools on a row of their own */
-@media (max-width: 640px) {
+@container (max-width: 640px) {
+  .agent-chat :deep(.agent-threads) {
+    grid-template-rows: auto auto auto minmax(0, 1fr);
+  }
+  .agent-chat :deep(.agent-threads__views),
+  .agent-chat :deep(.agent-threads__filters) {
+    grid-column: 1 / -1;
+  }
   .agent-chat__head :deep(.el-switch__label) {
     display: none;
   }
@@ -1005,6 +1727,11 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
 
 <!-- 子组件共用的卡片、消息与 Markdown 样式（类名都带 agent- / qw-md 前缀） -->
 <style>
+.agent-context-drawer .el-drawer__body {
+  display: flex;
+  min-height: 0;
+  padding: 12px;
+}
 .agent-threads {
   flex: none;
   width: 260px;
@@ -1204,6 +1931,11 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
   background: var(--qw-brand);
   border-radius: 9px;
 }
+.agent-composer__pricing {
+  margin: 0;
+  font-size: 12px;
+  color: var(--qw-warning);
+}
 .agent-composer__context {
   display: flex;
   gap: 6px;
@@ -1382,6 +2114,7 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
 }
 .agent-composer {
   display: flex;
+  flex: none;
   flex-direction: column;
   gap: 8px;
 }
@@ -1416,13 +2149,37 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
   background: var(--qw-brand-weak);
 }
 .agent-composer__label {
+  display: -webkit-box;
+  flex: 0 1 auto;
+  align-self: flex-start;
+  min-width: 0;
+  max-width: 45%;
+  overflow: hidden;
+  overflow-wrap: anywhere;
   font-weight: 500;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 .agent-composer__hint {
+  display: -webkit-box;
+  flex: 1;
+  align-self: flex-start;
+  min-width: 0;
   overflow: hidden;
   color: var(--qw-text-3);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.agent-composer__tooltip {
+  box-sizing: border-box;
+  max-width: min(420px, calc(100vw - 32px));
+  font-family: var(--qw-font);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.agent-composer__suggest {
+  font: inherit;
 }
 .agent-composer__bar {
   display: flex;
@@ -1436,7 +2193,9 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
 .agent-composer__model {
   width: 200px;
 }
-.agent-composer__reasoning,
+.agent-composer__reasoning {
+  width: 190px;
+}
 .agent-composer__mode {
   width: 130px;
 }

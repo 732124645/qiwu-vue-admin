@@ -190,6 +190,14 @@ export const Err = {
   AGENT_WEB_FAILED: def('B8009', 502, 'error.agent.web_failed'),
   /** the address or kind changed: the stored key is never sent to a new target, enter it again */
   AGENT_KEY_REQUIRED: def('B8010', 422, 'error.agent.key_required'),
+  /** The selected model has no explicit credit pricing. */
+  AGENT_PRICING_REQUIRED: def('B8011', 422, 'error.agent.pricing_required'),
+  /** A credit limit or stored price is malformed; never treat it as unlimited or free. */
+  AGENT_CREDIT_CONFIG_INVALID: def('B8012', 422, 'error.agent.credit_config_invalid'),
+  /** 不明写入的后果须由本人核对，普通信任与自动化不能绕过。 */
+  AGENT_RECOVERY_REQUIRED: def('B8013', 409, 'error.agent.recovery_required'),
+  AGENT_THREAD_BUSY: def('B8014', 409, 'error.agent.thread_busy'),
+  AGENT_RECOVERY_BUSY: def('B8015', 409, 'error.agent.recovery_busy'),
 
   /** WeChat Official Accounts gateway and account management errors. */
   WXOA_UPSTREAM: def('B6001', 502, 'error.wxoa.upstream'),

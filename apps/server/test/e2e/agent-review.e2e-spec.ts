@@ -1,3 +1,5 @@
+import { UsageBook } from '../../src/core/agent/runtime/usage-book.js'
+import { TEST_AGENT_PRICING, clearAgentUsage } from '../setup/agent-pricing.js'
 // Automatic review of writes (see docs/agent.md): an administrator sets a write tool's policy to `review`
 // (a read tool cannot take it; built-in tools are listed, take deny / review and can be switched off), and
 // in the auto-review mode such a write goes to the review model set by `agent.review.model` before a human:
@@ -15,7 +17,13 @@ import { ConfigService } from '@nestjs/config'
 import type { NestExpressApplication } from '@nestjs/platform-express'
 import { Test } from '@nestjs/testing'
 import { getDataSourceToken } from '@nestjs/typeorm'
-import { AGENT2_PARAMS, AGENT_LIMIT_PARAMS, AGENT_PAUSED_PARAM, agentPerms } from '@qiwu/shared'
+import {
+  AGENT2_PARAMS,
+  AGENT_LIMIT_PARAMS,
+  AGENT_PAUSED_PARAM,
+  agentPerms,
+  Err,
+} from '@qiwu/shared'
 import { I18nService } from 'nestjs-i18n'
 import request from 'supertest'
 import type { DataSource } from 'typeorm'
@@ -211,6 +219,8 @@ const runCtx = (threadId: number, signal = new AbortController().signal): AgentR
   turnId: 0,
   lang: 'en-US',
   signal,
+  invokeModel: (target, work, callSignal) =>
+    app.get(UsageBook).invoke(ownerId, target, { threadId }, work, callSignal ?? signal),
   recordUsage: async () => {},
   overBudget: async () => null,
 })
@@ -331,13 +341,29 @@ beforeAll(async () => {
   providerId = await insertRow(ds.manager, 'agent_provider', {
     name: `${PREFIX}provider`,
     base_url: 'http://127.0.0.1:9/v1',
-    models: [{ id: 'm1', label: 'm1', reasoning: false, contextWindow: 64_000 }],
+    models: [
+      {
+        id: 'm1',
+        label: 'm1',
+        reasoning: false,
+        pricing: TEST_AGENT_PRICING,
+        contextWindow: 64_000,
+      },
+    ],
     enabled: 1,
   })
   reviewProviderId = await insertRow(ds.manager, 'agent_provider', {
     name: `${PREFIX}review`,
     base_url: reviewBase,
-    models: [{ id: REVIEW_MODEL, label: REVIEW_MODEL, reasoning: false, contextWindow: 64_000 }],
+    models: [
+      {
+        id: REVIEW_MODEL,
+        label: REVIEW_MODEL,
+        reasoning: false,
+        pricing: TEST_AGENT_PRICING,
+        contextWindow: 64_000,
+      },
+    ],
     enabled: 1,
   })
   // the chat model is scripted; the review provider goes to the local stub through the real client
@@ -396,7 +422,7 @@ afterAll(async () => {
     }
     if (ownerId) {
       await ds.query('DELETE FROM agent_thread WHERE user_id = ? AND tenant_id = 1', [ownerId])
-      await ds.query('DELETE FROM agent_usage WHERE user_id = ? AND tenant_id = 1', [ownerId])
+      await clearAgentUsage(ds, [ownerId])
       await ds.query('DELETE FROM iam_user_roles WHERE user_id = ?', [ownerId])
       await ds.query('DELETE FROM iam_user WHERE id = ?', [ownerId])
     }
@@ -590,7 +616,11 @@ describe('what goes to review', () => {
         .post('/api/agent/threads')
         .set(bearer(owner))
         .send({ approvalMode: 'auto_review' })
-      expect([unset, refused.status]).toEqual([unset, 400])
+      expect([unset, refused.status, refused.body.code]).toEqual([
+        unset,
+        400,
+        Err.VALIDATION_FAILED.code,
+      ])
       // a fork (also an edited resend) does not carry a mode no longer offered: it asks instead
       const fell = await fork(reviewing)
       expect([unset, fell.status, fell.body.data?.approvalMode]).toEqual([unset, 201, 'ask'])
@@ -764,15 +794,15 @@ describe('limits', () => {
 
   it("no review model call once today's quota is used up by the turn's own step: it hands over", async () => {
     reply = { verdict: 'approve', reason: 'ok' }
-    await ds.query('DELETE FROM agent_usage WHERE user_id = ? AND tenant_id = 1', [ownerId])
+    await clearAgentUsage(ds, [ownerId])
     await inTenant1(() =>
       ds.query(
-        `INSERT INTO agent_usage (tenant_id, user_id, day, model, calls, prompt_tokens, completion_tokens)
-         VALUES (1, ?, UTC_DATE(), 'quota-filler', 1, 990, 0)`,
+        `INSERT INTO agent_usage (tenant_id, user_id, day, model, calls, prompt_tokens, completion_tokens, credits)
+         VALUES (1, ?, UTC_DATE(), 'quota-filler', 1, 990, 0, 990)`,
         [ownerId],
       ),
     )
-    await withLimit(AGENT_LIMIT_PARAMS.userDailyTokens, '1000', async () => {
+    await withLimit(AGENT_LIMIT_PARAMS.userDailyCredits, '1000', async () => {
       const { status, cards } = await write(update(1))
       expect(status).toBe('waiting')
       expect(reviewSeen).toHaveLength(0)
@@ -780,10 +810,10 @@ describe('limits', () => {
     })
   })
 
-  it("no review model call once the turn's token limit is reached: it hands over", async () => {
+  it("no review model call once the turn's credit limit is reached: it hands over", async () => {
     reply = { verdict: 'approve', reason: 'ok' }
-    // the first step uses 15 tokens
-    await withLimit(AGENT_LIMIT_PARAMS.turnTokens, '15', async () => {
+    // the first step consumes 15 credits at the explicit test rates
+    await withLimit(AGENT_LIMIT_PARAMS.turnCredits, '15', async () => {
       const { status, cards } = await write(update(1))
       expect(status).toBe('waiting')
       expect(reviewSeen).toHaveLength(0)

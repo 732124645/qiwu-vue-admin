@@ -1,163 +1,216 @@
-import { defineComponent, h, type VNode, type VNodeChild } from 'vue'
+import { Lexer, type MarkedToken, type Token } from 'marked'
+import { defineComponent, h, type VNodeChild } from 'vue'
+import MarkdownCodeBlock from './MarkdownCodeBlock.vue'
 
-/**
- * 模型回答的 Markdown 安全子集：段落、标题、列表、引用、代码块、表格、行内代码、粗体与链接。
- * 直接生成 VNode，文字一律作为文本节点交给 Vue 转义，从不使用 v-html，所以模型或网页带来的
- * HTML 只会原样显示。链接只放行 http(s) 与 mailto，新窗口打开并带 rel=noopener noreferrer。
- * 流式输出中途未闭合的代码块按代码块显示到末尾。
- */
-
-const SAFE_HREF = /^(https?:|mailto:)/i
-// 写成字符串：仓库的 i18n 检查按引号切分注释，正则字面量里的反引号会让它误判
-const INLINE = new RegExp(
-  '`([^`\\n]+)`|\\*\\*([^*\\n]+)\\*\\*|\\[([^\\]\\n]+)\\]\\(([^)\\s]+)\\)|(https?://[^\\s<>()\\]]+)',
-  'g',
-)
-
-function link(href: string, text: string): VNodeChild {
-  return SAFE_HREF.test(href)
-    ? h('a', { href, target: '_blank', rel: 'noopener noreferrer' }, text)
-    : text
+const MAX_TEXT = 128_000
+const MAX_DEPTH = 32
+const MAX_NODES = 5000
+const ENTITIES: Record<string, string> = {
+  amp: '&',
+  AMP: '&',
+  lt: '<',
+  LT: '<',
+  gt: '>',
+  GT: '>',
+  quot: '"',
+  QUOT: '"',
+  apos: "'",
+  nbsp: '\u00a0',
 }
 
-/** 行内标记；换行变成 <br>。 */
-export function inline(text: string): VNodeChild[] {
-  const out: VNodeChild[] = []
-  let last = 0
-  for (const m of text.matchAll(INLINE)) {
-    if (m.index > last) out.push(...breaks(text.slice(last, m.index)))
-    const [, code, bold, label, href, bare] = m
-    if (code != null) out.push(h('code', code))
-    else if (bold != null) out.push(h('strong', bold))
-    else if (label != null) out.push(link(href!, label))
-    else out.push(link(bare!, bare!))
-    last = m.index + m[0].length
+/** 常见实体和数字字符只转成文本，不把模型内容送进 HTML/DOM 解析器。 */
+function decode(text: string): string {
+  return text.replace(
+    /&(?:#([xX][\da-fA-F]+|\d+)|(amp|AMP|lt|LT|gt|GT|quot|QUOT|apos|nbsp));/g,
+    (raw, numeric: string | undefined, named: string | undefined) => {
+      if (named) return ENTITIES[named] ?? raw
+      const point =
+        numeric!.startsWith('x') || numeric!.startsWith('X')
+          ? Number.parseInt(numeric!.slice(1), 16)
+          : Number(numeric)
+      return point > 0 && point <= 0x10ffff && !(point >= 0xd800 && point <= 0xdfff)
+        ? String.fromCodePoint(point)
+        : '\ufffd'
+    },
+  )
+}
+
+/** 链接只允许明确的 HTTP(S)/mailto；控制字符、实体混淆和 URL 凭据不能变成可执行入口。 */
+export function safeMarkdownHref(value: string): string | null {
+  const href = decode(value)
+  if (!/^(https?:\/\/|mailto:)/i.test(href)) return null
+  for (const char of href) {
+    const point = char.codePointAt(0)!
+    if (point <= 0x20 || (point >= 0x7f && point <= 0x9f)) return null
   }
-  if (last < text.length) out.push(...breaks(text.slice(last)))
-  return out
+  try {
+    const url = new URL(href)
+    return ['http:', 'https:', 'mailto:'].includes(url.protocol) && !url.username && !url.password
+      ? url.href
+      : null
+  } catch {
+    return null
+  }
 }
 
-function breaks(text: string): VNodeChild[] {
-  return text.split('\n').flatMap((part, i) => (i ? [h('br'), part] : [part]))
+/** 给依赖自身的递归也设上限，避免深嵌套先在 lexer 内耗尽调用栈。 */
+function lex(text: string): Token[] {
+  const lexer = new Lexer({ gfm: true, breaks: true })
+  let depth = 0,
+    work = 0
+  const bounded = <T>(source: string, run: () => T): T => {
+    if (++depth > MAX_DEPTH || (work += source.length) > MAX_TEXT * 8)
+      throw new RangeError('markdown parse limit')
+    try {
+      return run()
+    } finally {
+      depth--
+    }
+  }
+  const block = lexer.blockTokens.bind(lexer),
+    inline = lexer.inlineTokens.bind(lexer)
+  lexer.blockTokens = ((...args: Parameters<Lexer['blockTokens']>) =>
+    bounded(args[0], () => block(...args))) as Lexer['blockTokens']
+  lexer.inlineTokens = (...args) => bounded(args[0], () => inline(...args))
+  return lexer.lex(text)
 }
 
-const FENCE = new RegExp('^\\s*`{3}')
-const LIST = /^\s*([-*+]|\d+[.)])\s+(.*)$/
-const HEADING = /^(#{1,6})\s+(.*)$/
-const QUOTE = /^\s*>\s?(.*)$/
-const TABLE_SEP = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/
-const cells = (line: string) =>
-  line
-    .trim()
-    .replace(/^\||\|$/g, '')
-    .split('|')
-    .map((c) => c.trim())
-/** 第 `i` 行是表头（下一行是分隔行） */
-const tableAt = (lines: string[], i: number) =>
-  lines[i]!.includes('|') && TABLE_SEP.test(lines[i + 1] ?? '') && lines[i + 1]!.includes('-')
-
-/** 把整段 Markdown 解析成块级 VNode。 */
-export function renderMarkdown(text: string): VNode[] {
-  const lines = text.replace(/\r\n?/g, '\n').split('\n')
-  const out: VNode[] = []
-  let i = 0
-  while (i < lines.length) {
-    const line = lines[i]!
-    if (!line.trim()) {
-      i++
-      continue
-    }
-    if (FENCE.test(line)) {
-      const body: string[] = []
-      i++
-      while (i < lines.length && !FENCE.test(lines[i]!)) body.push(lines[i++]!)
-      i++
-      out.push(h('pre', h('code', body.join('\n'))))
-      continue
-    }
-    if (tableAt(lines, i)) {
-      const head = cells(line)
-      i += 2
-      const rows: string[][] = []
-      while (i < lines.length && lines[i]!.includes('|') && lines[i]!.trim())
-        rows.push(cells(lines[i++]!))
-      out.push(
-        h('div', { class: 'qw-md__table' }, [
-          h('table', [
+/** GFM token 只生成安全 VNode；超长/深层/高节点输入整段退为原文，正文不会被截断。 */
+export function renderMarkdown(text: string): VNodeChild[] {
+  const plain = () => [h('pre', { class: 'qw-md__raw' }, text)]
+  if (text.length > MAX_TEXT) return plain()
+  let remaining = MAX_NODES
+  const take = () => {
+    if (--remaining < 0) throw new RangeError('markdown render limit')
+  }
+  const render = (tokens: Token[], depth = 0, taskLabel = ''): VNodeChild[] => {
+    if (depth > MAX_DEPTH) throw new RangeError('markdown render depth')
+    return tokens.flatMap((raw): VNodeChild[] => {
+      take()
+      const token = raw as MarkedToken
+      const children = (list: Token[]) => render(list, depth + 1, taskLabel)
+      switch (token.type) {
+        case 'space':
+        case 'def':
+          return []
+        case 'text':
+          return token.tokens ? children(token.tokens) : [decode(token.text)]
+        case 'escape':
+          return [token.text]
+        case 'paragraph':
+          return [h('p', children(token.tokens))]
+        case 'heading':
+          return [
+            h(`h${Math.min(6, token.depth + 2)}`, { class: 'qw-md__h' }, children(token.tokens)),
+          ]
+        case 'strong':
+          return [h('strong', children(token.tokens))]
+        case 'em':
+          return [h('em', children(token.tokens))]
+        case 'del':
+          return [h('del', children(token.tokens))]
+        case 'br':
+          return [h('br')]
+        case 'hr':
+          return [h('hr')]
+        case 'codespan':
+          return [h('code', token.text)]
+        case 'code':
+          return [h(MarkdownCodeBlock, { code: token.text, language: token.lang ?? '' })]
+        case 'html':
+          return token.block ? [h('pre', { class: 'qw-md__raw' }, token.raw)] : [token.raw]
+        case 'blockquote':
+          return [h('blockquote', children(token.tokens))]
+        case 'link':
+        case 'image': {
+          const href = safeMarkdownHref(token.href)
+          const content =
+            token.type === 'image' ? [decode(token.text) || token.href] : children(token.tokens)
+          return [
+            href
+              ? h(
+                  'a',
+                  {
+                    href,
+                    title: token.title ? decode(token.title) : undefined,
+                    target: '_blank',
+                    rel: 'noopener noreferrer',
+                    ...(token.type === 'image' ? { class: 'qw-md__image-link' } : {}),
+                  },
+                  content,
+                )
+              : h('span', content),
+          ]
+        }
+        case 'list':
+          return [
             h(
-              'thead',
-              h(
-                'tr',
-                head.map((c) => h('th', inline(c))),
-              ),
+              token.ordered ? 'ol' : 'ul',
+              token.ordered ? { start: token.start || 1 } : {},
+              token.items.map((item) => {
+                take()
+                return h(
+                  'li',
+                  { class: item.task ? 'qw-md__task' : undefined },
+                  render(item.tokens, depth + 1, item.text),
+                )
+              }),
             ),
+          ]
+        case 'checkbox':
+          return [
+            h('input', {
+              type: 'checkbox',
+              checked: token.checked,
+              disabled: true,
+              'aria-label': decode(taskLabel),
+            }),
+          ]
+        case 'list_item':
+          return [h('li', children(token.tokens))]
+        case 'table': {
+          const cell = (value: (typeof token.header)[number], tag: 'th' | 'td') => {
+            take()
+            return h(tag, { style: { textAlign: value.align ?? 'left' } }, children(value.tokens))
+          }
+          return [
             h(
-              'tbody',
-              rows.map((r) =>
+              'div',
+              { class: 'qw-md__table' },
+              h('table', [
                 h(
-                  'tr',
-                  head.map((_, k) => h('td', inline(r[k] ?? ''))),
+                  'thead',
+                  h(
+                    'tr',
+                    token.header.map((value) => cell(value, 'th')),
+                  ),
                 ),
-              ),
+                h(
+                  'tbody',
+                  token.rows.map((row) => {
+                    take()
+                    return h(
+                      'tr',
+                      row.map((value) => cell(value, 'td')),
+                    )
+                  }),
+                ),
+              ]),
             ),
-          ]),
-        ]),
-      )
-      continue
-    }
-    const heading = HEADING.exec(line)
-    if (heading) {
-      // 页面标题是 h2，回答里的 # 从 h3 开始，保持标题层级
-      const level = Math.min(6, heading[1]!.length + 2)
-      out.push(h(`h${level}`, { class: 'qw-md__h' }, inline(heading[2]!)))
-      i++
-      continue
-    }
-    const first = LIST.exec(line)
-    if (first) {
-      const ordered = /\d/.test(first[1]!)
-      const entries: string[] = []
-      while (i < lines.length) {
-        const m = LIST.exec(lines[i]!)
-        if (m && /\d/.test(m[1]!) === ordered) entries.push(m[2]!)
-        // 缩进的续行接在上一项后面
-        else if (/^\s{2,}\S/.test(lines[i]!) && entries.length)
-          entries[entries.length - 1] += `\n${lines[i]!.trim()}`
-        else break
-        i++
+          ]
+        }
+        default:
+          return [h('span', raw.raw)]
       }
-      out.push(
-        h(
-          ordered ? 'ol' : 'ul',
-          entries.map((e) => h('li', inline(e))),
-        ),
-      )
-      continue
-    }
-    if (QUOTE.test(line)) {
-      const body: string[] = []
-      while (i < lines.length && QUOTE.test(lines[i]!)) body.push(QUOTE.exec(lines[i++]!)![1]!)
-      out.push(h('blockquote', renderMarkdown(body.join('\n'))))
-      continue
-    }
-    const para: string[] = []
-    while (
-      i < lines.length &&
-      lines[i]!.trim() &&
-      !FENCE.test(lines[i]!) &&
-      !LIST.test(lines[i]!) &&
-      !HEADING.test(lines[i]!) &&
-      !QUOTE.test(lines[i]!) &&
-      // 段落后不空行直接跟表格
-      !(para.length && tableAt(lines, i))
-    )
-      para.push(lines[i++]!)
-    out.push(h('p', inline(para.join('\n'))))
+    })
   }
-  return out
+  try {
+    return render(lex(text))
+  } catch {
+    return plain()
+  }
 }
 
-/** `<MarkdownText :text>`：渲染上面的安全子集。 */
 export const MarkdownText = defineComponent({
   name: 'MarkdownText',
   props: { text: { type: String, required: true } },

@@ -1,6 +1,7 @@
 import { Inject, Injectable, Optional } from '@nestjs/common'
 import { type AgentChartSpec, agentChartSpec, Err } from '@qiwu/shared'
 import { z } from 'zod'
+import { BizError } from '../../http/biz-error.js'
 import {
   AGENT_IMAGE_STORE,
   AgentBuiltinTool,
@@ -8,13 +9,12 @@ import {
   type AgentToolContext,
 } from '../agent-ports.js'
 import { IMAGE_SIZES } from '../provider/chat-model.js'
-import { ProviderRegistry } from '../provider/provider-registry.js'
-import { TurnStop } from './turn-runner.js'
+import { ProviderRegistry, usageTarget } from '../provider/provider-registry.js'
+import { InvocationLeaseLost } from './usage-book.js'
+import { LeaseLost, TurnStop } from './turn-runner.js'
 import { TurnQueue } from './turn-queue.js'
 import { CHART_TOOL, IMAGE_TOOL, REPORT_TOOL } from './turn-tools.js'
 
-/** An image whose provider reports no usage counts as this many completion tokens (daily limits). */
-export const IMAGE_TOKENS = 4000
 /** At most this many images per turn (each one costs money). */
 export const IMAGES_PER_TURN = 4
 
@@ -142,11 +142,45 @@ export class AgentOutputTools {
       if (over) throw new TurnStop(Err.AGENT_LIMIT, { which: over })
       const m = await this.providers.resolveImage()
       if (!m?.chat.image) return ctx.fail(Err.AGENT_NOT_CONFIGURED)
-      const r = await m.chat.image({ model: m.model.id, prompt, size, signal: ctx.signal })
-      // 提供方没报用量、或报的是 0 时按兜底的 token 数计：图片不能白生成
-      const used = r.usage && r.usage.promptTokens + r.usage.completionTokens > 0 ? r.usage : null
-      await ctx.recordUsage(m.model.id, used ?? { promptTokens: 0, completionTokens: IMAGE_TOKENS })
-      file = await this.images.save(ctx.principal, key, { data: r.data, name: 'image' })
+      const target = usageTarget(m, 'image')
+      let attempted = false
+      const r = await ctx
+        .invokeModel(
+          target,
+          (receipt) => {
+            attempted = true
+            return m.chat.image!({
+              model: m.model.id,
+              prompt,
+              size,
+              ...receipt,
+            })
+          },
+          ctx.signal,
+        )
+        .catch(async (error: unknown) => {
+          if (
+            attempted &&
+            !ctx.signal.aborted &&
+            !(error instanceof InvocationLeaseLost || error instanceof LeaseLost)
+          )
+            await ctx.requireRecovery(
+              error instanceof BizError ? ctx.fail(error.err).error : undefined,
+            )
+          throw error
+        })
+      file = await this.images
+        .save(ctx.principal, key, { data: r.data, name: 'image' })
+        .catch(async (error: unknown) => {
+          if (
+            !ctx.signal.aborted &&
+            !(error instanceof InvocationLeaseLost || error instanceof LeaseLost)
+          )
+            await ctx.requireRecovery(
+              error instanceof BizError ? ctx.fail(error.err).error : undefined,
+            )
+          throw error
+        })
     }
     await ctx.items.add('image', { fileId: file.fileId, prompt, ...file.size })
     return { ok: true, content: `The image is shown to the user (file ${file.fileId}).` }

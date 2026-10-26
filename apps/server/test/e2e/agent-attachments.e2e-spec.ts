@@ -1,3 +1,4 @@
+import { TEST_AGENT_PRICING, clearAgentUsage } from '../setup/agent-pricing.js'
 // Files attached to an agent chat message, multi-tenancy on, with a scripted FakeChatModel for the
 // provider: text files (UTF-8 or GBK) reach the model request as untrusted blocks, capped and marked when
 // truncated; the first sheet of an xlsx as CSV; images become image parts only for a vision model (a
@@ -145,8 +146,21 @@ beforeAll(async () => {
     name: `${PREFIX}provider`,
     base_url: 'http://127.0.0.1:9/v1',
     models: [
-      { id: 'm1', label: 'm1', reasoning: false, contextWindow: 64_000 },
-      { id: 'v1', label: 'v1', reasoning: false, vision: true, contextWindow: 64_000 },
+      {
+        id: 'm1',
+        label: 'm1',
+        reasoning: false,
+        pricing: TEST_AGENT_PRICING,
+        contextWindow: 64_000,
+      },
+      {
+        id: 'v1',
+        label: 'v1',
+        reasoning: false,
+        vision: true,
+        pricing: TEST_AGENT_PRICING,
+        contextWindow: 64_000,
+      },
     ],
     enabled: 1,
   })
@@ -190,7 +204,7 @@ afterAll(async () => {
     for (const f of files) await local.remove(f.key, false)
     const users = [ownerId, otherId].filter(Boolean)
     if (users.length) {
-      await ds.query('DELETE FROM agent_usage WHERE user_id IN (?) AND tenant_id = 1', [users])
+      await clearAgentUsage(ds, users)
       await ds.query('DELETE FROM iam_user_roles WHERE user_id IN (?)', [users])
       await ds.query('DELETE FROM iam_user WHERE id IN (?)', [users])
     }

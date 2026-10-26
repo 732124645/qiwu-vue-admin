@@ -6,8 +6,6 @@ import { useAuthStore } from './stores/auth'
 export const FEATURE = {
   /** the approval tab, starting a process, the to-do and running counts */
   workflow: 'workflow',
-  /** 原生打卡独立于审批能力。 */
-  oa: 'oa',
   /** the bulletin feed: its pages' group (messaging) sits under system */
   bulletin: 'system',
 } as const
@@ -29,7 +27,6 @@ export const visibleTabs = (): Tab[] =>
 /** The workbench's entries (shortcuts and counters, by name) shown only with a feature of the package. */
 const HOME_FEATURES: Readonly<Record<string, string>> = {
   start: FEATURE.workflow,
-  clock: FEATURE.oa,
   todo: FEATURE.workflow,
   running: FEATURE.workflow,
   bulletin: FEATURE.bulletin,

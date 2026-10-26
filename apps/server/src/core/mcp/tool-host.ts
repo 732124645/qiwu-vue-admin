@@ -142,6 +142,10 @@ export interface ToolCallContext {
   allow?: (t: RegisteredTool) => ErrorDef | null
   /** 仅运行时能提供的消费函数；接收原始调用并返回服务端规范快照，MCP/PAT 入口没有此能力。 */
   confirmPerCall?: (tool: RegisteredTool, input: unknown) => Promise<ToolExecutionContext>
+  /** 本次进程内执行的真实生命周期，只由服务端登记，不进入公开响应或共享错误。 */
+  onExecution?: (work: Promise<unknown>) => void
+  /** 工具已执行但可信结果丢失，业务副作用需核对。 */
+  onUncertain?: () => void
   /** the action log fields of the caller: request line, address and `params` naming the channel */
   log: {
     method: string
@@ -183,6 +187,8 @@ export interface AgentCallRef {
   threadId: number
   turnId: number
   confirmPerCall?: ToolCallContext['confirmPerCall']
+  onExecution?: ToolCallContext['onExecution']
+  onUncertain?: ToolCallContext['onUncertain']
 }
 
 /**
@@ -259,6 +265,8 @@ export class ToolHost {
         principal: p,
         lang,
         confirmPerCall: ref.confirmPerCall,
+        onExecution: ref.onExecution,
+        onUncertain: ref.onUncertain,
         precheck: async () => {
           if (await this.flag(AGENT_PAUSED_PARAM)) throw new ToolRefusal(Err.AGENT_PAUSED)
         },
@@ -366,6 +374,7 @@ export class ToolHost {
     }
     let quiet = false
     let late: Promise<unknown> | undefined
+    let entered = false
     try {
       await ctx.precheck?.()
       // 参数过深或过大：不校验也不运行，日志行照记（不含原始参数）
@@ -395,7 +404,12 @@ export class ToolHost {
       }
       // 数据权限按工具声明的权限点计算，与对应列表接口一致（PermGuard 对路由做的同一件事）。
       const checked = tool.perm ? { perms: [tool.perm], all: false } : undefined
-      const data = await withCheckedPerm(checked, () => this.run(tool, input, execution))
+      const data = await withCheckedPerm(checked, () =>
+        this.run(tool, input, execution, (work) => {
+          entered = true
+          ctx.onExecution?.(work)
+        }),
+      )
       rec.result = tool.output ? this.shaped(tool, data) : data
       const text = maskedJson(rec.result)
       if (Buffer.byteLength(text) > MCP_OUTPUT_MAX_BYTES)
@@ -404,6 +418,7 @@ export class ToolHost {
     } catch (e) {
       const r = e instanceof ToolRefusal ? e : this.failure(e)
       quiet = r.quiet
+      if (tool?.kind === 'write' && entered) ctx.onUncertain?.()
       // 写入类工具超时：调用仍在后台运行，可能随后提交；等它结束再按实际结果记日志
       if (r instanceof ToolTimeout && tool?.kind === 'write') late = r.work
       rec.error = r.err
@@ -436,8 +451,18 @@ export class ToolHost {
     tool: RegisteredTool,
     input: unknown,
     context?: ToolExecutionContext,
+    onExecution?: (work: Promise<unknown>) => void,
   ): Promise<unknown> {
-    const work = Promise.resolve(tool.run(input, context))
+    let start!: () => void
+    const work = new Promise<unknown>((resolve, reject) => {
+      start = () => {
+        void Promise.resolve()
+          .then(() => tool.run(input, context))
+          .then(resolve, reject)
+      }
+    })
+    onExecution?.(work)
+    start()
     let timer: NodeJS.Timeout | undefined
     try {
       return await Promise.race([

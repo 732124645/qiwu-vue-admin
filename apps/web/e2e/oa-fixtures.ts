@@ -9,7 +9,6 @@ export type OfficeFixture = {
   users: Record<'owner' | 'boss' | 'other', OfficeUser>
   models: Record<string, unknown>[]
   versions: number[]
-  policy: Record<string, unknown> | null
 }
 export type ScriptRunner = (script: string, env?: Record<string, string>) => string
 
@@ -61,9 +60,7 @@ try {
    versions.push(version)
    await q.query('UPDATE wf_model SET draft_json=?,current_version_id=?,enabled=1,initiator_scope=?,manager_user_ids=NULL WHERE tenant_id=? AND id=?',[JSON.stringify(tree),version,JSON.stringify({userIds:[users.owner.id],deptIds:[],roleIds:[]}),tid,model.id])
   }
-  const [policy] = await q.query('SELECT id, enabled, timezone, location_mode FROM oa_attendance_policy WHERE tenant_id=? AND deleted_at IS NULL', [tid])
-  if(input.clock) await q.query("UPDATE oa_attendance_policy SET enabled=1,timezone='Asia/Shanghai',location_mode='none' WHERE tenant_id=? AND deleted_at IS NULL",[tid])
-  return {tid,role,users,models,versions,policy:policy??null}
+  return {tid,role,users,models,versions}
  }))
  console.log(JSON.stringify(result))
 } finally { await ds.destroy() }
@@ -82,13 +79,12 @@ try { await ds.transaction(async q=>{
   await q.query('DELETE FROM wf_instance WHERE tenant_id=? AND id IN (?)',[f.tid,instances])
  }
  await q.query('DELETE FROM oa_expense_item WHERE tenant_id=? AND claim_id IN (SELECT id FROM oa_expense_claim WHERE tenant_id=? AND user_id IN (?))',[f.tid,f.tid,ids])
- for(const table of ['biz_leave_request','oa_trip_request','oa_expense_claim','oa_seal_request','oa_clock_record']) await q.query('DELETE FROM '+table+' WHERE tenant_id=? AND user_id IN (?)',[f.tid,ids])
+ for(const table of ['biz_leave_request','oa_trip_request','oa_expense_claim','oa_seal_request']) await q.query('DELETE FROM '+table+' WHERE tenant_id=? AND user_id IN (?)',[f.tid,ids])
  const files=await q.query('SELECT object_key,is_public FROM fs_object WHERE tenant_id=? AND uploader_id IN (?)',[f.tid,ids])
  for(const file of files) await new LocalStorage().remove(file.object_key,!!file.is_public)
  await q.query('DELETE FROM fs_object WHERE tenant_id=? AND uploader_id IN (?)',[f.tid,ids])
  for(const model of f.models) await q.query('UPDATE wf_model SET draft_json=?,initiator_scope=?,manager_user_ids=?,enabled=?,current_version_id=? WHERE tenant_id=? AND id=?',[model.draft_json==null?null:JSON.stringify(model.draft_json),model.initiator_scope==null?null:JSON.stringify(model.initiator_scope),model.manager_user_ids==null?null:JSON.stringify(model.manager_user_ids),model.enabled,model.current_version_id,f.tid,model.id])
  await q.query('DELETE FROM wf_version WHERE tenant_id=? AND id IN (?)',[f.tid,f.versions])
- if(f.policy) await q.query('UPDATE oa_attendance_policy SET enabled=?,timezone=?,location_mode=? WHERE tenant_id=? AND id=?',[f.policy.enabled,f.policy.timezone,f.policy.location_mode,f.tid,f.policy.id])
  await q.query('DELETE FROM msg_inbox WHERE tenant_id=? AND user_id IN (?)',[f.tid,ids])
  for(const table of ['iam_user_roles','iam_user_positions']) await q.query('DELETE FROM '+table+' WHERE tenant_id=? AND user_id IN (?)',[f.tid,ids])
  await q.query('DELETE FROM iam_role_menus WHERE tenant_id=? AND role_id=?',[f.tid,f.role])
@@ -101,7 +97,7 @@ try { await ds.transaction(async q=>{
 export function seedOffice(
   run: ScriptRunner,
   tag: string,
-  options: { code?: string; clock?: boolean } = {},
+  options: { code?: string } = {},
 ): OfficeFixture {
   const output = run(SETUP, {
     OFFICE_INPUT: JSON.stringify({ tag, password: OFFICE_PASSWORD, ...options }),

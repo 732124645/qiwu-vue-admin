@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { DOMWrapper, flushPromises, mount, type VueWrapper } from '@vue/test-utils'
-import ElementPlus, { ElMessage, ElMessageBox } from 'element-plus'
+import ElementPlus, { ElMessage, ElMessageBox, ElSelect } from 'element-plus'
 import type {
   AgentMcpServerVo,
   AgentProviderVo,
@@ -21,6 +21,8 @@ import { dialogs } from '@/core/dialog'
 import { appSettings } from '@/core/stores/app'
 import { useAuthStore } from '@/core/stores/auth'
 import ProviderForm from '@/views/platform/agent/setting/ProviderForm.vue'
+import McpTools from '@/views/platform/agent/setting/McpTools.vue'
+import UsageEntries from '@/views/platform/agent/usage/UsageEntries.vue'
 import McpTab from '@/views/platform/agent/setting/McpTab.vue'
 import ParamTab from '@/views/platform/agent/setting/ParamTab.vue'
 import ProviderTab from '@/views/platform/agent/setting/ProviderTab.vue'
@@ -108,6 +110,69 @@ const PROVIDER: AgentProviderVo = {
 }
 
 describe('provider form', () => {
+  it('saves exact rates, explicit free pricing, cache inheritance and default reasoning', async () => {
+    const provider = { ...PROVIDER, models: [{ ...PROVIDER.models[0]!, reasoning: true }] }
+    const calls = mockApi({
+      'GET /agent/providers': ok([provider]),
+      'PUT /agent/providers/3': ok(provider),
+    })
+    await show(ProviderForm, { props: { id: 3 } })
+    expect(w.text()).toContain(t('agent.admin.model.pricingMissing'))
+    await w.find('.el-collapse-item__header').trigger('click')
+    const enabled = w
+      .findAll('.el-checkbox')
+      .find((node) => node.text() === t('agent.admin.model.pricingEnabled'))!
+    await enabled.find('input').setValue(true)
+    const rate = (name: string) => w.find(`input[aria-label="${t(`agent.admin.model.${name}`)}"]`)
+    await rate('inputCredits').setValue('0.1234567')
+    await rate('outputCredits').setValue('0')
+    await button(t('crud.action.save'))!.trigger('click')
+    await flushPromises()
+    expect(sent(calls, 'put', '/agent/providers/3')).toHaveLength(0)
+    await rate('inputCredits').setValue('0.123456')
+    await rate('cacheReadCredits').setValue('0')
+    await rate('imageCredits').setValue('0.000001')
+    const defaults = w
+      .findAllComponents(ElSelect)
+      .find(
+        (select) =>
+          select.find('input').attributes('aria-label') === t('agent.admin.model.reasoningDefault'),
+      )!
+    defaults.vm.$emit('update:modelValue', 'off')
+    await button(t('crud.action.save'))!.trigger('click')
+    await flushPromises()
+    expect(sent(calls, 'put', '/agent/providers/3')[0]).toMatchObject({
+      models: [
+        {
+          pricing: {
+            input: '0.123456',
+            output: '0',
+            cacheRead: '0',
+            cacheWrite: null,
+            imageCredits: '0.000001',
+          },
+          reasoningDefault: 'off',
+          reasoningStyle: 'standard',
+        },
+      ],
+    })
+    const style = w
+      .findAllComponents(ElSelect)
+      .find(
+        (select) =>
+          select.find('input').attributes('aria-label') === t('agent.admin.model.reasoningStyle'),
+      )!
+    style.vm.$emit('change', 'vllm')
+    await flushPromises()
+    expect(w.text()).toContain(t('agent.admin.model.vllmHint'))
+    await rate('inputCredits').setValue('0')
+    await button(t('crud.action.save'))!.trigger('click')
+    await flushPromises()
+    expect(sent(calls, 'put', '/agent/providers/3')[1]).toMatchObject({
+      models: [{ pricing: { input: '0', output: '0' }, reasoningStyle: 'vllm' }],
+    })
+  })
+
   it('keeps the stored key when the key is left empty, sends a typed one', async () => {
     const calls = mockApi({
       'GET /agent/providers': ok([PROVIDER]),
@@ -273,6 +338,42 @@ describe('external mcp servers', () => {
     syncedAt: null,
     tools: [],
   }
+
+  it('requires a named trust confirmation even without a read-only hint, and cancellation writes nothing', async () => {
+    const tool = {
+      id: 9,
+      name: 'search.unknown',
+      title: null,
+      description: null,
+      readOnlyHint: false,
+      enabled: true,
+      policy: 'ask' as const,
+    }
+    const confirm = vi.spyOn(ElMessageBox, 'confirm').mockRejectedValueOnce('cancel')
+    const calls = mockApi({ 'PUT /agent/mcp-servers/4/tools/9': ok({ ...tool, policy: 'auto' }) })
+    await show(McpTools, { props: { server: { ...SERVER, tools: [tool] }, canModify: true } })
+    const select = w.findComponent(ElSelect)
+    await select.trigger('click')
+    await flushPromises()
+    expect(
+      body()
+        .findAll('.el-select-dropdown__item')
+        .map((option) => option.text()),
+    ).toContain(t('agent.admin.policy.auto'))
+    select.vm.$emit('change', 'auto')
+    await flushPromises()
+    expect(confirm).toHaveBeenCalledWith(
+      expect.stringContaining(SERVER.name),
+      expect.any(String),
+      expect.any(Object),
+    )
+    expect(confirm.mock.calls[0]![0]).toContain(tool.name)
+    expect(calls.filter((call) => call.method === 'put')).toHaveLength(0)
+    confirm.mockResolvedValueOnce('confirm' as never)
+    select.vm.$emit('change', 'auto')
+    await flushPromises()
+    expect(sent(calls, 'put', '/agent/mcp-servers/4/tools/9')).toEqual([{ policy: 'auto' }])
+  })
 
   it('syncs a server and shows its status, error and time', async () => {
     const calls = mockApi({
@@ -550,6 +651,9 @@ describe('root-only params', () => {
     param(3, 'agent.instructions', ''),
     param(4, 'agent.limit.turn_steps', '20'),
     param(5, 'agent.limit.turn_seconds', '300'),
+    param(7, 'agent.limit.turn_credits', '3.000001'),
+    param(8, 'agent.limit.user_daily_credits', '10'),
+    param(9, 'agent.limit.tenant_daily_credits', '20'),
     // the key filter matches by "contains": a param outside the prefix is ignored
     param(6, 'mcp.agent.x', '1'),
   ]
@@ -598,6 +702,27 @@ describe('root-only params', () => {
     expect(sent(calls, 'put', '/settings/params/5')).toEqual([{ paramValue: '120' }])
   })
 
+  it('sends an explicit zero for unlimited credits and preserves decimal precision while numeric guards stay positive', async () => {
+    const calls = mockApi({
+      'GET /settings/params': ok({ items: PARAMS, total: PARAMS.length }),
+      'PUT /settings/params/7': ok(null),
+      'PUT /settings/params/8': ok(null),
+    })
+    await show(ParamTab)
+    const amount = (name: string) => w.find(`input[aria-label="${t(`agent.admin.limit.${name}`)}"]`)
+    await amount('turnCredits').setValue('0')
+    await amount('userDailyCredits').setValue('0.1234567')
+    await w.find('.param-tab__save-limits').trigger('click')
+    await flushPromises()
+    expect(calls.filter((call) => call.method === 'put')).toHaveLength(0)
+    await amount('userDailyCredits').setValue('0.123456')
+    await w.find('.param-tab__save-limits').trigger('click')
+    await flushPromises()
+    expect(sent(calls, 'put', '/settings/params/7')).toEqual([{ paramValue: '0' }])
+    expect(sent(calls, 'put', '/settings/params/8')).toEqual([{ paramValue: '0.123456' }])
+    expect(amount('turnSeconds').attributes('aria-valuemin')).toBe('1')
+  })
+
   it('shows no edit controls to a non-root admin', async () => {
     mockApi({ 'GET /settings/params': ok({ items: PARAMS, total: PARAMS.length }) })
     await show(ParamTab, { root: false })
@@ -617,6 +742,14 @@ describe('usage page', () => {
         calls: 3,
         promptTokens: 1000,
         completionTokens: 200,
+        totalTokens: 1200,
+        cacheReadTokens: 100,
+        cacheWriteTokens: null,
+        reasoningTokens: null,
+        credits: '0.1',
+        unpricedCalls: 0,
+        unreportedCalls: 0,
+        legacyCalls: 0,
       },
       {
         key: '2026-10-22',
@@ -624,9 +757,33 @@ describe('usage page', () => {
         calls: 2,
         promptTokens: 500,
         completionTokens: 100,
+        totalTokens: 600,
+        cacheReadTokens: null,
+        cacheWriteTokens: null,
+        reasoningTokens: null,
+        credits: '0.2',
+        unpricedCalls: 1,
+        unreportedCalls: 1,
+        legacyCalls: 1,
       },
     ],
-    user: [{ key: '1', label: 'Alice', calls: 5, promptTokens: 1500, completionTokens: 300 }],
+    user: [
+      {
+        key: '1',
+        label: 'Alice',
+        calls: 5,
+        promptTokens: 1500,
+        completionTokens: 300,
+        totalTokens: 1800,
+        cacheReadTokens: null,
+        cacheWriteTokens: null,
+        reasoningTokens: null,
+        credits: '0.3',
+        unpricedCalls: 1,
+        unreportedCalls: 1,
+        legacyCalls: 1,
+      },
+    ],
   }
 
   it('groups by day, then by user, with a totals row', async () => {
@@ -639,7 +796,8 @@ describe('usage page', () => {
     const footer = () => w.find('.el-table__footer').text()
     expect(footer()).toContain(t('agent.admin.usage.total'))
     expect(footer()).toContain((1500).toLocaleString())
-    expect(footer()).toContain((1800).toLocaleString())
+    expect(footer()).toContain('0.3')
+    expect(footer()).not.toContain('0.30000000000000004')
 
     await w
       .findAll('.usage__group label')
@@ -649,5 +807,105 @@ describe('usage page', () => {
     await flushPromises()
     expect(calls.at(-1)!.params).toMatchObject({ groupBy: 'user' })
     expect(w.find('.el-table__body').text()).toContain('Alice')
+  })
+  it('retains unknown tokens and unpriced history instead of displaying zero', async () => {
+    mockApi({
+      'GET /agent/usage': ok([
+        {
+          ...rowsBy.day![0]!,
+          promptTokens: null,
+          completionTokens: null,
+          totalTokens: null,
+          credits: '0',
+          unpricedCalls: 1,
+          unreportedCalls: 1,
+          legacyCalls: 1,
+        },
+      ]),
+    })
+    await show(UsagePage)
+    expect(w.find('.el-table__body').text()).toContain(t('agent.admin.usage.unknown'))
+    expect(w.find('.el-table__footer').text()).toContain(t('agent.admin.usage.unknown'))
+  })
+
+  it('shows a live invocation as in progress instead of free or missing-price history', async () => {
+    mockApi({
+      'GET /agent/usage/entries': ok({
+        items: [
+          {
+            id: 2,
+            userId: 1,
+            providerId: 3,
+            providerName: 'P',
+            model: 'M',
+            threadId: 7,
+            turnId: 9,
+            kind: 'chat',
+            status: 'pending',
+            usage: null,
+            pricing: {
+              input: '5',
+              output: '15',
+              cacheRead: null,
+              cacheWrite: null,
+              imageCredits: null,
+            },
+            credits: null,
+            usageReported: false,
+            createdAt: AT,
+          },
+        ],
+        total: 1,
+      }),
+    })
+    await show(UsageEntries, { props: { from: '2026-10-01', to: '2026-10-27' } })
+    expect(w.find('.el-table__body').text()).toContain(t('agent.admin.usage.state.pending'))
+    expect(w.find('.el-table__body').text()).not.toContain(t('agent.admin.usage.unpriced'))
+    await button(t('agent.admin.usage.entry'))!.trigger('click')
+    expect(w.find('.usage-entries__detail').text()).toContain(t('agent.admin.usage.pendingHint'))
+    expect(w.find('.usage-entries__detail').text()).not.toContain(t('agent.admin.usage.legacy'))
+  })
+
+  it('pages original usage and rate snapshots without reconstructing legacy or missing usage', async () => {
+    const entry = {
+      id: 1,
+      userId: 1,
+      providerId: 3,
+      providerName: 'P',
+      model: 'M',
+      threadId: 7,
+      turnId: 9,
+      kind: 'chat',
+      usage: null,
+      pricing: null,
+      credits: null,
+      usageReported: false,
+      createdAt: AT,
+    }
+    const calls = mockApi({ 'GET /agent/usage/entries': ok({ items: [entry], total: 21 }) })
+    await show(UsageEntries, { props: { from: '2026-10-01', to: '2026-10-26' } })
+    expect(calls.find((call) => call.url === '/agent/usage/entries')!.params).toEqual({
+      from: '2026-10-01',
+      to: '2026-10-26',
+      page: 1,
+      pageSize: 10,
+      sort: '-createdAt',
+    })
+    expect(w.text()).toContain(t('agent.admin.usage.unpriced'))
+    await button(t('agent.admin.usage.entry'))!.trigger('click')
+    await flushPromises()
+    expect(w.text()).toContain(t('agent.admin.usage.legacy'))
+    const files = w.findComponent({ name: 'CodeViewer' }).props('files') as {
+      path: string
+      content: string
+    }[]
+    expect(files.find((file) => file.path === 'usage.json')!.content).toBe('null')
+    expect(files.find((file) => file.path === 'pricing.json')!.content).toBe('null')
+    await w.find('.el-pagination .btn-next').trigger('click')
+    await flushPromises()
+    expect(
+      calls.filter((call) => call.url === '/agent/usage/entries').at(-1)!.params,
+    ).toMatchObject({ page: 2 })
+    expect(w.find('.usage-entries__detail').exists()).toBe(false)
   })
 })

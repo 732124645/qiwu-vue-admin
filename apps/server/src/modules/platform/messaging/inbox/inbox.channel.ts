@@ -3,7 +3,7 @@ import { InjectDataSource } from '@nestjs/typeorm'
 import { TransactionHost } from '@nestjs-cls/transactional'
 import type { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm'
 import { RT } from '@qiwu/shared'
-import type { DataSource } from 'typeorm'
+import type { DataSource, EntityManager } from 'typeorm'
 import { AppConfigService } from '../../../../core/config/config.module.js'
 import { tenantId } from '../../../../core/context/tenant.js'
 import {
@@ -62,22 +62,20 @@ export class InboxChannel implements NotifyChannel<InboxTemplate>, OnModuleInit 
     this.listeners.push(fn)
   }
 
-  templates(code: string): Promise<InboxTemplate[]> {
-    return this.ds.getRepository(InboxTemplate).find({ where: { code, enabled: true } })
+  templates(code: string, manager: EntityManager = this.txHost.tx): Promise<InboxTemplate[]> {
+    return manager.getRepository(InboxTemplate).find({ where: { code, enabled: true } })
   }
 
-  async write({
-    template,
-    recipient,
-    params,
-    values,
-  }: NotifyDraft<InboxTemplate>): Promise<number | null> {
+  async write(
+    { template, recipient, params, values }: NotifyDraft<InboxTemplate>,
+    manager: EntityManager = this.txHost.tx,
+  ): Promise<number | null> {
     if (recipient.userId === null) return null
     const title = Array.from(fillTemplate(template.title, values)).slice(0, 200).join('')
     const body = Buffer.from(fillTemplate(template.body, values))
       .subarray(0, 65_532)
       .toString('utf8')
-    const result: { insertId: number } = await this.txHost.tx.query(
+    const result: { insertId: number } = await manager.query(
       `INSERT INTO msg_inbox (user_id, template_code, locale, category, sender_label, title, body, params, status, attempts, tenant_id)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?)`,
       [

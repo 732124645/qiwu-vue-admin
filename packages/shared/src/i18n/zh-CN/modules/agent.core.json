@@ -11,13 +11,16 @@
         "context": "页面上下文",
         "planMode": "计划模式",
         "pinned": "置顶",
-        "temporary": "临时会话"
+        "temporary": "临时会话",
+        "clientDraftId": "草稿接收标识",
+        "revision": "核对版本"
       },
       "message": {
         "text": "消息",
         "skill": "技能",
         "fileIds": "附件",
-        "mode": "发送方式"
+        "mode": "发送方式",
+        "clientMessageId": "发送意图标识"
       },
       "approval": {
         "decision": "决定",

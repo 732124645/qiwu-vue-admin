@@ -1,5 +1,3 @@
-import { OaAgentModule } from './agent/oa-agent.module.js'
-import { AttendanceModule } from './attendance/attendance.module.js'
 import { OaAttachmentModule } from './attachment/oa-attachment.module.js'
 import { SealModule } from './seal/seal.module.js'
 import { Module } from '@nestjs/common'
@@ -14,8 +12,6 @@ import { TripModule } from './trip/trip.module.js'
 /** 办公业务登记在项目域，复用工作流模块而不向引擎注入业务依赖。 */
 @Module({
   imports: [
-    AttendanceModule,
-    OaAgentModule,
     OaAttachmentModule,
     TripModule,
     ExpenseModule,

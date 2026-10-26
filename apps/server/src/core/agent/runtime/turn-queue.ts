@@ -391,14 +391,38 @@ export class TurnQueue implements OnModuleInit, BeforeApplicationShutdown {
     for (const id of ids)
       n += await this.store.tx(async (w) => {
         const t = await w.thread(id)
-        if (!t?.temporary) return 0
+        if (!t?.temporary || t.recoveryRequired) return 0
         const active = t.lastActiveAt ?? t.createdAt
         if (idleBefore && active && new Date(active) >= idleBefore) return 0
         if (await w.m.getRepository(AgentTurn).existsBy({ threadId: id, status: ACTIVE_TURN }))
           return 0
         await w.m.getRepository(AgentItem).delete({ threadId: id })
         await w.m.getRepository(AgentTurn).delete({ threadId: id })
-        await w.m.getRepository(AgentThread).delete({ id })
+        if (t.clientDraftId) {
+          // 保留客户端永久去重键的薄墓碑，重试创建不能把已清理的临时会话复活。
+          await w.m.getRepository(AgentThread).update(
+            { id },
+            {
+              title: '',
+              context: null,
+              summary: null,
+              summarySeq: 0,
+              trusted: null,
+              targetRef: null,
+              profileId: null,
+              forkedFromId: null,
+              parentThreadId: null,
+              batchId: null,
+              automationRunId: null,
+              clientDraftHash: null,
+              shareToken: null,
+              providerId: null,
+              model: null,
+              reasoning: null,
+            },
+          )
+          await w.m.getRepository(AgentThread).softDelete({ id })
+        } else await w.m.getRepository(AgentThread).delete({ id })
         return 1
       })
     return n

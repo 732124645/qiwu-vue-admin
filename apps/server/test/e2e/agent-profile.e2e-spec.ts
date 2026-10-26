@@ -1,3 +1,4 @@
+import { TEST_AGENT_PRICING, clearAgentUsage } from '../setup/agent-pricing.js'
 // Agent profiles (see docs/agent.md): the caller's own and tenant-wide ones (those need agent.skill.modify),
 // another user's personal profile and another tenant's are 404; the approval mode must be one the platform
 // offers (a tenant-wide profile only read-only or ask), listed tools must exist, one default per scope. A new
@@ -145,8 +146,20 @@ beforeAll(async () => {
     name: `${PREFIX}provider`,
     base_url: 'http://127.0.0.1:9/v1',
     models: [
-      { id: 'pm1', label: 'pm1', reasoning: false, contextWindow: 64_000 },
-      { id: 'pm2', label: 'pm2', reasoning: true, contextWindow: 64_000 },
+      {
+        id: 'pm1',
+        label: 'pm1',
+        reasoning: false,
+        pricing: TEST_AGENT_PRICING,
+        contextWindow: 64_000,
+      },
+      {
+        id: 'pm2',
+        label: 'pm2',
+        reasoning: true,
+        pricing: TEST_AGENT_PRICING,
+        contextWindow: 64_000,
+      },
     ],
     enabled: 1,
   })
@@ -185,7 +198,7 @@ afterAll(async () => {
       }
       await ds.query('DELETE FROM agent_profile WHERE tenant_id = 1 AND created_by IN (?)', [ids])
       await ds.query('DELETE FROM agent_skill WHERE tenant_id = 1 AND owner_user_id IN (?)', [ids])
-      await ds.query('DELETE FROM agent_usage WHERE tenant_id = 1 AND user_id IN (?)', [ids])
+      await clearAgentUsage(ds, ids)
       await ds.query('DELETE FROM iam_user_roles WHERE user_id IN (?)', [ids])
       await ds.query('DELETE FROM iam_user WHERE id IN (?)', [ids])
     }

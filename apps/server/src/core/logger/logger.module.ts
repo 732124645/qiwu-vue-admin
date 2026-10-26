@@ -73,13 +73,29 @@ function sanitizedError(serialized: Record<string, unknown>): Record<string, unk
  * pino would take from them); the error filter logs 5xx already masked with the request's secrets too
  * (`describeFault`).
  */
+const STARTUP_CONTEXTS = new Set([
+  'NestFactory',
+  'InstanceLoader',
+  'RoutesResolver',
+  'RouterExplorer',
+  'NestApplication',
+])
+
 export const pinoHttpOptions = (cfg: AppConfigService): Options => ({
   level: cfg.get('LOG_LEVEL'),
   genReqId: requestId,
   redact: ['req.headers.authorization', 'req.headers.cookie', 'res.headers["set-cookie"]'],
   hooks: {
     // with no message given, pino makes the error's raw message the line's `msg`: give the masked one
-    logMethod(args, method) {
+    logMethod(args, method, level) {
+      // 开发重启只省略框架的重复注册信息，不过滤警告、错误或业务日志。
+      if (
+        process.env.QW_DEV === '1' &&
+        cfg.get('NODE_ENV') === 'development' &&
+        level === 30 &&
+        STARTUP_CONTEXTS.has((args[0] as { context?: string } | undefined)?.context ?? '')
+      )
+        return
       const [first] = args as unknown[]
       const err =
         first instanceof Error ? first : (first as { err?: unknown } | null | undefined)?.err
@@ -106,7 +122,19 @@ export const pinoHttpOptions = (cfg: AppConfigService): Options => ({
     err: sanitizedError,
   },
   // pino-pretty is a devDependency: only ever loaded in development
-  transport: cfg.get('NODE_ENV') === 'development' ? { target: 'pino-pretty' } : undefined,
+  transport:
+    cfg.get('NODE_ENV') === 'development'
+      ? {
+          target: 'pino-pretty',
+          options:
+            process.env.QW_DEV === '1'
+              ? {
+                  singleLine: true,
+                  ignore: 'pid,hostname,req.headers,res.headers,req.remoteAddress,req.remotePort',
+                }
+              : undefined,
+        }
+      : undefined,
 })
 
 /** Structured JSON logs (pino); every request line carries reqId = CLS id = traceId. Needs CoreConfigModule. */
