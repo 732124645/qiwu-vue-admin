@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import { onMounted, shallowRef, watch } from 'vue'
+import { computed, onMounted, shallowRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { AgentOptionsVo, AgentProfileVo, AgentThreadVo } from '@qiwu/shared'
 import { agentApi } from '@/api/platform/agent'
 import { agentProfileApi } from '@/api/platform/agent-memory'
-import IconButton from '@/core/components/IconButton.vue'
 import { toastRest } from '@/core/composables/use-crud'
 import { openDialog } from '@/core/dialog'
 import MemoryPanel from './MemoryPanel.vue'
@@ -17,9 +16,9 @@ export interface ProfileDraft {
 }
 
 /**
- * 对话页头部的“配置方案”与“记忆”：新会话草稿可选方案（默认选中本人的默认方案，选中后把方案的模型与模式
- * 带进输入框）与是否使用记忆；已有会话可逐会话开关记忆（临时会话不读不写记忆，不显示开关）。两个按钮打开
- * “配置方案”与“我的记忆”面板。
+ * 对话页“会话设置”里的“配置方案”与“记忆”两行：新会话草稿可选方案（默认选中本人的默认方案，选中后把方案的
+ * 模型与模式带进输入框）与是否使用记忆；已有会话可逐会话开关记忆（临时会话不读不写记忆，不显示开关）。
+ * 两行各有一个文字按钮打开“配置方案”与“我的记忆”面板。组件常驻页面（弹层隐藏时也挂载），默认方案才能及时带进草稿。
  */
 defineOptions({ name: 'AgentProfileMemoryBar' })
 const {
@@ -71,9 +70,22 @@ watch(
 
 /** 草稿里换方案：清空为不用方案。 */
 function choose(id: number | null | undefined) {
-  draft.value = { ...draft.value, profileId: id ?? null }
-  emit('apply', profiles.value.find((p) => p.id === id) ?? null)
+  const profileId = id == null || id === NO_PROFILE ? null : id
+  draft.value = { ...draft.value, profileId }
+  emit('apply', profiles.value.find((p) => p.id === profileId) ?? null)
 }
+
+/** 选择框里“不使用方案”的取值（方案 id 都是正整数） */
+const NO_PROFILE = 0
+/**
+ * 选择框显示的方案：已有会话显示它用的方案（只读，方案只能在新会话选）；草稿显示所选方案；
+ * 还没有任何方案时为空，显示“还没有方案”的提示。
+ */
+const picked = computed(() => {
+  if (!profiles.value.length) return undefined
+  const id = thread ? thread.profileId : draft.value.profileId
+  return id ?? NO_PROFILE
+})
 
 /** 记忆开关：已有会话立即保存，草稿只记下（建会话时带上）。 */
 function onMemory(v: string | number | boolean) {
@@ -107,36 +119,44 @@ onMounted(load)
 </script>
 
 <template>
-  <el-select
-    v-if="!thread && profiles.length"
-    class="agent-profile-bar__pick"
-    :model-value="draft.profileId ?? undefined"
-    clearable
-    size="small"
-    :placeholder="t('agent.profile.none')"
-    :aria-label="t('agent.profile.pick')"
-    @update:model-value="choose"
-  >
-    <el-option v-for="p in profiles" :key="p.id" :value="p.id" :label="p.name" />
-  </el-select>
-  <el-switch
-    v-if="thread ? !thread.temporary : !temporary"
-    :model-value="thread ? thread.memoryEnabled : draft.memoryEnabled"
-    :loading="saving"
-    :active-text="t('agent.memory.use')"
-    :aria-label="t('agent.memory.use')"
-    @update:model-value="onMemory"
-  />
-  <IconButton
-    icon="lucide:sliders-vertical"
-    :label="t('agent.profile.title')"
-    @click="openProfiles"
-  />
-  <IconButton icon="lucide:brain" :label="t('agent.memory.title')" @click="openMemories" />
+  <div class="agent-settings__row">
+    <span class="agent-settings__name">{{ t('agent.profile.title') }}</span>
+    <el-select
+      class="agent-profile-bar__pick"
+      :model-value="picked"
+      size="small"
+      :teleported="false"
+      :disabled="!!thread || !profiles.length"
+      :title="thread ? t('agent.chat.settings.profileLocked') : undefined"
+      :placeholder="t('agent.chat.settings.noProfiles')"
+      :aria-label="t('agent.profile.pick')"
+      @update:model-value="choose"
+    >
+      <el-option :value="NO_PROFILE" :label="t('agent.profile.none')" />
+      <el-option v-for="p in profiles" :key="p.id" :value="p.id" :label="p.name" />
+    </el-select>
+    <el-button size="small" link type="primary" @click="openProfiles">
+      {{ t('agent.chat.settings.manage') }}
+    </el-button>
+  </div>
+  <div class="agent-settings__row">
+    <span class="agent-settings__name">{{ t('agent.memory.use') }}</span>
+    <el-switch
+      v-if="thread ? !thread.temporary : !temporary"
+      :model-value="thread ? thread.memoryEnabled : draft.memoryEnabled"
+      :loading="saving"
+      :aria-label="t('agent.memory.use')"
+      @update:model-value="onMemory"
+    />
+    <span v-else class="agent-settings__hint">{{ t('agent.chat.settings.noMemory') }}</span>
+    <el-button size="small" link type="primary" @click="openMemories">
+      {{ t('agent.memory.title') }}
+    </el-button>
+  </div>
 </template>
 
 <style scoped>
 .agent-profile-bar__pick {
-  width: 140px;
+  width: 160px;
 }
 </style>

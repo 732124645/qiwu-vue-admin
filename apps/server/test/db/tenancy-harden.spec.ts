@@ -91,18 +91,20 @@ beforeAll(async () => {
 // afterAll rebuilds the database
 beforeEach((context) => {
   if (killed.script || fence.unsafe)
-    context.skip('a prior migration case failed; the database is rebuilt in afterAll')
+    context.skip(
+      'a prior migration case may have left the database half migrated; the database is rebuilt in afterAll',
+    )
   fence.begin(context.signal)
 })
 
 // 等待原异步函数的 finally 真正退出；超过可配置预算时 fence 终止 worker，不与恢复并行。
-afterEach(async ({ task, signal }) => {
-  await fence.drain(task.result?.state === 'fail' || signal.aborted)
+afterEach(async () => {
+  await fence.drain()
 }, SCRIPT_CASE_MS)
 
 afterAll(async () => {
   // back to the globalSetup state, whatever a failed case left
-  await fence.drain(false)
+  await fence.drain()
   if (ds?.isInitialized) {
     await recoverMigrationRun(async () => {
       if (killed.script || fence.unsafe) await ds.dropDatabase()

@@ -27,7 +27,12 @@ export default defineConfig({
     testTimeout: 20_000,
     // once per run: reset qiwu_test (drop, migrate, seed)
     globalSetup: ['test/setup/global-setup.ts'],
-    setupFiles: ['test/setup/load-env.ts', 'test/setup/tenant-leftovers.ts'],
+    setupFiles: [
+      'test/setup/load-env.ts',
+      'test/setup/tenant-leftovers.ts',
+      'test/setup/loopback-listen.ts',
+      'test/setup/fresh-throttle.ts',
+    ],
     // tests run from source, so locale JSON is read from src (the build copies it to dist/i18n);
     // ENV_FILE: CoreConfigModule's mode file (load-env.ts already put the same values in process.env);
     // CODEGEN_TEMPLATES: the generator's templates from source too

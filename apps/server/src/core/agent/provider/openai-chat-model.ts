@@ -111,13 +111,14 @@ export class OpenAiChatModel implements ChatModel {
   async *stream(req: ChatRequest): AsyncIterable<ChatEvent> {
     const names = this.namesOf(req)
     const call = this.guard(req.signal)
+    const body = this.body(req, names.wire)
     const calls = new Map<number, { id: string; name: string; args: string }>()
     let reason: ChatFinishReason = 'other'
     let finished = false
     try {
       const chunks = await this.withRetry(call, () =>
         this.client.chat.completions.create(
-          { ...this.body(req, names.wire), stream: true, stream_options: { include_usage: true } },
+          { ...body, stream: true, stream_options: { include_usage: true } },
           { signal: call.signal },
         ),
       )
@@ -148,7 +149,7 @@ export class OpenAiChatModel implements ChatModel {
       if (call.signal.aborted) throw call.signal.reason
       if (!finished) throw failed('bad_response')
     } catch (e) {
-      throw this.fail(e, call)
+      throw this.fail(e, call, body)
     } finally {
       call.done()
     }
@@ -166,9 +167,10 @@ export class OpenAiChatModel implements ChatModel {
   async complete(req: ChatRequest): Promise<ChatCompletion> {
     const names = this.namesOf(req)
     const call = this.guard(req.signal)
+    const body = this.body(req, names.wire)
     try {
       const res = await this.withRetry(call, () =>
-        this.client.chat.completions.create(this.body(req, names.wire), { signal: call.signal }),
+        this.client.chat.completions.create(body, { signal: call.signal }),
       )
       const reported = usageOf(res.usage)
       if (reported.usageReported) req.onUsage?.(reported)
@@ -192,7 +194,7 @@ export class OpenAiChatModel implements ChatModel {
         finishReason: FINISH[choice.finish_reason] ?? 'other',
       }
     } catch (e) {
-      throw this.fail(e, call)
+      throw this.fail(e, call, body)
     } finally {
       call.done()
     }
@@ -319,10 +321,28 @@ export class OpenAiChatModel implements ChatModel {
     }
   }
 
-  /** 调用方中断原样抛出中断原因；其余一律映射成不含上游正文的 AGENT_PROVIDER_FAILED。 */
-  private fail(e: unknown, call: ReturnType<OpenAiChatModel['guard']>): unknown {
+  /**
+   * 调用方中断原样抛出中断原因；其余一律映射成不含上游正文的 AGENT_PROVIDER_FAILED。
+   * 例外：请求带了 `reasoning_effort: 'none'`、被回 400 且上游说明提到 reasoning / effort / thinking 时，
+   * 是兼容服务不认识这个值，单独给出可读的原因让人改思考设置（只判断不外传上游正文）；其他 400 仍是
+   * http_400。不自动换别的值重发，以免悄悄改变思考行为并多付一次费用。
+   */
+  private fail(
+    e: unknown,
+    call: ReturnType<OpenAiChatModel['guard']>,
+    body?: { reasoning_effort?: string },
+  ): unknown {
     if (call.outer?.aborted) return abortReason(call.outer)
     if (e instanceof BizError) return e
+    if (
+      e instanceof APIError &&
+      e.status === 400 &&
+      body?.reasoning_effort === 'none' &&
+      /reasoning|effort|thinking/i.test(e.message)
+    ) {
+      this.logger.warn('chat model call failed: reasoning_off_rejected')
+      return new BizError(Err.AGENT_REASONING_OFF_REJECTED, { reason: 'reasoning_off_rejected' })
+    }
     const reason =
       call.signal.reason === TIMEOUT
         ? 'timeout'

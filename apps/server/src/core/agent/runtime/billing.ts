@@ -17,53 +17,69 @@ export function creditString(micros: bigint): string {
   return `${micros / MILLION}.${String(micros % MILLION).padStart(6, '0')}`
 }
 
-/** 缓存与推理都是总量中的细分；只替换缓存对应费率，绝不把细分再次加进总数。 */
+/**
+ * 按费率计一次调用的积分。缓存与推理都是总量中的细分：只替换缓存对应费率，绝不把细分再次加进总数。
+ * 配了费率的模型只要有输入、输出两个数就一定计价，宁多勿少：
+ * - 需要的缓存细分缺失或不合理（细分超过输入）时，全部输入按输入 / 缓存读取 / 缓存写入里最高的费率计；
+ * - total 与输入加输出不一致时不放弃，以输入 + 输出为准；推理超过输出时说明输出没含推理，加上推理计。
+ * 只有没有可用数字时才返回 null（没配费率，或这次需要调用方改用估算结算）；图片有单张后备积分时按单张收。
+ */
 export function chargeCredits(
   pricing: AgentModelPricing | null,
   usage: AgentTokenUsage | null,
   kind: 'chat' | 'image' = 'chat',
 ): string | null {
   if (!pricing) return null
-  const free = [
-    pricing.input,
-    pricing.output,
-    pricing.cacheRead ?? pricing.input,
-    pricing.cacheWrite ?? pricing.input,
-  ].every((rate) => creditMicros(rate) === 0n)
-  const flat = () =>
+  const rates = [pricing.input, pricing.cacheRead, pricing.cacheWrite].flatMap((r) =>
+    r === null ? [] : [creditMicros(r)],
+  )
+  const free = creditMicros(pricing.output) === 0n && rates.every((rate) => rate === 0n)
+  const flat =
     kind === 'image' && pricing.imageCredits !== null
       ? creditString(creditMicros(pricing.imageCredits))
-      : free
-        ? '0.000000'
-        : null
+      : null
   const u = usage
-  const usable =
-    u?.usageReported &&
-    u.promptTokens !== null &&
-    u.completionTokens !== null &&
-    (u.totalTokens === null || u.totalTokens === u.promptTokens + u.completionTokens) &&
-    (u.cacheReadTokens ?? 0) + (u.cacheWriteTokens ?? 0) <= u.promptTokens &&
-    (u.reasoningTokens ?? 0) <= u.completionTokens
-  if (!usable) return flat()
+  // 估算用量的图片在有单张后备积分时仍按单张收，不用估算 Token 改价
+  if (u?.estimated && flat) return flat
+  if (!(u?.usageReported || u?.estimated) || u.promptTokens === null || u.completionTokens === null)
+    return flat ?? (free ? '0.000000' : null)
   const inputRate = creditMicros(pricing.input)
-  let amount = BigInt(u.promptTokens!) * inputRate
-  for (const [tokens, rate] of [
+  const detailsValid = (u.cacheReadTokens ?? 0) + (u.cacheWriteTokens ?? 0) <= u.promptTokens
+  let amount = 0n
+  const missing = [
     [u.cacheReadTokens, pricing.cacheRead],
     [u.cacheWriteTokens, pricing.cacheWrite],
-  ] as const) {
-    if (rate === null) continue
-    const specific = creditMicros(rate)
-    if (specific === inputRate) continue
-    if (tokens === null) return flat()
-    amount += BigInt(tokens) * (specific - inputRate)
+  ].some(
+    ([tokens, rate]) =>
+      rate !== null &&
+      creditMicros(rate as string) !== inputRate &&
+      (tokens === null || !detailsValid),
+  )
+  if (missing) {
+    const highest = rates.reduce((a, b) => (b > a ? b : a), inputRate)
+    amount = BigInt(u.promptTokens) * highest
+  } else {
+    amount = BigInt(u.promptTokens) * inputRate
+    for (const [tokens, rate] of [
+      [u.cacheReadTokens, pricing.cacheRead],
+      [u.cacheWriteTokens, pricing.cacheWrite],
+    ] as const)
+      if (rate !== null && tokens !== null)
+        amount += BigInt(tokens) * (creditMicros(rate) - inputRate)
   }
-  amount += BigInt(u.completionTokens!) * creditMicros(pricing.output)
+  const reasoning = u.reasoningTokens ?? 0
+  const output =
+    reasoning > u.completionTokens ? u.completionTokens + reasoning : u.completionTokens
+  amount += BigInt(output) * creditMicros(pricing.output)
   // 每次调用只向上舍入一次到微积分，不能逐类型先舍入再相加。
   return creditString((amount + MILLION - 1n) / MILLION)
 }
 
-/** 0 表示不限额；未知的本轮消费在有限预算下阻断下一次调用。 */
-export function creditLimitReached(used: string, limit: string, unpriced = 0): boolean {
+/**
+ * 0 表示不限额；按已记入的积分判断（配了费率的调用总有积分：实际用量不可用时按估算记入）。只有模型没配
+ * 费率的调用不计积分、也不阻断后续调用，它们只在用量页的完整性提示里列出。
+ */
+export function creditLimitReached(used: string, limit: string): boolean {
   const cap = creditMicros(limit)
-  return cap > 0n && (unpriced > 0 || creditMicros(used) >= cap)
+  return cap > 0n && creditMicros(used) >= cap
 }

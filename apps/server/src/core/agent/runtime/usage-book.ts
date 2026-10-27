@@ -12,7 +12,7 @@ import { ParamService } from '../../settings/param.service.js'
 import type { AgentUsageTarget } from '../agent-ports.js'
 import { AgentUsage, AgentUsageEntry } from '../entities/agent-usage.entity.js'
 import type { ChatUsage } from '../provider/chat-model.js'
-import { usageOf } from '../provider/usage.js'
+import { estimatedUsage, IMAGE_OUTPUT_ESTIMATE, usageOf } from '../provider/usage.js'
 import { chargeCredits, creditLimitReached, creditMicros, creditString } from './billing.js'
 
 /** 用量和预算按 UTC 日归集。 */
@@ -43,6 +43,8 @@ interface UsageContext {
   threadId?: number
   turnId?: number
   failed?: boolean
+  /** 调用前的输入估算：进程在拿到任何回执前崩溃时，接管结算按它计积分，不能当作免费 */
+  estimate?: ChatUsage
 }
 
 /** 模型调用先登记尝试与费率，结束或接管时原子归集明细、每日及父子轮次用量。 */
@@ -115,7 +117,7 @@ export class UsageBook implements OnModuleInit {
         parentTurnId,
         kind: target.kind ?? 'chat',
         pricing: target.pricing ? structuredClone(target.pricing) : null,
-        usage: null,
+        usage: context.estimate ? () => ':estimate' : null,
         usageReported: false,
         credits: null,
         status: 'pending',
@@ -123,6 +125,7 @@ export class UsageBook implements OnModuleInit {
         leaseUntil: () => 'DATE_ADD(UTC_TIMESTAMP(3), INTERVAL 30 SECOND)',
         settledAt: null,
       })
+      .setParameter('estimate', context.estimate ? JSON.stringify(context.estimate) : null)
       .execute()
     const id = Number(inserted.identifiers[0]!.id)
     const ctrl = new AbortController()
@@ -260,7 +263,8 @@ export class UsageBook implements OnModuleInit {
       ])
       await receipt
       invocation.signal.throwIfAborted()
-      reported = result.usage ?? reported
+      // 没报告用量的结果不能覆盖调用前记下的估算
+      if (result.usage?.usageReported || result.usage?.estimated) reported = result.usage
       await invocation.settle(reported)
       return result
     } catch (error) {
@@ -317,28 +321,22 @@ export class UsageBook implements OnModuleInit {
     }
   }
 
-  /** 模型调用前统一检查当前每日积分；未计价消费在有限预算下阻断后续调用。 */
+  /**
+   * 模型调用前统一检查当前每日积分：只按已计价积分判断，未计价、未报告用量的调用不阻断后续调用。
+   * 有限预算下仍有过期未归集的调用时暂时拒绝，避免这笔可能已计价的消费漏算后放行。
+   */
   async overDaily(userId: number): Promise<'user_daily' | 'tenant_daily' | null> {
     await this.recoverExpired(false)
-    const userLimit = await this.limit(AGENT_LIMIT_PARAMS.userDailyCredits)
-    const user = await this.today(userId)
-    if (
-      creditLimitReached(
-        user.credits,
-        userLimit,
-        user.unpricedCalls + Number(await this.expiredPending(userId)),
+    const over = async (limitKey: string, user?: number) => {
+      const limit = await this.limit(limitKey)
+      if (creditMicros(limit) === 0n) return false
+      return (
+        creditLimitReached((await this.today(user)).credits, limit) ||
+        (await this.expiredPending(user))
       )
-    )
-      return 'user_daily'
-    const tenantLimit = await this.limit(AGENT_LIMIT_PARAMS.tenantDailyCredits)
-    const tenant = await this.today()
-    return creditLimitReached(
-      tenant.credits,
-      tenantLimit,
-      tenant.unpricedCalls + Number(await this.expiredPending()),
-    )
-      ? 'tenant_daily'
-      : null
+    }
+    if (await over(AGENT_LIMIT_PARAMS.userDailyCredits, userId)) return 'user_daily'
+    return (await over(AGENT_LIMIT_PARAMS.tenantDailyCredits)) ? 'tenant_daily' : null
   }
 
   /** 记录调用者本次实际用量，返回本次已计算积分供父轮汇总复用。 */
@@ -378,6 +376,8 @@ export class UsageBook implements OnModuleInit {
         .getOneOrFail()
       const pending = entry.status === 'pending'
       const previous = entry.usage
+      // 估算只用于计积分：Token 统计、增量与合并只取供应商真实报告的部分
+      const prior = previous?.usageReported ? previous : null
       const moreActual =
         reported?.usageReported && canonicalJson(previous) !== canonicalJson(reported)
       if (!pending && !moreActual)
@@ -392,21 +392,26 @@ export class UsageBook implements OnModuleInit {
       const usage = reported?.usageReported
         ? {
             ...reported,
-            promptTokens: reported.promptTokens ?? previous?.promptTokens ?? null,
-            completionTokens: reported.completionTokens ?? previous?.completionTokens ?? null,
-            cacheReadTokens: reported.cacheReadTokens ?? previous?.cacheReadTokens ?? null,
-            cacheWriteTokens: reported.cacheWriteTokens ?? previous?.cacheWriteTokens ?? null,
-            reasoningTokens: reported.reasoningTokens ?? previous?.reasoningTokens ?? null,
+            promptTokens: reported.promptTokens ?? prior?.promptTokens ?? null,
+            completionTokens: reported.completionTokens ?? prior?.completionTokens ?? null,
+            cacheReadTokens: reported.cacheReadTokens ?? prior?.cacheReadTokens ?? null,
+            cacheWriteTokens: reported.cacheWriteTokens ?? prior?.cacheWriteTokens ?? null,
+            reasoningTokens: reported.reasoningTokens ?? prior?.reasoningTokens ?? null,
             inputDetails:
-              reported.inputDetails || previous?.inputDetails
-                ? { ...previous?.inputDetails, ...reported.inputDetails }
+              reported.inputDetails || prior?.inputDetails
+                ? { ...prior?.inputDetails, ...reported.inputDetails }
                 : null,
             outputDetails:
-              reported.outputDetails || previous?.outputDetails
-                ? { ...previous?.outputDetails, ...reported.outputDetails }
+              reported.outputDetails || prior?.outputDetails
+                ? { ...prior?.outputDetails, ...reported.outputDetails }
                 : null,
           }
-        : (entry.usage ?? reported)
+        : prior
+          ? prior
+          : // 没有真实用量：结束时带来的估算（含已输出内容）优先于调用前只含输入的估算
+            reported?.estimated
+            ? reported
+            : (previous ?? reported)
       const oldUnreported =
         !previous?.usageReported ||
         previous.promptTokens === null ||
@@ -424,6 +429,18 @@ export class UsageBook implements OnModuleInit {
       }
       if (!pending && entry.kind === 'image' && credits === null && entry.credits !== null)
         credits = entry.credits // 已确认产出时的单张费用不会被迟到但仍不完整的 Token 回执抹掉。
+      // 配了费率就一定记积分：实际用量不能计价时退回这次调用的估算，没有任何估算时按零输入估算
+      // （成功的图片另计固定输出估算），不能记成“未计价”而不计也不挡
+      if (credits === null && pricing) {
+        const fallback =
+          [reported, previous].find((u) => u?.estimated) ??
+          estimatedUsage(0, entry.kind === 'image' && !failed ? IMAGE_OUTPUT_ESTIMATE : 0)
+        try {
+          credits = chargeCredits(pricing, fallback, entry.kind)
+        } catch {
+          credits = null
+        }
+      }
       const unreported =
         !usage?.usageReported || usage.promptTokens === null || usage.completionTokens === null
       const tid = tenantId()
@@ -446,9 +463,10 @@ export class UsageBook implements OnModuleInit {
       const beforeCredits = pending ? '0' : (entry.credits ?? '0')
       const change = creditMicros(credits ?? '0') - creditMicros(beforeCredits)
       const creditChange = `${change < 0n ? '-' : ''}${creditString(change < 0n ? -change : change)}`
-      const inputChange = (usage?.promptTokens ?? 0) - (pending ? 0 : (previous?.promptTokens ?? 0))
+      const actual = usage?.usageReported ? usage : null
+      const inputChange = (actual?.promptTokens ?? 0) - (pending ? 0 : (prior?.promptTokens ?? 0))
       const outputChange =
-        (usage?.completionTokens ?? 0) - (pending ? 0 : (previous?.completionTokens ?? 0))
+        (actual?.completionTokens ?? 0) - (pending ? 0 : (prior?.completionTokens ?? 0))
       const unpricedChange =
         Number(credits === null) - (pending ? 0 : Number(entry.credits === null))
       const unreportedChange = Number(unreported) - (pending ? 0 : Number(oldUnreported))
@@ -475,8 +493,8 @@ export class UsageBook implements OnModuleInit {
             entry.providerId,
             entry.providerName,
             entry.model.slice(0, 128),
-            usage?.promptTokens ?? 0,
-            usage?.completionTokens ?? 0,
+            actual?.promptTokens ?? 0,
+            actual?.completionTokens ?? 0,
             credits ?? '0',
             usage?.cacheReadTokens ?? null,
             usage?.cacheWriteTokens ?? null,

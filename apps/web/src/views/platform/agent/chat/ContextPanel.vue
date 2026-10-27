@@ -17,13 +17,21 @@ const {
   turn = null,
   selectedId = null,
   readonly = false,
+  inMain = false,
 } = defineProps<{
   items: AgentItemVo[]
   turn?: AgentTurnVo | null
   selectedId?: number | null
   readonly?: boolean
+  /** 正在主区域（对话区位置）显示，而不是右侧栏 */
+  inMain?: boolean
 }>()
-const emit = defineEmits<{ close: []; select: [id: number]; inspectChild: [id: number] }>()
+const emit = defineEmits<{
+  close: []
+  select: [id: number]
+  inspectChild: [id: number]
+  toggleMain: []
+}>()
 const { t } = useI18n()
 const tab = ref('tasks')
 const plan = computed(
@@ -103,6 +111,12 @@ function outputTitle(item: PreviewItem) {
   <aside id="agent-work-panel" class="agent-context" :aria-label="t('agent.chat.panel.open')">
     <header class="agent-context__head">
       <h3>{{ t('agent.chat.panel.open') }}</h3>
+      <span class="agent-context__spacer" />
+      <IconButton
+        :icon="inMain ? 'lucide:panel-right' : 'lucide:maximize-2'"
+        :label="t(inMain ? 'agent.chat.panel.toSide' : 'agent.chat.panel.toMain')"
+        @click="emit('toggleMain')"
+      />
       <IconButton
         icon="lucide:panel-right-close"
         :label="t('agent.chat.panel.close')"
@@ -218,7 +232,9 @@ function outputTitle(item: PreviewItem) {
   flex: none;
   gap: 8px;
   align-items: center;
-  justify-content: space-between;
+}
+.agent-context__spacer {
+  flex: 1;
 }
 .agent-context__head h3 {
   margin: 0;

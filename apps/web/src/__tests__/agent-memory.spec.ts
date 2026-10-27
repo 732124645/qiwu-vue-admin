@@ -214,6 +214,31 @@ describe('profiles', () => {
     expect((w.emitted('apply') as [AgentProfileVo | null][]).at(-1)![0]).toBeNull()
   })
 
+  it('always shows the profile select: disabled with a hint without profiles, read-only in an open chat', async () => {
+    mockApi({ 'GET /agent/profiles': ok([]) })
+    await show(ProfileMemoryBar, { draft: { profileId: undefined, memoryEnabled: true } })
+    let select = w.findComponent({ name: 'ElSelect' })
+    expect(select.props('disabled')).toBe(true)
+    expect(select.props('modelValue')).toBeUndefined()
+    expect(w.find('.agent-profile-bar__pick').text()).toContain('No profiles yet')
+    w.unmount()
+    mockApi({ 'GET /agent/profiles': ok([profile({ id: 2, name: 'Mine' })]) })
+    await show(ProfileMemoryBar, { draft: { profileId: undefined, memoryEnabled: true } })
+    select = w.findComponent({ name: 'ElSelect' })
+    expect(select.props('disabled')).toBe(false)
+    // no default profile: "no profile" is selected, and choosing it again keeps none
+    expect(select.props('modelValue')).toBe(0)
+    select.vm.$emit('update:modelValue', 0)
+    expect(
+      (w.emitted('update:draft') as [{ profileId: number | null }][]).at(-1)![0],
+    ).toMatchObject({
+      profileId: null,
+    })
+    await w.setProps({ thread: { ...THREAD, profileId: 2 } })
+    expect(select.props('disabled')).toBe(true)
+    expect(select.props('modelValue')).toBe(2)
+  })
+
   it('switches the memory of an open chat; temporary chats have no switch', async () => {
     const calls = mockApi({
       'GET /agent/profiles': ok([]),

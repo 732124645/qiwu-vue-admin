@@ -113,9 +113,10 @@ it('charges reasoning within output and rounds once per complete call', () => {
   ).toBe('0.000001')
 })
 
-it('requires counters only for effective differential rates and never treats unknown consumption as free', () => {
+it('charges missing or impossible cache details at the highest input rate and never treats unknown consumption as free', () => {
   const usage = usageOf({ prompt_tokens: 10, completion_tokens: 5 })
-  expect(chargeCredits(pricing, usage)).toBeNull()
+  // 缓存写入费率 2 是三项输入费率里最高的：10 × 2 + 5 × 3
+  expect(chargeCredits(pricing, usage)).toBe('0.000035')
   expect(chargeCredits({ ...pricing, cacheRead: null, cacheWrite: null }, usage)).toBe('0.000030')
   expect(chargeCredits({ ...pricing, cacheRead: '1.5', cacheWrite: '1.5' }, usage)).toBe('0.000030')
   expect(chargeCredits(null, usage)).toBeNull()
@@ -131,7 +132,26 @@ it('requires counters only for effective differential rates and never treats unk
         prompt_tokens_details: { cached_tokens: 11, cache_write_tokens: 0 },
       }),
     ),
-  ).toBeNull()
+  ).toBe('0.000035')
+})
+
+it('prices a reported total that disagrees by input plus output, adding reasoning the output left out', () => {
+  const rates = { ...pricing, cacheRead: null, cacheWrite: null }
+  // total 与 10 + 5 不符：不放弃，按 10 × 1.5 + 5 × 3
+  expect(
+    chargeCredits(rates, usageOf({ prompt_tokens: 10, completion_tokens: 5, total_tokens: 99 })),
+  ).toBe('0.000030')
+  // 推理 8 超过输出 5：输出没含推理，按 5 + 8 计
+  expect(
+    chargeCredits(
+      rates,
+      usageOf({
+        prompt_tokens: 10,
+        completion_tokens: 5,
+        completion_tokens_details: { reasoning_tokens: 8 },
+      }),
+    ),
+  ).toBe('0.000054')
 })
 
 it('uses an explicit image price only when token charging is unavailable', () => {
@@ -157,8 +177,8 @@ it('recognizes explicit free pricing without inventing unknown tokens, while ima
 it('enforces finite credit thresholds, preserves unlimited and bounds decimal storage exactly', () => {
   expect(creditLimitReached('9.999999', '10')).toBe(false)
   expect(creditLimitReached('10', '10')).toBe(true)
-  expect(creditLimitReached('0', '10', 1)).toBe(true)
-  expect(creditLimitReached('999', '0', 99)).toBe(false)
+  expect(creditLimitReached('0', '10')).toBe(false)
+  expect(creditLimitReached('999', '0')).toBe(false)
   expect(creditString(creditMicros('999999999999999999.999999'))).toBe('999999999999999999.999999')
   expect(() => creditString(10n ** 24n)).toThrow('out of range')
   expect(() => creditMicros('1.0000001')).toThrow('invalid')

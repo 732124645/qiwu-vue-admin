@@ -29,11 +29,12 @@ beforeAll(async () => {
   fence.install(ds)
 })
 beforeEach((context) => {
-  if (fence.unsafe) context.skip('database is rebuilt after a failed migration case')
+  if (fence.unsafe)
+    context.skip('database is rebuilt after a migration case that may have left it half migrated')
   fence.begin(context.signal)
 })
-afterEach(async ({ task, signal }) => {
-  await fence.drain(task.result?.state === 'fail' || signal.aborted)
+afterEach(async () => {
+  await fence.drain()
   await recoverMigrationRun(async () => {
     if (fence.unsafe) {
       await ds.dropDatabase()

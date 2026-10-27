@@ -2,7 +2,6 @@
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useEventListener } from '@vueuse/core'
-import IconButton from '@/core/components/IconButton.vue'
 import {
   comboLabel,
   comboOf,
@@ -14,7 +13,7 @@ import {
 } from './shortcuts'
 
 /**
- * 对话页头部的“快捷键设置”弹出层：点某个动作后按下新的组合键即改；冲突（页面已占用、缺少修饰键、
+ * 对话页“会话设置”里的“快捷键”一页：点某个动作后按下新的组合键即改；冲突（页面已占用、缺少修饰键、
  * 已被另一个动作使用）时不改并在该行提示。录入非“停止”的动作时 Esc 取消录入；Tab 不截下，键盘用户可以
  * 照常移走焦点。改动通过 v-model 交给页面保存。
  */
@@ -77,32 +76,27 @@ function reset() {
 </script>
 
 <template>
-  <el-popover trigger="click" placement="bottom-end" :width="340" @hide="recording = null">
-    <template #reference>
-      <IconButton icon="lucide:keyboard" :label="t('agent.chat.shortcut.open')" />
-    </template>
-    <div class="agent-shortcuts">
-      <p class="agent-shortcuts__title">{{ t('agent.chat.shortcut.title') }}</p>
-      <div v-for="a in SHORTCUT_ACTIONS" :key="a" class="agent-shortcuts__row">
-        <span class="agent-shortcuts__name">{{ t(`agent.chat.shortcut.action.${a}`) }}</span>
-        <el-button
-          size="small"
-          :type="recording === a ? 'primary' : undefined"
-          :data-action="a"
-          @click="record(a)"
-        >
-          {{ recording === a ? t('agent.chat.shortcut.press') : comboLabel(model[a]) }}
-        </el-button>
-        <p v-if="problem[a]" role="alert" class="agent-shortcuts__problem">{{ problem[a] }}</p>
-      </div>
-      <p class="agent-shortcuts__hint">
-        {{ t(escapeCloses ? 'agent.chat.dock.escapeHint' : 'agent.chat.shortcut.stopHint') }}
-      </p>
-      <el-button size="small" link type="primary" @click="reset">
-        {{ t('agent.chat.shortcut.reset') }}
+  <div class="agent-shortcuts">
+    <p class="agent-shortcuts__title">{{ t('agent.chat.shortcut.title') }}</p>
+    <div v-for="a in SHORTCUT_ACTIONS" :key="a" class="agent-shortcuts__row">
+      <span class="agent-shortcuts__name">{{ t(`agent.chat.shortcut.action.${a}`) }}</span>
+      <el-button
+        size="small"
+        :type="recording === a ? 'primary' : undefined"
+        :data-action="a"
+        @click="record(a)"
+      >
+        {{ recording === a ? t('agent.chat.shortcut.press') : comboLabel(model[a]) }}
       </el-button>
+      <p v-if="problem[a]" role="alert" class="agent-shortcuts__problem">{{ problem[a] }}</p>
     </div>
-  </el-popover>
+    <p class="agent-shortcuts__hint">
+      {{ t(escapeCloses ? 'agent.chat.dock.escapeHint' : 'agent.chat.shortcut.stopHint') }}
+    </p>
+    <el-button size="small" link type="primary" @click="reset">
+      {{ t('agent.chat.shortcut.reset') }}
+    </el-button>
+  </div>
 </template>
 
 <style scoped>

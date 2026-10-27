@@ -160,6 +160,7 @@
     "credit_config_invalid": "The credit budget or model rates are invalid. Ask the platform administrator to check the settings.",
     "recovery_required": "A previous operation may have taken effect or incurred a charge. Check the actual result before resuming.",
     "thread_busy": "Stop the running or waiting task before continuing this operation.",
-    "recovery_busy": "An operation may still be executing. Wait for it to finish and check its actual result before resuming."
+    "recovery_busy": "An operation may still be executing. Wait for it to finish and check its actual result before resuming.",
+    "reasoning_off_rejected": "The model service does not accept turning reasoning off (reasoning_effort: none). Pick another reasoning level, or ask the platform administrator to set the model's default reasoning to provider default or use the vLLM switch."
   }
 }

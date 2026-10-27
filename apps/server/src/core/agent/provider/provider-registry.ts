@@ -5,6 +5,7 @@ import { BizError } from '../../http/biz-error.js'
 import type { ChatModel } from './chat-model.js'
 import type { AgentUsageTarget } from '../agent-ports.js'
 import { type ChatModelConfig, OpenAiChatModel } from './openai-chat-model.js'
+import { withUsageEstimate } from './usage.js'
 import {
   ProviderSettingsService,
   SearchProviderSettingsService,
@@ -49,15 +50,16 @@ export class ProviderRegistry {
   /**
    * 启用的提供方 + 模型：`providerId` 不给时取默认（没有标默认就取排序最前的启用者），`model` 不给时取
    * 该提供方的第一个模型；找不到、已停用、模型不在其列表里一律 AGENT_NOT_CONFIGURED。
+   * 没配费率的模型照常可用（升级前的模型都没有费率，拒绝会让助手整体停用），调用记为未计价；
+   * 配了但不合法的费率仍拒绝，不能静默当成免费。
    */
   async resolve(providerId?: number, model?: string): Promise<ResolvedModel> {
     const rows = (await this.providers.rows()).filter((r) => r.enabled)
     const row = providerId === undefined ? rows[0] : rows.find((r) => Number(r.id) === providerId)
     const m = row && (model === undefined ? row.models[0] : row.models.find((x) => x.id === model))
     if (!row || !m) throw new BizError(Err.AGENT_NOT_CONFIGURED)
-    if (!m.pricing) throw new BizError(Err.AGENT_PRICING_REQUIRED)
-    const pricing = agentModelPricing.safeParse(m.pricing)
-    if (!pricing.success) throw new BizError(Err.AGENT_CREDIT_CONFIG_INVALID)
+    const pricing = m.pricing ? agentModelPricing.safeParse(m.pricing) : null
+    if (pricing && !pricing.success) throw new BizError(Err.AGENT_CREDIT_CONFIG_INVALID)
     return {
       providerId: Number(row.id),
       providerName: row.name,
@@ -69,26 +71,28 @@ export class ProviderRegistry {
         fast: m.fast ?? false,
         contextWindow: m.contextWindow,
         image: m.image ?? false,
-        pricing: pricing.data,
+        pricing: pricing?.data ?? null,
         reasoningDefault: m.reasoningDefault ?? 'provider',
         reasoningStyle: m.reasoningStyle ?? 'standard',
       },
-      chat: this.connect({
-        baseUrl: row.baseUrl,
-        apiKey: this.providers.openKey(row),
-        models: row.models,
-        retries: 0, // 每次持久调用只发一个物理请求，5xx 结果不明时不自动重发付费请求。
-      }),
+      chat: withUsageEstimate(
+        this.connect({
+          baseUrl: row.baseUrl,
+          apiKey: this.providers.openKey(row),
+          models: row.models,
+          retries: 0, // 每次持久调用只发一个物理请求，5xx 结果不明时不自动重发付费请求。
+        }),
+      ),
     }
   }
 
   /**
-   * 生成图片用的模型：启用的提供方里第一个标了图片能力的模型（默认提供方在前，同 {@link resolve} 的顺序）；
-   * 没有为 null（此时不提供 `image.generate`）。
+   * 生成图片用的模型：启用的提供方里第一个标了图片能力的模型（默认提供方在前，同 {@link resolve} 的顺序，
+   * 没配费率的也算，调用记为未计价）；没有为 null（此时不提供 `image.generate`）。
    */
   async resolveImage(): Promise<ResolvedModel | null> {
     for (const row of (await this.providers.rows()).filter((r) => r.enabled)) {
-      const m = row.models.find((x) => x.image && x.pricing)
+      const m = row.models.find((x) => x.image)
       if (m) return this.resolve(Number(row.id), m.id)
     }
     return null

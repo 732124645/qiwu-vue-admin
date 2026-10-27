@@ -1,6 +1,8 @@
 // 后端只在一轮编译成功并完成写盘后重启，避免监听 dist 把半份产物当作新版本。
+// 开发编译写到独立的 dist-dev：正式构建（nest build）会先删再重建 dist，两者重叠时不能让开发服务
+// 读到被删的文件（MODULE_NOT_FOUND）。数据库脚本、种子与正式启动仍各自构建并读取 dist，互不影响。
 import { spawn } from 'node:child_process'
-import { readFileSync, readdirSync, realpathSync, watch } from 'node:fs'
+import { readFileSync, readdirSync, realpathSync, rmSync, watch } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { relative, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
@@ -44,15 +46,21 @@ export function runDevServer({
     '--noEmitOnError',
   ],
   sharedCompiler = [fileURLToPath(new URL('./dev-shared.mjs', import.meta.url))],
-  entry = 'dist/main.js',
+  outDir = 'dist-dev',
+  entry = `${outDir}/main.js`,
   env = process.env,
   write = (line) => console.log(line),
   inspect = inspectorArgs(env.QW_INSPECT),
+  retryDelay = 2000,
 } = {}) {
+  // 增量信息也放进开发目录：默认位置在 dist 之外且与正式构建共用，会让编译器误判“已是最新”而不写开发产物。
+  compiler = [...compiler, '--outDir', outDir, '--tsBuildInfoFile', `${outDir}/.tsbuildinfo`]
   const runnerStarted = performance.now()
   // macOS 临时目录等路径可能含符号链接，需与编译器的真实路径使用同一输入键。
   cwd = realpathSync(cwd)
   sharedCwd = realpathSync(sharedCwd)
+  // 每次启动从空的开发目录编译：增量编译不会删除已不存在的源码产物，删掉或改名的旧迁移会被 TypeORM 加载
+  rmSync(resolve(cwd, outDir), { recursive: true, force: true })
   let app,
     serverCompiler,
     sharedProcess,
@@ -66,7 +74,8 @@ export function runDevServer({
     serverFailed = false,
     serverRevision = 0,
     generation = 0,
-    applied = -1
+    applied = -1,
+    retried = -1
   let firstChange,
     serverMs,
     sharedMs,
@@ -203,7 +212,13 @@ export function runDevServer({
     const processChild = (app = spawn(process.execPath, [...inspect, entry], {
       cwd,
       stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
-      env: { I18N_DIR: 'src/i18n', CODEGEN_TEMPLATES: 'codegen-templates', ...env, QW_DEV: '1' },
+      env: {
+        I18N_DIR: 'src/i18n',
+        CODEGEN_TEMPLATES: 'codegen-templates',
+        MIGRATIONS_DIR: `${outDir}/db/migrations`,
+        ...env,
+        QW_DEV: '1',
+      },
     }))
     let ready = false
     const timeout = setTimeout(() => {
@@ -240,8 +255,20 @@ export function runDevServer({
     })
     processChild.once('exit', (code, signal) => {
       clearTimeout(timeout)
-      if (!stopped && app === processChild && !restarting)
-        write(`[server] exited (${signal ?? code}); waiting for a successful change`)
+      if (stopped || app !== processChild || restarting) return
+      // 就绪前的非零退出多半是外部进程短暂占用端口或文件之类的瞬时问题：同一代次延迟后只重试一次，
+      // 仍失败就等下一次改动，不反复拉起一个必然崩溃的版本。
+      if (!ready && code !== 0 && retried !== launch) {
+        retried = launch
+        write(`[server] exited before ready (${signal ?? code}); retrying once in ${retryDelay} ms`)
+        setTimeout(() => {
+          if (stopped || app !== processChild || applied !== launch || launch !== generation) return
+          applied = -1
+          progress()
+        }, retryDelay).unref()
+        return
+      }
+      write(`[server] exited (${signal ?? code}); waiting for a successful change`)
     })
     restarting = false
     progress()

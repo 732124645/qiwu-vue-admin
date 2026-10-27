@@ -1,6 +1,7 @@
 // Agent admin pages: write-only keys (empty keeps the stored one), the models editor's checks, the tool
 // policy choices (a write tool never "auto"), the external MCP sync status, skill import / export, the
-// instructions and the root-only params, and the usage page's grouping and totals.
+// instructions and the root-only params, the usage page's grouping, totals, key figures and completeness
+// notes, and the settings page's getting-started guide.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
@@ -33,6 +34,19 @@ import SkillImport from '@/views/platform/agent/skill/SkillImport.vue'
 import SkillForm from '@/views/platform/agent/skill/SkillForm.vue'
 import SkillList from '@/views/platform/agent/skill/SkillList.vue'
 import UsagePage from '@/views/platform/agent/usage/index.vue'
+import {
+  chartPoints,
+  formatCredits,
+  integrityNotes,
+  sumTokens,
+} from '@/views/platform/agent/usage/usage-summary'
+import SetupGuide from '@/views/platform/agent/setting/SetupGuide.vue'
+import {
+  guideComplete,
+  guideSteps,
+  guideStorageKey,
+  readGuide,
+} from '@/views/platform/agent/setting/setup-guide'
 import { me, mockApi, ok } from './mock-api'
 
 const AT = '2026-10-22T01:00:00.000Z'
@@ -42,12 +56,20 @@ let w: VueWrapper
 /** Mounts `component` with the app's plugins; `root` false signs in as a non-root platform admin. */
 async function show(
   component: object,
-  { perms = SETTING, root = true, props = {} as Record<string, unknown> } = {},
+  {
+    perms = SETTING,
+    root = true,
+    props = {} as Record<string, unknown>,
+    routes = [] as { path: string; name: string }[],
+  } = {},
 ) {
   useAuthStore().me = root ? me(['*', ...perms]) : { ...me(perms), roles: ['admin'] }
   const router = createRouter({
     history: createMemoryHistory(),
-    routes: [{ path: '/', component: { render: () => null } }],
+    routes: [
+      { path: '/', component: { render: () => null } },
+      ...routes.map((r) => ({ ...r, component: { render: () => null } })),
+    ],
   })
   await router.push('/')
   w = mount(component, {
@@ -723,6 +745,28 @@ describe('root-only params', () => {
     expect(amount('turnSeconds').attributes('aria-valuemin')).toBe('1')
   })
 
+  it('warns when every credit budget is zero and offers the jump to root only', async () => {
+    const zero = PARAMS.map((p) =>
+      p.paramKey.endsWith('_credits') ? { ...p, paramValue: '0' } : p,
+    )
+    mockApi({ 'GET /settings/params': ok({ items: zero, total: zero.length }) })
+    await show(ParamTab)
+    expect(w.find('.param-tab__no-cap').text()).toContain(t('agent.admin.param.noCreditCap'))
+    const jump = button(t('agent.admin.param.setCreditCap'))!
+    await jump.trigger('click')
+    const first = w.find(`input[aria-label="${t('agent.admin.limit.turnCredits')}"]`)
+    expect(document.activeElement).toBe(first.element)
+    w.unmount()
+    mockApi({ 'GET /settings/params': ok({ items: zero, total: zero.length }) })
+    await show(ParamTab, { root: false })
+    expect(w.find('.param-tab__no-cap').exists()).toBe(true)
+    expect(button(t('agent.admin.param.setCreditCap'))).toBeUndefined()
+    w.unmount()
+    mockApi({ 'GET /settings/params': ok({ items: PARAMS, total: PARAMS.length }) })
+    await show(ParamTab)
+    expect(w.find('.param-tab__no-cap').exists()).toBe(false)
+  })
+
   it('shows no edit controls to a non-root admin', async () => {
     mockApi({ 'GET /settings/params': ok({ items: PARAMS, total: PARAMS.length }) })
     await show(ParamTab, { root: false })
@@ -828,6 +872,73 @@ describe('usage page', () => {
     expect(w.find('.el-table__footer').text()).toContain(t('agent.admin.usage.unknown'))
   })
 
+  it('formats credits to at most two decimals with grouping and keeps tiny amounts visible', () => {
+    expect(formatCredits('150.000000')).toBe('150')
+    expect(formatCredits('1234567.5')).toBe(`${(1234567).toLocaleString()}.5`)
+    expect(formatCredits('2.345')).toBe('2.35')
+    expect(formatCredits('0.999999')).toBe('1')
+    expect(formatCredits('0.004')).toBe('<0.01')
+    expect(formatCredits('0')).toBe('0')
+  })
+
+  it('counts only the completeness problems that occurred and flags partly unknown tokens', () => {
+    expect(integrityNotes(rowsBy.day!.slice(0, 1))).toEqual([])
+    expect(integrityNotes(rowsBy.day!)).toEqual([
+      { kind: 'unpriced', count: 1 },
+      { kind: 'unreported', count: 1 },
+      { kind: 'legacy', count: 1 },
+    ])
+    expect(
+      integrityNotes([{ ...rowsBy.day![0]!, unpricedCalls: 2 }, rowsBy.day![0]!]).map(
+        (n) => n.kind,
+      ),
+    ).toEqual(['unpriced'])
+    const rows = [rowsBy.day![0]!, { ...rowsBy.day![1]!, promptTokens: null }]
+    expect(sumTokens(rows, 'promptTokens')).toEqual({ total: 1000, partial: true, known: true })
+    expect(sumTokens(rows, 'completionTokens')).toEqual({ total: 300, partial: false, known: true })
+  })
+
+  it('fills every day of the range in the daily chart and keeps other groupings as returned', () => {
+    const points = chartPoints(rowsBy.day!.slice(1), 'day', ['2026-10-20', '2026-10-23'])
+    expect(points.map((p) => p.label)).toEqual([
+      '2026-10-20',
+      '2026-10-21',
+      '2026-10-22',
+      '2026-10-23',
+    ])
+    expect(points.map((p) => p.credits)).toEqual([0, 0, 0.2, 0])
+    expect(chartPoints(rowsBy.user!, 'user', ['2026-10-20', '2026-10-23'])).toHaveLength(1)
+  })
+
+  it('shows the key figures and explains completeness problems only when there are any', async () => {
+    let rows = rowsBy.day!.slice(0, 1)
+    mockApi({ 'GET /agent/usage': () => ok(rows) })
+    await show(UsagePage, { perms: ['agent.usage.browse'], root: false })
+    expect(w.find('[data-kpi="calls"]').text()).toContain('3')
+    expect(w.find('[data-kpi="credits"]').text()).toContain('0.1')
+    expect(w.find('[data-kpi="top.day"]').text()).toContain('2026-10-21')
+    expect(w.find('.usage__integrity').exists()).toBe(false)
+    expect(w.find('.el-table__header').text()).not.toContain(t('agent.admin.usage.unpricedCalls'))
+
+    rows = [...rowsBy.day!, { ...rowsBy.day![1]!, key: '2026-10-23', credits: '149.9' }]
+    await button(t('crud.action.search'))!.trigger('click')
+    await flushPromises()
+    expect(w.find('[data-kpi="credits"]').text()).toContain('150.2')
+    expect(w.find('[data-kpi="credits"] strong').attributes('title')).toBe('150.2')
+    const notes = w.find('.usage__integrity')
+    expect(notes.find('[data-integrity="unpriced"]').text()).toBe(
+      i18n.global.t('agent.admin.usage.integrity.unpriced', { n: '2' }),
+    )
+    expect(notes.find('[data-integrity="legacy"]').exists()).toBe(true)
+  })
+
+  it('shows an empty state instead of a chart when the period has no calls', async () => {
+    mockApi({ 'GET /agent/usage': ok([]) })
+    await show(UsagePage)
+    expect(w.find('.usage__empty').exists()).toBe(true)
+    expect(w.findComponent({ name: 'QwChart' }).exists()).toBe(false)
+  })
+
   it('shows a live invocation as in progress instead of free or missing-price history', async () => {
     mockApi({
       'GET /agent/usage/entries': ok({
@@ -907,5 +1018,125 @@ describe('usage page', () => {
       calls.filter((call) => call.url === '/agent/usage/entries').at(-1)!.params,
     ).toMatchObject({ page: 2 })
     expect(w.find('.usage-entries__detail').exists()).toBe(false)
+  })
+})
+
+describe('setup guide', () => {
+  const steps = (providers: Partial<AgentProviderVo>[], tools = false) =>
+    guideSteps(
+      providers.map((p) => ({ ...PROVIDER, ...p })),
+      [],
+      { tools, chat: true },
+    )
+
+  it('counts the model step done for any enabled provider with models, as the runtime picks one', () => {
+    expect(steps([{}])[0]!.done).toBe(true)
+    expect(steps([{ enabled: false }])[0]!.done).toBe(false)
+    expect(steps([{ isDefault: false }])[0]!.done).toBe(true)
+    expect(steps([{ models: [] }])[0]!.done).toBe(false)
+    // web search is optional: the guide is complete without it
+    expect(guideComplete(steps([{}], true))).toBe(true)
+    expect(guideComplete(steps([{}], false))).toBe(false)
+    expect(guideComplete(steps([], true))).toBe(false)
+  })
+
+  it('reads no progress from unusable or broken storage', () => {
+    localStorage.setItem('qw.agent.setup-guide.9', '{broken')
+    expect(readGuide('qw.agent.setup-guide.9')).toEqual({})
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('denied')
+    })
+    expect(readGuide('qw.agent.setup-guide.9')).toEqual({})
+    localStorage.removeItem('qw.agent.setup-guide.9')
+  })
+
+  it('opens tabs, remembers the reviewed tools and the chat visit per user, then collapses', async () => {
+    localStorage.removeItem(guideStorageKey(1))
+    mockApi({ 'GET /agent/providers': ok([PROVIDER]), 'GET /agent/search-providers': ok([]) })
+    await show(SetupGuide, {
+      props: { tab: 'providers' },
+      routes: [{ path: '/agent/chat', name: 'agent-chat' }],
+    })
+    const state = (key: string) => w.find(`[data-step="${key}"] .el-tag`).text()
+    expect(state('providers')).toBe(t('agent.admin.guide.state.done'))
+    expect(state('search')).toBe(t('agent.admin.guide.state.optional'))
+    expect(state('tools')).toBe(t('agent.admin.guide.state.todo'))
+    expect(button(t('agent.admin.guide.collapse'))).toBeUndefined()
+    // 待完成用主要按钮，可选用次要按钮，已完成只是“查看”链接
+    const action = (key: string) => w.find(`[data-step="${key}"] button`)
+    expect(action('tools').classes()).toContain('el-button--primary')
+    expect(action('tools').classes()).not.toContain('is-link')
+    expect(action('search').classes()).not.toContain('el-button--primary')
+    expect(action('providers').classes()).toContain('is-link')
+    expect(action('providers').text()).toBe(t('agent.admin.guide.view'))
+
+    await w.find('[data-step="tools"] button').trigger('click')
+    expect(w.emitted('open')).toEqual([['tools']])
+    await w.setProps({ tab: 'tools' })
+    await flushPromises()
+    expect(state('tools')).toBe(t('agent.admin.guide.state.done'))
+
+    await w.find('[data-step="chat"] button').trigger('click')
+    await flushPromises()
+    expect(w.vm.$router.currentRoute.value.name).toBe('agent-chat')
+    await button(t('agent.admin.guide.collapse'))!.trigger('click')
+    expect(w.find('.setup-guide__collapsed').exists()).toBe(true)
+    expect(readGuide(guideStorageKey(1))).toEqual({ tools: true, chat: true, collapsed: true })
+    expect(readGuide(guideStorageKey(2))).toEqual({})
+    localStorage.removeItem(guideStorageKey(1))
+  })
+
+  it('lists unpriced models and a missing credit cap, with the jumps for root only', async () => {
+    const unpriced = {
+      ...PROVIDER,
+      models: [
+        { ...PROVIDER.models[0]!, pricing: null },
+        {
+          ...PROVIDER.models[0]!,
+          id: 'priced',
+          label: 'Priced',
+          pricing: {
+            input: '1',
+            output: '2',
+            cacheRead: null,
+            cacheWrite: null,
+            imageCredits: null,
+          },
+        },
+      ],
+    }
+    const credits = ['turn_credits', 'user_daily_credits', 'tenant_daily_credits'].map((k, i) => ({
+      id: i + 1,
+      paramKey: `agent.limit.${k}`,
+      paramValue: '0',
+    }))
+    const routes = {
+      'GET /agent/providers': ok([unpriced]),
+      'GET /agent/search-providers': ok([]),
+      'GET /settings/params': ok({ items: credits, total: credits.length }),
+    }
+    mockApi(routes)
+    await show(SetupGuide, { props: { tab: 'providers' } })
+    const notice = w.find('.setup-guide__unpriced').text()
+    expect(notice).toContain('Chat')
+    expect(notice).not.toContain('Priced')
+    expect(w.find('.setup-guide__no-cap').text()).toContain(t('agent.admin.param.noCreditCap'))
+    await button(t('agent.admin.param.setCreditCap'))!.trigger('click')
+    await button(t('agent.admin.guide.setPricing'))!.trigger('click')
+    expect(w.emitted('open')).toEqual([['params'], ['providers']])
+    w.unmount()
+    mockApi(routes)
+    await show(SetupGuide, { props: { tab: 'providers' }, root: false })
+    expect(w.find('.setup-guide__no-cap').exists()).toBe(true)
+    expect(button(t('agent.admin.param.setCreditCap'))).toBeUndefined()
+    expect(button(t('agent.admin.guide.setPricing'))).toBeUndefined()
+  })
+
+  it('offers no chat button without the chat page', async () => {
+    mockApi({ 'GET /agent/providers': ok([]), 'GET /agent/search-providers': ok([]) })
+    await show(SetupGuide, { props: { tab: 'providers' } })
+    expect(w.find('[data-step="chat"] button').exists()).toBe(false)
+    expect(w.find('[data-step="chat"]').text()).toContain(t('agent.admin.guide.noChat'))
+    expect(w.find('[data-step="providers"] .el-tag').text()).toBe(t('agent.admin.guide.state.todo'))
   })
 })

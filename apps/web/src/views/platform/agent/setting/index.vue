@@ -8,11 +8,12 @@ import McpTab from './McpTab.vue'
 import ParamTab from './ParamTab.vue'
 import ProviderTab from './ProviderTab.vue'
 import SearchTab from './SearchTab.vue'
+import SetupGuide from './SetupGuide.vue'
 import ToolTab from './ToolTab.vue'
 
 /**
- * 平台页“智能体设置”：模型、联网搜索、外部 MCP、工具策略、平台技能、说明与限额、诊断七个标签，
- * 各标签首次打开时才载入；诊断只有 root 看得到。改动要 `agent.setting.modify`；系统参数（联网模式、说明、限额、暂停）只有 root 能改。
+ * 平台页“智能体设置”：顶部“开始使用”引导，下面按管理员配置的先后排列标签——模型服务、联网搜索、工具审批、
+ * 外部工具（MCP）、平台技能、使用规则与额度，诊断放最后；各标签首次打开时才载入；诊断只有 root 看得到。改动要 `agent.setting.modify`；系统参数（联网模式、说明、限额、暂停）只有 root 能改。
  */
 defineOptions({ name: 'AgentSetting' })
 const { t } = useI18n()
@@ -20,8 +21,8 @@ const tab = ref('providers')
 const TABS = [
   ['providers', ProviderTab],
   ['search', SearchTab],
-  ['mcp', McpTab],
   ['tools', ToolTab],
+  ['mcp', McpTab],
   ['skills', SkillList],
   ['params', ParamTab],
   ['diagnostics', DiagnosticsTab],
@@ -34,6 +35,7 @@ const tabs = computed(() =>
 
 <template>
   <div class="qw-page">
+    <SetupGuide :tab="tab" @open="tab = $event" />
     <el-card class="qw-table-panel">
       <el-tabs v-model="tab" class="agent-setting-tabs">
         <el-tab-pane

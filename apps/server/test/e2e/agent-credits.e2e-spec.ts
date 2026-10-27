@@ -12,7 +12,7 @@ import { EnvSchema } from '../../src/core/config/env.schema.js'
 import { ParamService } from '../../src/core/settings/param.service.js'
 import { UsageBook, usageDay } from '../../src/core/agent/runtime/usage-book.js'
 import { ProviderRegistry } from '../../src/core/agent/provider/provider-registry.js'
-import { usageOf } from '../../src/core/agent/provider/usage.js'
+import { estimatedUsage, usageOf, withUsageEstimate } from '../../src/core/agent/provider/usage.js'
 import { bearer, signIn } from '../setup/auth.js'
 import { addUser, createTenant, inTenant1, type PeopledTenant } from '../setup/tenants.js'
 import { withTenant } from '../../src/core/context/tenant.js'
@@ -145,7 +145,7 @@ it('keeps provider identity, cache detail and immutable per-call prices while ad
   )
 })
 
-it('enforces credit thresholds, leaves zero unlimited and does not treat missing usage as free', async () => {
+it('enforces credit thresholds, leaves zero unlimited and charges estimated usage against the budget', async () => {
   await inTenant1(() => book.add(userId, target(), original))
   const key = AGENT_LIMIT_PARAMS.userDailyCredits
   await ds.query('UPDATE cfg_param SET param_value = ? WHERE param_key = ?', ['0.002020', key])
@@ -154,16 +154,110 @@ it('enforces credit thresholds, leaves zero unlimited and does not treat missing
   await ds.query('UPDATE cfg_param SET param_value = ? WHERE param_key = ?', ['0', key])
   await app.get(ParamService).invalidate(key)
   expect(await inTenant1(() => book.overDaily(userId))).toBeNull()
-  await inTenant1(() => book.add(userId, target(), usageOf(undefined)))
+  // 配了费率但用量未知：按估算计积分，标为估算，不冒充供应商的 Token 统计
+  const tokens = async () =>
+    (
+      await ds.query<{ p: string }[]>(
+        'SELECT SUM(prompt_tokens) AS p FROM agent_usage WHERE tenant_id = 1 AND user_id = ?',
+        [userId],
+      )
+    )[0]!.p
+  expect(Number(await tokens())).toBe(1000)
+  // 估算没有缓存细分：输入按三项里最高的缓存写入费率 2 计，1000 × 2 + 200 × 3
+  expect(await inTenant1(() => book.add(userId, target(), estimatedUsage(1000, 200)))).toBe(
+    '0.002600',
+  )
+  expect(Number(await tokens())).toBe(1000)
   expect(await inTenant1(() => book.today(userId))).toMatchObject({
-    credits: '0.002020',
+    credits: '0.004620',
     promptTokens: null,
-    unpricedCalls: 1,
+    unpricedCalls: 0,
     unreportedCalls: 1,
   })
-  await ds.query('UPDATE cfg_param SET param_value = ? WHERE param_key = ?', ['1', key])
+  const [entry] = await ds.query<{ usage_json: unknown }[]>(
+    'SELECT usage_json FROM agent_usage_entry WHERE user_id = ? ORDER BY id DESC LIMIT 1',
+    [userId],
+  )
+  const stored =
+    typeof entry!.usage_json === 'string' ? JSON.parse(entry!.usage_json) : entry!.usage_json
+  expect(stored).toMatchObject({ estimated: true, usageReported: false })
+  await ds.query('UPDATE cfg_param SET param_value = ? WHERE param_key = ?', ['0.004', key])
   await app.get(ParamService).invalidate(key)
   expect(await inTenant1(() => book.overDaily(userId))).toBe('user_daily')
+})
+
+it('charges reported usage it cannot split exactly, and an image without usage, against a finite budget', async () => {
+  const key = AGENT_LIMIT_PARAMS.userDailyCredits
+  const limitTo = async (value: string) => {
+    await ds.query('UPDATE cfg_param SET param_value = ? WHERE param_key = ?', [value, key])
+    await app.get(ParamService).invalidate(key)
+  }
+  const plain = { ...pricing, cacheRead: null, cacheWrite: null }
+  const cases: [string, () => Promise<string | null>, string][] = [
+    // 配了缓存费率却没报细分：全部输入按三项里最高的缓存写入费率 2 计
+    [
+      'cache rates without details',
+      () =>
+        inTenant1(() =>
+          book.add(userId, target(), usageOf({ prompt_tokens: 1000, completion_tokens: 250 })),
+        ),
+      '0.002750',
+    ],
+    // total 与输入加输出不符：以 1000 + 250 计
+    [
+      'a total that disagrees',
+      () =>
+        inTenant1(() =>
+          book.add(
+            userId,
+            { ...target(), pricing: plain },
+            usageOf({ prompt_tokens: 1000, completion_tokens: 250, total_tokens: 9 }),
+          ),
+        ),
+      '0.002250',
+    ],
+    // 图片成功但没报用量、也没配单张积分：提示词估算 + 固定的图片输出估算
+    [
+      'an image without usage',
+      () => {
+        const model = withUsageEstimate({
+          stream: () => {
+            throw new Error('unused')
+          },
+          complete: () => Promise.reject(new Error('unused')),
+          image: async () => ({ data: Buffer.from('png'), usage: usageOf(undefined, true) }),
+        })
+        return inTenant1(async () => {
+          await book.invoke(userId, { ...target(), pricing: plain, kind: 'image' }, {}, (receipt) =>
+            model.image!({ model: 'same-model', prompt: 'a cat', ...receipt }),
+          )
+          const [row] = await ds.query<{ credits: string | null }[]>(
+            'SELECT credits FROM agent_usage_entry WHERE user_id = ? ORDER BY id DESC LIMIT 1',
+            [userId],
+          )
+          return row!.credits
+        })
+      },
+      // 提示词 2 Token × 1.5 + 6240 × 3
+      '0.018723',
+    ],
+  ]
+  for (const [label, call, credits] of cases) {
+    await clearAgentUsage(ds, [userId])
+    await limitTo('0')
+    // 用例名随结果一起比较，失败时能看出是哪种情况
+    expect({ label, charged: await call() }).toEqual({ label, charged: credits })
+    expect({ label, ...(await inTenant1(() => book.today(userId))) }).toMatchObject({
+      label,
+      credits,
+      unpricedCalls: 0,
+    })
+    await limitTo(credits)
+    expect({ label, over: await inTenant1(() => book.overDaily(userId)) }).toEqual({
+      label,
+      over: 'user_daily',
+    })
+  }
 })
 
 it('stores explicit free and image fallback charges without synthesizing token quantities', async () => {
@@ -190,21 +284,29 @@ it('stores explicit free and image fallback charges without synthesizing token q
   })
 })
 
-it('refuses unconfigured prices before constructing an upstream client', async () => {
+it('serves a model without rates and records its calls as unpriced under a finite budget', async () => {
   const rows = [{ id: 'unpriced', reasoning: false, contextWindow: 64000 }]
   await ds.query('UPDATE agent_provider SET models = ? WHERE id = ?', [
     JSON.stringify(rows),
     providers[0],
   ])
-  const registry = app.get(ProviderRegistry)
-  const connect = vi.spyOn(registry, 'connect')
+  const key = AGENT_LIMIT_PARAMS.userDailyCredits
+  await ds.query('UPDATE cfg_param SET param_value = ? WHERE param_key = ?', ['1', key])
+  await app.get(ParamService).invalidate(key)
   try {
-    await expect(registry.resolve(providers[0], 'unpriced')).rejects.toMatchObject({
-      err: Err.AGENT_PRICING_REQUIRED,
+    const resolved = await app.get(ProviderRegistry).resolve(providers[0], 'unpriced')
+    expect(resolved.model.pricing).toBeNull()
+    const unpriced = { ...target(providers[0], 'unpriced'), pricing: null }
+    for (let i = 0; i < 2; i++) {
+      expect(await inTenant1(() => book.overDaily(userId))).toBeNull()
+      expect(await inTenant1(() => book.add(userId, unpriced, original))).toBeNull()
+    }
+    expect(await inTenant1(() => book.today(userId))).toMatchObject({
+      credits: '0.000000',
+      unpricedCalls: 2,
+      unreportedCalls: 0,
     })
-    expect(connect).not.toHaveBeenCalled()
   } finally {
-    connect.mockRestore()
     await ds.query('UPDATE agent_provider SET models = ? WHERE id = ?', [
       JSON.stringify([{ id: 'same-model', reasoning: false, contextWindow: 64000, pricing }]),
       providers[0],
@@ -212,7 +314,61 @@ it('refuses unconfigured prices before constructing an upstream client', async (
   }
 })
 
-it('does not mark a failed explicit-free image as unpriced or charge a paid image flat price without output', async () => {
+it('refuses a malformed rate in chat, image and the diagnostics probe instead of treating it as free', async () => {
+  const bad = { input: 'abc', output: '1', cacheRead: null, cacheWrite: null, imageCredits: null }
+  await ds.query('UPDATE agent_provider SET models = ? WHERE id = ?', [
+    JSON.stringify([
+      { id: 'bad-rate', reasoning: false, contextWindow: 64000, image: true, pricing: bad },
+    ]),
+    providers[0],
+  ])
+  const registry = app.get(ProviderRegistry)
+  try {
+    await expect(registry.resolve(providers[0], 'bad-rate')).rejects.toMatchObject({
+      err: Err.AGENT_CREDIT_CONFIG_INVALID,
+    })
+    await expect(registry.resolveImage()).rejects.toMatchObject({
+      err: Err.AGENT_CREDIT_CONFIG_INVALID,
+    })
+    const probe = await api()
+      .post(`/api/agent/diagnostics/test-provider/${providers[0]}`)
+      .set(bearer(root))
+    expect(probe.status).toBe(422)
+    expect(probe.body.code).toBe(Err.AGENT_CREDIT_CONFIG_INVALID.code)
+  } finally {
+    await ds.query('UPDATE agent_provider SET models = ? WHERE id = ?', [
+      JSON.stringify([{ id: 'same-model', reasoning: false, contextWindow: 64000, pricing }]),
+      providers[0],
+    ])
+  }
+})
+
+it('refuses a finite budget while an expired call is still unsettled, then lets it through once settled', async () => {
+  const pending = await inTenant1(() => book.begin(userId, target(), {}))
+  pending.release()
+  await ds.query(
+    'UPDATE agent_usage_entry SET lease_until = DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 MINUTE) WHERE id = ?',
+    [pending.id],
+  )
+  const key = AGENT_LIMIT_PARAMS.userDailyCredits
+  await ds.query('UPDATE cfg_param SET param_value = ? WHERE param_key = ?', ['1', key])
+  await app.get(ParamService).invalidate(key)
+  // 结算暂时做不了（例如接管清理还没轮到它）：有限额度下先拒绝，不漏算后放行
+  const recover = vi.spyOn(book, 'recoverExpired').mockResolvedValue(0)
+  try {
+    expect(await inTenant1(() => book.overDaily(userId))).toBe('user_daily')
+  } finally {
+    recover.mockRestore()
+  }
+  expect(await inTenant1(() => book.overDaily(userId))).toBeNull()
+  const [row] = await ds.query<{ status: string }[]>(
+    'SELECT status FROM agent_usage_entry WHERE id = ?',
+    [pending.id],
+  )
+  expect(row!.status).toBe('unknown')
+})
+
+it('never marks a failed priced image as unpriced nor charges a paid image flat price without output', async () => {
   const zero = { input: '0', output: '0', cacheRead: '0', cacheWrite: '0', imageCredits: '0' }
   expect(
     await inTenant1(() =>
@@ -234,10 +390,10 @@ it('does not mark a failed explicit-free image as unpriced or charge a paid imag
         { failed: true },
       ),
     ),
-  ).toBeNull()
+  ).toBe('0.000000') // 失败的图片没有产出，也没有请求估算可依：不收单张费用，但仍是已计价的调用
   expect(await inTenant1(() => book.today(userId))).toMatchObject({
     credits: '0.000000',
-    unpricedCalls: 1,
+    unpricedCalls: 0,
     unreportedCalls: 2,
   })
 })

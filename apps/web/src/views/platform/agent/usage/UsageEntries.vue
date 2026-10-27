@@ -91,7 +91,11 @@ void load()
           ? t('agent.admin.usage.state.pending')
           : row.usageReported
             ? t('agent.admin.on')
-            : t('agent.admin.usage.unreported')
+            : t(
+                row.usage?.estimated
+                  ? 'agent.admin.usage.estimated'
+                  : 'agent.admin.usage.unreported',
+              )
       }}</template>
       <template #actions="{ row }"
         ><el-button link type="primary" @click="selected = row">{{
@@ -104,7 +108,15 @@ void load()
       <h3>{{ selected.providerName }} / {{ selected.model }}</h3>
       <p v-if="selected.status === 'pending'">{{ t('agent.admin.usage.pendingHint') }}</p>
       <p v-else-if="!selected.usage && !selected.pricing">{{ t('agent.admin.usage.legacy') }}</p>
-      <p v-else-if="!selected.usageReported">{{ t('agent.admin.usage.unreported') }}</p>
+      <p v-else-if="!selected.usageReported">
+        {{
+          t(
+            selected.usage?.estimated
+              ? 'agent.admin.usage.estimated'
+              : 'agent.admin.usage.unreported',
+          )
+        }}
+      </p>
       <p>
         {{ t('agent.admin.usage.credits') }}:
         {{

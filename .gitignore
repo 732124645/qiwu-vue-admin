@@ -1,6 +1,8 @@
 # deps & build
 node_modules/
 dist/
+# the dev runner's own output (scripts/dev-server.mjs), apart from the production build
+dist-dev/
 *.tsbuildinfo
 coverage/
 .vite/

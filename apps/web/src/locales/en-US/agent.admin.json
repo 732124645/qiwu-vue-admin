@@ -11,10 +11,10 @@
       "tab": {
         "providers": "Models",
         "search": "Web search",
-        "mcp": "External MCP",
-        "tools": "Tool policies",
+        "mcp": "External tools (MCP)",
+        "tools": "Tool approval",
         "skills": "Platform skills",
-        "params": "Instructions & limits",
+        "params": "Rules & quotas",
         "prompts": "Prompt templates",
         "instructions": "Instructions",
         "diagnostics": "Diagnostics"
@@ -43,8 +43,9 @@
         "configure": "Rates and reasoning",
         "pricingEnabled": "Configure credit rates",
         "pricingConfigured": "Rates configured",
-        "pricingMissing": "Rates required",
-        "pricingHint": "Credits per million tokens. An explicit 0 is free; models without rates cannot be called.",
+        "pricingMissing": "No rates configured",
+        "unpricedHint": "Models marked \"No rates configured\" still work and their calls are recorded as unpriced; unpriced calls do not count toward credit budgets.",
+        "pricingHint": "Credits per million tokens. An explicit 0 is free; a model without rates still works, its calls are recorded as unpriced and do not count toward credit budgets.",
         "inputCredits": "Input credits / million tokens",
         "outputCredits": "Output credits / million tokens",
         "cacheReadCredits": "Cache read credits / million tokens",
@@ -59,7 +60,7 @@
         "reasoningVllm": "vLLM on/off switch",
         "reasoningHint": "This capability allows reasoning controls; unchecking it does not turn the model’s reasoning off.",
         "vllmHint": "vLLM only toggles enable_thinking; low, medium and high do not represent different levels.",
-        "standardOffHint": "Off sends none to the standard API; configure it only when the model supports it.",
+        "standardOffHint": "Off sends reasoning_effort: none to the standard API; some compatible services reject that value with HTTP 400, so choose Off only when the model supports it.",
         "reasoningOn": "On"
       },
       "search": {
@@ -138,14 +139,13 @@
         "instructionsHint": "Put first into every system prompt, for every tenant.",
         "limits": "Limits",
         "creditsHint": "Credit budgets allow up to 6 decimals; 0 is unlimited. Checks use recorded spend before each call; in-flight calls can cross the threshold. Steps, time and concurrency must stay positive.",
-        "creditInvalid": "Enter a nonnegative credit amount with at most 6 decimal places."
+        "creditInvalid": "Enter a nonnegative credit amount with at most 6 decimal places.",
+        "noCreditCap": "There is currently no credit cap: the per-turn, per-user daily and per-tenant daily credit budgets are all 0 (unlimited). Token limits from before the upgrade were not converted to credits; set budgets as needed.",
+        "setCreditCap": "Set budgets"
       },
       "limit": {
         "turnSteps": "Steps per turn",
         "turnSeconds": "Seconds per turn",
-        "turnTokens": "Tokens per turn",
-        "userDailyTokens": "Tokens per user per day",
-        "tenantDailyTokens": "Tokens per tenant per day",
         "userConcurrentTurns": "Turns running at once per user",
         "turnCredits": "Credits per turn",
         "userDailyCredits": "Daily credits per user",
@@ -190,14 +190,13 @@
         "completionTokens": "Output tokens",
         "totalTokens": "Total tokens",
         "total": "Total",
-        "chart": "Credit usage",
-        "credits": "Recorded credits",
+        "credits": "Credits",
         "cacheReadTokens": "Cache read tokens",
         "cacheWriteTokens": "Cache write tokens",
         "reasoningTokens": "Reasoning tokens",
-        "unpricedCalls": "Unpriced calls",
-        "unreportedCalls": "Calls without reported usage",
-        "legacyCalls": "Legacy calls without details",
+        "unpricedCalls": "Calls to models without rates",
+        "unreportedCalls": "Calls with unknown usage",
+        "legacyCalls": "Early calls without details",
         "unknown": "Unknown",
         "entries": "Call details",
         "entry": "Raw usage and rate snapshot",
@@ -205,15 +204,41 @@
         "rawUsage": "Provider-reported usage",
         "unpriced": "Unpriced",
         "unreported": "Usage was not reported by the provider",
+        "estimated": "Usage was not reported; credits were estimated from the request and the output so far",
         "legacy": "This legacy record lacks details or rates. Historical credits are not reconstructed.",
-        "hint": "Recorded credits exclude unpriced calls. Unknown usage is not zero; legacy and unreported calls are marked separately.",
+        "hint": "Credits use the model price at the time of each call; changing a price later does not alter existing records.",
         "invocationStatus": "Invocation status",
         "state": {
           "pending": "In progress",
           "complete": "Complete",
           "unknown": "Outcome unknown"
         },
-        "pendingHint": "The call is in progress and final usage has not arrived. It enters the aggregate after completion or interruption is recorded."
+        "pendingHint": "The call is in progress and final usage has not arrived. It enters the aggregate after completion or interruption is recorded.",
+        "creditUnit": "Credits",
+        "partial": "Some calls have unknown usage and are not included",
+        "topCredits": "{n} credits",
+        "empty": "No calls in this period yet",
+        "chartBy": {
+          "day": "Credits per day",
+          "user": "Credits per user",
+          "model": "Credits per model"
+        },
+        "kpi": {
+          "calls": "Calls",
+          "credits": "Credits used",
+          "tokens": "Input / output tokens",
+          "top": {
+            "day": "Busiest day",
+            "user": "Top user",
+            "model": "Top model"
+          }
+        },
+        "integrity": {
+          "title": "Data completeness",
+          "unpriced": "{n} calls used a model without rates; they are not counted in credits and not limited by credit budgets. Add the rates under Agent settings → Models (they apply to later calls only).",
+          "unreported": "{n} calls have unknown usage (the model service returned none, or the call was stopped, timed out or failed before it ended), so their tokens cannot be counted; for models with rates, credits were estimated from the request and the output so far and count toward budgets.",
+          "legacy": "{n} calls are early records saved without details; they are shown as recorded and not recalculated."
+        }
       },
       "diag": {
         "queue": "Turn queue",
@@ -269,8 +294,48 @@
           "no_model": "No model configured",
           "search_not_configured": "No usable key",
           "failed": "Failed",
+          "reasoning_off_rejected": "The model service does not accept turning reasoning off (reasoning_effort: none)",
           "http": "HTTP {status}"
         }
+      },
+      "guide": {
+        "title": "Get started",
+        "intro": "Complete these steps in order and the assistant is ready to use.",
+        "allDone": "All required setup is done. You can collapse this guide.",
+        "collapse": "Collapse",
+        "expand": "Show guide",
+        "collapsedText": "The assistant’s initial setup is complete.",
+        "noChat": "This account has no chat page, or the assistant is turned off.",
+        "state": {
+          "done": "Done",
+          "todo": "To do",
+          "optional": "Optional"
+        },
+        "step": {
+          "providers": {
+            "title": "Set up a model",
+            "desc": "Add and enable a model service with models (mark a default when there are several). This step is required.",
+            "action": "Set up"
+          },
+          "search": {
+            "title": "Web search",
+            "desc": "Set it up when answers need current information; chat works without it.",
+            "action": "Set up"
+          },
+          "tools": {
+            "title": "Review tool approval",
+            "desc": "Make sure tools that change data run only after a person confirms or a review passes.",
+            "action": "Review"
+          },
+          "chat": {
+            "title": "Try it",
+            "desc": "Ask a question on the chat page and see the result.",
+            "action": "Open chat"
+          }
+        },
+        "view": "View",
+        "unpriced": "These models have no rates configured: {models}. Unpriced calls do not count toward credit budgets.",
+        "setPricing": "Configure rates"
       }
     }
   }

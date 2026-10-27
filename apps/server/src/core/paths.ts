@@ -23,8 +23,13 @@ export const i18nDirs = (): string[] =>
     ? [fromCwd(process.env.I18N_DIR), fromCwd('../../packages/shared/src/i18n')]
     : [fromCwd('dist/i18n')]
 
-/** Compiled TypeORM migrations: always run from dist, never through tsx (see docs/adr/002-orm.md, docs/adr/001-module-format.md). */
-export const migrationsGlob = (): string => fromCwd('dist/db/migrations/*.js')
+/**
+ * Compiled TypeORM migrations: always run from compiled JS, never through tsx (see docs/adr/002-orm.md,
+ * docs/adr/001-module-format.md). `dist/db/migrations` by default; the dev runner points `MIGRATIONS_DIR`
+ * at its own output so a production build deleting dist cannot pull files away from the dev app.
+ */
+export const migrationsGlob = (): string =>
+  fromCwd(`${process.env.MIGRATIONS_DIR ?? 'dist/db/migrations'}/*.js`)
 
 export const DEFAULT_UPLOAD_ROOT = './data/upload'
 

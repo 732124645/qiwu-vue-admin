@@ -1,15 +1,14 @@
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import type { AgentNotifySettings } from '@qiwu/shared'
-import IconButton from '@/core/components/IconButton.vue'
 import { agentNotifyApi } from '@/api/platform/agent'
 import { toastRest } from '@/core/composables/use-crud'
 
 /**
- * 对话页头部的“通知设置”弹出层：每类提醒是否同时发邮件；站内信总会发（手机端经站内信同步）。
- * 第一次打开时载入，点保存才提交。
+ * 对话页“会话设置”里的“通知”一页：每类提醒是否同时发邮件；站内信总会发（手机端经站内信同步）。
+ * 打开这一页时载入，点保存才提交。
  */
 defineOptions({ name: 'AgentNotifySettings' })
 const { t } = useI18n()
@@ -24,7 +23,7 @@ const loaded = ref(false)
 const loading = ref(false)
 const saving = ref(false)
 
-/** 弹层打开时载入本人的设置（只载一次）。 */
+/** 打开这一页时载入本人的设置（同一实例只载一次）。 */
 async function load() {
   if (loaded.value || loading.value) return
   loading.value = true
@@ -51,37 +50,33 @@ async function save() {
     saving.value = false
   }
 }
+onMounted(load)
 </script>
 
 <template>
-  <el-popover trigger="click" placement="bottom-end" :width="320" @show="load">
-    <template #reference>
-      <IconButton icon="lucide:bell-ring" :label="t('agent.chat.notify.open')" />
-    </template>
-    <div v-loading="loading" class="agent-notify">
-      <p class="agent-notify__title">{{ t('agent.chat.notify.title') }}</p>
-      <div v-for="e in EVENTS" :key="e" class="agent-notify__row">
-        <span class="agent-notify__name">{{ t(`agent.chat.notify.event.${e}`) }}</span>
-        <el-switch
-          v-model="form[e].mail"
-          :data-event="e"
-          :disabled="!loaded"
-          :aria-label="`${t(`agent.chat.notify.event.${e}`)} ${t('agent.chat.notify.mail')}`"
-          :active-text="t('agent.chat.notify.mail')"
-        />
-      </div>
-      <p class="agent-notify__hint">{{ t('agent.chat.notify.hint') }}</p>
-      <el-button
-        size="small"
-        type="primary"
-        :loading="saving"
-        :disabled="saving || !loaded"
-        @click="save"
-      >
-        {{ t('crud.action.save') }}
-      </el-button>
+  <div v-loading="loading" class="agent-notify">
+    <p class="agent-notify__title">{{ t('agent.chat.notify.title') }}</p>
+    <div v-for="e in EVENTS" :key="e" class="agent-notify__row">
+      <span class="agent-notify__name">{{ t(`agent.chat.notify.event.${e}`) }}</span>
+      <el-switch
+        v-model="form[e].mail"
+        :data-event="e"
+        :disabled="!loaded"
+        :aria-label="`${t(`agent.chat.notify.event.${e}`)} ${t('agent.chat.notify.mail')}`"
+        :active-text="t('agent.chat.notify.mail')"
+      />
     </div>
-  </el-popover>
+    <p class="agent-notify__hint">{{ t('agent.chat.notify.hint') }}</p>
+    <el-button
+      size="small"
+      type="primary"
+      :loading="saving"
+      :disabled="saving || !loaded"
+      @click="save"
+    >
+      {{ t('crud.action.save') }}
+    </el-button>
+  </div>
 </template>
 
 <style scoped>

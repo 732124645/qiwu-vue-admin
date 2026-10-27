@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { agentPerms } from '@qiwu/shared'
 import { agentProviderApi } from '@/api/platform/agent-admin'
@@ -16,6 +17,8 @@ const { t } = useI18n()
 const modify = agentPerms.setting.modify
 const auth = useAuthStore()
 const { rows, loading, refresh, remove } = useList(agentProviderApi.list)
+/** 有模型没配费率时在表格上方说明：照常可用，但调用不计入积分额度 */
+const hasUnpriced = computed(() => rows.value.some((p) => p.models.some((m) => !m.pricing)))
 const columns: QwColumn[] = [
   { prop: 'name', label: 'field.agent.provider.name', width: 160, showOverflowTooltip: true },
   { prop: 'hasKey', label: 'field.agent.provider.apiKey', width: 100 },
@@ -50,6 +53,9 @@ async function openForm(id?: number) {
 <template>
   <div>
     <p v-if="!auth.platformRoot" class="agent-setting__hint">{{ t('agent.admin.rootOnly') }}</p>
+    <p v-if="hasUnpriced" class="agent-setting__hint provider-tab__unpriced">
+      {{ t('agent.admin.model.unpricedHint') }}
+    </p>
     <TableToolbar
       table-id="agent.provider"
       :columns="columns"

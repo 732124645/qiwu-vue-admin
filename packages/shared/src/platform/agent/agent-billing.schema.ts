@@ -28,5 +28,7 @@ export const agentTokenUsage = z.object({
   outputDetails: details,
   rawUsage: z.record(z.string(), z.unknown()).nullable(),
   usageReported: z.boolean(),
+  /** 供应商没给用量时按请求与已输出内容保守估算的 Token（仅输入、输出两项），计入积分与额度 */
+  estimated: z.boolean().optional(),
 })
 export type AgentTokenUsage = z.infer<typeof agentTokenUsage>

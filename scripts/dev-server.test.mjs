@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, renameSync, rmSync } from 'node:fs'
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -104,6 +112,7 @@ setInterval(() => {}, 1000);
         sharedCompiler: [...(preload ? ['--import', preloadFile] : []), sharedRunner],
         write: (line) => output.push(line),
         inspect: [],
+        retryDelay: 200,
       })
       return loop
     },
@@ -448,40 +457,114 @@ ts.sys.writeFile = (file, data, bom) => {
 )
 
 test(
-  'source reload recovers after an external build deletes and reconstructs server dist',
-  { timeout: 20_000 },
+  'external builds that delete and rebuild dist while dev compiles overlap never break the dev app',
+  { timeout: 40_000 },
   async () => {
     const f = fixture()
     f.start()
     try {
       const first = await until(() => f.ready()[0], 'external build cold ready')
-      rmSync(join(f.cwd, 'dist'), { recursive: true, force: true })
-      await delay(80)
-      assert.equal(f.ready().length, 1)
-      assert.equal(alive(pidOf(first)), true)
-      const build = spawn(
-        process.execPath,
-        [tsc, '-p', 'tsconfig.build.json', '--incremental', 'false'],
-        { cwd: f.cwd, stdio: ['ignore', 'pipe', 'pipe'], signal: AbortSignal.timeout(10_000) },
+      assert.ok(existsSync(join(f.cwd, 'dist-dev/main.js')))
+      // 外部构建反复删掉并重建 dist，期间保存源码触发开发编译与重启
+      let building = true
+      const builds = (async () => {
+        let runs = 0
+        while (building || runs < 2) {
+          rmSync(join(f.cwd, 'dist'), { recursive: true, force: true })
+          const build = spawn(
+            process.execPath,
+            [tsc, '-p', 'tsconfig.build.json', '--incremental', 'false'],
+            { cwd: f.cwd, stdio: 'ignore', signal: AbortSignal.timeout(10_000) },
+          )
+          assert.equal(await new Promise((done) => build.once('exit', done)), 0)
+          runs++
+        }
+        return runs
+      })()
+      await delay(50)
+      writeFileSync(f.main, f.source('during-build'))
+      const during = await until(
+        () => f.ready().find((line) => line.includes('fixture:during-build-initial:')),
+        'reload while an external build runs',
       )
-      let diagnostics = ''
-      build.stdout.on('data', (chunk) => (diagnostics += chunk))
-      build.stderr.on('data', (chunk) => (diagnostics += chunk))
-      const code = await new Promise((resolve, reject) => {
-        build.once('error', reject)
-        build.once('exit', resolve)
-      })
-      assert.equal(code, 0, diagnostics)
-      writeFileSync(f.main, f.source('after-build'))
-      const restored = await until(
-        () => f.ready().find((line) => line.includes('fixture:after-build-initial:')),
-        'source reload after external build',
-      )
-      assert.notEqual(pidOf(restored), pidOf(first))
       assert.equal(alive(pidOf(first)), false)
+      writeFileSync(f.main, f.source('again'))
+      const again = await until(
+        () => f.ready().find((line) => line.includes('fixture:again-initial:')),
+        'second reload while an external build runs',
+      )
+      assert.equal(alive(pidOf(during)), false)
+      building = false
+      assert.ok((await builds) >= 2)
+      await delay(400)
+      assert.equal(alive(pidOf(again)), true)
+      assert.equal(f.ready().length, 3, f.output.join('\n'))
+      assert.doesNotMatch(f.output.join('\n'), /MODULE_NOT_FOUND|exited/)
+      assert.ok(existsSync(join(f.cwd, 'dist/main.js')))
+    } finally {
+      await f.close()
+    }
+  },
+)
+
+test(
+  'the dev app reads migrations from its own clean output directory',
+  { timeout: 20_000 },
+  async () => {
+    const f = fixture()
+    // 上次运行留下的、源码里已删除的迁移产物
+    const stale = join(f.cwd, 'dist-dev/db/migrations/1-removed.js')
+    mkdirSync(join(f.cwd, 'dist-dev/db/migrations'), { recursive: true })
+    writeFileSync(stale, 'export {}')
+    // 夹具应用把收到的迁移目录写进就绪地址（目录名里没有冒号）
+    writeFileSync(
+      f.main,
+      f.source(`' + (globalThis as any).process.env.MIGRATIONS_DIR.split('/').join('_') + '`),
+    )
+    f.start()
+    try {
+      const ready = await until(() => f.ready()[0], 'migration directory cold ready')
+      assert.match(ready, /fixture:dist-dev_db_migrations-initial:/)
+      assert.equal(existsSync(stale), false)
+    } finally {
+      await f.close()
+    }
+  },
+)
+
+test(
+  'an app that exits before ready is retried once per generation, then waits for a change',
+  { timeout: 30_000 },
+  async () => {
+    const f = fixture()
+    // 第一次启动在就绪前崩溃，第二次正常；之后的版本每次都崩溃
+    const crashing = (version, always) => `
+// @ts-ignore 夹具没有 Node 类型声明
+import { existsSync, writeFileSync } from 'node:fs';
+if (${always} || !existsSync('crashed-once')) {
+  writeFileSync('crashed-once', '');
+  (globalThis as any).process.exit(3);
+}
+${f.source(version)}`
+    writeFileSync(f.main, crashing('flaky', false))
+    f.start()
+    try {
+      const ready = await until(
+        () => f.ready().find((line) => line.includes('fixture:flaky-initial:')),
+        'retried start becomes ready',
+      )
+      assert.ok(ready)
+      const retries = () => f.output.filter((line) => line.includes('retrying once')).length
+      assert.equal(retries(), 1, f.output.join('\n'))
+      writeFileSync(f.main, crashing('broken', true))
+      await until(
+        () => f.output.some((line) => line.includes('waiting for a successful change')),
+        'gives up after one retry',
+      )
+      assert.equal(retries(), 2, f.output.join('\n'))
       await delay(600)
-      assert.equal(f.ready().length, 2, f.output.join('\n'))
-      assert.doesNotMatch(f.output.join('\n'), /MODULE_NOT_FOUND/)
+      assert.equal(retries(), 2)
+      assert.equal(f.ready().length, 1)
     } finally {
       await f.close()
     }

@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import type { DataSource } from 'typeorm'
-import { MigrationCaseFence } from '../setup/migrations.js'
+import { MigrationCaseFence, runScript } from '../setup/migrations.js'
 import {
   assertMigrationRunSafe,
   clearMigrationRunUnsafe,
@@ -60,7 +60,7 @@ it('abort waits for the current query and original finally, refuses later SQL, a
   await started
   expect(migrationRunUnsafe()).toBe(true)
   controller.abort()
-  const drained = fence.drain(true).then(() => events.push('drained'))
+  const drained = fence.drain().then(() => events.push('drained'))
   // 即使外部换了当前 signal，旧用例的异步上下文仍只能看到自身已中止的信号。
   fence.begin(new AbortController().signal)
   await delay(10)
@@ -81,7 +81,7 @@ it('successful cases clear their marker; failed recovery keeps it and other chan
   const fence = new MigrationCaseFence(200)
   fence.begin(new AbortController().signal)
   await fence.wrap(async () => 'ok')()
-  await fence.drain(false)
+  await fence.drain()
   expect(migrationRunUnsafe()).toBe(false)
   await expect(
     recoverMigrationRun(async () => {
@@ -92,6 +92,73 @@ it('successful cases clear their marker; failed recovery keeps it and other chan
   expect(migrationRunUnsafe({ ...env, DB_NAME: `${env.DB_NAME}_other_test` })).toBe(false)
   await recoverMigrationRun(async () => undefined)
   expect(() => assertMigrationRunSafe()).not.toThrow()
+})
+
+it('a plain assertion failure keeps later cases running; a failed SQL step or script marks the run unsafe', async () => {
+  const ds = {
+    createQueryRunner: () => ({
+      query: async (sql: string) => {
+        if (sql === 'bad DDL') throw new Error('ER_PARSE_ERROR')
+      },
+    }),
+  } as unknown as Pick<DataSource, 'createQueryRunner'>
+  const fence = new MigrationCaseFence(200)
+  fence.install(ds)
+  const failing = async (body: () => Promise<void>) => {
+    fence.begin(new AbortController().signal)
+    await fence
+      .wrap(body)()
+      .catch(() => undefined)
+    await fence.drain()
+    return fence.unsafe
+  }
+  expect(
+    await failing(async () => {
+      await ds.createQueryRunner().query('fine')
+      expect(1).toBe(2)
+    }),
+  ).toBe(false)
+  expect(migrationRunUnsafe()).toBe(false)
+  // 用例吞掉了失败的 SQL 又以断言失败结束：结构可能停在半途
+  expect(
+    await failing(async () => {
+      await ds
+        .createQueryRunner()
+        .query('bad DDL')
+        .catch(() => undefined)
+      expect(1).toBe(2)
+    }),
+  ).toBe(true)
+  expect(migrationRunUnsafe()).toBe(true)
+})
+
+it('a script that exits non-zero inside a failed case or any non-assertion error marks the run unsafe', async () => {
+  const failing = async (body: () => unknown) => {
+    const fence = new MigrationCaseFence(200)
+    fence.begin(new AbortController().signal)
+    await fence
+      .wrap(body)()
+      .catch(() => undefined)
+    await fence.drain()
+    return fence.unsafe
+  }
+  expect(
+    await failing(() => {
+      runScript('-e', ['process.exit(2)'])
+      expect(1).toBe(2)
+    }),
+  ).toBe(true)
+  expect(
+    await failing(() => {
+      throw new Error('migration step failed')
+    }),
+  ).toBe(true)
+  expect(
+    await failing(() => {
+      runScript('-e', ['process.exit(0)'])
+      expect(1).toBe(2)
+    }),
+  ).toBe(false)
 })
 
 it('marker read/write failures refuse work instead of treating the channel as clean', async () => {
@@ -127,7 +194,7 @@ const fence = new MigrationCaseFence(20);
 const ds = {createQueryRunner: () => ({query: () => new Promise(() => {})})};
 fence.install(ds);
 beforeEach(({ signal }) => fence.begin(signal));
-afterEach(async ({ signal }) => await fence.drain(signal.aborted), 200);
+afterEach(async () => await fence.drain(), 200);
 it('in-flight SQL never returns', fence.wrap(async () => await ds.createQueryRunner().query('fake SQL')), 10);
 `,
   )
@@ -204,7 +271,7 @@ fence.install(ds);
 const nativeIt = globalThis.it;
 const it = ${wrapped ? 'migrationTests(nativeIt, fence)' : 'nativeIt'};
 beforeEach(({signal}) => fence.begin(signal));
-afterEach(async ({signal}) => { await fence.drain(signal.aborted); events.push('drained'); }, 500);
+afterEach(async () => { await fence.drain(); events.push('drained'); }, 500);
 afterAll(async () => {
  await recoverMigrationRun(async () => events.push('recovered'));
  await delay(100);

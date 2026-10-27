@@ -1,5 +1,6 @@
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
+import { Err } from '@qiwu/shared'
 import type { ChatEvent, ChatMessage } from './chat-model.js'
 import { FakeChatModel } from './fake-chat-model.js'
 import { OpenAiChatModel, toWire, wireNames } from './openai-chat-model.js'
@@ -64,6 +65,14 @@ describe('reasoning sent back', () => {
         const body = JSON.parse(raw) as Record<string, any>
         bodies.push(body)
         const prior = (body.messages as any[]).filter((m) => m.role === 'assistant')
+        // 有的兼容服务不认识 reasoning_effort: none，直接回 400
+        const strict =
+          ['strict', 'vague'].includes(body.model) && body.reasoning_effort !== undefined
+        if (strict && !['low', 'medium', 'high'].includes(body.reasoning_effort)) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          const message = body.model === 'vague' ? 'invalid request' : 'unknown reasoning_effort'
+          return res.end(JSON.stringify({ error: { message } }))
+        }
         if (body.tools && prior.some((m) => typeof m.reasoning_content !== 'string')) {
           res.writeHead(400, { 'Content-Type': 'application/json' })
           return res.end(JSON.stringify({ error: { message: 'missing reasoning_content' } }))
@@ -141,6 +150,37 @@ describe('reasoning sent back', () => {
     expect(bodies.at(-1)).not.toHaveProperty('reasoning_effort')
     await collect(configured('provider').stream({ model: 'think', messages: [] }))
     expect(bodies.at(-1)).not.toHaveProperty('reasoning_effort')
+  })
+
+  it('names a rejected reasoning off on a 400 and sends one request only', async () => {
+    const strict = new OpenAiChatModel({
+      baseUrl,
+      apiKey: null,
+      retries: 2,
+      models: [
+        { id: 'strict', reasoning: true },
+        { id: 'vague', reasoning: true },
+      ],
+    })
+    const before = bodies.length
+    await expect(
+      collect(strict.stream({ model: 'strict', messages: [], reasoning: 'off' })),
+    ).rejects.toMatchObject({
+      err: Err.AGENT_REASONING_OFF_REJECTED,
+      params: { reason: 'reasoning_off_rejected' },
+    })
+    await expect(
+      strict.complete({ model: 'strict', messages: [], reasoning: 'off' }),
+    ).rejects.toMatchObject({ err: Err.AGENT_REASONING_OFF_REJECTED })
+    expect(bodies.length - before).toBe(2)
+    // 上游说明与思考参数无关的 400 不归到“不接受关闭思考”
+    await expect(
+      collect(strict.stream({ model: 'vague', messages: [], reasoning: 'off' })),
+    ).rejects.toMatchObject({ err: Err.AGENT_PROVIDER_FAILED, params: { reason: 'http_400' } })
+    // 别的 400 仍是普通的模型服务失败
+    await expect(
+      collect(model().stream({ model: 'plain', messages: history, tools })),
+    ).rejects.toMatchObject({ err: Err.AGENT_PROVIDER_FAILED, params: { reason: 'http_400' } })
   })
 
   it('sends a reasoning text back only to the model that produced it', () => {

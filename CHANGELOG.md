@@ -1,8 +1,27 @@
 # Changelog
 
-中文说明：本文件按功能区域汇总栖梧 / Qiwu 的用户可见变化，正文使用英文。`1.0.0` 于 2026-10-05 发布，`1.0.3` 于 2026-10-06 发布（`1.0.1`、`1.0.2` 未发布，内容并入 `1.0.3`），`1.1.0`（多租户）、`1.2.0`（手写 SQL 的数据权限）、`1.2.1`（修复）与 `1.3.0`（任务队列）于 2026-10-14 发布，`1.3.1`（开发调试开关）与 `1.4.0`（安全审查修复）于 2026-10-15 发布，`1.4.1`（界面细节）、`1.5.0`（微信公众号管理，默认关闭）与 `1.6.0`（MCP 智能体接入，默认关闭；下游合并改进）于 2026-10-20 发布，`1.6.1`（后端连不上时停在原页面等待；README 更新）与 `1.7.0`（AI 编程友好：公开开发规则、任务配方、检查报错带修复提示、项目地图）于 2026-10-21 发布，`1.7.1`（列表操作列不再截断误点）、`1.8.0`（后台智能助手，默认关闭）与 `1.9.0`（智能助手：自动化、记忆、配置方案、自动审查、子智能体与深度研究）于 2026-10-22 发布。
+中文说明：本文件按功能区域汇总栖梧 / Qiwu 的用户可见变化，正文使用英文。`1.0.0` 于 2026-10-05 发布，`1.0.3` 于 2026-10-06 发布（`1.0.1`、`1.0.2` 未发布，内容并入 `1.0.3`），`1.1.0`（多租户）、`1.2.0`（手写 SQL 的数据权限）、`1.2.1`（修复）与 `1.3.0`（任务队列）于 2026-10-14 发布，`1.3.1`（开发调试开关）与 `1.4.0`（安全审查修复）于 2026-10-15 发布，`1.4.1`（界面细节）、`1.5.0`（微信公众号管理，默认关闭）与 `1.6.0`（MCP 智能体接入，默认关闭；下游合并改进）于 2026-10-20 发布，`1.6.1`（后端连不上时停在原页面等待；README 更新）与 `1.7.0`（AI 编程友好：公开开发规则、任务配方、检查报错带修复提示、项目地图）于 2026-10-21 发布，`1.7.1`（列表操作列不再截断误点）、`1.8.0`（后台智能助手，默认关闭）与 `1.9.0`（智能助手：自动化、记忆、配置方案、自动审查、子智能体与深度研究）于 2026-10-22 发布，`1.10.0`（基础办公申请）于 2026-10-23 发布，`1.11.0`（助手积分额度与断线恢复）与 `1.12.0`（助手桌面工作区、用量与设置页；积分升级修复）于 2026-10-27 发布。
 
 All notable product changes are recorded here in Keep a Changelog style. The initial release below summarizes the delivered features. Planned work is identified explicitly.
+
+## [1.12.0] - 2026-10-27
+
+### Changed
+
+- The assistant chat is a desktop workspace: the conversation list and side panel can be resized by dragging or with the keyboard (widths are kept per user and browser; double-click restores the default), and the list folds to a rail. The work panel and subtask details open in the main area, focus mode covers the application shell, and the header keeps three labelled buttons with the remaining options in a conversation settings popover and an actions menu. Message actions appear in one row on hover or focus, answers use a centred reading column and the composer shows its shortcuts on a hint line with plan mode as a switch.
+- The usage page leads with key figures, shows credits with two decimals and thousands separators, lists business columns by default, explains data completeness only when it applies and draws a per-day chart with units and an empty state.
+- The assistant settings open with a getting-started guide (model, web search, tool approval, first conversation) and order their tabs by setup step with plainer names.
+
+### Fixed
+
+- Models without credit rates keep working after an upgrade: their calls are recorded as unpriced and are neither charged nor limited. A priced model is always charged: unknown usage is estimated from the request and the streamed output, and reported usage without cache details or with inconsistent totals is charged conservatively. The usage page lists unpriced and estimated calls separately, and the settings page says when no credit limit is configured.
+- A provider that rejects turning reasoning off returns a dedicated error instead of a generic upstream failure.
+- The development server builds into its own output directory, so a production build no longer breaks a running `pnpm dev`; it retries once when the backend exits before it is ready.
+- Server tests bind their temporary listeners to the loopback address and start every spec file with empty rate-limit buckets, so unrelated local services and earlier files no longer cause sporadic 401, 404 or 429 answers.
+
+### Upgrade notes
+
+- No new migrations. Existing models without rates resume working after the upgrade; configure rates and budgets where credits should apply. Add `dist-dev/` to the ignore list of a project derived from an older template.
 
 ## [1.11.0] - 2026-10-27
 

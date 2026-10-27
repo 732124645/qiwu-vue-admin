@@ -863,7 +863,11 @@ it(`keeps a streamed prefix and unknown billing through forced process terminati
     'SELECT id, status, usage_json FROM agent_usage_entry WHERE tenant_id = 1 AND turn_id = ?',
     [turn.id],
   )
-  expect(pending).toMatchObject({ status: 'pending', usage_json: null })
+  // 调用发出前已记下只含输入的估算：进程被强杀后接管结算按它计积分，不当成免费
+  expect(pending).toMatchObject({
+    status: 'pending',
+    usage_json: { estimated: true, usageReported: false, completionTokens: 0 },
+  })
   await stopChild(first, 'SIGKILL')
   // 不伪造租约失效：等待真实 Redis TTL 和数据库 UTC lease_until。
   await until(async () => {
@@ -895,15 +899,17 @@ it(`keeps a streamed prefix and unknown billing through forced process terminati
     'SELECT status, credits FROM agent_usage_entry WHERE tenant_id = 1 AND turn_id = ? ORDER BY id',
     [turn.id],
   )
-  expect(entries).toEqual([
-    { status: 'unknown', credits: null },
-    { status: 'complete', credits: '6.000000' },
-  ])
+  expect(entries.map((e: { status: string }) => e.status)).toEqual(['unknown', 'complete'])
+  expect(entries[1].credits).toBe('6.000000')
+  const estimated = Number(entries[0].credits)
+  expect(estimated).toBeGreaterThan(0)
+  expect(estimated).toBe((pending.usage_json.promptTokens * Number(TEST_AGENT_PRICING.input)) / 1e6)
   const [total] = await ds.query(
-    'SELECT credits, unpriced_calls FROM agent_turn WHERE tenant_id = 1 AND id = ?',
+    'SELECT credits, unpriced_calls, unreported_calls FROM agent_turn WHERE tenant_id = 1 AND id = ?',
     [turn.id],
   )
-  expect(total).toMatchObject({ credits: '6.000000', unpriced_calls: 1 })
+  expect(total).toMatchObject({ unpriced_calls: 0, unreported_calls: 1 })
+  expect(Number(total.credits)).toBe(estimated + 6)
   expect(upstreamCalls).toBe(2)
   mode = 'receipt'
   const metered = await makeTurn()

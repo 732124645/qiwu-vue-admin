@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, ref, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -10,11 +10,13 @@ import {
   AGENT_SKILL_BODY_MAX,
   AGENT_TRUST_MODE_PARAM,
 } from '@qiwu/shared'
+import { noCreditCap } from './setup-guide'
 import { useAgentParams } from './use-params'
 
 /**
  * “说明与限额”标签（系统参数，只有 root 能改，其他人只读）：平台说明（拼在每个系统提示最前面）、
  * 每轮与每日限额、是否提供“信任本会话”、紧急暂停（暂停前确认：新的轮次与工具调用立即被拒）。
+ * 三个积分额度都是 0 时在顶部提醒“没有积分额度上限”，root 可一键跳到额度输入框。
  */
 defineOptions({ name: 'AgentParamTab' })
 const { t } = useI18n()
@@ -37,6 +39,14 @@ watch(params, (p) => {
   }
 })
 const on = (key: string) => params.value[key]?.paramValue === 'true'
+const noCap = computed(() => noCreditCap(params.value))
+const limitsForm = ref<{ $el: HTMLElement }>()
+/** 滚到额度区并聚焦第一个积分输入框。 */
+function focusCredits() {
+  const input = limitsForm.value?.$el.querySelector<HTMLInputElement>('input[inputmode="decimal"]')
+  input?.scrollIntoView({ block: 'center' })
+  input?.focus()
+}
 
 /** 保存全部限额（只发改过的）。空的输入框不保存。 */
 function saveLimits() {
@@ -76,6 +86,14 @@ async function setPaused(paused: boolean) {
 <template>
   <div v-loading="loading" class="param-tab">
     <p v-if="!isRoot" class="param-tab__hint">{{ t('agent.admin.rootOnly') }}</p>
+    <el-alert v-if="noCap" class="param-tab__no-cap" type="warning" show-icon :closable="false">
+      <div class="param-tab__notice">
+        <span>{{ t('agent.admin.param.noCreditCap') }}</span>
+        <el-button v-if="isRoot" link type="primary" @click="focusCredits">
+          {{ t('agent.admin.param.setCreditCap') }}
+        </el-button>
+      </div>
+    </el-alert>
     <el-form label-position="top" @submit.prevent>
       <el-form-item :label="t('agent.admin.param.paused')">
         <el-switch
@@ -124,7 +142,7 @@ async function setPaused(paused: boolean) {
 
     <h3 class="param-tab__title">{{ t('agent.admin.param.limits') }}</h3>
     <p class="param-tab__hint">{{ t('agent.admin.param.creditsHint') }}</p>
-    <el-form label-position="top" class="param-tab__limits" @submit.prevent>
+    <el-form ref="limitsForm" label-position="top" class="param-tab__limits" @submit.prevent>
       <el-form-item
         v-for="[name, key] in LIMITS"
         :key="key"
@@ -165,6 +183,15 @@ async function setPaused(paused: boolean) {
 <style scoped>
 .param-tab {
   max-width: 760px;
+}
+.param-tab__no-cap {
+  margin-bottom: 16px;
+}
+.param-tab__notice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
 }
 .param-tab__limits {
   display: grid;

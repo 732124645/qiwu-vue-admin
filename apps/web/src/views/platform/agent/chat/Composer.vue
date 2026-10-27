@@ -49,7 +49,7 @@ export interface ComposerMessage {
  * 底部输入框：多行，Enter 发送、Shift+Enter 换行（输入法组字时不发送）；`$` 补全技能，整行 `/` 补全斜杠命令，
  * `@` 提及技能、外部服务器与当前页面带来的记录（插入可读的文字记号，模型直接读；提及技能同时作为本轮技能），
  * `/prompts` 与“提示词”菜单插入模板；↑/↓ 翻看本人发过的消息，Ctrl+R 搜索它们；附件（图片只给能看图的模型）；模型、
- * 快速档、推理强度、审批模式与计划模式；上下文用量；运行中可选“追加到当前步骤”或“排到下一轮”，
+ * 快速档、推理强度、审批模式与计划模式（带状态的开关）放在输入框下的一条工具栏里，按键说明是工具栏下一行淡色提示；上下文用量；运行中可选“追加到当前步骤”或“排到下一轮”，
  * 输入框为空时按停止键（默认 Esc，可在页面自定义）停止本轮。发送按钮在请求进行中 loading 且不可再点，失败时文字保留。
  */
 defineOptions({ name: 'AgentComposer' })
@@ -610,7 +610,6 @@ defineExpose({
         ref="modelSelect"
         v-model="modelKey"
         class="agent-composer__model"
-        size="small"
         :aria-label="t('agent.chat.composer.model')"
         :placeholder="t('agent.chat.composer.model')"
         :disabled="!options?.providers.length"
@@ -626,7 +625,6 @@ defineExpose({
       </el-select>
       <el-button
         v-if="fastModel"
-        size="small"
         class="agent-composer__toggle"
         :type="current?.fast ? 'primary' : undefined"
         :aria-pressed="!!current?.fast"
@@ -638,7 +636,6 @@ defineExpose({
         v-if="current?.reasoning"
         v-model="reasoning"
         class="agent-composer__reasoning"
-        size="small"
         clearable
         :aria-label="t('agent.chat.composer.reasoning')"
         :placeholder="defaultReasoningLabel"
@@ -650,7 +647,6 @@ defineExpose({
         ref="modeSelect"
         v-model="approvalMode"
         class="agent-composer__mode"
-        size="small"
         :aria-label="t('agent.chat.composer.approvalMode')"
       >
         <el-option
@@ -660,19 +656,23 @@ defineExpose({
           :label="t(`agent.chat.mode.${m}`)"
         />
       </el-select>
-      <el-button
-        size="small"
-        class="agent-composer__toggle"
-        :type="settings.planMode ? 'primary' : undefined"
-        :aria-pressed="settings.planMode"
+      <el-switch
+        class="agent-composer__plan"
+        :model-value="settings.planMode"
+        :active-text="t('agent.chat.composer.plan')"
+        :aria-label="t('agent.chat.composer.plan')"
         :title="t('agent.chat.composer.planHint')"
-        @click="set({ planMode: !settings.planMode })"
-      >
-        {{ t('agent.chat.composer.plan') }}
-      </el-button>
+        @update:model-value="(on: string | number | boolean) => set({ planMode: !!on })"
+      />
       <span class="agent-composer__spacer" />
-      <label v-if="contextPercent != null" class="agent-composer__context">
-        {{ t('agent.chat.composer.contextEstimate', { percent: contextPercent }) }}
+      <label
+        v-if="contextPercent != null"
+        class="agent-composer__context"
+        :title="t('agent.chat.composer.contextEstimate', { percent: contextPercent })"
+      >
+        <span class="agent-composer__context-text">{{
+          t('agent.chat.composer.contextEstimate', { percent: contextPercent })
+        }}</span>
         <meter
           min="0"
           :max="context!.window"
@@ -683,7 +683,6 @@ defineExpose({
       <el-radio-group
         v-if="running"
         v-model="sendMode"
-        size="small"
         :aria-label="t('agent.chat.composer.sendMode')"
       >
         <el-radio-button value="steer">{{ t('agent.chat.composer.steer') }}</el-radio-button>
@@ -696,5 +695,6 @@ defineExpose({
         {{ t('agent.chat.composer.send') }}
       </el-button>
     </div>
+    <p class="agent-composer__keys">{{ t('agent.chat.composer.keys') }}</p>
   </div>
 </template>

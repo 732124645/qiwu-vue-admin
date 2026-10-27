@@ -771,6 +771,23 @@ describe('distilling memories', () => {
     expect(second).not.toContain('I run the Shanghai sales team')
   })
 
+  it('a distilling call that fails on a priced model is still charged by its request estimate', async () => {
+    await clear('peer')
+    await clearAgentUsage(ds, [users.peer.id])
+    const id = await talk()
+    script({ error: new Error('upstream down') })
+    await distil('peer', id).catch(() => undefined)
+    expect(fake.requests).toHaveLength(1)
+    const [row] = await ds.query<
+      { credits: string; unpriced_calls: number; unreported_calls: number }[]
+    >(
+      'SELECT credits, unpriced_calls, unreported_calls FROM agent_usage WHERE tenant_id = 1 AND user_id = ?',
+      [users.peer.id],
+    )
+    expect(Number(row!.credits)).toBeGreaterThan(0)
+    expect(row).toMatchObject({ unpriced_calls: 0, unreported_calls: 1 })
+  })
+
   it('skips temporary chats, chats with memory off, a paused agent and a reached daily cap', async () => {
     await clear('peer')
     script()

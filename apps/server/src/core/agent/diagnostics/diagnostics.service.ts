@@ -9,6 +9,7 @@ import { AgentTurn } from '../entities/agent-thread.entity.js'
 import { McpConnectFailure, McpConnector } from '../mcp-client/mcp-connector.js'
 import { AgentMcpServerService } from '../mcp-client/mcp-server.service.js'
 import { ProviderRegistry } from '../provider/provider-registry.js'
+import { withUsageEstimate } from '../provider/usage.js'
 import {
   ProviderSettingsService,
   SearchProviderSettingsService,
@@ -187,24 +188,26 @@ export class AgentDiagnosticsService {
     if (!row) throw new BizError(Err.NOT_FOUND)
     const model = row.models[0]
     if (!model) throw new BizError(Err.AGENT_NOT_CONFIGURED, { reason: 'no_model' })
-    if (!model.pricing) throw new BizError(Err.AGENT_PRICING_REQUIRED)
-    const pricing = agentModelPricing.safeParse(model.pricing)
-    if (!pricing.success) throw new BizError(Err.AGENT_CREDIT_CONFIG_INVALID)
+    // 与对话一致：没配费率照常测试并记为未计价，配错的费率才拒绝
+    const pricing = model.pricing ? agentModelPricing.safeParse(model.pricing) : null
+    if (pricing && !pricing.success) throw new BizError(Err.AGENT_CREDIT_CONFIG_INVALID)
     const over = await this.usage.overDaily(p.userId)
     if (over) throw new BizError(Err.AGENT_LIMIT, { which: over })
     return this.timed('provider', async () => {
-      const chat = this.registry.connect({
-        baseUrl: row.baseUrl,
-        apiKey: this.providers.openKey(row),
-        models: row.models,
-        timeoutMs: this.timeoutMs,
-        retries: 0,
-      })
+      const chat = withUsageEstimate(
+        this.registry.connect({
+          baseUrl: row.baseUrl,
+          apiKey: this.providers.openKey(row),
+          models: row.models,
+          timeoutMs: this.timeoutMs,
+          retries: 0,
+        }),
+      )
       const target = {
         providerId: Number(row.id),
         providerName: row.name,
         model: model.id,
-        pricing: pricing.data,
+        pricing: pricing?.data ?? null,
       }
       await this.usage.invoke(
         p.userId,

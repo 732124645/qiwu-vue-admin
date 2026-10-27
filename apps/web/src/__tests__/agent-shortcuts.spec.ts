@@ -1,13 +1,13 @@
 // The chat page's own keyboard shortcuts (new chat, focus the message box, stop, plan mode): combos by the
 // physical key, conflicts refused (keys the page owns, a missing modifier, another action's combo), saved
 // per user in this browser and read back with defaults filled in (a broken or blocked storage falls back),
-// the settings popover recording a combo, the page acting on the saved combos, and opening the current
+// the settings page recording a combo, the page acting on the saved combos, and opening the current
 // thread in a new window.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
-import ElementPlus, { ElMessage } from 'element-plus'
+import ElementPlus, { ElDropdown, ElMessage } from 'element-plus'
 import type { AgentOptionsVo, AgentThreadVo, AgentTurnVo } from '@qiwu/shared'
 import { i18n, setLocale } from '@/core/i18n'
 import { vPerm } from '@/core/permission'
@@ -100,7 +100,7 @@ describe('shortcut combos', () => {
   })
 })
 
-describe('shortcut settings popover', () => {
+describe('shortcut settings', () => {
   let w: VueWrapper
   afterEach(() => w?.unmount())
 
@@ -117,7 +117,6 @@ describe('shortcut settings popover', () => {
       global: { plugins: [ElementPlus, i18n] },
       attachTo: document.body,
     })
-    await w.find('.icon-button').trigger('click')
     await flushPromises()
     return model
   }
@@ -322,7 +321,7 @@ describe('chat page shortcuts and new window', () => {
     mockApi(ROUTES)
     const open = vi.spyOn(window, 'open').mockReturnValue(null)
     await showThread()
-    await w.find('[aria-label="Open in a new window"]').trigger('click')
+    w.find('.agent-chat__head').findComponent(ElDropdown).vm.$emit('command', 'window')
     expect(open).toHaveBeenCalledWith('/agent?thread=7', '_blank', 'noopener')
   })
 })

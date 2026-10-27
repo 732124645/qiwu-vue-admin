@@ -74,9 +74,14 @@ import { HumanConfirmation } from './human-confirmation.js'
 import { AutomationPreApproval } from '../automation/pre-approval.js'
 import { AgentSweepStats } from '../diagnostics/sweep-stats.js'
 import { AgentItem, AgentThread, AgentTurn } from '../entities/agent-thread.entity.js'
-import type { ChatFinishReason, ChatToolCall, ChatUsage } from '../provider/chat-model.js'
+import type {
+  ChatFinishReason,
+  ChatMessage,
+  ChatToolCall,
+  ChatUsage,
+} from '../provider/chat-model.js'
 import { ProviderRegistry, type ResolvedModel, usageTarget } from '../provider/provider-registry.js'
-import { usageOf } from '../provider/usage.js'
+import { estimateInputTokens, estimatedUsage, estimateOutputTokens } from '../provider/usage.js'
 import { creditLimitReached } from './billing.js'
 import { trustModeOn } from '../threads/thread-vo.js'
 import { AgentToolPolicies, effectivePolicy } from '../tools/tool-policy.js'
@@ -843,7 +848,7 @@ export class TurnRunner {
     Object.assign(ctx.turn, await this.ds.getRepository(AgentTurn).findOneBy({ id: ctx.turn.id }))
     const l = ctx.limits
     if (ctx.turn.steps >= l.turnSteps) throw new TurnStop(Err.AGENT_LIMIT, { which: 'steps' })
-    if (creditLimitReached(ctx.turn.credits ?? '0', l.turnCredits, ctx.turn.unpricedCalls))
+    if (creditLimitReached(ctx.turn.credits ?? '0', l.turnCredits))
       throw new TurnStop(Err.AGENT_LIMIT, { which: 'turn_credits' })
     const parent = await this.rollUp.get(Number(ctx.turn.id))?.overBudget()
     if (parent) throw new TurnStop(Err.AGENT_LIMIT, { which: parent })
@@ -895,10 +900,18 @@ export class TurnRunner {
     let finish: ChatFinishReason = 'other'
     const calls: ChatToolCall[] = []
     const target = usageTarget(ctx.model)
+    const messages: ChatMessage[] = [{ role: 'system', content: system }, ...history]
+    // 供应商不报用量、或在结尾前被停止 / 超时 / 出错时按估算计积分：输入按本次请求，输出按已流出的内容
+    const input = estimateInputTokens(messages, chatTools)
+    const estimated = () =>
+      estimatedUsage(
+        input,
+        estimateOutputTokens(text, thought, ...calls.map((c) => c.name + c.arguments)),
+      )
     const invocation = await this.usage.begin(
       ctx.p.userId,
       target,
-      { threadId: tid, turnId },
+      { threadId: tid, turnId, estimate: estimatedUsage(input) },
       ctx.signal,
     )
     let flushChain = Promise.resolve()
@@ -929,7 +942,7 @@ export class TurnRunner {
     try {
       for await (const ev of ctx.model.chat.stream({
         model: ctx.model.model.id,
-        messages: [{ role: 'system', content: system }, ...history],
+        messages,
         tools: chatTools,
         reasoning: ctx.thread.reasoning ?? undefined,
         signal: invocation.signal,
@@ -958,14 +971,14 @@ export class TurnRunner {
       clearInterval(checkpointTimer)
       await flush()
       invocation.signal.throwIfAborted()
-      await invocation.settle(usage ?? usageOf(null))
+      await invocation.settle(usage?.usageReported ? usage : estimated())
     } catch (e) {
       // 不确定的租约不再发布；已提交的前缀由接管者标为中断，原调用只结算自己的回执。
       clearInterval(checkpointTimer)
       await flushChain.catch(() => {})
       let settlementError: unknown
       try {
-        await invocation.settle(usage ?? usageOf(null), true)
+        await invocation.settle(usage?.usageReported ? usage : estimated(), true)
       } catch (error) {
         settlementError = error
       }
@@ -1325,8 +1338,7 @@ export class TurnRunner {
   ): Promise<'turn_credits' | 'user_daily' | 'tenant_daily' | null> {
     await this.usage.recoverExpired(false)
     Object.assign(ctx.turn, await this.ds.getRepository(AgentTurn).findOneBy({ id: ctx.turn.id }))
-    if (creditLimitReached(ctx.turn.credits ?? '0', ctx.limits.turnCredits, ctx.turn.unpricedCalls))
-      return 'turn_credits'
+    if (creditLimitReached(ctx.turn.credits ?? '0', ctx.limits.turnCredits)) return 'turn_credits'
     const parent = await this.rollUp.get(Number(ctx.turn.id))?.overBudget()
     return parent ?? this.overDaily(ctx.p.userId)
   }
@@ -1376,11 +1388,7 @@ export class TurnRunner {
           ctx.turn,
           await this.ds.getRepository(AgentTurn).findOneBy({ id: ctx.turn.id }),
         )
-        return creditLimitReached(
-          ctx.turn.credits ?? '0',
-          ctx.limits.turnCredits,
-          ctx.turn.unpricedCalls,
-        )
+        return creditLimitReached(ctx.turn.credits ?? '0', ctx.limits.turnCredits)
           ? 'turn_credits'
           : this.overDaily(ctx.p.userId)
       },
@@ -2080,11 +2088,7 @@ export class TurnRunner {
           ctx.turn,
           await this.ds.getRepository(AgentTurn).findOneBy({ id: ctx.turn.id }),
         )
-        return creditLimitReached(
-          ctx.turn.credits ?? '0',
-          ctx.limits.turnCredits,
-          ctx.turn.unpricedCalls,
-        )
+        return creditLimitReached(ctx.turn.credits ?? '0', ctx.limits.turnCredits)
           ? 'turn_credits'
           : this.overDaily(ctx.p.userId)
       },

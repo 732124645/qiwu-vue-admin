@@ -46,7 +46,7 @@ const PATTERNS = [
   '.husky/*',
 ]
 
-const SKIP = /(^|\/)(dist|coverage)\/|^pnpm-lock\.yaml$|^\.git$/
+const SKIP = /(^|\/)(dist|dist-dev|coverage)\/|^pnpm-lock\.yaml$|^\.git$/
 const COMMENT = /^\s*(\/\/|\/\*|\*|#)/
 
 export default function ({ root, files, read }) {

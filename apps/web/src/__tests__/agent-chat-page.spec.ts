@@ -214,11 +214,14 @@ async function key(k: string, extra = {}) {
   await flushPromises()
 }
 const suggestions = () =>
-  w.findAll('[role="option"]').map((o) => o.find('.agent-composer__label').text())
+  w
+    .findAll('.agent-composer__suggest [role="option"]')
+    .map((o) => o.find('.agent-composer__label').text())
 
 beforeEach(() => {
   clearHistory()
   sessionStorage.clear()
+  localStorage.removeItem('qw.agent.layout.1')
   setActivePinia(createPinia())
   setLocale('en-US')
   accessToken.value = 'at'
@@ -536,27 +539,190 @@ describe('conversation', () => {
     expect(textarea().element.value).toBe('Find customers without a phone')
   })
 
-  it('on a narrow screen folds the header tools behind More', async () => {
-    vi.stubGlobal('matchMedia', (media: string) => ({
-      media,
-      matches: media === '(max-width: 640px)',
-      addEventListener: () => undefined,
-      removeEventListener: () => undefined,
-    }))
-    try {
-      mockApi(BASE)
-      await show()
-      const tools = w.find('#agent-chat-tools')
-      expect(tools.isVisible()).toBe(false)
-      const more = w.find('button[aria-controls="agent-chat-tools"]')
-      expect(more.attributes('aria-expanded')).toBe('false')
-      await more.trigger('click')
-      expect(tools.isVisible()).toBe(true)
-      expect(more.attributes('aria-expanded')).toBe('true')
-      expect(tools.find('[aria-label="Keyboard shortcuts"]').exists()).toBe(true)
-    } finally {
-      vi.unstubAllGlobals()
+  it('keeps only labelled buttons in the header and the rest in the settings popover and More menu', async () => {
+    mockApi({
+      ...BASE,
+      'GET /agent/threads/7/items': ok({ thread: thread(7), items: ITEMS, turn: turn() }),
+    })
+    await show()
+    const head = w.find('.agent-chat__head')
+    for (const label of ['Work panel', 'Focus mode', 'Conversation settings'])
+      expect(head.findAll('button').some((b) => b.text() === label)).toBe(true)
+    for (const label of ['Keyboard shortcuts', 'Notification settings', 'Open in a new window'])
+      expect(head.find(`button[aria-label="${label}"]`).exists()).toBe(false)
+    const toggle = w.find('.agent-chat__settings-toggle')
+    expect(toggle.attributes('aria-expanded')).toBe('false')
+    await toggle.trigger('click')
+    // the popover opens after its (zero) show delay
+    await wait(10)
+    expect(toggle.attributes('aria-expanded')).toBe('true')
+    const pop = w.find('.agent-settings')
+    // 名称在弹层的 dialog 元素本身上
+    expect(pop.attributes('role')).toBe('dialog')
+    expect(pop.attributes('aria-label')).toBe('Conversation settings')
+    expect(pop.findAll('[role="tab"]').map((tab) => tab.text())).toEqual([
+      'Conversation',
+      'Notifications',
+      'Keyboard shortcuts',
+    ])
+    expect(pop.find('input[aria-label="Temporary conversation"]').exists()).toBe(true)
+    // the open conversation: no temporary switch, its actions in More
+    await open()
+    expect(pop.find('input[aria-label="Temporary conversation"]').exists()).toBe(false)
+    expect(head.findComponent(ElDropdown).exists()).toBe(true)
+  })
+})
+
+describe('layout', () => {
+  const KEY = 'qw.agent.layout.1'
+  const separator = (name: string) => w.find(`[role="separator"][aria-label="${name}"]`)
+  const saved = () => JSON.parse(localStorage.getItem(KEY) ?? '{}') as Record<string, unknown>
+
+  it('resizes the list by keyboard within its bounds, restores it on double-click and remembers it', async () => {
+    mockApi(BASE)
+    await show()
+    const list = separator('Resize the conversation list')
+    expect(list.attributes()).toMatchObject({
+      tabindex: '0',
+      'aria-orientation': 'vertical',
+      'aria-valuenow': '260',
+      'aria-valuemin': '220',
+      'aria-valuemax': '420',
+    })
+    await list.trigger('keydown', { key: 'ArrowRight' })
+    expect(list.attributes('aria-valuenow')).toBe('276')
+    expect(w.find<HTMLElement>('.agent-threads').element.style.width).toBe('276px')
+    await list.trigger('keydown', { key: 'End' })
+    await list.trigger('keydown', { key: 'ArrowRight', shiftKey: true })
+    expect(list.attributes('aria-valuenow')).toBe('420')
+    await list.trigger('keydown', { key: 'Home' })
+    await list.trigger('keydown', { key: 'ArrowLeft' })
+    expect(list.attributes('aria-valuenow')).toBe('220')
+    await flushPromises()
+    expect(saved()).toMatchObject({ list: 220 })
+    w.unmount()
+    await show()
+    expect(separator('Resize the conversation list').attributes('aria-valuenow')).toBe('220')
+    await separator('Resize the conversation list').trigger('dblclick')
+    expect(separator('Resize the conversation list').attributes('aria-valuenow')).toBe('260')
+  })
+
+  it('a pointer drag writes the layout once, when the drag ends', async () => {
+    mockApi(BASE)
+    await show()
+    const writes = vi.spyOn(localStorage, 'setItem')
+    const layoutWrites = () => writes.mock.calls.filter(([key]) => key === KEY).length
+    const list = separator('Resize the conversation list')
+    list.element.dispatchEvent(new PointerEvent('pointerdown', { button: 0, clientX: 100 }))
+    for (const x of [110, 120, 130]) {
+      window.dispatchEvent(new PointerEvent('pointermove', { clientX: x }))
+      await flushPromises()
     }
+    expect(list.attributes('aria-valuenow')).toBe('290')
+    expect(layoutWrites()).toBe(0)
+    window.dispatchEvent(new PointerEvent('pointerup'))
+    await flushPromises()
+    expect(layoutWrites()).toBe(1)
+    expect(saved()).toMatchObject({ list: 290 })
+  })
+
+  it('folds the list into a rail that stays, and the panel splitter widens the panel to the left', async () => {
+    mockApi(BASE)
+    await show()
+    await w.find('button[aria-label="Collapse the conversation list"]').trigger('click')
+    await flushPromises()
+    expect(w.find('.agent-threads').isVisible()).toBe(false)
+    expect(separator('Resize the conversation list').exists()).toBe(false)
+    expect(saved()).toMatchObject({ listCollapsed: true })
+    w.unmount()
+    await show()
+    const expand = w.find('.agent-chat__rail button[aria-label="Expand the conversation list"]')
+    expect(expand.attributes('aria-expanded')).toBe('false')
+
+    await w.find('.agent-chat__panel-toggle').trigger('click')
+    const panel = separator('Resize the side panel')
+    expect(panel.attributes('aria-valuenow')).toBe('380')
+    // the panel sits right of its splitter: moving the splitter left makes it wider
+    await panel.trigger('keydown', { key: 'ArrowLeft' })
+    expect(panel.attributes('aria-valuenow')).toBe('396')
+    expect(w.find<HTMLElement>('.agent-chat__panel').element.style.width).toBe('396px')
+    await expand.trigger('click')
+    expect(w.find('.agent-threads').isVisible()).toBe(true)
+    expect(w.find('.agent-chat__rail').exists()).toBe(false)
+  })
+
+  it('focus mode covers the app chrome until Esc or the button, and is remembered', async () => {
+    mockApi(BASE)
+    await show()
+    const button = () => w.find('.agent-chat__focus-toggle')
+    expect(button().attributes('aria-pressed')).toBe('false')
+    await button().trigger('click')
+    expect(w.find('.agent-chat').classes()).toContain('agent-chat--focus')
+    expect(button().text()).toBe('Exit focus')
+    await flushPromises()
+    expect(saved()).toMatchObject({ focus: true })
+    w.unmount()
+    await show()
+    expect(w.find('.agent-chat').classes()).toContain('agent-chat--focus')
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await flushPromises()
+    expect(w.find('.agent-chat').classes()).not.toContain('agent-chat--focus')
+    await button().trigger('click')
+    await button().trigger('click')
+    expect(w.find('.agent-chat').classes()).not.toContain('agent-chat--focus')
+  })
+
+  it('moves the work panel and a subtask into the main area and back to the conversation', async () => {
+    mockApi({
+      ...BASE,
+      'GET /agent/threads/7/items': ok({
+        thread: thread(7),
+        turn: turn(),
+        items: [
+          ...ITEMS,
+          item(10, 10, 'subagent', {
+            callId: 'children',
+            tasks: [{ title: 'Check stock', threadId: 41, status: 'running' }],
+          }),
+        ],
+      }),
+      'GET /agent/threads/41/items': ok({
+        thread: thread(41, { parentThreadId: 7, title: 'Check stock' }),
+        turn: turn({ threadId: 41 }),
+        items: [item(21, 1, 'assistant', { text: 'Stock is available.' }, 'done')],
+      }),
+    })
+    await show()
+    await open()
+    await type('draft kept')
+    await w.find('.agent-subtasks__task').trigger('click')
+    await flushPromises()
+    // a subtask card opens in the side panel first
+    expect(w.find('.agent-chat__panel .agent-child').exists()).toBe(true)
+    expect(w.find('.agent-chat__main').isVisible()).toBe(true)
+    await w.find('.agent-child button[aria-label="Open in the main area"]').trigger('click')
+    expect(w.find('.agent-chat__main').isVisible()).toBe(false)
+    expect(separator('Resize the side panel').exists()).toBe(false)
+    expect(w.find('.agent-chat__crumb-list').text()).toBe('Thread 7Subtask details')
+    await w.find('.agent-child button[aria-label="Back to the side panel"]').trigger('click')
+    expect(w.find('.agent-chat__main').isVisible()).toBe(true)
+    expect(separator('Resize the side panel').exists()).toBe(true)
+    await w.find('.agent-child button[aria-label="Back to main task"]').trigger('click')
+    // the work panel goes to the main area too; back to the conversation closes it
+    await w.find('.agent-chat__panel-toggle').trigger('click')
+    await w.find('.agent-context button[aria-label="Open in the main area"]').trigger('click')
+    expect(w.find('.agent-chat__crumb-list').text()).toBe('Thread 7Work panel')
+    expect(w.find('.agent-chat__main').isVisible()).toBe(false)
+    await w
+      .findAll('.agent-chat__crumbs button')
+      .find((b) => b.text() === 'Back to the conversation')!
+      .trigger('click')
+    expect(w.find('.agent-context').exists()).toBe(false)
+    expect(w.find('.agent-chat__main').isVisible()).toBe(true)
+    expect(textarea().element.value).toBe('draft kept')
+    // reopened, the panel starts in the side again
+    await w.find('.agent-chat__panel-toggle').trigger('click')
+    expect(w.find('.agent-chat__main').isVisible()).toBe(true)
   })
 })
 
@@ -578,17 +744,17 @@ describe('composer', () => {
     const pageScroll = document.documentElement.scrollTop
     const movePage = vi.spyOn(window, 'scrollTo')
     await key('ArrowUp')
-    expect(w.find('[aria-selected="true"]').text()).toContain('/clear')
+    expect(w.find('.agent-composer__suggest [aria-selected="true"]').text()).toContain('/clear')
     expect(list.scrollTop).toBe(240)
     expect(document.activeElement).toBe(textarea().element)
     await key('ArrowDown')
-    expect(w.find('[aria-selected="true"]').text()).toContain('/new')
+    expect(w.find('.agent-composer__suggest [aria-selected="true"]').text()).toContain('/new')
     expect(list.scrollTop).toBe(0)
     for (let i = 0; i < 9; i++) await key('ArrowDown')
     expect(list.scrollTop).toBe(240)
     await type('/c')
     expect(suggestions()).toEqual(['/compact', '/clear'])
-    expect(w.find('[aria-selected="true"]').text()).toContain('/compact')
+    expect(w.find('.agent-composer__suggest [aria-selected="true"]').text()).toContain('/compact')
     expect(list.scrollTop).toBe(0)
     expect(document.activeElement).toBe(textarea().element)
     expect(document.documentElement.scrollTop).toBe(pageScroll)
@@ -604,7 +770,7 @@ describe('composer', () => {
     mockApi({ ...BASE, 'GET /agent/options': ok({ ...OPTIONS, skills: [skill] }) })
     await show()
     await type('$')
-    await w.find('[role="option"]').trigger('mouseenter')
+    await w.find('.agent-composer__suggest [role="option"]').trigger('mouseenter')
     await vi.waitFor(() => {
       const tooltip = document.querySelector('.agent-composer__tooltip')
       expect(tooltip?.textContent).toContain(`$${skill.name}`)
@@ -684,7 +850,9 @@ describe('composer', () => {
     expect(suggestions()).toEqual(['$fill-customer', '$report'])
     await type('please $f')
     expect(suggestions()).toEqual(['$fill-customer'])
-    expect(w.find('[role="option"]').text()).toContain('Fill in customer details')
+    expect(w.find('.agent-composer__suggest [role="option"]').text()).toContain(
+      'Fill in customer details',
+    )
     await key('Enter')
     expect(textarea().element.value).toBe('please $fill-customer ')
     expect(suggestions()).toEqual([])
@@ -933,9 +1101,12 @@ describe('composer extras', () => {
     })
     expect(w.findComponent(FileUpload).exists()).toBe(false)
 
-    await button('Plan mode')!.trigger('click')
+    const plan = w.find('.agent-composer__plan')
+    expect(plan.find('input').attributes('aria-checked')).toBe('false')
+    await plan.trigger('click')
     await flushPromises()
     expect(body(sent(calls, 'patch', '/agent/threads/7').at(-1))).toMatchObject({ planMode: true })
+    expect(plan.find('input').attributes('aria-checked')).toBe('true')
   })
 
   it('inserts a prompt template with /prompts and recalls sent messages with Up and Down', async () => {
@@ -1102,7 +1273,7 @@ describe('live list, trust, plans and mentions', () => {
       clientMessageId: expect.any(String),
       text: 'Go ahead with the plan',
     })
-    expect(button('Plan mode')!.attributes('aria-pressed')).toBe('false')
+    expect(w.find('.agent-composer__plan input').attributes('aria-checked')).toBe('false')
     expect(button('Run this plan')).toBeUndefined()
   })
 

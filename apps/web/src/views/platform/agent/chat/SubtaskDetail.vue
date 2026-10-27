@@ -11,8 +11,17 @@ import { chatRows } from './thread-state'
 
 /** 子任务只读检查器：主会话不换页，不提供子任务的审批或发送入口。 */
 defineOptions({ name: 'AgentSubtaskDetail' })
-const { parentId, threadId } = defineProps<{ parentId: number; threadId: number }>()
-const emit = defineEmits<{ close: [] }>()
+const {
+  parentId,
+  threadId,
+  inMain = false,
+} = defineProps<{
+  parentId: number
+  threadId: number
+  /** 正在主区域（对话区位置）显示，而不是右侧栏 */
+  inMain?: boolean
+}>()
+const emit = defineEmits<{ close: []; toggleMain: [] }>()
 const { t } = useI18n()
 const detail = shallowRef<AgentThreadDetailVo | null>(null)
 const loading = ref(false)
@@ -82,6 +91,11 @@ onBeforeUnmount(() => {
         :type="detail.turn.status === 'failed' ? 'danger' : 'info'"
         >{{ t(`agent.chat.turn.${detail.turn.status}`) }}</el-tag
       >
+      <IconButton
+        :icon="inMain ? 'lucide:panel-right' : 'lucide:maximize-2'"
+        :label="t(inMain ? 'agent.chat.panel.toSide' : 'agent.chat.panel.toMain')"
+        @click="emit('toggleMain')"
+      />
       <IconButton icon="lucide:x" :label="t('agent.chat.panel.close')" @click="emit('close')" />
     </header>
     <p class="agent-child__hint">{{ t('agent.chat.subtask.readonly') }}</p>

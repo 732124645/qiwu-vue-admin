@@ -821,6 +821,79 @@ describe('limits and the pause switch', () => {
     }
   })
 
+  it('a model that reports no usage keeps answering under finite credit budgets, charged by estimate', async () => {
+    const silent = { usageReported: false, promptTokens: null, completionTokens: null }
+    await setParam(AGENT_LIMIT_PARAMS.turnCredits, '1000000000')
+    await setParam(AGENT_LIMIT_PARAMS.userDailyCredits, '1000000000')
+    await setParam(AGENT_LIMIT_PARAMS.tenantDailyCredits, '1000000000')
+    try {
+      const id = await thread()
+      // 第一轮两步：用量未知的第一步按估算计积分，不能挡住同一轮的第二步
+      script(
+        { toolCalls: [{ name: 'test.note.read', args: { id: 1 } }], usage: silent },
+        { text: 'First.', usage: silent },
+      )
+      const first = await start(id, 'read note 1')
+      expect(await settled(first, TERMINAL)).toBe('completed')
+      expect(await turnOf(first)).toMatchObject({ unpriced_calls: 0 })
+      expect((await turnOf(first)).unreported_calls).toBeGreaterThanOrEqual(2)
+      expect(Number((await turnOf(first)).credits)).toBeGreaterThan(0)
+      // 同一天的下一轮照常运行
+      script({ text: 'Second.', usage: silent })
+      const second = await start(id, 'and again')
+      expect(await settled(second, TERMINAL)).toBe('completed')
+      expect(Number((await turnOf(second)).credits)).toBeGreaterThan(0)
+    } finally {
+      await setParam(AGENT_LIMIT_PARAMS.turnCredits, '0')
+      await setParam(AGENT_LIMIT_PARAMS.userDailyCredits, '0')
+      await setParam(AGENT_LIMIT_PARAMS.tenantDailyCredits, '0')
+    }
+  })
+
+  it('a priced model stopped before its answer ends is charged by estimate and counts toward the daily budget', async () => {
+    await clearAgentUsage(ds, [ownerId])
+    try {
+      script({ text: 'never', delayMs: 5000, usage: { usageReported: false } })
+      const id = await thread()
+      const turnId = await start(id, 'a long question')
+      for (const until = Date.now() + 3000; !fake.requests.length;) {
+        if (Date.now() > until) throw new Error('model did not start')
+        await sleep(10)
+      }
+      await http().post(`/api/agent/threads/${id}/cancel`).set(bearer(owner)).expect(201)
+      expect(await settled(turnId, TERMINAL)).toBe('cancelled')
+      // 轮次先记为已取消，被中断的调用随后才结算
+      let entries: { credits: string | null; usage_json: unknown; status: string }[] = []
+      for (const until = Date.now() + 5000; ; await sleep(40)) {
+        entries = await ds.query(
+          'SELECT credits, usage_json, status FROM agent_usage_entry WHERE tenant_id = 1 AND turn_id = ?',
+          [turnId],
+        )
+        if (entries.length && entries.every((e) => e.status !== 'pending')) break
+        if (Date.now() > until) throw new Error('the stopped call was not settled')
+      }
+      expect(entries).toHaveLength(1)
+      const usage =
+        typeof entries[0]!.usage_json === 'string'
+          ? JSON.parse(entries[0]!.usage_json)
+          : entries[0]!.usage_json
+      // 什么都没流出：输入按请求估算，输出记 0
+      expect(usage).toMatchObject({ estimated: true, usageReported: false, completionTokens: 0 })
+      const credits = Number(entries[0]!.credits)
+      expect(credits).toBeGreaterThan(0)
+      expect(credits).toBe(usage.promptTokens)
+      // 估算的积分计入每日额度：额度恰好用完时，下一轮在调用模型前就停下
+      await setParam(AGENT_LIMIT_PARAMS.userDailyCredits, String(credits))
+      script({ text: 'must not be asked' })
+      const next = await start(await thread(), 'once more')
+      expect(await settled(next, TERMINAL)).toBe('failed')
+      expect(await turnOf(next)).toMatchObject({ error_code: Err.AGENT_LIMIT.code })
+      expect(fake.requests).toHaveLength(0)
+    } finally {
+      await setParam(AGENT_LIMIT_PARAMS.userDailyCredits, '0')
+    }
+  })
+
   it('the concurrency limit refuses another turn with 429', async () => {
     await setParam(AGENT_LIMIT_PARAMS.userConcurrentTurns, '1')
     try {
@@ -1239,8 +1312,10 @@ describe('reasoning, recovery, slots and the turn clock', () => {
       message: null,
     })
     expect(fake.requests).toHaveLength(2)
-    expect(Number(ended.unpriced_calls)).toBe(1)
-    expect(Number(ended.credits)).toBe(15)
+    // 丢锁中断的那次调用没有回执：按请求估算计积分，不当成免费
+    expect(Number(ended.unpriced_calls)).toBe(0)
+    expect(Number(ended.unreported_calls)).toBe(1)
+    expect(Number(ended.credits)).toBeGreaterThan(15)
     expect((await items(id, 'assistant')).at(-1)!.payload.text).toBe('done after the requeue')
   }, 40_000)
 

@@ -219,6 +219,20 @@ describe('items', () => {
     await flushPromises()
     expect(writeText).toHaveBeenCalledWith('Plain **answer**')
 
+    // one row: copy and fork outside, rating and reading tools behind More
+    const actions = w.findAll('.agent-msg__actions')
+    expect(actions).toHaveLength(1)
+    const more = w.find('button[aria-label="More actions"]')
+    const extra = w.find<HTMLElement>(`#${more.attributes('aria-controls')}`)
+    expect(more.attributes('aria-expanded')).toBe('false')
+    expect(extra.element.style.display).toBe('none')
+    expect(extra.find('button[aria-label="Not helpful"]').exists()).toBe(true)
+    expect(extra.find('button[aria-label="View Markdown source"]').exists()).toBe(true)
+    expect(extra.find('button[aria-label="Copy"]').exists()).toBe(false)
+    await more.trigger('click')
+    expect(more.attributes('aria-expanded')).toBe('true')
+    expect(extra.element.style.display).toBe('')
+
     // cancelling the comment box sends nothing
     prompt.mockRejectedValueOnce('cancel')
     await w.find('button[aria-label="Not helpful"]').trigger('click')

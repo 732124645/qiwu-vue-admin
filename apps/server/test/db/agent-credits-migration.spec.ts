@@ -44,12 +44,14 @@ beforeAll(async () => {
 
 beforeEach((context) => {
   if (fence.unsafe)
-    context.skip('a prior migration case failed; the database is rebuilt before continuing')
+    context.skip(
+      'a prior migration case may have left the database half migrated; the database is rebuilt before continuing',
+    )
   fence.begin(context.signal)
 })
 
-afterEach(async ({ task, signal }) => {
-  await fence.drain(task.result?.state === 'fail' || signal.aborted)
+afterEach(async () => {
+  await fence.drain()
   await recoverMigrationRun(async () => {
     if (fence.unsafe) {
       await ds.dropDatabase()

@@ -4,11 +4,10 @@
       "limit": {
         "steps": "the steps of this turn are used up",
         "seconds": "this turn ran out of time",
-        "turn_tokens": "the tokens of this turn are used up",
-        "user_daily": "your daily credit budget was reached or includes unpriced calls",
-        "tenant_daily": "the tenant daily credit budget was reached or includes unpriced calls",
+        "user_daily": "your daily credit budget was reached, or a call is still being settled",
+        "tenant_daily": "the tenant daily credit budget was reached, or a call is still being settled",
         "concurrency": "you have the most turns running at once; wait for one to finish",
-        "turn_credits": "this turn reached its credit budget or has unpriced calls",
+        "turn_credits": "this turn reached its credit budget",
         "context": "the context still exceeds this model window; shorten the request or select a larger window"
       },
       "truncated": {

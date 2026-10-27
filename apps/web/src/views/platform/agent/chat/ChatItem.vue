@@ -18,7 +18,8 @@ import { show, type ChatRow } from './thread-state'
  * 对话里的一行：用户气泡（附件、排队标记）、助手回答（Markdown 安全子集、编号来源、后续建议）、
  * 可折叠的“思考”、压缩分隔线、工具调用与结果合成的折叠卡（轮次结束仍没有结果的显示“已停止”）、审批卡、
  * 反问卡、计划清单、图表 / 图片 / 报告 / 子任务卡片（OutputCard）、错误提示（显示翻译后的说明，不显示错误码）。
- * 消息上的操作：复制、从这里分叉、编辑最后一条用户消息重发、给回答点赞 / 点踩（可附说明）；计划模式下
+ * 消息上的操作只有一行，悬停或焦点在这条消息里时才显示：用户消息复制、编辑最后一条重发、分叉；回答复制、
+ * 分叉，其余（查看源码、下载、展开阅读、点赞 / 点踩，可附说明）收在“更多”里，展开后接在同一行。计划模式下
  * 最后一条回答可“执行此计划”。
  */
 defineOptions({ name: 'AgentChatItem' })
@@ -60,6 +61,9 @@ const emit = defineEmits<{
 }>()
 const { t, te } = useI18n()
 const raw = ref(false)
+/** 回答的“更多”操作（源码、下载、展开阅读、点赞点踩）是否展开在同一行里 */
+const moreOpen = ref(false)
+const moreId = `agent-msg-more-${Math.random().toString(36).slice(2, 8)}`
 /** 下载原始 Markdown，不从渲染后的 HTML 或高亮节点还原。 */
 function downloadMarkdown() {
   if (row.kind !== 'item' || row.item.kind !== 'assistant') return
@@ -259,53 +263,67 @@ async function rate(itemId: number, value: 1 | -1) {
             <span v-else>{{ c.title || c.url }}</span>
           </li>
         </ol>
-        <div v-if="row.item.payload.text" class="agent-msg__actions agent-msg__reading">
-          <IconButton
-            icon="lucide:code"
-            :label="t(raw ? 'agent.chat.markdown.rendered' : 'agent.chat.markdown.source')"
-            :aria-pressed="raw"
-            @click="raw = !raw"
-          />
-          <IconButton
-            icon="lucide:download"
-            :label="t('agent.chat.markdown.download')"
-            @click="downloadMarkdown"
-          />
-          <IconButton
-            v-if="canInspect"
-            icon="lucide:expand"
-            :label="t('agent.chat.markdown.expand')"
-            @click="emit('inspect', row.item.id)"
-          />
-        </div>
-        <div v-if="row.item.status !== 'running'" class="agent-msg__actions">
-          <IconButton
-            icon="lucide:copy"
-            :label="t('agent.chat.action.copy')"
-            @click="copy(row.item.payload.text)"
-          />
-          <template v-if="!readonly">
+        <div
+          v-if="row.item.payload.text || row.item.status !== 'running'"
+          class="agent-msg__actions"
+        >
+          <template v-if="row.item.status !== 'running'">
             <IconButton
-              v-if="canFork"
+              icon="lucide:copy"
+              :label="t('agent.chat.action.copy')"
+              @click="copy(row.item.payload.text)"
+            />
+            <IconButton
+              v-if="canFork && !readonly"
               icon="lucide:git-branch"
               :label="t('agent.chat.fork')"
               @click="emit('fork', row.item.seq)"
             />
-            <IconButton
-              icon="lucide:thumbs-up"
-              :label="t('agent.chat.feedback.up')"
-              :aria-pressed="rated === 1"
-              :disabled="rating || rated !== null"
-              @click="rate(row.item.id, 1)"
-            />
-            <IconButton
-              icon="lucide:thumbs-down"
-              :label="t('agent.chat.feedback.down')"
-              :aria-pressed="rated === -1"
-              :disabled="rating || rated !== null"
-              @click="rate(row.item.id, -1)"
-            />
           </template>
+          <IconButton
+            icon="lucide:ellipsis"
+            :label="t('agent.chat.action.more')"
+            :aria-expanded="moreOpen"
+            :aria-controls="moreId"
+            @click="moreOpen = !moreOpen"
+          />
+          <span v-show="moreOpen" :id="moreId" class="agent-msg__more">
+            <template v-if="row.item.payload.text">
+              <IconButton
+                icon="lucide:code"
+                :label="t(raw ? 'agent.chat.markdown.rendered' : 'agent.chat.markdown.source')"
+                :aria-pressed="raw"
+                @click="raw = !raw"
+              />
+              <IconButton
+                icon="lucide:download"
+                :label="t('agent.chat.markdown.download')"
+                @click="downloadMarkdown"
+              />
+              <IconButton
+                v-if="canInspect"
+                icon="lucide:expand"
+                :label="t('agent.chat.markdown.expand')"
+                @click="emit('inspect', row.item.id)"
+              />
+            </template>
+            <template v-if="!readonly && row.item.status !== 'running'">
+              <IconButton
+                icon="lucide:thumbs-up"
+                :label="t('agent.chat.feedback.up')"
+                :aria-pressed="rated === 1"
+                :disabled="rating || rated !== null"
+                @click="rate(row.item.id, 1)"
+              />
+              <IconButton
+                icon="lucide:thumbs-down"
+                :label="t('agent.chat.feedback.down')"
+                :aria-pressed="rated === -1"
+                :disabled="rating || rated !== null"
+                @click="rate(row.item.id, -1)"
+              />
+            </template>
+          </span>
         </div>
         <el-button
           v-if="canRunPlan && !readonly && row.item.status === 'done'"
@@ -436,6 +454,13 @@ async function rate(itemId: number, value: 1 | -1) {
   flex-wrap: wrap;
   gap: 2px;
   margin-top: 8px;
+}
+.agent-msg__more {
+  display: inline-flex;
+  gap: 2px;
+  padding-left: 4px;
+  margin-left: 2px;
+  border-left: 1px solid var(--qw-border);
 }
 :deep(.qw-md__task) {
   list-style: none;

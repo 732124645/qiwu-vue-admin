@@ -1,4 +1,4 @@
-import type { ChatUsage } from './chat-model.js'
+import type { ChatMessage, ChatModel, ChatTool, ChatUsage } from './chat-model.js'
 
 type NumericTree = { [key: string]: number | NumericTree }
 const object = (value: unknown): Record<string, unknown> | null =>
@@ -68,5 +68,93 @@ export function usageOf(value: unknown, image = false): ChatUsage {
     outputDetails,
     rawUsage: numericUsage(source),
     usageReported: source !== null,
+  }
+}
+
+/** 估算时一张输入图片按这么多 Token 计。 */
+const IMAGE_ESTIMATE = 1000
+/**
+ * 生成一张图片、供应商没报用量又没配单张积分时的输出估算。按 Token 计费的图片模型里，常见的最高一档
+ * （OpenAI gpt-image-1 高质量、1536×1024）约 6240 个输出 Token；取这个上限，宁多勿少。
+ */
+export const IMAGE_OUTPUT_ESTIMATE = 6240
+/** UTF-8 字节数 / 3：英文偏高、中文接近实际，估算宁多勿少，避免借用量缺失少计积分。 */
+const textTokens = (text: string) => Math.ceil(Buffer.byteLength(text) / 3)
+
+/** 一次请求的输入 Token 估算：消息正文、回传的推理与工具调用、工具定义，图片按固定数。 */
+export function estimateInputTokens(
+  messages: readonly ChatMessage[],
+  tools: readonly ChatTool[] = [],
+): number {
+  let text = tools.length ? JSON.stringify(tools) : ''
+  let images = 0
+  for (const m of messages) {
+    if (Array.isArray(m.content))
+      for (const c of m.content) {
+        if (c.type === 'text') text += c.text
+        else images++
+      }
+    else text += m.content ?? ''
+    if (m.role === 'assistant') {
+      text += m.reasoning ?? ''
+      for (const c of m.toolCalls ?? []) text += c.name + c.arguments
+    }
+  }
+  return textTokens(text) + images * IMAGE_ESTIMATE
+}
+
+/** 已输出内容（回答、推理、工具调用参数）的 Token 估算；什么都没输出时为 0。 */
+export const estimateOutputTokens = (...parts: string[]) => textTokens(parts.join(''))
+
+/**
+ * 供应商没有报告用量时的估算用量：只有输入、输出两项，标为 `estimated`，不冒充供应商报告
+ * （`usageReported` 仍为 false），也不计入 Token 统计，只用于按费率计积分。
+ */
+export function estimatedUsage(promptTokens: number, completionTokens = 0): ChatUsage {
+  return {
+    promptTokens,
+    completionTokens,
+    totalTokens: promptTokens + completionTokens,
+    cacheReadTokens: null,
+    cacheWriteTokens: null,
+    reasoningTokens: null,
+    inputDetails: null,
+    outputDetails: null,
+    rawUsage: null,
+    usageReported: false,
+    estimated: true,
+  }
+}
+
+/**
+ * 给非流式调用补上用量估算：发请求前先回报只含输入的估算（调用中断、超时、进程崩溃时按它结算），
+ * 供应商报告了实际用量就以实际为准，没报告时按输入与输出内容估算。流式调用由轮次执行器自己估算。
+ * 这样配了费率的模型不能靠中途停止或服务不报用量而免费使用。
+ */
+export function withUsageEstimate(chat: ChatModel): ChatModel {
+  return {
+    stream: (req) => chat.stream(req),
+    async complete(req) {
+      const input = estimateInputTokens(req.messages, req.tools)
+      req.onUsage?.(estimatedUsage(input))
+      const res = await chat.complete(req)
+      if (res.usage.usageReported) return res
+      const output = estimateOutputTokens(
+        res.text,
+        ...res.toolCalls.map((c) => c.name + c.arguments),
+      )
+      return { ...res, usage: estimatedUsage(input, output) }
+    },
+    ...(chat.image && {
+      async image(req) {
+        const input = estimateOutputTokens(req.prompt)
+        req.onUsage?.(estimatedUsage(input))
+        const res = await chat.image!(req)
+        // 成功但没报用量：按提示词与固定的图片输出估算（配了单张积分时计费仍按单张）
+        return res.usage?.usageReported
+          ? res
+          : { ...res, usage: estimatedUsage(input, IMAGE_OUTPUT_ESTIMATE) }
+      },
+    }),
   }
 }

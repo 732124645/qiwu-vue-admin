@@ -11,7 +11,13 @@ import {
 } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
-import { useDebounceFn, useEventListener, useElementSize, useMediaQuery } from '@vueuse/core'
+import {
+  useDebounceFn,
+  useEventListener,
+  useElementSize,
+  useMediaQuery,
+  useWindowSize,
+} from '@vueuse/core'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import dayjs from 'dayjs'
 import {
@@ -29,6 +35,7 @@ import {
 import { agentApi } from '@/api/platform/agent'
 import IconButton from '@/core/components/IconButton.vue'
 import { toastRest } from '@/core/composables/use-crud'
+import { Icon } from '@/core/icons'
 import { usePerm } from '@/core/permission'
 import { onRealtime, realtimeStatus } from '@/core/realtime/socket'
 import { ApiError, saveBlob } from '@/core/request/http'
@@ -41,6 +48,7 @@ import NotifySettings from './NotifySettings.vue'
 import ProfileMemoryBar, { type ProfileDraft } from './ProfileMemoryBar.vue'
 import ShortcutSettings from './ShortcutSettings.vue'
 import { comboOf, loadShortcuts, saveShortcuts } from './shortcuts'
+import { LIST_WIDTH, loadLayout, PANEL_WIDTH, panelMax, saveLayout, usePaneResize } from './layout'
 import ThreadList from './ThreadList.vue'
 import {
   applyItemEvent,
@@ -58,7 +66,9 @@ import {
 import { pendingContext, pendingRoute } from './use-agent-context'
 
 /**
- * “智能助手”对话页（整页的对话应用）：左侧会话列表，中间对话流，底部输入框。
+ * “智能助手”对话页（整页的对话应用）：左侧会话列表 | 对话区 | 右侧面板，两条分隔线可拖动或用方向键调宽，
+ * 会话列表可收起成窄条，右侧面板（工作面板、子任务详情、报告）可在主区域打开；专注模式隐藏系统菜单与标签页。
+ * 宽度、收起与专注状态按本人本浏览器保存（layout.ts）。
  * 打开会话时从接口读全部条目，之后靠 `agent:event` 实时更新（新增 / 替换条目、增量文本、轮次状态）；
  * 断线重连、页面重新显示或漏了事件时用 `afterSeq` 从接口补齐。所有接口只作用于本人的会话；
  * 地址里的 `?shared=<token>` 显示同租户的只读分享快照。其他会话的推送更新列表（未读数、轮次状态，
@@ -78,14 +88,73 @@ const props = withDefaults(
 )
 const host = ref<HTMLElement>()
 const { width: hostWidth } = useElementSize(host)
-const historyOpen = ref(!props.embedded)
-const smallViewport = useMediaQuery('(max-width: 640px)')
+const { width: viewportWidth } = useWindowSize()
 const smallPanelViewport = useMediaQuery('(max-width: 1279px)')
-const narrow = computed(() => (hostWidth.value > 0 ? hostWidth.value <= 640 : smallViewport.value))
-const panelNarrow = computed(() =>
-  hostWidth.value > 0 ? hostWidth.value < (props.embedded ? 900 : 1120) : smallPanelViewport.value,
+/** 只有嵌入的助手窗口在宽度不够时把右侧面板放进抽屉；整页按 PC 宽度设计，面板总在行内、可拖宽。 */
+const panelNarrow = computed(
+  () => props.embedded && (hostWidth.value > 0 ? hostWidth.value < 900 : smallPanelViewport.value),
 )
 const childId = ref<number | null>(null)
+
+// ---- 布局：宽度、列表收起与专注模式（本人本浏览器；嵌入窗口不读也不改） ----
+const layoutUser = useAuthStore().me?.user.id ?? 0
+const layout = ref(loadLayout(layoutUser))
+const historyOpen = ref(props.embedded ? false : !layout.value.listCollapsed)
+watch(historyOpen, (open) => {
+  if (!props.embedded) layout.value.listCollapsed = !open
+})
+/** 分隔线本身的宽度，以及会话列表收起后窄条（含右侧间距）的宽度 */
+const SPLITTER = 12
+const RAIL = 56
+const list = usePaneResize(
+  computed({ get: () => layout.value.list, set: (v) => (layout.value.list = v) }),
+  { min: LIST_WIDTH.min, max: () => LIST_WIDTH.max, fallback: LIST_WIDTH.fallback, direction: 1 },
+)
+const panel = usePaneResize(
+  computed({ get: () => layout.value.panel, set: (v) => (layout.value.panel = v) }),
+  {
+    min: PANEL_WIDTH.min,
+    max: () =>
+      panelMax(
+        viewportWidth.value,
+        hostWidth.value,
+        (props.embedded
+          ? historyOpen.value
+            ? 248
+            : 0
+          : historyOpen.value
+            ? list.value.value + SPLITTER
+            : RAIL) + SPLITTER,
+      ),
+    fallback: PANEL_WIDTH.fallback,
+    direction: -1,
+  },
+)
+const listSplitter = list.attrs
+const panelSplitter = panel.attrs
+const listDragging = list.dragging
+const panelDragging = panel.dragging
+// 拖动中每次指针移动都会改宽度：只在拖动结束后写一次 localStorage，不在拖动途中反复同步写盘
+watch(
+  [layout, () => listDragging.value || panelDragging.value],
+  ([l, dragging]) => {
+    if (!dragging) saveLayout(layoutUser, l)
+  },
+  { deep: true },
+)
+const listWidth = list.value
+const panelWidth = panel.value
+
+/** 专注模式：对话工作台盖住系统侧栏与标签页（布局没有现成的“内容区最大化”，浏览器全屏另在系统头部）。 */
+const focusMode = computed({
+  get: () => !props.embedded && layout.value.focus,
+  set: (on: boolean) => {
+    if (!props.embedded) layout.value.focus = on
+  },
+})
+/** 头部“会话设置”弹层是否打开、当前页签；只读快照只有“快捷键”一页 */
+const settingsOpen = ref(false)
+const settingsTab = ref<'session' | 'notify' | 'shortcuts'>('session')
 
 const { t } = useI18n()
 const route = useRoute()
@@ -154,9 +223,9 @@ const context = shallowRef<AgentContext | null>(null)
 const settings = ref<ComposerSettings>(defaultSettings())
 /** 新会话草稿是否是临时会话（不进列表，离开即删） */
 const temporary = ref(false)
-/** 窄屏（≤ 640px）：方案、记忆、通知、快捷键与新窗口收进“更多”展开的一行，避免头部横向溢出 */
-const moreOpen = ref(false)
 const panelOpen = ref(false)
+/** 右侧面板改在主区域（对话区的位置）显示；关闭面板后回到侧栏 */
+const panelInMain = ref(false)
 const panelScope = ref(0)
 const inspectedId = ref<number | null>(null)
 const panelItems = computed(() => (loadingThread.value ? [] : items.value))
@@ -980,8 +1049,9 @@ async function saveAsSkill() {
   }
 }
 
-type ThreadCommand = 'revert' | 'export' | 'share' | 'unshare' | 'skill'
+type ThreadCommand = 'window' | 'revert' | 'export' | 'share' | 'unshare' | 'skill'
 function onThreadCommand(cmd: ThreadCommand) {
+  if (cmd === 'window') return openInWindow()
   const run = { revert, export: exportMarkdown, share, unshare, skill: saveAsSkill }[cmd]
   void run()
 }
@@ -1044,11 +1114,19 @@ async function onCommand(cmd: SlashCommand) {
 }
 
 // ---- 快捷键：本人在本浏览器自定义（默认 Alt+N 新会话）；只在本页显示时；按物理键判断，mac 的 ⌥ 会改变 e.key ----
-const userId = useAuthStore().me?.user.id ?? 0
-const shortcuts = ref(loadShortcuts(userId))
-watch(shortcuts, (m) => saveShortcuts(userId, m))
+const shortcuts = ref(loadShortcuts(layoutUser))
+watch(shortcuts, (m) => saveShortcuts(layoutUser, m))
 useEventListener(window, 'keydown', (e: KeyboardEvent) => {
   if (!pageActive || e.defaultPrevented) return
+  // 专注模式下 Esc 退出；焦点在弹层、对话框等页面外的浮层里时由它们自己处理 Esc
+  if (e.key === 'Escape' && focusMode.value && !settingsOpen.value) {
+    const target = e.target as Node | null
+    if (!target || target === document.body || host.value?.contains(target)) {
+      focusMode.value = false
+      e.preventDefault()
+      return
+    }
+  }
   const combo = comboOf(e)
   const map = shortcuts.value
   if (!combo) return
@@ -1147,7 +1225,20 @@ watch(
 )
 
 watch(panelOpen, (open) => {
-  if (!open) childId.value = null
+  if (open) return
+  childId.value = null
+  panelInMain.value = false
+})
+/** 主区域里显示的面板在面包屑上的名字 */
+const panelTitle = computed(() =>
+  t(childId.value ? 'agent.chat.subtask.details' : 'agent.chat.panel.open'),
+)
+const conversationTitle = computed(() =>
+  sharedToken.value ? sharedTitle.value : thread.value?.title || t('agent.chat.thread.new'),
+)
+const settingsPane = computed({
+  get: () => (readOnly.value ? 'shortcuts' : settingsTab.value),
+  set: (v: 'session' | 'notify' | 'shortcuts') => (settingsTab.value = v),
 })
 
 const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:ss') : '')
@@ -1159,13 +1250,15 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
     class="agent-chat qw-workspace"
     :class="{
       'agent-chat--embedded': props.embedded,
-      'agent-chat--narrow': narrow,
-      'agent-chat--compact': hostWidth > 0 && hostWidth < 1120 && (!props.embedded || historyOpen),
+      'agent-chat--focus': focusMode,
+      'agent-chat--dragging': listDragging || panelDragging,
     }"
   >
     <ThreadList
       v-show="historyOpen"
+      id="agent-thread-list"
       ref="listRef"
+      :style="props.embedded ? undefined : { width: `${listWidth}px` }"
       :active="props.active"
       :active-id="thread?.id ?? null"
       @open="
@@ -1177,14 +1270,46 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
       @create="newDraft()"
       @gone="(id) => thread?.id === id && newDraft()"
     />
+    <div
+      v-if="!props.embedded && historyOpen"
+      v-bind="listSplitter"
+      class="agent-chat__splitter"
+      :class="{ 'is-dragging': listDragging }"
+      :aria-label="t('agent.chat.layout.resizeList')"
+      aria-controls="agent-thread-list"
+      :title="t('agent.chat.layout.resizeHint')"
+    />
+    <nav
+      v-if="!props.embedded && !historyOpen"
+      class="agent-chat__rail"
+      :aria-label="t('agent.chat.thread.list')"
+    >
+      <IconButton
+        icon="lucide:panel-left-open"
+        :label="t('agent.chat.layout.expandList')"
+        :aria-expanded="false"
+        aria-controls="agent-thread-list"
+        @click="historyOpen = true"
+      />
+      <IconButton icon="lucide:plus" :label="t('agent.chat.thread.new')" @click="newDraft()" />
+    </nav>
 
-    <section class="agent-chat__main" :aria-label="t('agent.chat.title')">
+    <section v-show="!panelInMain" class="agent-chat__main" :aria-label="t('agent.chat.title')">
       <header class="agent-chat__head">
         <IconButton
+          v-if="props.embedded"
           icon="lucide:history"
           :label="t('agent.chat.thread.list')"
           :aria-expanded="historyOpen"
           @click="historyOpen = !historyOpen"
+        />
+        <IconButton
+          v-else-if="historyOpen"
+          icon="lucide:panel-left-close"
+          :label="t('agent.chat.layout.collapseList')"
+          :aria-expanded="true"
+          aria-controls="agent-thread-list"
+          @click="historyOpen = false"
         />
         <IconButton
           v-if="props.embedded"
@@ -1198,11 +1323,12 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
           @click="openThread(thread.parentThreadId)"
           >{{ t('agent.chat.subtask.back') }}</el-button
         >
-        <h2 class="agent-chat__title">
-          {{ sharedToken ? sharedTitle : thread?.title || t('agent.chat.thread.new') }}
-        </h2>
+        <h2 class="agent-chat__title">{{ conversationTitle }}</h2>
         <el-tag v-if="sharedToken" size="small" type="info">{{
           t('agent.chat.share.readonly')
+        }}</el-tag>
+        <el-tag v-else-if="!thread && temporary" size="small" type="warning">{{
+          t('agent.chat.temporary')
         }}</el-tag>
         <span role="status" class="agent-chat__turn">
           <el-tag
@@ -1219,51 +1345,96 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
         <el-button
           size="small"
           class="agent-chat__panel-toggle"
+          :title="t('agent.chat.panel.open')"
+          :type="panelOpen ? 'primary' : undefined"
+          plain
           :aria-expanded="panelOpen"
           aria-controls="agent-work-panel"
           @click="panelOpen = !panelOpen"
-          >{{ t('agent.chat.panel.open') }}</el-button
         >
-
-        <el-switch
-          v-if="!thread && !readOnly"
-          v-model="temporary"
-          :active-text="t('agent.chat.temporary')"
-          :aria-label="t('agent.chat.temporary')"
-        />
-        <IconButton
-          v-if="narrow"
-          icon="lucide:ellipsis"
-          :label="t('crud.action.more')"
-          :aria-expanded="moreOpen"
-          aria-controls="agent-chat-tools"
-          @click="moreOpen = !moreOpen"
-        />
-        <div v-show="!narrow || moreOpen" id="agent-chat-tools" class="agent-chat__tools">
-          <ProfileMemoryBar
-            v-if="!readOnly"
-            v-model:draft="draft"
-            :thread="thread"
-            :options="options"
-            :temporary="temporary"
-            @apply="applyProfile"
-            @updated="onThreadUpdated"
+          <Icon icon="lucide:panel-right" class="agent-chat__btn-icon" />
+          <span class="agent-chat__btn-text">{{ t('agent.chat.panel.open') }}</span></el-button
+        >
+        <el-button
+          v-if="!props.embedded"
+          size="small"
+          class="agent-chat__focus-toggle"
+          :aria-pressed="focusMode"
+          :title="t('agent.chat.focus.hint')"
+          @click="focusMode = !focusMode"
+        >
+          <Icon
+            :icon="focusMode ? 'lucide:minimize-2' : 'lucide:maximize-2'"
+            class="agent-chat__btn-icon"
           />
-          <NotifySettings v-if="!readOnly" />
-          <ShortcutSettings v-model="shortcuts" :escape-closes="props.embedded" />
-          <IconButton
-            v-if="thread && !thread.temporary"
-            icon="lucide:external-link"
-            :label="t('agent.chat.newWindow')"
-            @click="openInWindow"
-          />
-        </div>
+          <span class="agent-chat__btn-text">{{
+            t(focusMode ? 'agent.chat.focus.exit' : 'agent.chat.focus.enter')
+          }}</span></el-button
+        >
+        <el-popover
+          v-model:visible="settingsOpen"
+          trigger="click"
+          placement="bottom-end"
+          :width="380"
+          :teleported="false"
+          role="dialog"
+          :aria-label="t('agent.chat.settings.open')"
+          popper-class="agent-settings"
+        >
+          <template #reference>
+            <el-button
+              size="small"
+              class="agent-chat__settings-toggle"
+              :title="t('agent.chat.settings.open')"
+            >
+              <Icon icon="lucide:settings-2" class="agent-chat__btn-icon" />
+              <span class="agent-chat__btn-text">{{
+                t('agent.chat.settings.open')
+              }}</span></el-button
+            >
+          </template>
+          <div>
+            <el-tabs v-model="settingsPane" class="agent-settings__tabs">
+              <el-tab-pane
+                v-if="!readOnly"
+                name="session"
+                :label="t('agent.chat.settings.session')"
+              >
+                <div v-if="!thread" class="agent-settings__row">
+                  <span class="agent-settings__name">{{ t('agent.chat.temporary') }}</span>
+                  <el-switch v-model="temporary" :aria-label="t('agent.chat.temporary')" />
+                </div>
+                <p v-if="!thread" class="agent-settings__hint">
+                  {{ t('agent.chat.settings.temporaryHint') }}
+                </p>
+                <ProfileMemoryBar
+                  v-model:draft="draft"
+                  :thread="thread"
+                  :options="options"
+                  :temporary="temporary"
+                  @apply="applyProfile"
+                  @updated="onThreadUpdated"
+                />
+              </el-tab-pane>
+              <el-tab-pane v-if="!readOnly" name="notify" :label="t('agent.chat.notify.title')">
+                <NotifySettings v-if="settingsOpen && settingsPane === 'notify'" />
+              </el-tab-pane>
+              <el-tab-pane name="shortcuts" :label="t('agent.chat.shortcut.title')">
+                <ShortcutSettings
+                  v-if="settingsOpen && settingsPane === 'shortcuts'"
+                  v-model="shortcuts"
+                  :escape-closes="props.embedded"
+                />
+              </el-tab-pane>
+            </el-tabs>
+          </div>
+        </el-popover>
         <el-dropdown v-if="thread && !readOnly" trigger="click" @command="onThreadCommand">
           <IconButton icon="lucide:ellipsis-vertical" :label="t('agent.chat.thread.menu')" />
           <template #dropdown>
             <el-dropdown-menu>
-              <el-dropdown-item command="revert" :disabled="!turn || running">
-                {{ t('agent.chat.revert.title') }}
+              <el-dropdown-item v-if="!thread.temporary" command="window">
+                {{ t('agent.chat.newWindow') }}
               </el-dropdown-item>
               <el-dropdown-item command="export">{{ t('agent.chat.export') }}</el-dropdown-item>
               <el-dropdown-item v-if="!thread.temporary" command="share">{{
@@ -1274,6 +1445,9 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
               }}</el-dropdown-item>
               <el-dropdown-item command="skill" :disabled="savingSkill || running">
                 {{ t('agent.chat.saveSkill.action') }}
+              </el-dropdown-item>
+              <el-dropdown-item command="revert" divided :disabled="!turn || running">
+                {{ t('agent.chat.revert.title') }}
               </el-dropdown-item>
             </el-dropdown-menu>
           </template>
@@ -1526,40 +1700,43 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
         />
       </template>
     </section>
-    <SubtaskDetail
-      v-if="panelOpen && !panelNarrow && childId && thread && !readOnly"
-      :key="childId"
-      class="agent-chat__panel"
-      :parent-id="thread.id"
-      :thread-id="childId"
-      @close="panelOpen = false"
+    <div
+      v-if="panelOpen && !panelNarrow && !panelInMain"
+      v-bind="panelSplitter"
+      class="agent-chat__splitter"
+      :class="{ 'is-dragging': panelDragging }"
+      :aria-label="t('agent.chat.layout.resizePanel')"
+      aria-controls="agent-side-panel"
+      :title="t('agent.chat.layout.resizeHint')"
     />
-    <ContextPanel
-      v-else-if="panelOpen && !panelNarrow"
-      :key="panelScope"
+    <div
+      v-if="panelOpen && (!panelNarrow || panelInMain)"
+      id="agent-side-panel"
       class="agent-chat__panel"
-      :items="panelItems"
-      :turn
-      :selected-id="inspectedId"
-      :readonly="readOnly"
-      @select="inspectedId = $event"
-      @inspect-child="inspectChild"
-      @close="panelOpen = false"
-    />
-    <el-drawer
-      v-if="panelNarrow"
-      v-model="panelOpen"
-      :title="t('agent.chat.panel.open')"
-      :with-header="false"
-      size="min(100vw, 480px)"
-      destroy-on-close
-      class="agent-context-drawer"
+      :class="{ 'agent-chat__panel--main': panelInMain }"
+      :style="panelInMain ? undefined : { width: `${panelWidth}px` }"
     >
+      <nav
+        v-if="panelInMain"
+        class="agent-chat__crumbs"
+        :aria-label="t('agent.chat.layout.crumbs')"
+      >
+        <el-button size="small" @click="panelOpen = false">
+          <Icon icon="lucide:arrow-left" class="agent-chat__btn-icon" />
+          {{ t('agent.chat.layout.backToChat') }}</el-button
+        >
+        <ol class="agent-chat__crumb-list">
+          <li>{{ conversationTitle }}</li>
+          <li aria-current="page">{{ panelTitle }}</li>
+        </ol>
+      </nav>
       <SubtaskDetail
         v-if="childId && thread && !readOnly"
         :key="childId"
         :parent-id="thread.id"
         :thread-id="childId"
+        :in-main="panelInMain"
+        @toggle-main="panelInMain = !panelInMain"
         @close="panelOpen = false"
       />
       <ContextPanel
@@ -1569,6 +1746,39 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
         :turn
         :selected-id="inspectedId"
         :readonly="readOnly"
+        :in-main="panelInMain"
+        @toggle-main="panelInMain = !panelInMain"
+        @select="inspectedId = $event"
+        @inspect-child="inspectChild"
+        @close="panelOpen = false"
+      />
+    </div>
+    <el-drawer
+      v-if="panelNarrow"
+      :model-value="panelOpen && !panelInMain"
+      :title="t('agent.chat.panel.open')"
+      :with-header="false"
+      size="min(100vw, 480px)"
+      destroy-on-close
+      class="agent-context-drawer"
+      @update:model-value="(open: boolean) => !panelInMain && (panelOpen = open)"
+    >
+      <SubtaskDetail
+        v-if="childId && thread && !readOnly"
+        :key="childId"
+        :parent-id="thread.id"
+        :thread-id="childId"
+        @toggle-main="panelInMain = true"
+        @close="panelOpen = false"
+      />
+      <ContextPanel
+        v-else
+        :key="panelScope"
+        :items="panelItems"
+        :turn
+        :selected-id="inspectedId"
+        :readonly="readOnly"
+        @toggle-main="panelInMain = true"
         @select="inspectedId = $event"
         @inspect-child="inspectChild"
         @close="panelOpen = false"
@@ -1580,31 +1790,33 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
 <style scoped>
 .agent-chat {
   display: flex;
-  gap: 16px;
   flex: 1;
   min-width: 0;
   min-height: 0;
-  container-type: inline-size;
 }
-.agent-chat--compact {
-  flex-direction: column;
+/* focus mode: the workbench covers the side menu and the tags, below Element Plus overlays (2000+) */
+.agent-chat--focus {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  padding: 16px;
+  background: var(--qw-canvas);
 }
-.agent-chat--embedded {
-  gap: 8px;
+/* the banner of an acting tenant stays visible above the workbench */
+:global(.app-layout--acting) .agent-chat--focus {
+  top: 36px;
+}
+.agent-chat--dragging {
+  cursor: col-resize;
+  user-select: none;
 }
 .agent-chat--embedded :deep(.agent-threads) {
   width: 240px;
-  flex: none;
-}
-.agent-chat--embedded.agent-chat--narrow {
-  flex-direction: column;
-}
-.agent-chat--embedded.agent-chat--narrow :deep(.agent-threads) {
-  width: 100%;
-  max-height: 40%;
+  margin-right: 8px;
 }
 .agent-chat :deep(.agent-threads),
-.agent-chat__main {
+.agent-chat__main,
+.agent-chat__rail {
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
@@ -1616,13 +1828,124 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
   border-radius: var(--qw-radius);
   box-shadow: var(--qw-shadow-1);
 }
-.agent-chat__panel {
-  width: 340px;
+.agent-chat :deep(.agent-threads) {
   flex: none;
+}
+.agent-chat__rail {
+  flex: none;
+  align-items: center;
+  width: 44px;
+  padding: 8px 4px;
+  margin-right: 12px;
+}
+.agent-chat__splitter {
+  position: relative;
+  flex: none;
+  width: 12px;
+  cursor: col-resize;
+  touch-action: none;
+  border-radius: var(--qw-radius-sm);
+}
+/* a faint line with a grip in the middle; darker on hover and while dragging */
+.agent-chat__splitter::before,
+.agent-chat__splitter::after {
+  position: absolute;
+  content: '';
+  transition: background-color 0.15s;
+}
+.agent-chat__splitter::before {
+  top: 8px;
+  bottom: 8px;
+  left: 5px;
+  width: 2px;
+  background: var(--qw-border);
+  border-radius: 1px;
+}
+.agent-chat__splitter::after {
+  top: 50%;
+  left: 4px;
+  width: 4px;
+  height: 32px;
+  background: var(--qw-text-3);
+  border-radius: 2px;
+  opacity: 0.45;
+  transform: translateY(-50%);
+}
+.agent-chat__splitter:hover::before,
+.agent-chat__splitter.is-dragging::before,
+.agent-chat__splitter:hover::after,
+.agent-chat__splitter.is-dragging::after {
+  background: var(--qw-brand);
+  opacity: 1;
+}
+.agent-chat__splitter:focus-visible {
+  outline: none;
+}
+.agent-chat__splitter:focus-visible::before {
+  background: var(--qw-brand-text);
+  box-shadow: 0 0 0 2px var(--qw-brand-weak);
+}
+.agent-chat__panel {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  min-height: 0;
+}
+.agent-chat__panel--main {
+  flex: 1;
+}
+.agent-chat__crumbs {
+  display: flex;
+  flex: none;
+  gap: 12px;
+  align-items: center;
+}
+.agent-chat__crumb-list {
+  display: flex;
+  min-width: 0;
+  padding: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: 13px;
+  color: var(--qw-text-2);
+  list-style: none;
+}
+.agent-chat__crumb-list li {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-chat__crumb-list li + li::before {
+  padding: 0 6px;
+  color: var(--qw-text-3);
+  content: '/';
+}
+.agent-chat__crumb-list li[aria-current='page'] {
+  flex: none;
+  font-weight: 600;
+  color: var(--qw-text);
 }
 .agent-chat__main {
   flex: 1;
   min-width: 0;
+  container: agent-main / inline-size;
+}
+/* a narrow conversation column (wide panes): the header buttons keep their icon, the text stays for
+   assistive technology and in the tooltip */
+@container agent-main (max-width: 680px) {
+  .agent-chat__btn-text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .agent-chat__btn-icon {
+    margin-right: 0;
+  }
 }
 .agent-chat__head {
   display: flex;
@@ -1631,11 +1954,13 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
   gap: 8px;
   align-items: center;
 }
-.agent-chat__tools {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
+.agent-chat__head > .el-button {
+  margin: 0;
+}
+.agent-chat__btn-icon {
+  width: 14px;
+  height: 14px;
+  margin-right: 4px;
 }
 .agent-chat__title {
   min-width: 0;
@@ -1648,14 +1973,21 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* the reading column: centred, at most 860px wide, narrower when the panes take the room */
 .agent-chat__stream {
   display: flex;
   flex: 1;
   flex-direction: column;
   gap: 12px;
   min-height: 0;
-  padding: 8px 4px;
+  padding: 8px max(4px, calc((100% - 860px) / 2));
   overflow: auto;
+}
+.agent-chat__main > :is(.agent-composer, .agent-chat__context, .agent-card__meta) {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 860px;
+  margin-inline: auto;
 }
 .agent-chat__welcome {
   display: flex;
@@ -1684,44 +2016,6 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
 }
 .agent-chat__context {
   display: flex;
-}
-@container (max-width: 1100px) {
-  .agent-chat {
-    flex-direction: column;
-  }
-  .agent-chat :deep(.agent-threads) {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    grid-template-rows: auto auto minmax(0, 1fr);
-    width: 100%;
-    max-height: min(200px, 32%);
-  }
-  .agent-chat :deep(.agent-threads__scroll) {
-    grid-column: 1 / -1;
-  }
-  .agent-chat :deep(.agent-threads__views) {
-    align-self: center;
-  }
-  .agent-chat :deep(.agent-threads__label) {
-    margin-top: 0;
-  }
-}
-/* narrow: switches without their text (the aria-label stays), the tools on a row of their own */
-@container (max-width: 640px) {
-  .agent-chat :deep(.agent-threads) {
-    grid-template-rows: auto auto auto minmax(0, 1fr);
-  }
-  .agent-chat :deep(.agent-threads__views),
-  .agent-chat :deep(.agent-threads__filters) {
-    grid-column: 1 / -1;
-  }
-  .agent-chat__head :deep(.el-switch__label) {
-    display: none;
-  }
-  .agent-chat__tools {
-    flex-basis: 100%;
-    justify-content: flex-end;
-  }
 }
 </style>
 
@@ -1808,10 +2102,10 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
 .agent-msg--user {
   flex-direction: row-reverse;
   align-self: flex-end;
-  max-width: 80%;
+  max-width: 75%;
 }
 .agent-msg--assistant {
-  max-width: 100%;
+  width: 100%;
 }
 .agent-msg__bubble {
   padding: 8px 12px;
@@ -1829,11 +2123,13 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
   gap: 4px;
   margin-bottom: 4px;
 }
-.agent-msg--user .agent-msg__actions {
+/* one row of actions per message, shown while the pointer or the focus is on that message */
+.agent-msg .agent-msg__actions {
   opacity: 0;
+  transition: opacity 0.15s;
 }
 .agent-msg:hover .agent-msg__actions,
-.agent-msg__actions:focus-within {
+.agent-msg:focus-within .agent-msg__actions {
   opacity: 1;
 }
 .agent-msg__actions {
@@ -1842,6 +2138,7 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
 }
 .agent-msg__answer {
   display: flex;
+  flex: 1;
   flex-direction: column;
   gap: 6px;
   min-width: 0;
@@ -2117,6 +2414,7 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
   flex: none;
   flex-direction: column;
   gap: 8px;
+  min-width: 0;
 }
 .agent-composer__box {
   position: relative;
@@ -2191,13 +2489,84 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
   margin: 0;
 }
 .agent-composer__model {
-  width: 200px;
+  width: 240px;
 }
 .agent-composer__reasoning {
-  width: 190px;
+  width: 200px;
 }
 .agent-composer__mode {
-  width: 130px;
+  width: 170px;
+}
+.agent-composer__keys {
+  margin: 0;
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--qw-text-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* a narrow conversation column: the toolbar stays on one row, the selects shrink, the context use keeps
+   only its meter (its text stays the meter's accessible name) */
+@container agent-main (max-width: 680px) {
+  .agent-composer__bar {
+    flex-wrap: nowrap;
+    min-width: 0;
+    gap: 6px;
+  }
+  .agent-composer__bar > * {
+    flex-shrink: 0;
+  }
+  /* the selects and the meter give way first, so the send button stays inside the message box width */
+  .agent-composer__bar > .agent-composer__model,
+  .agent-composer__bar > .agent-composer__reasoning,
+  .agent-composer__bar > .agent-composer__mode {
+    flex: 0 1 auto;
+    min-width: 64px;
+  }
+  .agent-composer__bar > .agent-composer__context {
+    flex: 0 1 64px;
+    min-width: 24px;
+  }
+  .agent-composer__context meter {
+    width: 100%;
+    min-width: 0;
+  }
+  .agent-composer__spacer {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  .agent-composer__context-text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+.agent-settings__tabs .el-tab-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.agent-settings__row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-height: 32px;
+}
+.agent-settings__name {
+  flex: 1;
+  color: var(--qw-text-2);
+}
+.agent-settings__row .el-button {
+  margin: 0;
+}
+.agent-settings__hint {
+  margin: 0 0 4px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--qw-text-3);
 }
 .agent-composer__spacer {
   flex: 1;
@@ -2243,6 +2612,8 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
   overflow: auto;
 }
 .qw-md table {
+  width: auto;
+  max-width: 100%;
   margin: 0 0 8px;
   font-size: 13px;
   border-collapse: collapse;
@@ -2255,11 +2626,5 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
 }
 .qw-md th {
   background: var(--qw-surface-2);
-}
-@media (max-width: 1100px) {
-  .agent-threads {
-    width: auto;
-    max-height: 280px;
-  }
 }
 </style>

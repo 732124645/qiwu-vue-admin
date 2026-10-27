@@ -130,7 +130,7 @@
       },
       "composer": {
         "label": "Message",
-        "placeholder": "Type a message: Enter sends, Shift+Enter adds a line; $ picks a skill, {'@'} mentions, / runs a command, Ctrl+R searches sent messages",
+        "placeholder": "Type a message, / for commands",
         "queuePlaceholder": "This turn is still running; a message sent now follows its current step",
         "suggestions": "Suggestions",
         "model": "Model",
@@ -153,7 +153,8 @@
         "historyPlaceholder": "Type to search your sent messages, Enter fills in, Esc cancels",
         "reasoningDefault": "Model default: {value}",
         "contextEstimate": "Context estimate {percent}%",
-        "queueExpired": "Queued message expired and was not automatically executed"
+        "queueExpired": "Queued message expired and was not automatically executed",
+        "keys": "Enter sends · Shift+Enter new line · $ skill · {'@'} mention · / command · Ctrl+R searches sent messages"
       },
       "reasoning": {
         "low": "Low",
@@ -205,7 +206,8 @@
         "copied": "Copied",
         "copyFailed": "Copy failed; select the text and copy it yourself",
         "edit": "Edit and resend",
-        "editing": "Editing the last message: sending forks a new conversation"
+        "editing": "Editing the last message: sending forks a new conversation",
+        "more": "More actions"
       },
       "feedback": {
         "up": "Helpful",
@@ -261,7 +263,6 @@
         "text": "Go ahead with the plan"
       },
       "shortcut": {
-        "open": "Keyboard shortcuts",
         "title": "Keyboard shortcuts",
         "press": "Press the new keys…",
         "reset": "Restore defaults",
@@ -280,7 +281,6 @@
       },
       "newWindow": "Open in a new window",
       "notify": {
-        "open": "Notification settings",
         "title": "Notifications",
         "mail": "Also send an email",
         "hint": "You always get an inbox message; the mobile app reads the inbox. Emails go to the address in your profile.",
@@ -304,7 +304,9 @@
         "noOutputs": "No outputs yet. Expand an answer to read it here.",
         "answer": "Answer · {n}",
         "reading": "Expanded reading",
-        "chooseOutput": "Choose an output to view"
+        "chooseOutput": "Choose an output to view",
+        "toMain": "Open in the main area",
+        "toSide": "Back to the side panel"
       },
       "markdown": {
         "plainText": "Plain text",
@@ -354,6 +356,29 @@
       },
       "message": {
         "interrupted": "Generation interrupted; showing saved content"
+      },
+      "settings": {
+        "open": "Conversation settings",
+        "session": "Conversation",
+        "manage": "Manage",
+        "noMemory": "Temporary conversations never use memory",
+        "temporaryHint": "A temporary conversation stays out of the list, is deleted when you leave it and never uses memory.",
+        "noProfiles": "No profiles yet",
+        "profileLocked": "A started conversation keeps its profile; choose one in a new conversation"
+      },
+      "focus": {
+        "enter": "Focus mode",
+        "exit": "Exit focus",
+        "hint": "Hides the side menu and the tabs, leaving only the conversation; press Esc or click again to leave"
+      },
+      "layout": {
+        "resizeList": "Resize the conversation list",
+        "resizePanel": "Resize the side panel",
+        "resizeHint": "Drag or use the arrow keys; double-click restores the default width",
+        "collapseList": "Collapse the conversation list",
+        "expandList": "Expand the conversation list",
+        "crumbs": "Location",
+        "backToChat": "Back to the conversation"
       }
     }
   }

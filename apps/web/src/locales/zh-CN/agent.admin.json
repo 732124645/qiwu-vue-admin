@@ -9,12 +9,12 @@
       "keyMissing": "未设置",
       "rootOnly": "这里的设置只有超级管理员能修改，你可以查看当前内容。",
       "tab": {
-        "providers": "模型",
+        "providers": "模型服务",
         "search": "联网搜索",
-        "mcp": "外部 MCP",
-        "tools": "工具策略",
+        "mcp": "外部工具（MCP）",
+        "tools": "工具审批",
         "skills": "平台技能",
-        "params": "说明与限额",
+        "params": "使用规则与额度",
         "prompts": "提示词模板",
         "instructions": "说明",
         "diagnostics": "诊断"
@@ -43,8 +43,9 @@
         "configure": "费率与思考",
         "pricingEnabled": "配置积分费率",
         "pricingConfigured": "费率已配置",
-        "pricingMissing": "待配置费率",
-        "pricingHint": "以下为每百万 Token 的积分费率。明确填 0 表示免费；未配置费率的模型不能发起调用。",
+        "pricingMissing": "未配置费率",
+        "unpricedHint": "标为“未配置费率”的模型照常可用，调用记为未计价；未计价的调用不计入积分额度。",
+        "pricingHint": "以下为每百万 Token 的积分费率。明确填 0 表示免费；未配置费率的模型照常可用，调用记为未计价，未计价的调用不计入积分额度。",
         "inputCredits": "普通输入积分 / 百万 Token",
         "outputCredits": "输出积分 / 百万 Token",
         "cacheReadCredits": "缓存读取积分 / 百万 Token",
@@ -59,7 +60,7 @@
         "reasoningVllm": "vLLM 开关",
         "reasoningHint": "勾选表示模型支持通过参数控制思考，不代表取消勾选就关闭模型思考。",
         "vllmHint": "vLLM 只切换 enable_thinking；低、中、高不会映射成不同等级。",
-        "standardOffHint": "标准接口的“关闭”发送 none；仅在模型明确支持时配置。",
+        "standardOffHint": "标准接口的“关闭”发送 reasoning_effort: none；部分兼容服务不认识这个值会返回 400，仅在模型明确支持时选择“关闭”。",
         "reasoningOn": "开启"
       },
       "search": {
@@ -138,14 +139,13 @@
         "instructionsHint": "拼在每个系统提示的最前面，对所有租户生效。",
         "limits": "限额",
         "creditsHint": "积分预算最多保留 6 位小数，0 表示不限额。调用前按已记账消费检查，达到预算后停止后续调用，在途调用可能越过阈值；步数、时间与并发仍须大于 0。",
-        "creditInvalid": "请输入有效积分金额（非负，最多 6 位小数）。"
+        "creditInvalid": "请输入有效积分金额（非负，最多 6 位小数）。",
+        "noCreditCap": "当前没有积分额度上限：每轮、每人每日、每租户每日的积分额度都是 0（不限）。升级前的 token 上限没有换算成积分，请按需设置。",
+        "setCreditCap": "去设置额度"
       },
       "limit": {
         "turnSteps": "每轮最多步数",
         "turnSeconds": "每轮最长秒数",
-        "turnTokens": "每轮 token 上限",
-        "userDailyTokens": "每用户每日 token 上限",
-        "tenantDailyTokens": "每租户每日 token 上限",
         "userConcurrentTurns": "每用户同时运行的轮次",
         "turnCredits": "每轮累计积分预算",
         "userDailyCredits": "每人每日积分预算",
@@ -190,14 +190,13 @@
         "completionTokens": "输出 token",
         "totalTokens": "合计 token",
         "total": "合计",
-        "chart": "积分用量",
-        "credits": "已计积分",
+        "credits": "积分",
         "cacheReadTokens": "缓存读取 Token",
         "cacheWriteTokens": "缓存写入 Token",
         "reasoningTokens": "思考 Token",
-        "unpricedCalls": "未计价调用",
-        "unreportedCalls": "未报告用量调用",
-        "legacyCalls": "旧记录缺少明细",
+        "unpricedCalls": "模型未配置费率的调用",
+        "unreportedCalls": "用量未知的调用",
+        "legacyCalls": "早期无明细的调用",
         "unknown": "未知",
         "entries": "调用明细",
         "entry": "原始用量与费率快照",
@@ -205,15 +204,41 @@
         "rawUsage": "供应商原始用量",
         "unpriced": "未计价",
         "unreported": "供应商未报告用量",
+        "estimated": "供应商未报告用量，积分按请求与已输出内容估算",
         "legacy": "旧记录未留存细分或费率，不补算历史积分。",
-        "hint": "已计积分不包含未计价调用。未知用量不代表 0；旧历史和缺少供应商报告的调用另行标记。",
+        "hint": "积分按每次调用当时的模型价格计算，之后修改价格不会改变已有记录。",
         "invocationStatus": "调用状态",
         "state": {
           "pending": "计量中",
           "complete": "已完成",
           "unknown": "结果待核对"
         },
-        "pendingHint": "调用正在进行，最终用量尚未返回；结束或中断核算后进入汇总。"
+        "pendingHint": "调用正在进行，最终用量尚未返回；结束或中断核算后进入汇总。",
+        "creditUnit": "积分",
+        "partial": "部分调用的用量未知，未计入",
+        "topCredits": "{n} 积分",
+        "empty": "这段时间还没有调用记录",
+        "chartBy": {
+          "day": "每日积分",
+          "user": "各用户积分",
+          "model": "各模型积分"
+        },
+        "kpi": {
+          "calls": "调用次数",
+          "credits": "已用积分",
+          "tokens": "输入 / 输出 token",
+          "top": {
+            "day": "用量最多的一天",
+            "user": "用量最多的用户",
+            "model": "用量最多的模型"
+          }
+        },
+        "integrity": {
+          "title": "数据完整性",
+          "unpriced": "有 {n} 次调用所用的模型没有配置费率，这些调用没有算进积分，也不受积分额度限制。可以在“智能体设置 → 模型服务”里补上费率（只对之后的调用生效）。",
+          "unreported": "有 {n} 次调用用量未知（模型服务没有返回用量，或调用在结束前被停止、超时、出错），这些调用的 token 无法统计；配了费率的已按请求与已输出内容估算积分并计入额度。",
+          "legacy": "有 {n} 次是早期的调用记录，当时没有保存明细，按原样显示，不重新计算。"
+        }
       },
       "diag": {
         "queue": "轮次队列",
@@ -269,8 +294,48 @@
           "no_model": "没有配置模型",
           "search_not_configured": "没有可用的密钥",
           "failed": "失败",
+          "reasoning_off_rejected": "模型服务不接受“关闭思考”（reasoning_effort: none）",
           "http": "HTTP {status}"
         }
+      },
+      "guide": {
+        "title": "开始使用",
+        "intro": "按下面的顺序完成设置，智能助手就可以使用了。",
+        "allDone": "必需的设置都已完成，可以收起这块引导。",
+        "collapse": "收起",
+        "expand": "展开引导",
+        "collapsedText": "智能助手的初始设置已完成。",
+        "noChat": "当前账号没有对话页，或智能助手未开启。",
+        "state": {
+          "done": "已完成",
+          "todo": "待完成",
+          "optional": "可选"
+        },
+        "step": {
+          "providers": {
+            "title": "配置模型",
+            "desc": "添加并启用一个带模型的模型服务（有多个时可设默认），这是必需的一步。",
+            "action": "去配置"
+          },
+          "search": {
+            "title": "联网搜索",
+            "desc": "需要查最新资料时再配置，不配置也能正常对话。",
+            "action": "去配置"
+          },
+          "tools": {
+            "title": "检查工具审批",
+            "desc": "确认会修改数据的工具需要人工确认或审查后才执行。",
+            "action": "去检查"
+          },
+          "chat": {
+            "title": "试一试",
+            "desc": "到对话页问一个问题，看看效果。",
+            "action": "去对话"
+          }
+        },
+        "view": "查看",
+        "unpriced": "以下模型未配置费率：{models}。未计价的调用不计入积分额度。",
+        "setPricing": "去配置费率"
       }
     }
   }

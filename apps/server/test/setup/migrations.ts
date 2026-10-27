@@ -63,6 +63,8 @@ export const SCRIPT_CASE_MS = SCRIPT_TIMEOUT_MS * 4
 
 /** 本文件里被超时杀掉的脚本（空串表示没有）：之后库可能停在半途，不能再接着做后续步骤。 */
 export const killed = { script: '' }
+/** 本文件里非零退出的脚本次数：失败的用例期间有脚本失败，迁移可能只做了一半。 */
+const scripts = { failed: 0 }
 
 /**
  * 运行 `node <script> …`（cwd apps/server）。子进程被超时杀掉（status 为 null 或带 signal）时立即抛错并
@@ -84,12 +86,27 @@ export function runScript(
       `script ${script} killed after ${SCRIPT_TIMEOUT_MS} ms (timeout${r.signal ? `, ${r.signal}` : ''}); raise QW_TEST_SCRIPT_TIMEOUT_MS on a slow database`,
     )
   }
+  if (r.status !== 0) scripts.failed++
   return r
 }
 
-/** 只保护迁移测试自己的 DataSource：超时后停止后续 SQL，并等待原用例退出才允许重建。 */
+/** 一个用例的运行记录：自身的 Vitest 信号，以及期间是否有 SQL 失败。 */
+interface CaseRun {
+  signal: AbortSignal
+  sqlFailed: boolean
+}
+
+/** Vitest 的 expect 失败抛 AssertionError；SQL、迁移与脚本的错误都不是。 */
+const assertionOnly = (error: unknown) => error instanceof Error && error.name === 'AssertionError'
+
+/**
+ * 只保护迁移测试自己的 DataSource：超时后停止后续 SQL，并等待原用例退出才允许重建。
+ * 只有可能留下半截迁移时才置为不安全（之后的用例跳过、库在结束时重建）：用例超时、脚本被杀，
+ * 或失败的用例期间有 SQL 出错、脚本非零退出、抛出的不是断言错误。所有操作都成功、只是断言不符的
+ * 失败不影响后续用例，免得一个断言失败把整个文件的结果都藏起来。
+ */
 export class MigrationCaseFence {
-  private readonly scope = new AsyncLocalStorage<AbortSignal>()
+  private readonly scope = new AsyncLocalStorage<CaseRun>()
   private readonly pending = new Set<Promise<unknown>>()
   private signal?: AbortSignal
   unsafe = false
@@ -106,10 +123,14 @@ export class MigrationCaseFence {
     return (...args: Args): Promise<unknown> => {
       if (!this.signal) throw new Error('migration case signal missing')
       markMigrationRunUnsafe()
-      const work = this.scope.run(this.signal, () => Promise.resolve().then(() => body(...args)))
+      const run: CaseRun = { signal: this.signal, sqlFailed: false }
+      const scriptsBefore = scripts.failed
+      const work = this.scope.run(run, () => Promise.resolve().then(() => body(...args)))
       const tracked = work
         .catch((error) => {
-          this.unsafe = true
+          if (run.signal.aborted || run.sqlFailed || scripts.failed > scriptsBefore)
+            this.unsafe = true
+          else if (!assertionOnly(error)) this.unsafe = true
           throw error
         })
         .finally(() => this.pending.delete(tracked))
@@ -125,16 +146,24 @@ export class MigrationCaseFence {
       const runner = create(...args)
       const query = runner.query
       runner.query = ((sql: string, ...params: unknown[]) => {
-        if (!/^\s*ROLLBACK(?:\s|$)/i.test(sql)) this.scope.getStore()?.throwIfAborted()
-        return Reflect.apply(query, runner, [sql, ...params])
+        const run = this.scope.getStore()
+        if (!/^\s*ROLLBACK(?:\s|$)/i.test(sql)) run?.signal.throwIfAborted()
+        // 记下用例期间失败的 SQL（含被用例自己吞掉的）：MySQL 的 DDL 不能回滚，失败处可能留下半截结构
+        return Promise.resolve(Reflect.apply(query, runner, [sql, ...params])).catch((error) => {
+          if (run) run.sqlFailed = true
+          throw error
+        })
       }) as QueryRunner['query']
       return runner
     }
   }
 
-  /** 不提前恢复：当前查询可先结束，但后续 SQL 被信号阻断，原 finally 完成后才返回。 */
-  async drain(failed: boolean) {
-    if (failed || this.signal?.aborted) this.unsafe = true
+  /**
+   * 不提前恢复：当前查询可先结束，但后续 SQL 被信号阻断，原 finally 完成后才返回。
+   * 用例失败本身不置为不安全（由 {@link wrap} 按失败原因判断）；超时一律不安全，原用例可能还在库上执行。
+   */
+  async drain() {
+    if (this.signal?.aborted) this.unsafe = true
     let timer: NodeJS.Timeout | undefined
     const drained = await Promise.race([
       Promise.allSettled(this.pending).then(() => true),

@@ -130,7 +130,7 @@
       },
       "composer": {
         "label": "输入消息",
-        "placeholder": "输入消息，Enter 发送，Shift+Enter 换行；$ 选技能，{'@'} 提及，/ 用命令，Ctrl+R 搜索发过的消息",
+        "placeholder": "输入消息，/ 查看命令",
         "queuePlaceholder": "本轮还在运行，现在发送的消息会排在当前步骤之后",
         "suggestions": "补全建议",
         "model": "模型",
@@ -153,7 +153,8 @@
         "historyPlaceholder": "输入文字搜索发过的消息，Enter 填入，Esc 取消",
         "reasoningDefault": "模型默认：{value}",
         "contextEstimate": "上下文估算 {percent}%",
-        "queueExpired": "排队消息已作废，未自动执行"
+        "queueExpired": "排队消息已作废，未自动执行",
+        "keys": "Enter 发送 · Shift+Enter 换行 · $ 技能 · {'@'} 提及 · / 命令 · Ctrl+R 搜索发过的消息"
       },
       "reasoning": {
         "low": "低",
@@ -205,7 +206,8 @@
         "copied": "已复制",
         "copyFailed": "复制失败，请手动选择文字复制",
         "edit": "编辑后重发",
-        "editing": "正在编辑上一条消息：发送后会分叉出新会话"
+        "editing": "正在编辑上一条消息：发送后会分叉出新会话",
+        "more": "更多操作"
       },
       "feedback": {
         "up": "有帮助",
@@ -261,7 +263,6 @@
         "text": "按计划执行"
       },
       "shortcut": {
-        "open": "快捷键设置",
         "title": "快捷键",
         "press": "请按下新的组合键…",
         "reset": "恢复默认",
@@ -280,7 +281,6 @@
       },
       "newWindow": "在新窗口打开",
       "notify": {
-        "open": "通知设置",
         "title": "通知",
         "mail": "同时发邮件",
         "hint": "站内信总会收到；手机端通过站内信同步。邮件发到个人资料里的邮箱。",
@@ -304,7 +304,9 @@
         "noOutputs": "当前没有产物；可从回答选择展开阅读。",
         "answer": "回答 · {n}",
         "reading": "展开阅读",
-        "chooseOutput": "选择一个产物查看"
+        "chooseOutput": "选择一个产物查看",
+        "toMain": "在主区域打开",
+        "toSide": "还原到侧栏"
       },
       "markdown": {
         "plainText": "纯文本",
@@ -354,6 +356,29 @@
       },
       "message": {
         "interrupted": "生成已中断，显示已保存内容"
+      },
+      "settings": {
+        "open": "会话设置",
+        "session": "本会话",
+        "manage": "管理方案",
+        "noMemory": "临时会话不读写记忆",
+        "temporaryHint": "临时会话不进会话列表，离开后删除，也不读写记忆。",
+        "noProfiles": "还没有方案",
+        "profileLocked": "已开始的会话不能更换方案，请在新会话里选择"
+      },
+      "focus": {
+        "enter": "专注模式",
+        "exit": "退出专注",
+        "hint": "隐藏系统菜单和标签页，只留对话工作台；按 Esc 或再点一次退出"
+      },
+      "layout": {
+        "resizeList": "调整会话列表宽度",
+        "resizePanel": "调整右侧面板宽度",
+        "resizeHint": "拖动或用左右方向键调宽，双击恢复默认宽度",
+        "collapseList": "收起会话列表",
+        "expandList": "展开会话列表",
+        "crumbs": "当前位置",
+        "backToChat": "返回对话"
       }
     }
   }

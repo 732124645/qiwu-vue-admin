@@ -75,7 +75,10 @@ function walk(dir, out = []) {
   if (!existsSync(dir)) return out
   for (const e of readdirSync(dir, { withFileTypes: true })) {
     if (e.isDirectory()) {
-      if (!['node_modules', 'dist', 'coverage'].includes(e.name) && !e.name.startsWith('.'))
+      if (
+        !['node_modules', 'dist', 'dist-dev', 'coverage'].includes(e.name) &&
+        !e.name.startsWith('.')
+      )
         walk(join(dir, e.name), out)
     } else out.push(join(dir, e.name))
   }
