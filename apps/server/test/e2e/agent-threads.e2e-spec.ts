@@ -8,7 +8,7 @@ import { ConfigService } from '@nestjs/config'
 import type { NestExpressApplication } from '@nestjs/platform-express'
 import { Test } from '@nestjs/testing'
 import { getDataSourceToken } from '@nestjs/typeorm'
-import { AGENT_TRUST_MODE_PARAM, agentPerms, Err } from '@qiwu/shared'
+import { agentPerms, Err } from '@qiwu/shared'
 import request from 'supertest'
 import type { DataSource } from 'typeorm'
 import { AppModule } from '../../src/app.module.js'
@@ -16,7 +16,6 @@ import { setupApp } from '../../src/app.setup.js'
 import { AgentModule } from '../../src/core/agent/agent.module.js'
 import { EnvSchema } from '../../src/core/config/env.schema.js'
 import { REDIS, type Redis } from '../../src/core/redis/redis.module.js'
-import { ParamService } from '../../src/core/settings/param.service.js'
 import { findId, insertRow } from '../../src/db/seeds/upsert.js'
 import { bearer, signIn } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
@@ -254,13 +253,13 @@ describe('options', () => {
       },
     ])
     expect(o.defaults).toEqual({ providerId, model: 'chat-1' })
-    expect(o.approvalModes).toEqual(['read_only', 'ask', 'trust'])
+    expect(o.approvalModes).toEqual(['read_only', 'plan', 'ask'])
     // the seeded platform skills only (this spec adds none)
     expect(o.skills.filter((s: { scope: string }) => s.scope !== 'platform')).toEqual([])
     expect(o.paused).toBe(false)
     expect(o.webSearch).toBe(false)
     expect(o.tone).toBe('default')
-    expect(o.trustSession).toBe(true)
+    expect(o).not.toHaveProperty('trustSession')
     expect(o.servers).toEqual(expect.any(Array))
     expect(o.starters).toHaveLength(4)
     const en = await http()
@@ -340,45 +339,24 @@ describe('options', () => {
     expect(mine).toEqual([{ name: `${PREFIX}srv-on` }])
   })
 
-  it('drops the trust mode while agent.trust_mode is false, and refuses it on a thread then', async () => {
-    const params = app.get(ParamService)
-    // only the word false turns it off, in any case and with blanks around it
-    await ds.query("UPDATE cfg_param SET param_value = ' FALSE ' WHERE param_key = ?", [
-      AGENT_TRUST_MODE_PARAM,
-    ])
-    await params.invalidate(AGENT_TRUST_MODE_PARAM)
-    try {
-      const o = (await http().get('/api/agent/options').set(bearer(tok.a))).body.data
-      expect(o.approvalModes).toEqual(['read_only', 'ask'])
-      expect(o.trustSession).toBe(false)
-      const res = await http()
-        .post('/api/agent/threads')
-        .set(bearer(tok.a))
-        .send({ title: title(), approvalMode: 'trust' })
-      expect(res.status).toBe(400)
-      const id = await newThread(tok.a)
-      expect(
-        (
-          await http()
-            .patch(`/api/agent/threads/${id}`)
-            .set(bearer(tok.a))
-            .send({ approvalMode: 'trust' })
-        ).status,
-      ).toBe(400)
-      // any other value keeps it on
-      await ds.query("UPDATE cfg_param SET param_value = 'off' WHERE param_key = ?", [
-        AGENT_TRUST_MODE_PARAM,
-      ])
-      await params.invalidate(AGENT_TRUST_MODE_PARAM)
-      const on = (await http().get('/api/agent/options').set(bearer(tok.a))).body.data
-      expect(on.approvalModes).toEqual(['read_only', 'ask', 'trust'])
-      expect(on.trustSession).toBe(true)
-    } finally {
-      await ds.query("UPDATE cfg_param SET param_value = 'true' WHERE param_key = ?", [
-        AGENT_TRUST_MODE_PARAM,
-      ])
-      await params.invalidate(AGENT_TRUST_MODE_PARAM)
-    }
+  it('the plan mode is a mode of its own; the retired trust mode and plan switch are refused', async () => {
+    const created = await http()
+      .post('/api/agent/threads')
+      .set(bearer(tok.a))
+      .send({ title: title(), approvalMode: 'plan' })
+    expect(created.status).toBe(201)
+    expect(created.body.data.approvalMode).toBe('plan')
+    expect(created.body.data).not.toHaveProperty('planMode')
+    const trust = await http()
+      .post('/api/agent/threads')
+      .set(bearer(tok.a))
+      .send({ title: title(), approvalMode: 'trust' })
+    expect([trust.status, trust.body.code]).toEqual([400, Err.VALIDATION_FAILED.code])
+    const id = created.body.data.id as number
+    const patch = (body: object) =>
+      http().patch(`/api/agent/threads/${id}`).set(bearer(tok.a)).send(body)
+    expect((await patch({ approvalMode: 'trust' })).status).toBe(400)
+    expect((await patch({ approvalMode: 'ask' })).body.data.approvalMode).toBe('ask')
   })
 })
 
@@ -394,7 +372,7 @@ describe('threads', () => {
       model: 'chat-1',
       reasoning: null,
       approvalMode: 'ask',
-      planMode: false,
+      allowedTools: [],
       temporary: false,
       unread: 0,
       shared: false,
@@ -510,14 +488,12 @@ describe('threads', () => {
       http().patch(`/api/agent/threads/${id}`).set(bearer(token)).send(body)
     const res = await patch({
       title: `${PREFIX}renamed`,
-      approvalMode: 'read_only',
-      planMode: true,
+      approvalMode: 'plan',
     })
     expect(res.status).toBe(200)
     expect(res.body.data).toMatchObject({
       title: `${PREFIX}renamed`,
-      approvalMode: 'read_only',
-      planMode: true,
+      approvalMode: 'plan',
     })
     expect((await patch({ reasoning: 'low' })).status).toBe(400)
     expect((await patch({ model: 'think-1', reasoning: 'medium' })).body.data).toMatchObject({
@@ -687,36 +663,20 @@ describe('threads', () => {
     )
   })
 
-  it('leaving the trust mode forgets what the thread trusted', async () => {
-    const id = await newThread(tok.a, { approvalMode: 'trust' })
-    const trusted = async () =>
-      (
-        await ds.query<{ trusted: unknown }[]>('SELECT trusted FROM agent_thread WHERE id = ?', [
-          id,
-        ])
-      )[0]!.trusted
+  it('switching the mode keeps the tools allowed for the thread', async () => {
+    const id = await newThread(tok.a)
     await ds.query('UPDATE agent_thread SET trusted = ? WHERE id = ?', [
-      JSON.stringify(['demo.book.create:1']),
+      JSON.stringify(['1#demo.book.create']),
       id,
     ])
-    await http()
-      .patch(`/api/agent/threads/${id}`)
-      .set(bearer(tok.a))
-      .send({ title: 'x' })
-      .expect(200)
-    expect(await trusted()).not.toBeNull()
-    await http()
-      .patch(`/api/agent/threads/${id}`)
-      .set(bearer(tok.a))
-      .send({ approvalMode: 'trust' })
-      .expect(200)
-    expect(await trusted()).not.toBeNull()
-    await http()
-      .patch(`/api/agent/threads/${id}`)
-      .set(bearer(tok.a))
-      .send({ approvalMode: 'ask' })
-      .expect(200)
-    expect(await trusted()).toBeNull()
+    for (const approvalMode of ['plan', 'read_only', 'ask']) {
+      const res = await http()
+        .patch(`/api/agent/threads/${id}`)
+        .set(bearer(tok.a))
+        .send({ approvalMode })
+        .expect(200)
+      expect(res.body.data.allowedTools).toEqual(['demo.book.create'])
+    }
   })
 
   it('reverts the latest turn with its items and what came after; 409 while it runs', async () => {
@@ -735,7 +695,7 @@ describe('threads', () => {
     expect(d.turn.id).toBe(turn)
   })
 
-  it('refuses to revert while a call of the latest turn runs; drops the trust the reverted turn recorded', async () => {
+  it('refuses to revert while a call of the latest turn runs; drops the allowances the reverted turn recorded', async () => {
     const { id } = await conversation(tok.a, ids.a)
     // waiting inside an external call (its form open): the call cannot be undone
     const next = await addTurn(id, ids.a, 'waiting')
@@ -747,9 +707,9 @@ describe('threads', () => {
       { callId: 'e1', tool: 'ext.srv.w', title: 'w', source: 'mcp', kind: 'write', args: {} },
       { turnId: next, status: 'running' },
     )
-    const kept = '999999#t.a.b|id:2'
+    const kept = '999999#t.a.c'
     await ds.query('UPDATE agent_thread SET trusted = ? WHERE id = ?', [
-      JSON.stringify([`${next}#t.a.b|id:1`, kept]),
+      JSON.stringify([`${next}#t.a.b`, kept]),
       id,
     ])
     const revert = () => http().post(`/api/agent/threads/${id}/revert`).set(bearer(tok.a))
@@ -898,6 +858,10 @@ describe('sharing', () => {
       },
       { status: 'approved' },
     )
+    await ds.query('UPDATE agent_thread SET trusted = ? WHERE id = ?', [
+      JSON.stringify([`${turn}#demo.book.create`]),
+      id,
+    ])
     const res = await http().post(`/api/agent/threads/${id}/share`).set(bearer(tok.a))
     expect(res.status).toBe(201)
     const { token } = res.body.data
@@ -917,6 +881,8 @@ describe('sharing', () => {
       expect(seen.status).toBe(200)
       const items = seen.body.data.items as Seen
       expect(seen.body.data.thread.id).toBe(id)
+      // which tools the owner allowed for the thread is the owner's own setting
+      expect(seen.body.data.thread.allowedTools).toEqual([])
       const call = items.find((i) => i.kind === 'tool_call')!.payload
       expect(call.args).toBeNull()
       expect(call.title).toBe('Create a book')
@@ -934,8 +900,9 @@ describe('sharing', () => {
       expect(seen.body.data.turn.error).toEqual({ code: 'E1', message: '' })
     }
     // the owner sees everything
-    const full = (await http().get(`/api/agent/shared/${token}`).set(bearer(tok.a))).body.data
-      .items as Seen
+    const ownView = (await http().get(`/api/agent/shared/${token}`).set(bearer(tok.a))).body.data
+    expect(ownView.thread.allowedTools).toEqual([])
+    const full = ownView.items as Seen
     expect(full.find((i) => i.kind === 'tool_result')!.payload.preview).toBe('BOOK-PREVIEW-42')
     expect(full.find((i) => i.kind === 'approval')!.payload.changes).toBeDefined()
 

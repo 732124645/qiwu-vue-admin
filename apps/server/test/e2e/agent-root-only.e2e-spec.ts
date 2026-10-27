@@ -90,6 +90,7 @@ const changes: [string, string, object][] = [
     { name: `${PREFIX}p`, baseUrl: 'https://api.example.com/v1', models: [{ id: 'm' }] },
   ],
   ['DELETE', '/api/agent/providers/1', {}],
+  ['POST', '/api/agent/providers/models', { baseUrl: 'https://api.example.com/v1' }],
   ['POST', '/api/agent/search-providers', { kind: 'tavily', name: `${PREFIX}s` }],
   ['PUT', '/api/agent/search-providers/1', { kind: 'tavily', name: `${PREFIX}s` }],
   ['DELETE', '/api/agent/search-providers/1', {}],

@@ -236,16 +236,17 @@ describe('batch review page', () => {
     expect(w.findAll('.agent-approval')).toHaveLength(1)
   })
 
-  it('offers "approve for this conversation" only when the platform allows it', async () => {
-    for (const trustSession of [false, true]) {
-      mockApi({
-        'GET /agent/batches/9': ok(detail(true)),
-        'GET /agent/options': ok({ trustSession }),
-      })
+  it('offers "don\'t ask again" on a pending card only when the card allows it', async () => {
+    for (const sessionAllow of [false, true]) {
+      const d = detail(true)
+      d.rows[0]!.pending = [{ ...approval, payload: { ...approval.payload, sessionAllow } }]
+      mockApi({ 'GET /agent/batches/9': ok(d) })
       await router.push('/agent/batch?id=9')
       w = mount(BatchPage, { global: { plugins: [ElementPlus, i18n, router] } })
       await flushPromises()
-      expect(!!button('Approve for this conversation')).toBe(trustSession)
+      expect(w.findAll('.agent-approval button').some((b) => b.text().startsWith('Don'))).toBe(
+        sessionAllow,
+      )
       w.unmount()
     }
     w = undefined

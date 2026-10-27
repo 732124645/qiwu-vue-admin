@@ -7,6 +7,8 @@ import {
   type AgentMessageSend,
   agentMessageSend,
   agentPerms,
+  type AgentPlanDecide,
+  agentPlanDecide,
   type AgentQuestionAnswer,
   agentQuestionAnswer,
   agentTurnVo,
@@ -26,7 +28,7 @@ import { turnVo } from './item-store.js'
 const me = (): Principal => clsGet('principal')!
 
 /**
- * 对话页里推进轮次的接口（see docs/agent.md）：发消息、中断、压缩、确认审批、回答提问。都要
+ * 对话页里推进轮次的接口（see docs/agent.md）：发消息、中断、压缩、确认审批、回答提问、决定方案卡。都要
  * `agent.chat.use`，只对本人的会话与条目生效（别人的、跨租户的 404）；每次都记操作日志。
  */
 @ApiTags('agent')
@@ -111,6 +113,28 @@ export class AgentTurnController {
     @Body({ schema: agentQuestionAnswer }) dto: AgentQuestionAnswer,
   ) {
     await this.control.answerQuestion(me(), itemId, dto)
+    return null
+  }
+
+  @Post('plans/:itemId')
+  @RequirePerm(agentPerms.chat.use)
+  @ActionLog({
+    domain: 'agent.plan',
+    verb: 'handle',
+    bizId: (req) => (req.params as { itemId?: string }).itemId,
+  })
+  // 意见可能带个人信息：不进操作日志和接口日志
+  @Sensitive('feedback')
+  @ApiOperation({
+    summary:
+      'Decide a plan card of the own thread: approve and run it (auto_review or ask), or keep refining (409 when no longer pending)',
+  })
+  @ApiEnvelope()
+  async decidePlan(
+    @Param('itemId', ParseIntPipe) itemId: number,
+    @Body({ schema: agentPlanDecide }) dto: AgentPlanDecide,
+  ) {
+    await this.control.decidePlan(me(), itemId, dto)
     return null
   }
 }

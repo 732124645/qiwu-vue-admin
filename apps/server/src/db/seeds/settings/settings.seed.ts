@@ -5,7 +5,6 @@ import {
   AGENT_INSTRUCTIONS_PARAM,
   AGENT_LIMIT_PARAMS,
   AGENT_PAUSED_PARAM,
-  AGENT_TRUST_MODE_PARAM,
   AGENT_WEB_DOMAINS_PARAM,
   AGENT_WEB_MODE_PARAM,
   APP_UPDATE_PARAMS,
@@ -396,14 +395,6 @@ const PARAMS: ParamSeed[] = [
     nameI18n: {
       'zh-CN': '智能体每条自动化每日最多运行次数（UTC 日）',
       'en-US': 'Agent runs per automation per day (UTC)',
-    },
-  },
-  {
-    key: AGENT_TRUST_MODE_PARAM,
-    value: 'true',
-    nameI18n: {
-      'zh-CN': '智能体允许“信任本会话”审批模式（false 时不提供）',
-      'en-US': 'Agent offers the "trust this conversation" approval mode (false: not offered)',
     },
   },
   {

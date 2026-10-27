@@ -188,7 +188,7 @@ const thread = (p: Partial<AgentThreadVo> = {}): AgentThreadVo => ({
   model: 'm1',
   reasoning: null,
   approvalMode: 'ask',
-  planMode: false,
+  allowedTools: [],
   pinned: false,
   temporary: false,
   unread: 0,
@@ -238,12 +238,11 @@ const OPTIONS: AgentOptionsVo = {
   ],
   defaults: { providerId: 1, model: 'm1' },
   skills: [],
-  approvalModes: ['ask'],
+  approvalModes: ['ask', 'plan'],
   webSearch: false,
   paused: false,
   starters: [],
   prompts: [],
-  trustSession: false,
   servers: [],
   tone: 'default',
 }
@@ -296,7 +295,7 @@ describe('chat page shortcuts and new window', () => {
     expect(patches()).toHaveLength(0)
     window.dispatchEvent(press({ code: 'KeyL', altKey: true }))
     await flushPromises()
-    expect(JSON.parse(String(patches()[0]?.data))).toMatchObject({ planMode: true })
+    expect(JSON.parse(String(patches()[0]?.data))).toMatchObject({ approvalMode: 'plan' })
 
     window.dispatchEvent(press({ code: 'KeyF', altKey: true }))
     expect(document.activeElement).toBe(w.find('textarea').element)

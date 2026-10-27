@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toolTitle, toolPermission } from '../tool-presentation'
 import dayjs from 'dayjs'
@@ -12,34 +12,32 @@ type Decision = AgentApprovalDecide['decision']
 
 /**
  * 审批卡片：智能体要执行一次写入，先给发起人看工具、目标记录、逐字段的旧值 → 新值与本轮引用的来源。
- * 待审批时可“确认”、“本会话内同意”（同一工具同一目标不再问）、“拒绝”或“取消”（结束本轮），可附说明；
- * 卡片本身获得焦点时 Enter 确认、Esc 拒绝（焦点在按钮、链接或说明框上时不拦截，免得 Tab 到“拒绝”按 Enter
- * 却成了确认）。平台关闭“信任本会话”时不给“本会话内同意”。请求进行中按钮都不可再点，防止重复提交；决定后显示结果。
- * 被权限、会话模式或平台策略拦下时不给按钮，只说明怎样才能做。服务端仍校验只有本人能决定（已决定的返回 409）。
- * 经过自动审查的卡片显示审查结论（已通过、驳回或交给人）与理由。
+ * 待审批时从窄到宽：“允许这一次”、“本会话内不再询问「工具」”（服务端给出 `sessionAllow` 时才有；整个工具在本会话
+ * 内不再问，可在会话设置里撤销）、“拒绝”（先展开说明框“告诉助手怎么做”，再提交）。取消本轮交给输入框的停止键。
+ * 卡片本身获得焦点时 Enter 允许这一次、Esc 展开拒绝说明（焦点在按钮、链接或说明框上时不拦截，免得 Tab 到
+ * “拒绝”按 Enter 却成了确认）；说明框里 Enter 提交拒绝、Esc 收起。请求进行中按钮都不可再点，防止重复提交；
+ * 决定后显示结果，因本会话放行而自动执行的卡片注明这一点。被权限、会话模式或平台策略拦下时不给按钮，只说明
+ * 怎样才能做。服务端仍校验只有本人能决定（已决定的返回 409）。经过自动审查的卡片显示审查结论与理由；审查
+ * 建议拒绝的卡片仍待本人决定；自动审查模式下没有送审的卡片说明原因。
  */
 defineOptions({ name: 'AgentApprovalCard' })
-const {
-  item,
-  readonly = false,
-  trust = true,
-} = defineProps<{
+const { item, readonly = false } = defineProps<{
   item: Extract<AgentItemVo, { kind: 'approval' }>
   /** 分享的只读快照：只看不操作 */
   readonly?: boolean
-  /** 是否提供“本会话内同意”（系统参数 agent.trust_mode） */
-  trust?: boolean
 }>()
 const emit = defineEmits<{ decided: [] }>()
-const { t } = useI18n()
+const { t, te } = useI18n()
 
-const DECISIONS = computed<{ value: Decision; primary?: boolean }[]>(() => [
-  { value: 'approve', primary: true },
-  ...(trust && !item.payload.perCallConfirmation ? [{ value: 'approve_session' as const }] : []),
-  { value: 'reject' },
-  { value: 'cancel' },
-])
+const tool = computed(() => toolTitle(item.payload.tool, item.payload.title))
+/** 逐次本人确认的操作永远不给“本会话内不再询问”，即使服务端误给了 sessionAllow */
+const sessionAllow = computed(
+  () => !!item.payload.sessionAllow && !item.payload.perCallConfirmation,
+)
 const note = ref('')
+const noteBox = ref<{ focus: () => void }>()
+/** 正在写拒绝说明：说明框展开，提交后才真正拒绝 */
+const rejecting = ref(false)
 const pending = ref<Decision | null>(null)
 /** 本页已提交成功、等待服务端推送新状态的决定 */
 const sent = ref<Decision | null>(null)
@@ -56,16 +54,27 @@ const open = computed(() => !readonly && item.status === 'pending' && !sent.valu
 const decided = computed(() => item.payload.decision ?? sent.value)
 /**
  * 自动审查的结论（通过、驳回或交给人）与理由；理由只当文字显示。放行与驳回的理由是审查模型写的，注明
- * “审查模型的说法”；交给人的说明可能是系统自己的（出错、超时、额度），只写“说明”。
+ * “审查模型的说法”；交给人的说明可能是系统自己的（出错、超时、额度），只写“说明”。驳回但仍待本人决定时
+ * 写“建议拒绝”。
  */
 const review = computed(() => (item.payload.auto?.by === 'review' ? item.payload.auto : null))
+const reviewTitle = computed(() =>
+  review.value?.verdict === 'reject' && item.status === 'pending'
+    ? t('agent.review.card.rejectPending')
+    : t(`agent.review.card.${review.value?.verdict}`),
+)
+/** 未送审的原因：服务端可能新增原因码，本页不认识的用通用说明 */
+const unreviewedText = computed(() => {
+  const key = `agent.review.card.unreviewed.${item.payload.unreviewed}`
+  return te(key) ? t(key) : t('agent.review.card.unreviewed.other')
+})
 
-/** 提交决定；失败时恢复可点，成功后交给页面补齐最新状态。 */
+/** 提交决定；失败时恢复可点，成功后交给页面补齐最新状态。只有拒绝带说明。 */
 async function decide(decision: Decision) {
   if (!open.value || pending.value) return
   pending.value = decision
   try {
-    const text = note.value.trim()
+    const text = decision === 'reject' ? note.value.trim() : ''
     const token = item.payload.confirmationToken
     await agentApi.decide(item.id, {
       decision,
@@ -81,6 +90,13 @@ async function decide(decision: Decision) {
     pending.value = null
   }
 }
+/** 展开拒绝说明框并把焦点放进去。 */
+async function startReject() {
+  if (!open.value || pending.value) return
+  rejecting.value = true
+  await nextTick()
+  noteBox.value?.focus()
+}
 /** 只处理卡片本身的按键：按钮、链接与说明框上的 Enter / Esc 保持原来的行为。 */
 function onKey(e: KeyboardEvent) {
   if (e.isComposing || e.target !== e.currentTarget) return
@@ -89,7 +105,19 @@ function onKey(e: KeyboardEvent) {
     void decide('approve')
   } else if (e.key === 'Escape') {
     e.preventDefault()
+    void startReject()
+  }
+}
+/** 说明框里 Enter 提交拒绝、Esc 收起说明框（输入法组字时不处理）。 */
+function onNoteKey(e: KeyboardEvent) {
+  if (e.isComposing) return
+  if (e.key === 'Enter') {
+    e.preventDefault()
     void decide('reject')
+  } else if (e.key === 'Escape') {
+    e.preventDefault()
+    e.stopPropagation()
+    rejecting.value = false
   }
 }
 </script>
@@ -116,7 +144,7 @@ function onKey(e: KeyboardEvent) {
     </header>
     <dl class="agent-card__fields">
       <dt>{{ t('agent.chat.approval.tool') }}</dt>
-      <dd>{{ toolTitle(item.payload.tool, item.payload.title) }}</dd>
+      <dd>{{ tool }}</dd>
       <template v-if="item.payload.changes">
         <dt>{{ t('agent.chat.approval.target') }}</dt>
         <dd>{{ item.payload.changes.target }}</dd>
@@ -160,11 +188,19 @@ function onKey(e: KeyboardEvent) {
       :class="`agent-approval__review--${review.verdict}`"
       role="status"
     >
-      <strong>{{ t(`agent.review.card.${review.verdict}`) }}</strong>
+      <strong>{{ reviewTitle }}</strong>
       <span class="agent-approval__review-said">{{
         t(review.verdict === 'escalate' ? 'agent.review.card.note' : 'agent.review.card.said')
       }}</span>
       <span>{{ review.reason }}</span>
+    </p>
+    <p
+      v-else-if="item.payload.unreviewed"
+      class="agent-approval__review agent-approval__review--escalate"
+      role="status"
+    >
+      <strong>{{ t('agent.review.card.unreviewed.title') }}</strong>
+      <span>{{ unreviewedText }}</span>
     </p>
     <el-alert
       v-if="blocked"
@@ -177,28 +213,56 @@ function onKey(e: KeyboardEvent) {
         })
       "
     />
-    <template v-else-if="open">
+    <template v-else-if="open && rejecting">
       <el-input
+        ref="noteBox"
         v-model="note"
         :aria-label="t('agent.chat.approval.note')"
         :placeholder="t('agent.chat.approval.note')"
         maxlength="500"
         :disabled="!!pending"
+        @keydown="onNoteKey"
       />
       <div class="agent-card__actions">
-        <span class="agent-card__meta">{{ t('agent.chat.approval.keys') }}</span>
+        <span class="agent-card__meta">{{ t('agent.chat.approval.noteKeys') }}</span>
+        <el-button :disabled="!!pending" @click="rejecting = false">
+          {{ t('agent.chat.approval.back') }}
+        </el-button>
         <el-button
-          v-for="d in DECISIONS"
-          :key="d.value"
-          :type="d.primary ? 'primary' : undefined"
-          :loading="pending === d.value"
+          type="danger"
+          :loading="pending === 'reject'"
           :disabled="!!pending"
-          @click="decide(d.value)"
+          @click="decide('reject')"
         >
-          {{ t(`agent.chat.approval.action.${d.value}`) }}
+          {{ t('agent.chat.approval.action.reject') }}
         </el-button>
       </div>
     </template>
+    <div v-else-if="open" class="agent-card__actions">
+      <span class="agent-card__meta">{{ t('agent.chat.approval.keys') }}</span>
+      <el-button
+        type="primary"
+        :loading="pending === 'approve'"
+        :disabled="!!pending"
+        @click="decide('approve')"
+      >
+        {{ t('agent.chat.approval.action.approve') }}
+      </el-button>
+      <el-button
+        v-if="sessionAllow"
+        :loading="pending === 'approve_session'"
+        :disabled="!!pending"
+        @click="decide('approve_session')"
+      >
+        {{ t('agent.chat.approval.action.approve_session', { tool }) }}
+      </el-button>
+      <el-button :disabled="!!pending" @click="startReject">
+        {{ t('agent.chat.approval.action.reject') }}
+      </el-button>
+    </div>
+    <p v-else-if="item.payload.allowedBy === 'session'" class="agent-card__meta" role="status">
+      {{ t('agent.chat.approval.allowedBySession') }}
+    </p>
     <p v-else-if="item.payload.decidedAt || item.payload.note" class="agent-card__meta">
       <span v-if="item.payload.decidedAt">{{
         dayjs(item.payload.decidedAt).format('YYYY-MM-DD HH:mm')

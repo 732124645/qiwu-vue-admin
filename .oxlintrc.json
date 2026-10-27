@@ -93,7 +93,8 @@
         "apps/server/test/db/db-migrations.spec.ts",
         "apps/server/test/db/tenancy-harden.spec.ts",
         "apps/server/test/db/agent-credits-migration.spec.ts",
-        "apps/server/test/db/agent-recovery-migration.spec.ts"
+        "apps/server/test/db/agent-recovery-migration.spec.ts",
+        "apps/server/test/db/agent-modes-migration.spec.ts"
       ],
       "rules": {
         "vitest/no-standalone-expect": [

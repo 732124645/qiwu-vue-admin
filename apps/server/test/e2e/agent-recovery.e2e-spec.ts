@@ -505,7 +505,8 @@ it('publishes only committed prefixes with offsets and revisions, and rejects st
 })
 
 it('stops a recovered uncertain write, retains the evidence and expires previously queued intent', async () => {
-  const { thread, turn } = await makeTurn({ approvalMode: 'trust' })
+  // the tool allowed for the thread does not get past the recovery stop either
+  const { thread, turn } = await makeTurn({ trusted: ['1#test.changed.write'] })
   await tenant(() =>
     store.append(
       Number(thread.id),

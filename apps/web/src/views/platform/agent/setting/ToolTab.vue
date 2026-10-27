@@ -13,9 +13,11 @@ import { toolTitle, toolPermission, toolDescription } from '../tool-presentation
 import { useList } from './use-list'
 
 /**
- * “工具策略”标签：本系统工具、内置联网工具与智能体内置工具的审批策略。写入工具只能“询问”、“自动审查”
- * 或“禁用”，从不自动执行；改过的可恢复为按类型的默认（只读自动、写入询问）。内置工具在这里启停（本系统
- * 其他工具在 MCP 工具页）。只有 root 能改，其他人只读。
+ * “工具策略”标签：本系统工具、内置联网工具与智能体内置工具的审批策略。读取工具可“直接执行”、“需确认”
+ * （读取不送自动审查）或“停用”；
+ * 写入工具只能“需确认”（自动审查模式下先交审查模型）、“仅人工确认”（永不送审，也不能本会话放行）或“停用”，
+ * 从不无条件执行；每个选项下有一行说明。改过的可恢复为按类型的默认。内置工具在这里启停（本系统其他工具在
+ * MCP 工具页）。只有 root 能改，其他人只读。
  */
 defineOptions({ name: 'AgentToolTab' })
 const { t } = useI18n()
@@ -36,9 +38,17 @@ const columns: QwColumn[] = [
   { prop: 'policy', label: 'agent.admin.tool.policy', width: 150 },
   { prop: 'enabled', label: 'agent.admin.tool.enabled', width: 90 },
 ]
-/** 一个工具可选的策略：写入工具不提供“自动”，“自动审查”只给写入工具。 */
-const toolPolicies = (tool: Pick<AgentToolVo, 'kind'>): AgentToolPolicy[] =>
-  tool.kind === 'write' ? ['ask', 'review', 'deny'] : ['auto', 'ask', 'deny']
+/**
+ * 一个工具可选的策略：读取工具可直接执行、需确认（不送自动审查）或停用，写入工具从不直接执行。
+ * 服务端标记 `humanOnly` 的工具只给“仅人工确认”与“停用”：运行时对它们除停用外总按仅人工确认处理，
+ * 给出“需确认”会让页面与实际行为不符。
+ */
+const toolPolicies = (tool: Pick<AgentToolVo, 'kind' | 'humanOnly'>): AgentToolPolicy[] => {
+  if (tool.humanOnly) return ['human', 'deny']
+  return tool.kind === 'write' ? ['ask', 'human', 'deny'] : ['auto', 'ask', 'deny']
+}
+/** 顶部图例：每种策略一行说明 */
+const LEGEND: AgentToolPolicy[] = ['auto', 'ask', 'human', 'deny']
 /** 正在保存的工具名：其控件加载并禁用 */
 const busy = ref<string>()
 
@@ -74,6 +84,15 @@ async function setEnabled(row: AgentToolVo, enabled: boolean) {
 <template>
   <div>
     <p v-if="!auth.platformRoot" class="agent-setting__hint">{{ t('agent.admin.rootOnly') }}</p>
+    <div class="agent-setting__hint">
+      <p class="tool-tab__note">{{ t('agent.admin.policy.note') }}</p>
+      <ul class="tool-tab__legend">
+        <li v-for="p in LEGEND" :key="p">
+          <strong>{{ t(`agent.admin.policy.${p}`) }}</strong
+          >{{ t('agent.admin.policy.sep') }}{{ t(`agent.admin.policyHint.${p}`) }}
+        </li>
+      </ul>
+    </div>
     <TableToolbar table-id="agent.tool" :columns="columns" :searchable="false" @refresh="refresh" />
     <QwTable
       table-id="agent.tool"
@@ -113,6 +132,7 @@ async function setEnabled(row: AgentToolVo, enabled: boolean) {
             :key="p"
             :value="p"
             :label="t(`agent.admin.policy.${p}`)"
+            :title="t(`agent.admin.policyHint.${p}`)"
           />
         </el-select>
       </template>
@@ -160,5 +180,13 @@ async function setEnabled(row: AgentToolVo, enabled: boolean) {
 }
 .tool-tab__policy {
   width: 120px;
+}
+.tool-tab__note {
+  margin: 0 0 4px;
+}
+.tool-tab__legend {
+  margin: 0;
+  padding-left: 18px;
+  line-height: 20px;
 }
 </style>

@@ -1,5 +1,5 @@
 // The pure parts of the turn engine: the history sent to the model, the follow-up suggestions, the
-// approval policy, the trust key and the attachments of a user message.
+// approval policy, session allowances and the attachments of a user message.
 import type { ResolvedAttachment } from '../agent-ports.js'
 import {
   contextMessage,
@@ -13,8 +13,8 @@ import {
   transcript,
   userContent,
 } from './turn-prompt.js'
-import { effectivePolicy as policyOf } from '../tools/tool-policy.js'
-import { isTrusted, parseTrust, trustEntry, trustKey } from './turn-tools.js'
+import { allowedPolicy, effectivePolicy as policyOf } from '../tools/tool-policy.js'
+import { allowedTools, allowEntry, isAllowed, parseAllow } from './turn-tools.js'
 
 let seq = 0
 const item = (kind: string, payload: object, status: string | null = null): PromptItem => ({
@@ -230,41 +230,36 @@ describe('reasoning, broken arguments, summaries', () => {
 })
 
 describe('approval policy', () => {
-  it('reads auto and writes ask by default; a write is never auto', () => {
+  it('reads are auto unless denied; a write asks by default, a high-risk one only a person confirms', () => {
     expect(policyOf('read', null)).toBe('auto')
+    expect(policyOf('read', 'ask')).toBe('ask')
+    expect(policyOf('read', 'human')).toBe('auto')
+    expect(policyOf('read', 'deny')).toBe('deny')
     expect(policyOf('write', null)).toBe('ask')
     expect(policyOf('write', 'auto')).toBe('ask')
+    expect(policyOf('write', 'human')).toBe('human')
     expect(policyOf('write', 'deny')).toBe('deny')
-    expect(policyOf('read', 'ask')).toBe('ask')
+    expect(policyOf('write', null, true)).toBe('human')
+    expect(policyOf('write', 'auto', true)).toBe('human')
+    expect(policyOf('write', 'ask', true)).toBe('ask')
   })
 
-  it('trusts a tool on the previewed target, else the id, else the exact arguments', () => {
-    expect(trustKey('t.a.b', { id: 3, x: 1 }, 'note:3')).toBe('t.a.b|note:3')
-    expect(trustKey('t.a.b', { id: 3, x: 1 })).toBe('t.a.b|id:3')
-    expect(trustKey('t.a.b', { b: 1, a: 2 })).toBe(trustKey('t.a.b', { a: 2, b: 1 }))
-    expect(trustKey('t.a.b', { a: 1 })).not.toBe(trustKey('t.a.b', { a: 2 }))
+  it('accepts only the policies of the kind', () => {
+    const all = ['auto', 'ask', 'human', 'deny'] as const
+    expect(all.filter((x) => allowedPolicy('read', x))).toEqual(['auto', 'ask', 'deny'])
+    expect(all.filter((x) => allowedPolicy('write', x))).toEqual(['ask', 'human', 'deny'])
   })
 
-  it('keys long arguments on a hash of all of them, and an external tool always on its arguments', () => {
-    const pad = 'x'.repeat(600)
-    const a = trustKey('t.a.b', { a: pad, b: 1 })
-    expect(a).toMatch(/^t\.a\.b\|sha256:[0-9a-f]{64}$/)
-    // the arguments differ only past the first 500 characters: still two different keys
-    expect(a).not.toBe(trustKey('t.a.b', { a: pad, b: 2 }))
-    // an external server decides what its `id` means: the same id with other arguments is another call
-    expect(trustKey('ext.s.w', { id: 1, op: 'read' }, undefined, true)).not.toBe(
-      trustKey('ext.s.w', { id: 1, op: 'drop' }, undefined, true),
-    )
-    expect(trustKey('ext.s.w', { id: 1 }, undefined, true)).toMatch(/\|sha256:/)
-  })
-
-  it('stores a trust with the turn that recorded it; old entries without a turn still match', () => {
-    const e = trustEntry(42, 't.a.b|id:3')
-    expect(parseTrust(e)).toEqual({ turnId: 42, key: 't.a.b|id:3' })
-    expect(isTrusted([e], 't.a.b|id:3')).toBe(true)
-    expect(isTrusted([e], 't.a.b|id:4')).toBe(false)
-    expect(parseTrust('t.a.b|id:3')).toEqual({ turnId: null, key: 't.a.b|id:3' })
-    expect(isTrusted(null, 'x')).toBe(false)
+  it('stores a session allowance with the turn that recorded it, by tool name', () => {
+    const e = allowEntry(42, 'demo.customer.update')
+    expect(parseAllow(e)).toEqual({ turnId: 42, tool: 'demo.customer.update' })
+    expect(isAllowed([e], 'demo.customer.update')).toBe(true)
+    expect(isAllowed([e], 'demo.book.create')).toBe(false)
+    expect(parseAllow('ext.s.w')).toEqual({ turnId: null, tool: 'ext.s.w' })
+    expect(
+      allowedTools([e, allowEntry(43, 'demo.customer.update'), allowEntry(43, 'ext.s.w')]),
+    ).toEqual(['demo.customer.update', 'ext.s.w'])
+    expect(isAllowed(null, 'x')).toBe(false)
   })
 })
 

@@ -8,7 +8,6 @@ import {
   AGENT_LIMIT_PARAMS,
   agentCreditAmount,
   AGENT_PAUSED_PARAM,
-  AGENT_TRUST_MODE_PARAM,
   AGENT_WEB_DOMAINS_PARAM,
   AGENT_WEB_MODE_PARAM,
   AUDIT_RETENTION_PARAM,
@@ -64,7 +63,7 @@ const shown = (p: Parameter): Parameter =>
 /**
  * Sign-up switch, role and dept, the WeChat sign-in switch, the audit retention and the agent access
  * stop switch (`mcp.paused`: an emergency stop for every tenant), the in-app agent's stop switch, limits,
- * trust mode, platform instructions, web settings, the auto-review model, the memory params and the research
+ * platform instructions, web settings, the auto-review model, the memory params and the research
  * limits (they bound every tenant's cost and safety) are root-managed,
  * root being the platform's super admin only (403 `grant_exceeds_own`; see docs/design-notes.md#permissions,
  * #tenancy): the retention purge is the one way rows nobody may delete (tenant enter / leave) go.
@@ -82,9 +81,10 @@ const ROOT_ONLY: ReadonlySet<unknown> = new Set([
   'agent.limit.turn_tokens',
   'agent.limit.user_daily_tokens',
   'agent.limit.tenant_daily_tokens',
+  // 已退役的会话信任开关：回退到旧版本时它又会生效，仍只许 root 改
+  'agent.trust_mode',
   AGENT2_PARAMS.automationsPerUser,
   AGENT2_PARAMS.automationRunsPerDay,
-  AGENT_TRUST_MODE_PARAM,
   AGENT_INSTRUCTIONS_PARAM,
   AGENT_WEB_MODE_PARAM,
   AGENT_WEB_DOMAINS_PARAM,

@@ -203,7 +203,6 @@ export class AgentSubagents {
               model: parent.model,
               reasoning: parent.reasoning,
               approvalMode: 'read_only',
-              planMode: false,
               memoryEnabled: false,
               parentThreadId: Number(parent.id),
               targetRef: key,

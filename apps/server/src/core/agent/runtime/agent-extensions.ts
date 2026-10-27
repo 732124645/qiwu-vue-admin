@@ -22,7 +22,7 @@ import {
   type AgentRunThread,
 } from '../agent-ports.js'
 import type { AgentThread } from '../entities/agent-thread.entity.js'
-import { planInput } from './turn-tools.js'
+import { planInput, readOnlyMode } from './turn-tools.js'
 
 /** 一段上下文最多交给模型这么多字符（超出截断）。 */
 export const CONTEXT_PART_MAX = 20_000
@@ -42,8 +42,7 @@ export function runThread(t: AgentThread): AgentRunThread {
   return {
     id: Number(t.id),
     mode: t.approvalMode,
-    planMode: t.planMode,
-    readOnly: t.approvalMode === 'read_only' || t.planMode,
+    readOnly: readOnlyMode(t.approvalMode),
     memoryEnabled: t.memoryEnabled,
     profileId: t.profileId === null ? null : Number(t.profileId),
     parentThreadId: t.parentThreadId === null ? null : Number(t.parentThreadId),

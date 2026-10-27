@@ -1,7 +1,10 @@
-import { Injectable } from '@nestjs/common'
+import { Injectable, Logger } from '@nestjs/common'
 import { TransactionHost } from '@nestjs-cls/transactional'
 import type { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm'
 import {
+  AGENT_PROVIDER_MODELS_MAX,
+  type AgentProviderModelsQuery,
+  type AgentProviderModelsVo,
   type AgentProviderSave,
   type AgentProviderVo,
   type AgentSearchProviderSave,
@@ -9,6 +12,7 @@ import {
   Err,
 } from '@qiwu/shared'
 import { type FindOptionsWhere, In, Not, type ObjectLiteral } from 'typeorm'
+import { z } from 'zod'
 import type { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity.js'
 import { AppConfigService } from '../../config/config.module.js'
 import { deriveKey, open, type Sealed, seal } from '../../crypto/secret-box.js'
@@ -21,6 +25,13 @@ import { AgentProvider, AgentSearchProvider } from './provider.entity.js'
  * 换了标签或 APP_SECRET 旧密文就打不开，要重新填密钥。
  */
 const KEY_INFO = 'qw:agent-provider-key:v1'
+
+/** 拉取模型清单的总超时：只是表单里的一次查询，不重试 */
+const MODELS_TIMEOUT_MS = 10_000
+/** OpenAI 兼容的 `GET /models` 应答；其他字段忽略 */
+const modelsWire = z.object({
+  data: z.array(z.object({ id: z.string(), owned_by: z.string().optional().catch(undefined) })),
+})
 
 type Keyed = ObjectLiteral & {
   id: number
@@ -150,6 +161,109 @@ export class ProviderSettingsService extends KeyedSettings<AgentProvider> {
     await this.remove([id])
     return null
   }
+
+  /**
+   * 从服务商的 `GET {baseUrl}/models` 读可用模型，供表单勾选添加，不写任何数据。
+   * 密钥来源（安全关键）：请求里填了 `apiKey` 就用它；否则只有 `id` 指向已保存的提供方、且 `baseUrl`
+   * 与已保存的地址完全一致时才解出已保存的密钥。地址改了而又没填新密钥时拒绝（AGENT_KEY_REQUIRED），
+   * 绝不把已保存的密钥发到别的地址，否则改个地址就能把密钥送到自己的服务器上。没有密钥的提供方
+   * （本地 Ollama）不带 Authorization。密钥不进日志、不进应答。
+   */
+  async upstreamModels(dto: AgentProviderModelsQuery): Promise<AgentProviderModelsVo> {
+    let key = dto.apiKey || null
+    if (!key && dto.id !== undefined) {
+      const stored = await this.rowWithKey(dto.id)
+      if (stored.apiKey && stored.baseUrl !== dto.baseUrl)
+        throw new BizError(Err.AGENT_KEY_REQUIRED)
+      key = this.openKey(stored)
+    }
+    const items = new Map<string, string | undefined>()
+    for (const m of await fetchModels(dto.baseUrl, key)) {
+      const id = m.id.trim()
+      // 存不进模型清单的 id（空、超长）不给出
+      if (id && id.length <= 128 && !items.has(id)) items.set(id, m.owned_by || undefined)
+    }
+    return {
+      items: [...items]
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .slice(0, AGENT_PROVIDER_MODELS_MAX)
+        .map(([id, ownedBy]) => (ownedBy ? { id, ownedBy } : { id })),
+    }
+  }
+}
+
+const logger = new Logger(ProviderSettingsService.name)
+
+/** 上游模型清单最多读这么多字节：超出按服务没有正常应答处理，不把任意大的正文读进内存。 */
+const MODELS_MAX_BYTES = 2 * 1024 * 1024
+
+/**
+ * 按上限读出正文（声明的长度或实际读到的超过上限就停下并取消读取）：超出为 undefined。只在超出时提前结束，
+ * 不信任 Content-Length（可能缺失或不实）。
+ */
+async function readCapped(res: Response, max: number): Promise<string | undefined> {
+  if (Number(res.headers.get('content-length')) > max) {
+    await res.body?.cancel().catch(() => undefined)
+    return undefined
+  }
+  if (!res.body) return ''
+  const reader = res.body.getReader()
+  const chunks: Uint8Array[] = []
+  let size = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    size += value.byteLength
+    if (size > max) {
+      await reader.cancel().catch(() => undefined)
+      return undefined
+    }
+    chunks.push(value)
+  }
+  return Buffer.concat(chunks).toString('utf8')
+}
+
+/**
+ * 请求 `GET {baseUrl}/models`：短超时、不重试、不跟随重定向（重定向会把 Authorization 带到别处）。
+ * 失败只给简短原因、不回显上游正文（可能含密钥片段）：401/403 是密钥被拒，其余是服务没有正常应答。
+ */
+async function fetchModels(baseUrl: string, key: string | null) {
+  let res: Response
+  try {
+    res = await fetch(`${baseUrl.replace(/\/+$/, '')}/models`, {
+      headers: { Accept: 'application/json', ...(key && { Authorization: `Bearer ${key}` }) },
+      redirect: 'manual',
+      signal: AbortSignal.timeout(MODELS_TIMEOUT_MS),
+    })
+  } catch (e) {
+    const reason = e instanceof Error && e.name === 'TimeoutError' ? 'timeout' : 'network'
+    logger.warn(`model list failed: ${reason}`)
+    throw new BizError(Err.AGENT_PROVIDER_FAILED, { reason })
+  }
+  if (res.status === 401 || res.status === 403) {
+    logger.warn(`model list failed: http_${res.status}`)
+    throw new BizError(Err.AGENT_PROVIDER_KEY_REJECTED)
+  }
+  let body: unknown = null
+  if (res.ok) {
+    const text = await readCapped(res, MODELS_MAX_BYTES).catch(() => null)
+    if (text === undefined) {
+      logger.warn('model list failed: too_large')
+      throw new BizError(Err.AGENT_PROVIDER_FAILED, { reason: 'too_large' })
+    }
+    try {
+      body = text === null ? null : JSON.parse(text)
+    } catch {
+      body = null
+    }
+  } else await res.body?.cancel().catch(() => undefined)
+  const parsed = modelsWire.safeParse(body)
+  if (!parsed.success) {
+    const reason = res.ok ? 'bad_response' : `http_${res.status}`
+    logger.warn(`model list failed: ${reason}`)
+    throw new BizError(Err.AGENT_PROVIDER_FAILED, { reason })
+  }
+  return parsed.data.data
 }
 
 /** 联网搜索服务商的平台配置（`/api/agent/search-providers`）。 */

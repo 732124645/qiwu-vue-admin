@@ -6,6 +6,7 @@ import type {
   AgentMessageSend,
   AgentNotifySettings,
   AgentOptionsVo,
+  AgentPlanDecide,
   AgentQuestionAnswer,
   AgentSkillVo,
   AgentStatusVo,
@@ -50,6 +51,9 @@ export const agentApi = {
   updateThread: (id: number, dto: AgentThreadUpdate) =>
     api.patch<AgentThreadVo>(`/agent/threads/${id}`, dto),
   removeThread: (id: number) => api.delete(`/agent/threads/${id}`),
+  /** 撤销本会话对一个工具的放行（之后它的写入重新逐次询问） */
+  revokeAllowedTool: (id: number, tool: string) =>
+    api.delete<AgentThreadVo>(`/agent/threads/${id}/allowed-tools/${encodeURIComponent(tool)}`),
   /** 复制到第 `seq` 条（含）为止的内容成为新会话 */
   fork: (id: number, seq: number, clientDraftId?: string) =>
     api.post<AgentThreadVo>(`/agent/threads/${id}/fork`, {
@@ -88,6 +92,8 @@ export const agentApi = {
   decide: (itemId: number, dto: AgentApprovalDecide) => api.post(`/agent/approvals/${itemId}`, dto),
   answer: (itemId: number, dto: Partial<AgentQuestionAnswer>) =>
     api.post(`/agent/questions/${itemId}`, dto),
+  /** 方案卡：批准并按所选模式执行，或继续完善（服务器切换模式并开始执行） */
+  decidePlan: (itemId: number, dto: AgentPlanDecide) => api.post(`/agent/plans/${itemId}`, dto),
 }
 
 /** /api/agent/notify-settings：本人的提醒设置（站内信总是发，每类提醒可另发邮件）。 */

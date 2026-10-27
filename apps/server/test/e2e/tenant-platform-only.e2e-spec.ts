@@ -311,6 +311,7 @@ describe('@PlatformOnly() on the routes', () => {
         'AgentPlatformSkillController.remove',
         'AgentPlatformSkillController.update',
         'AgentProviderController.create',
+        'AgentProviderController.models',
         'AgentProviderController.remove',
         'AgentProviderController.update',
         'AgentSearchProviderController.create',

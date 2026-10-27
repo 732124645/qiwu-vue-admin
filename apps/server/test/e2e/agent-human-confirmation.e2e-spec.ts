@@ -347,15 +347,13 @@ describe('per-call human confirmation', () => {
     expect(written).toHaveLength(0)
   })
 
-  it('ignores session trust and requires a fresh personal card for each call', async () => {
+  it('ignores a session allowance and requires a fresh personal card for each call', async () => {
     script({ toolCalls: [call()] }, { toolCalls: [call()] }, { text: 'Done.' })
-    const t = await begin({
-      approval_mode: 'trust',
-      trusted: [`${NAME}|id:7`, `${NAME}|Request (#7)`],
-    })
+    const t = await begin({ trusted: [`1#${NAME}`] })
     expect(await waitingOrEnded(t.turnId)).toBe('waiting')
     const first = await pending(t.id)
     expect(first.payload.perCallConfirmation).toBe(true)
+    expect(first.payload.sessionAllow).toBeUndefined()
     const visible = await http()
       .get(`/api/agent/threads/${t.id}/items`)
       .set(bearer(owner))
@@ -375,6 +373,23 @@ describe('per-call human confirmation', () => {
     expect(written[0]!.context?.confirmation?.preview.fields[0]!.to).toBe(1)
     await decide(first).expect(409)
     expect(written).toHaveLength(2)
+  })
+
+  it('a message while the personal card waits rejects it with the message as the note', async () => {
+    script({ toolCalls: [call()] }, { text: 'Left it.' })
+    const t = await begin()
+    expect(await waitingOrEnded(t.turnId)).toBe('waiting')
+    const card = await pending(t.id)
+    await http()
+      .post(`/api/agent/threads/${t.id}/messages`)
+      .set(bearer(owner))
+      .send({ text: 'not this one' })
+      .expect(201)
+    expect(await ended(t.turnId)).toBe('completed')
+    expect(written).toHaveLength(0)
+    const [after] = (await rows(t.id, 'approval')) as { status: string; payload: any }[]
+    expect([after!.status, after!.payload.note]).toEqual(['rejected', 'not this one'])
+    await decide(card).expect(409)
   })
 
   it('renews the token when model, attachment or permission facts changed before the click', async () => {
@@ -700,6 +715,48 @@ describe('per-call human confirmation', () => {
     expect(written).toHaveLength(0)
   })
 
+  it('refuses to consume an approved personal card once the thread is in plan or read-only mode', async () => {
+    for (const mode of ['plan', 'read_only']) {
+      script({ toolCalls: [call()] })
+      const t = await begin()
+      const card = await pending(t.id)
+      const held = vi.spyOn(app.get(TurnQueue), 'resume').mockResolvedValueOnce('skip')
+      await decide(card).expect(201)
+      held.mockRestore()
+      await ds.query("UPDATE agent_turn SET status = 'running' WHERE id = ? AND tenant_id = 1", [
+        t.turnId,
+      ])
+      await ds.query(
+        "UPDATE agent_item SET status = 'running' WHERE thread_id = ? AND kind = 'tool_call' AND tenant_id = 1",
+        [t.id],
+      )
+      await ds.query('UPDATE agent_thread SET approval_mode = ? WHERE id = ? AND tenant_id = 1', [
+        mode,
+        t.id,
+      ])
+      const p = await principal()
+      await expect(
+        inTenant1(() =>
+          app
+            .get(HumanConfirmation)
+            .claim(
+              p,
+              { threadId: t.id, turnId: t.turnId, callId: card.payload.callId },
+              card.id,
+              NAME,
+              card.payload.args,
+            ),
+        ),
+      ).rejects.toMatchObject({ err: Err.AGENT_APPROVAL_CLOSED })
+      const stored = (await rows(t.id, 'approval')).find((c) => c.id === card.id)!
+      expect([mode, stored.payload.internal.confirmation.consumedAt]).toEqual([mode, undefined])
+      await ds.query("UPDATE agent_turn SET status = 'cancelled' WHERE id = ? AND tenant_id = 1", [
+        t.turnId,
+      ])
+    }
+    expect(written).toHaveLength(0)
+  })
+
   it('skips automatic reviewers, excludes pre-approval and does not expose writes to children', async () => {
     const ext = app.get(AgentExtensions)
     const has = vi.spyOn(ext, 'hasReviewers').mockReturnValue(true)
@@ -708,7 +765,7 @@ describe('per-call human confirmation', () => {
       .mockResolvedValue({ verdict: 'approve', by: 'review', reason: 'Approved automatically' })
     try {
       await ds.query(
-        "INSERT INTO cfg_mcp_tool (name, enabled, agent_policy) VALUES (?, 1, 'review')",
+        "INSERT INTO cfg_mcp_tool (name, enabled, agent_policy) VALUES (?, 1, 'ask')",
         [NAME],
       )
       script({ toolCalls: [call()] }, { text: 'Not written.' })

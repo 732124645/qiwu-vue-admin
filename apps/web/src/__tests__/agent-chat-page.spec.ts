@@ -55,7 +55,7 @@ const thread = (id: number, p: Partial<AgentThreadVo> = {}): AgentThreadVo => ({
   model: 'm1',
   reasoning: null,
   approvalMode: 'ask',
-  planMode: false,
+  allowedTools: [],
   pinned: false,
   temporary: false,
   unread: 0,
@@ -128,12 +128,11 @@ const OPTIONS: AgentOptionsVo = {
     { name: 'fill-customer', description: 'Fill in customer details', scope: 'platform' },
     { name: 'report', description: 'Weekly report', scope: 'user' },
   ],
-  approvalModes: ['read_only', 'ask', 'trust'],
+  approvalModes: ['read_only', 'plan', 'ask', 'auto_review'],
   webSearch: true,
   paused: false,
   starters: ['Summarize this month', 'Find customers without a phone'],
   prompts: [{ id: 1, name: 'Weekly', body: 'Write the weekly report for {team}' }],
-  trustSession: true,
   servers: [],
   tone: 'default',
 }
@@ -433,7 +432,6 @@ describe('conversation', () => {
     expect(body(sent(calls, 'post', '/agent/threads')[0])).toEqual({
       clientDraftId: expect.any(String),
       approvalMode: 'ask',
-      planMode: false,
       providerId: 1,
       model: 'm1',
       context: {
@@ -1101,12 +1099,65 @@ describe('composer extras', () => {
     })
     expect(w.findComponent(FileUpload).exists()).toBe(false)
 
-    const plan = w.find('.agent-composer__plan')
-    expect(plan.find('input').attributes('aria-checked')).toBe('false')
-    await plan.trigger('click')
+    // Shift+Tab in the message box cycles the modes the platform offers and announces the new one
+    const announce = () => w.find('.agent-composer__announce').text()
+    await key('Tab', { shiftKey: true })
+    expect(body(sent(calls, 'patch', '/agent/threads/7').at(-1))).toMatchObject({
+      approvalMode: 'auto_review',
+    })
+    expect(announce()).toBe('Mode: Auto review')
+    await key('Tab', { shiftKey: true })
+    expect(body(sent(calls, 'patch', '/agent/threads/7').at(-1))).toMatchObject({
+      approvalMode: 'read_only',
+    })
+    expect(announce()).toBe('Mode: Read only')
+    // /plan toggles plan mode through the same selector
+    await type('/plan')
+    await key('Enter')
+    expect(body(sent(calls, 'patch', '/agent/threads/7').at(-1))).toMatchObject({
+      approvalMode: 'plan',
+    })
+  })
+
+  it('the mode selector lists only the modes the platform offers, one at a time; Shift+Tab with one mode does nothing', async () => {
+    const calls = mockApi({
+      ...BASE,
+      'GET /agent/options': ok({ ...OPTIONS, approvalModes: ['plan', 'ask'] }),
+      'GET /agent/threads/7/items': ok({ thread: thread(7), items: ITEMS, turn: turn() }),
+      'PATCH /agent/threads/7': (c) => ok(thread(7, JSON.parse(String(c.data)) as object)),
+    })
+    await show()
+    await open()
+    const select = w.find('.agent-composer__mode')
+    await select.find('.el-select__wrapper').trigger('click')
     await flushPromises()
-    expect(body(sent(calls, 'patch', '/agent/threads/7').at(-1))).toMatchObject({ planMode: true })
-    expect(plan.find('input').attributes('aria-checked')).toBe('true')
+    const listbox = select.find('input').attributes('aria-controls')!
+    expect(
+      [...document.querySelectorAll(`#${listbox} .el-select-dropdown__item`)].map((o) =>
+        o.textContent?.trim(),
+      ),
+    ).toEqual(['Plan', 'Ask every time'])
+    expect(
+      document.querySelector(`#${listbox} .el-select-dropdown__item`)!.getAttribute('title'),
+    ).toBe(i18n.global.t('agent.chat.modeHint.plan'))
+    await key('Tab', { shiftKey: true })
+    expect(body(sent(calls, 'patch', '/agent/threads/7').at(-1))).toMatchObject({
+      approvalMode: 'plan',
+    })
+    await key('Tab', { shiftKey: true })
+    expect(body(sent(calls, 'patch', '/agent/threads/7').at(-1))).toMatchObject({
+      approvalMode: 'ask',
+    })
+    w.unmount()
+    const one = mockApi({
+      ...BASE,
+      'GET /agent/options': ok({ ...OPTIONS, approvalModes: ['ask'] }),
+      'GET /agent/threads/7/items': ok({ thread: thread(7), items: ITEMS, turn: turn() }),
+    })
+    await show()
+    await open()
+    await key('Tab', { shiftKey: true })
+    expect(sent(one, 'patch', '/agent/threads/7')).toHaveLength(0)
   })
 
   it('inserts a prompt template with /prompts and recalls sent messages with Up and Down', async () => {
@@ -1194,7 +1245,7 @@ describe('live list, trust, plans and mentions', () => {
     expect(w.find('.agent-threads__unread').exists()).toBe(false)
   })
 
-  it('marks the log busy while a turn runs and hides "approve for this conversation" when the platform turns it off', async () => {
+  it('marks the log busy while a turn waits on a card; typing then warns that sending rejects it', async () => {
     const approval = item(
       5,
       3,
@@ -1204,7 +1255,6 @@ describe('live list, trust, plans and mentions', () => {
     )
     mockApi({
       ...BASE,
-      'GET /agent/options': ok({ ...OPTIONS, trustSession: false }),
       'GET /agent/threads/7/items': ok({
         thread: thread(7),
         items: [...ITEMS, approval],
@@ -1214,11 +1264,17 @@ describe('live list, trust, plans and mentions', () => {
     await show()
     await open()
     expect(w.find('[role="log"]').attributes('aria-busy')).toBe('true')
-    expect(button('Approve')).toBeDefined()
-    expect(button('Approve for this conversation')).toBeUndefined()
+    expect(button('Allow once')).toBeDefined()
+    // the card does not offer "don't ask again" without sessionAllow
+    expect(w.findAll('.agent-approval button').some((b) => b.text().startsWith('Don'))).toBe(false)
+    const hint = () => w.find('.agent-composer__reject-hint')
+    expect(hint().exists()).toBe(false)
+    await type('Use the other Acme')
+    expect(hint().text()).toBe(i18n.global.t('agent.chat.composer.rejectHint'))
     push({ threadId: 7, type: 'turn', turn: turn({ status: 'completed' }) })
     await flushPromises()
     expect(w.find('[role="log"]').attributes('aria-busy')).toBe('false')
+    expect(hint().exists()).toBe(false)
   })
 
   it('a follow-up suggestion sends only on an empty draft, otherwise joins the draft', async () => {
@@ -1250,31 +1306,162 @@ describe('live list, trust, plans and mentions', () => {
     })
   })
 
-  it('runs a finished plan: plan mode off first, then the localized go-ahead', async () => {
-    const order: string[] = []
+  it('a plan card is decided on the server; the page follows the new mode without saving it again', async () => {
+    const proposal = item(
+      3,
+      3,
+      'question',
+      {
+        callId: 'c1',
+        from: 'agent',
+        questions: [],
+        proposal: { title: 'Fix the phones', summary: 'Search, then update.', steps: ['Search'] },
+      },
+      'pending',
+    )
+    let decided = false
     const calls = mockApi({
       ...BASE,
       'GET /agent/threads/7/items': () =>
         ok({
-          thread: thread(7, { planMode: !order.includes('patch') }),
-          items: [ITEMS[0], item(2, 2, 'assistant', { text: '1. Search\n2. Update' }, 'done')],
+          thread: thread(7, { approvalMode: decided ? 'auto_review' : 'plan' }),
+          items: [ITEMS[0], item(2, 2, 'assistant', { text: '1. Search' }, 'done'), proposal],
           turn: turn(),
         }),
-      'PATCH /agent/threads/7': () => (order.push('patch'), ok(thread(7, { planMode: false }))),
-      'POST /agent/threads/7/messages': () => (order.push('send'), ok(turn())),
+      'POST /agent/plans/3': () => ((decided = true), ok(null)),
     })
     await show()
     await open()
-    await button('Run this plan')!.trigger('click')
+    // the old message-based "run" buttons are gone
+    expect(button('Run (ask every time)')).toBeUndefined()
+    await button('Approve, run with automatic review')!.trigger('click')
     await flushPromises()
-    expect(order).toEqual(['patch', 'send'])
-    expect(body(sent(calls, 'patch', '/agent/threads/7')[0])).toEqual({ planMode: false })
-    expect(body(sent(calls, 'post', '/agent/threads/7/messages')[0])).toEqual({
-      clientMessageId: expect.any(String),
-      text: 'Go ahead with the plan',
+    expect(body(sent(calls, 'post', '/agent/plans/3')[0])).toEqual({ decision: 'auto_review' })
+    expect(sent(calls, 'patch', '/agent/threads/7')).toHaveLength(0)
+    expect(sent(calls, 'post', '/agent/threads/7/messages')).toHaveLength(0)
+    expect(w.findComponent({ name: 'AgentComposer' }).props('settings')).toMatchObject({
+      approvalMode: 'auto_review',
     })
-    expect(w.find('.agent-composer__plan input').attributes('aria-checked')).toBe('false')
-    expect(button('Run this plan')).toBeUndefined()
+  })
+
+  it('follows a mode the server changed even when the catch-up after the decision is superseded', async () => {
+    const proposal = item(
+      3,
+      3,
+      'question',
+      {
+        callId: 'c1',
+        from: 'agent',
+        questions: [],
+        proposal: { title: 'Plan', summary: 'S', steps: ['A'] },
+      },
+      'pending',
+    )
+    let mode: AgentThreadVo['approvalMode'] = 'plan'
+    const pending: Array<() => void> = []
+    const calls = mockApi({
+      ...BASE,
+      'GET /agent/threads/7/items': async (c) => {
+        const all = (c.params as { afterSeq?: number } | undefined)?.afterSeq == null
+        const seen = mode
+        if (!all) await new Promise<void>((r) => pending.push(r))
+        return ok({
+          thread: thread(7, { approvalMode: seen }),
+          items: all ? [ITEMS[0], proposal] : [],
+          turn: turn(),
+        })
+      },
+      'POST /agent/plans/3': () => ok(null),
+      'PATCH /agent/threads/7': (c) =>
+        ok(thread(7, { approvalMode: mode, ...(JSON.parse(String(c.data)) as object) })),
+    })
+    await show()
+    await open()
+    const composer = () => w.findComponent({ name: 'AgentComposer' })
+    await button('Approve, confirm each change')!.trigger('click')
+    await flushPromises()
+    // the catch-up of the decision read the old mode; a delta for an unknown item supersedes it
+    mode = 'ask'
+    push({ threadId: 7, type: 'delta', itemId: 99, delta: 'x' })
+    await flushPromises()
+    expect(pending).toHaveLength(2)
+    pending[0]!()
+    await flushPromises()
+    pending[1]!()
+    await flushPromises()
+    expect(composer().props('settings')).toMatchObject({ approvalMode: 'ask' })
+    expect(sent(calls, 'patch', '/agent/threads/7')).toHaveLength(0)
+    composer().vm.$emit('update:settings', { ...composer().props('settings'), reasoning: 'high' })
+    await flushPromises()
+    expect(body(sent(calls, 'patch', '/agent/threads/7')[0])).toMatchObject({ approvalMode: 'ask' })
+  })
+
+  it('offers no automatic-review approval when the platform has no review model', async () => {
+    mockApi({
+      ...BASE,
+      'GET /agent/options': ok({ ...OPTIONS, approvalModes: ['read_only', 'plan', 'ask'] }),
+      'GET /agent/threads/7/items': ok({
+        thread: thread(7, { approvalMode: 'plan' }),
+        items: [
+          ITEMS[0],
+          item(
+            3,
+            3,
+            'question',
+            {
+              callId: 'c1',
+              from: 'agent',
+              questions: [],
+              proposal: { title: 'Fix', summary: 'Search.', steps: ['Search'] },
+            },
+            'pending',
+          ),
+        ],
+        turn: turn(),
+      }),
+    })
+    await show()
+    await open()
+    expect(button('Approve, confirm each change')).toBeDefined()
+    expect(button('Approve, run with automatic review')).toBeUndefined()
+  })
+
+  it('lists the tools allowed in this conversation and revokes one', async () => {
+    const allowed = thread(7, { allowedTools: ['demo.customer.update', 'mcp.crm/notes'] })
+    const calls = mockApi({
+      ...BASE,
+      'GET /agent/threads/7/items': ok({ thread: allowed, items: ITEMS, turn: turn() }),
+      'DELETE /agent/threads/7/allowed-tools/mcp.crm%2Fnotes': ok(
+        thread(7, { allowedTools: ['demo.customer.update'] }),
+      ),
+    })
+    await show()
+    await open()
+    await w.find('.agent-chat__settings-toggle').trigger('click')
+    await wait(10)
+    const rows = () => w.findAll('.agent-settings__allowed li')
+    expect(rows().map((r) => r.find('.agent-settings__name').text())).toEqual([
+      i18n.global.t('agent.tools.demo_customer_update.title'),
+      'mcp.crm/notes',
+    ])
+    await rows()[1]!.find('button').trigger('click')
+    await flushPromises()
+    expect(sent(calls, 'delete', '/agent/threads/7/allowed-tools/mcp.crm%2Fnotes')).toHaveLength(1)
+    expect(rows()).toHaveLength(1)
+  })
+
+  it('says so when nothing is allowed in this conversation', async () => {
+    mockApi({
+      ...BASE,
+      'GET /agent/threads/7/items': ok({ thread: thread(7), items: ITEMS, turn: turn() }),
+    })
+    await show()
+    await open()
+    await w.find('.agent-chat__settings-toggle').trigger('click')
+    await wait(10)
+    expect(w.find('.agent-settings').text()).toContain(
+      i18n.global.t('agent.chat.settings.allowedEmpty'),
+    )
   })
 
   it('saves the conversation as a skill draft and opens it on the skill page', async () => {
@@ -1535,7 +1722,7 @@ describe('work panel scope', () => {
 
 describe('embedded chat and subtasks', () => {
   it('preserves chosen model and approval mode when draft options arrive late', async () => {
-    const selected = { model: 'm2', approvalMode: 'read_only' as const, planMode: true }
+    const selected = { model: 'm2', approvalMode: 'plan' as const }
     const created = thread(9, selected)
     const calls = mockApi({
       ...BASE,

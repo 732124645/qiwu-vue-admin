@@ -155,6 +155,29 @@ describe('profiles', () => {
     expect(sent(calls, 'post', '/agent/profiles')[1]).toMatchObject({ tools: null })
   })
 
+  it('offers the platform modes; a tenant-shared profile cannot use auto review', async () => {
+    mockApi({ 'GET /mcp/my-tools': ok([]) })
+    await show(ProfileForm, {
+      canTenant: true,
+      options: { approvalModes: ['read_only', 'plan', 'ask', 'auto_review'], providers: [] },
+    })
+    const modeSelect = () =>
+      w
+        .findAllComponents({ name: 'ElSelect' })
+        .find((select) => select.props('ariaLabel') === t('field.agent.profile.approvalMode'))!
+    const labels = () =>
+      modeSelect()
+        .findAllComponents({ name: 'ElOption' })
+        .map((o) => o.props('label'))
+    expect(labels()).toEqual(['Read only', 'Plan', 'Ask every time', 'Auto review'])
+    modeSelect().vm.$emit('update:modelValue', 'auto_review')
+    await flushPromises()
+    await w.findAll('.el-radio')[1]!.find('input').setValue(true)
+    await flushPromises()
+    expect(labels()).toEqual(['Read only', 'Plan', 'Ask every time'])
+    expect(modeSelect().props('modelValue')).toBe('ask')
+  })
+
   it('allows other tool identifiers for a new profile without an administration request', async () => {
     const calls = mockApi({
       'GET /mcp/my-tools': ok([]),

@@ -19,10 +19,12 @@ import {
   clearHistory,
   mentionedSkill,
   mentionPrefix,
+  nextMode,
   pushHistory,
   skillOf,
   skillPrefix,
   slashMatches,
+  togglePlanMode,
   type SlashCommand,
 } from './thread-state'
 
@@ -32,7 +34,6 @@ export interface ComposerSettings {
   model: string | null
   reasoning: (typeof AGENT_REASONING)[number] | null
   approvalMode: AgentApprovalMode
-  planMode: boolean
 }
 
 /** 一次发送：文字、`$` 技能、已上传的附件，以及运行中时的发送方式。 */
@@ -49,7 +50,9 @@ export interface ComposerMessage {
  * 底部输入框：多行，Enter 发送、Shift+Enter 换行（输入法组字时不发送）；`$` 补全技能，整行 `/` 补全斜杠命令，
  * `@` 提及技能、外部服务器与当前页面带来的记录（插入可读的文字记号，模型直接读；提及技能同时作为本轮技能），
  * `/prompts` 与“提示词”菜单插入模板；↑/↓ 翻看本人发过的消息，Ctrl+R 搜索它们；附件（图片只给能看图的模型）；模型、
- * 快速档、推理强度、审批模式与计划模式（带状态的开关）放在输入框下的一条工具栏里，按键说明是工具栏下一行淡色提示；上下文用量；运行中可选“追加到当前步骤”或“排到下一轮”，
+ * 快速档、推理强度与会话模式（只读 / 计划 / 每次询问 / 自动审查，只列平台此刻提供的；输入框里 Shift+Tab 循环）
+ * 放在输入框下的一条工具栏里，按键说明是工具栏下一行淡色提示；上下文用量；运行中可选“追加到当前步骤”或“排到下一轮”，
+ * 等待确认时提示“发送即拒绝待确认的操作”（服务端把这句话作为拒绝说明并继续本轮）；
  * 输入框为空时按停止键（默认 Esc，可在页面自定义）停止本轮。发送按钮在请求进行中 loading 且不可再点，失败时文字保留。
  */
 defineOptions({ name: 'AgentComposer' })
@@ -57,6 +60,7 @@ const {
   options,
   submit,
   running = false,
+  awaitingApproval = false,
   stopping = false,
   disabled = false,
   temporary = false,
@@ -68,6 +72,8 @@ const {
   /** 发送一条消息，成功时为 true（此时才清空输入框与附件） */
   submit: (msg: ComposerMessage) => Promise<boolean>
   running?: boolean
+  /** 本轮正停在待确认的操作上：此时发送等于拒绝它们并附上这句话 */
+  awaitingApproval?: boolean
   stopping?: boolean
   disabled?: boolean
   /** 当前（或将要新建的）会话是临时会话：发出的消息不记进输入历史 */
@@ -154,10 +160,15 @@ const reasoning = computed({
       : settings.value.reasoning,
   set: (value) => set({ reasoning: value || null }),
 })
-const approvalMode = computed({
-  get: () => settings.value.approvalMode,
-  set: (value) => set({ approvalMode: value }),
-})
+const modes = computed(() => options?.approvalModes ?? [])
+/** 读屏软件播报的模式切换（Shift+Tab 时焦点留在输入框，看不到选择器变化） */
+const modeAnnounce = ref('')
+/** 切到另一个模式并播报；与选择器改动走同一条保存路径。 */
+function switchMode(mode: AgentApprovalMode) {
+  if (mode === settings.value.approvalMode) return
+  set({ approvalMode: mode })
+  modeAnnounce.value = t('agent.chat.composer.modeNow', { mode: t(`agent.chat.mode.${mode}`) })
+}
 
 // ---- 附件 ----
 const showFiles = ref(false)
@@ -276,11 +287,11 @@ async function setText(value: string) {
   caret.value = value.length
 }
 
-/** 输入框自己处理的命令：模型、审批、计划模式、技能与提示词；其余交给页面。 */
+/** 输入框自己处理的命令：模型、会话模式（`/approvals` 打开选择器，`/plan` 切换计划）、技能与提示词；其余交给页面。 */
 function runCommand(cmd: SlashCommand) {
   if (cmd === 'model') return openSelect(modelSelect.value)
   if (cmd === 'approvals') return openSelect(modeSelect.value)
-  if (cmd === 'plan') return set({ planMode: !settings.value.planMode })
+  if (cmd === 'plan') return switchMode(togglePlanMode(settings.value.approvalMode, modes.value))
   if (cmd === 'skills') return void setText('$')
   if (cmd === 'prompts') {
     pickingPrompt.value = true
@@ -363,6 +374,19 @@ function onKeydown(e: KeyboardEvent) {
       void pick(list[highlighted.value] ?? list[0]!)
       return
     }
+  }
+  // Shift+Tab 在可用模式间循环（候选列表打开时上面已处理）；只有一个模式时保留浏览器的焦点后退
+  if (
+    e.key === 'Tab' &&
+    e.shiftKey &&
+    !e.ctrlKey &&
+    !e.altKey &&
+    !e.metaKey &&
+    modes.value.length > 1
+  ) {
+    e.preventDefault()
+    switchMode(nextMode(settings.value.approvalMode, modes.value))
+    return
   }
   if (e.key === 'Escape' && pickingHistory.value) {
     e.preventDefault()
@@ -574,6 +598,9 @@ defineExpose({
         @keyup="syncCaret"
       />
     </div>
+    <p v-if="awaitingApproval && text.trim()" class="agent-composer__reject-hint" role="status">
+      {{ t('agent.chat.composer.rejectHint') }}
+    </p>
     <FileUpload
       v-if="showFiles"
       v-model="files"
@@ -645,25 +672,21 @@ defineExpose({
       </el-select>
       <el-select
         ref="modeSelect"
-        v-model="approvalMode"
+        :model-value="settings.approvalMode"
         class="agent-composer__mode"
         :aria-label="t('agent.chat.composer.approvalMode')"
+        :title="t(`agent.chat.modeHint.${settings.approvalMode}`)"
+        @update:model-value="(m: AgentApprovalMode) => switchMode(m)"
       >
         <el-option
-          v-for="m in options?.approvalModes ?? []"
+          v-for="m in modes"
           :key="m"
           :value="m"
           :label="t(`agent.chat.mode.${m}`)"
+          :title="t(`agent.chat.modeHint.${m}`)"
         />
       </el-select>
-      <el-switch
-        class="agent-composer__plan"
-        :model-value="settings.planMode"
-        :active-text="t('agent.chat.composer.plan')"
-        :aria-label="t('agent.chat.composer.plan')"
-        :title="t('agent.chat.composer.planHint')"
-        @update:model-value="(on: string | number | boolean) => set({ planMode: !!on })"
-      />
+      <span class="agent-composer__announce" aria-live="polite">{{ modeAnnounce }}</span>
       <span class="agent-composer__spacer" />
       <label
         v-if="contextPercent != null"

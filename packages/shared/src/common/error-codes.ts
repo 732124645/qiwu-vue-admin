@@ -200,6 +200,8 @@ export const Err = {
   AGENT_RECOVERY_BUSY: def('B8015', 409, 'error.agent.recovery_busy'),
   /** The provider rejected `reasoning_effort: none` (HTTP 400); the reasoning setting must change. */
   AGENT_REASONING_OFF_REJECTED: def('B8016', 502, 'error.agent.reasoning_off_rejected'),
+  /** The model service refused the key (HTTP 401/403) while its model list was loaded. */
+  AGENT_PROVIDER_KEY_REJECTED: def('B8017', 422, 'error.agent.provider_key_rejected'),
 
   /** WeChat Official Accounts gateway and account management errors. */
   WXOA_UPSTREAM: def('B6001', 502, 'error.wxoa.upstream'),

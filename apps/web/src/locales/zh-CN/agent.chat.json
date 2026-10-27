@@ -78,7 +78,7 @@
         "to": "改为",
         "empty": "（空）",
         "sources": "依据的来源",
-        "note": "说明（可选）",
+        "note": "告诉助手怎么做（可选）",
         "status": {
           "running": "执行中",
           "done": "已完成",
@@ -88,24 +88,26 @@
           "expired": "已失效",
           "answered": "已回答"
         },
-        "keys": "焦点在卡片本身时 Enter 确认、Esc 拒绝",
+        "keys": "焦点在卡片本身时 Enter 允许这一次、Esc 拒绝",
         "action": {
-          "approve": "确认执行",
-          "approve_session": "本会话内同意",
-          "reject": "拒绝",
-          "cancel": "取消本轮"
+          "approve": "允许这一次",
+          "approve_session": "本会话内不再询问「{tool}」",
+          "reject": "拒绝"
         },
         "decision": {
           "approve": "已确认",
-          "approve_session": "本会话内已同意",
+          "approve_session": "本会话内不再询问",
           "reject": "已拒绝",
           "cancel": "已取消"
         },
         "blocked": {
           "permission": "你没有执行这项操作的权限（{perm}），请联系管理员授权后再试。",
-          "mode": "本会话是只读模式，不能修改数据；切换审批模式后重新提问。",
+          "mode": "当前为只读或计划模式，不能修改数据；切换到“每次询问”或“自动审查”后重新提问。",
           "policy": "平台不允许智能助手使用这个工具。"
-        }
+        },
+        "noteKeys": "Enter 拒绝 · Esc 返回",
+        "back": "返回",
+        "allowedBySession": "已按本会话放行执行"
       },
       "question": {
         "title": "智能助手想确认几个问题",
@@ -135,7 +137,7 @@
         "suggestions": "补全建议",
         "model": "模型",
         "reasoning": "推理强度",
-        "approvalMode": "审批模式",
+        "approvalMode": "会话模式",
         "stop": "停止",
         "send": "发送",
         "queue": "排到下一轮",
@@ -145,8 +147,6 @@
         "attach": "附件",
         "prompts": "提示词模板",
         "fast": "快速",
-        "plan": "计划模式",
-        "planHint": "只读，先列出计划，确认后再执行",
         "context": "上下文 {percent}%",
         "sendMode": "运行中发送方式",
         "steer": "追加到本轮",
@@ -154,7 +154,9 @@
         "reasoningDefault": "模型默认：{value}",
         "contextEstimate": "上下文估算 {percent}%",
         "queueExpired": "排队消息已作废，未自动执行",
-        "keys": "Enter 发送 · Shift+Enter 换行 · $ 技能 · {'@'} 提及 · / 命令 · Ctrl+R 搜索发过的消息"
+        "keys": "Enter 发送 · Shift+Enter 换行 · Shift+Tab 切换模式 · $ 技能 · {'@'} 提及 · / 命令 · Ctrl+R 搜索发过的消息",
+        "modeNow": "已切换到：{mode}",
+        "rejectHint": "发送后将拒绝待确认的操作，并把这句话告诉助手"
       },
       "reasoning": {
         "low": "低",
@@ -164,14 +166,20 @@
       },
       "mode": {
         "read_only": "只读",
-        "ask": "询问",
-        "trust": "信任本会话"
+        "plan": "计划",
+        "ask": "每次询问"
+      },
+      "modeHint": {
+        "read_only": "只读取数据，从不修改，也不弹确认",
+        "plan": "只读取并提交方案，你批准后切换模式执行",
+        "ask": "读取直接执行，每次写入前都问你",
+        "auto_review": "写入先交审查模型，拿不准或有风险时才问你"
       },
       "slash": {
         "new": "新建会话",
         "compact": "压缩较早的对话",
         "model": "切换模型",
-        "approvals": "切换审批模式",
+        "approvals": "切换会话模式",
         "skills": "选择技能",
         "mcp": "外部 MCP 服务器设置",
         "status": "本轮用量与状态",
@@ -258,9 +266,26 @@
         "working": "正在根据会话生成技能草稿…",
         "done": "已生成技能草稿“{name}”（未启用），检查后再启用"
       },
-      "planRun": {
-        "action": "执行此计划",
-        "text": "按计划执行"
+      "planCard": {
+        "title": "执行方案",
+        "changes": "将改动的数据",
+        "assumptions": "前提假设",
+        "keys": "Enter 批准（焦点在卡片上时）",
+        "feedback": "还要怎么改（可不填）",
+        "feedbackKeys": "Enter 提交，Shift+Enter 换行，Esc 返回",
+        "back": "返回",
+        "closed": "已结束",
+        "started": "按已批准的方案执行",
+        "action": {
+          "auto_review": "批准并自动审查执行",
+          "ask": "批准并逐个确认",
+          "refine": "继续完善"
+        },
+        "choice": {
+          "auto_review": "已批准 · 自动审查执行",
+          "ask": "已批准 · 逐个确认",
+          "refine": "已退回完善"
+        }
       },
       "shortcut": {
         "title": "快捷键",
@@ -364,7 +389,11 @@
         "noMemory": "临时会话不读写记忆",
         "temporaryHint": "临时会话不进会话列表，离开后删除，也不读写记忆。",
         "noProfiles": "还没有方案",
-        "profileLocked": "已开始的会话不能更换方案，请在新会话里选择"
+        "profileLocked": "已开始的会话不能更换方案，请在新会话里选择",
+        "allowed": "本会话已放行",
+        "allowedEmpty": "还没有放行的工具；在确认卡上选“本会话内不再询问”后会列在这里。",
+        "revoke": "撤销放行：{tool}",
+        "revokeShort": "撤销"
       },
       "focus": {
         "enter": "专注模式",

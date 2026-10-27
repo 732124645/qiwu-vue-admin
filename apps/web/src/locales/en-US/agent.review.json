@@ -6,9 +6,6 @@
       }
     },
     "admin": {
-      "policy": {
-        "review": "Auto review"
-      },
       "tool": {
         "sources": {
           "builtin": "Built-in"
@@ -21,9 +18,20 @@
       "card": {
         "approve": "Approved by automatic review",
         "reject": "Rejected by automatic review",
+        "rejectPending": "Automatic review suggests rejecting",
         "escalate": "Automatic review left it to you",
         "said": "What the review model said:",
-        "note": "Note:"
+        "note": "Note:",
+        "unreviewed": {
+          "title": "Not reviewed automatically",
+          "policy": "This tool is set to \"People only\", so it is never sent to automatic review.",
+          "read": "This read tool is set to \"Needs confirmation\"; reads are never sent to automatic review.",
+          "personal": "This action must be confirmed by you in person each time; automatic review cannot do it for you.",
+          "mode": "The conversation is read-only or in plan mode, so it was not reviewed automatically.",
+          "paused": "The agent is paused, so it was not reviewed automatically.",
+          "no_model": "No review model is set on the platform, so it was not reviewed automatically.",
+          "other": "This call was not sent to automatic review and needs your confirmation."
+        }
       }
     }
   }

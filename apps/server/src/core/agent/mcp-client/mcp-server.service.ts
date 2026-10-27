@@ -285,8 +285,8 @@ export class AgentMcpServerService extends BaseCrudService<AgentMcpServer> {
 
   /**
    * 连接服务器并同步工具清单：新工具停用、策略 ask（等管理员看过再启用）；已有工具更新标题、描述、
-   * 参数与只读声明，保留管理员设的启用；描述、参数或只读声明变了的，策略退回 ask（管理员审过的 auto
-   * 不能被服务器悄悄换掉行为），这些工具名记在 `lastError`（`tools_changed: …`）里提醒复查；服务器上
+   * 参数与只读声明，保留管理员设的启用；描述、参数或只读声明变了的，auto 策略退回 ask（管理员审过的 auto
+   * 不能被服务器悄悄换掉行为；human/deny 保持不变，只收紧不放宽），这些工具名记在 `lastError`（`tools_changed: …`）里提醒复查；服务器上
    * 已经没有的工具停用。记下连接状态与时间；连接失败记原因码并回 AGENT_MCP_SERVER_FAILED。
    */
   async sync(id: number): Promise<AgentMcpServerVo> {
@@ -321,7 +321,8 @@ export class AgentMcpServerService extends BaseCrudService<AgentMcpServer> {
           if (reviewed) changed.push(t.name)
           await this.tools.update(stored.id, {
             ...fields,
-            ...(reviewed && { policy: 'ask' as const }),
+            // 行为变了只能收紧不能放宽：auto 退回 ask；human/deny 原样保留（退回 ask 反而会让写入可以送审或执行）
+            ...(reviewed && stored.policy === 'auto' && { policy: 'ask' as const }),
           } as QueryDeepPartialEntity<AgentMcpTool>)
         } else
           await this.tools.save(

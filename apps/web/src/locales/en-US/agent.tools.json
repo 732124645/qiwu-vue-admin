@@ -41,6 +41,10 @@
         "title": "Update the plan",
         "description": "Display and update the steps and progress of the current task."
       },
+      "plan_propose": {
+        "title": "Propose the plan",
+        "description": "In plan mode, present the plan for you to approve or refine."
+      },
       "ask_user": {
         "title": "Ask the user",
         "description": "Ask for missing information or a choice."

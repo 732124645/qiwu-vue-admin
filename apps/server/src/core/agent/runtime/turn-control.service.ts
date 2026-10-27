@@ -2,23 +2,24 @@ import { createHash } from 'node:crypto'
 import { Inject, Injectable, Optional } from '@nestjs/common'
 import { InjectDataSource } from '@nestjs/typeorm'
 import {
-  AGENT_TRUST_MODE_PARAM,
+  AGENT2_PARAMS,
   type AgentApprovalDecide,
   type AgentItemPayloads,
   type AgentAttachment,
   type AgentMessageSend,
+  type AgentPlanDecide,
+  type AgentPlanProposal,
   type AgentQuestionAnswer,
   Err,
 } from '@qiwu/shared'
 import { I18nService } from 'nestjs-i18n'
-import { type DataSource, IsNull, MoreThan } from 'typeorm'
+import { type DataSource, In, IsNull, MoreThan } from 'typeorm'
 import type { Principal } from '../../auth/principal.js'
 import { BizError } from '../../http/biz-error.js'
 import { canonicalJson } from '../../guard/idempotent.js'
 import { currentLocale } from '../../i18n/locale.js'
-import { ProviderRegistry } from '../provider/provider-registry.js'
 import { ParamService } from '../../settings/param.service.js'
-import { trustModeOn } from '../threads/thread-vo.js'
+import { ProviderRegistry } from '../provider/provider-registry.js'
 import {
   ATTACHMENT_SOURCE,
   type AttachmentSource,
@@ -35,11 +36,36 @@ import {
 import { type ItemInternal, ItemStore, type ItemWriter, StaleItem } from './item-store.js'
 import { ACTIVE_TURN, TurnQueue } from './turn-queue.js'
 import { TurnRunner } from './turn-runner.js'
-import { isTrusted, trustEntry } from './turn-tools.js'
+import { allowEntry, isAllowed } from './turn-tools.js'
 import { HumanConfirmation } from './human-confirmation.js'
+import { parseReviewModel } from './auto-reviewer.js'
 
 const notFound = () => new BizError(Err.NOT_FOUND)
-type AcceptedMessage = { turnId: number; first: boolean; start: boolean }
+type AcceptedMessage = { turnId: number; first: boolean; start: boolean; resume?: boolean }
+type QuestionPayload = AgentItemPayloads['question'] & { internal?: ItemInternal }
+
+/**
+ * 批准后开始执行的那一轮的第一条消息（运行时写的用户角色消息）：方案原文是模型自己早先写的，标明是“已批准
+ * 的方案”，并说明此刻的模式，让模型按它执行、用 plan.update 报告进度。
+ */
+export function approvedPlanText(plan: AgentPlanProposal, mode: 'ask' | 'auto_review'): string {
+  const how =
+    mode === 'auto_review'
+      ? 'each change is first checked by the automatic review'
+      : 'each change waits for the user’s approval'
+  return [
+    `[The user approved the plan below and switched the conversation to execution (${how}). Carry it ` +
+      'out now step by step and keep the checklist current with plan.update (one step doing at a time).]',
+    '',
+    'The approved plan:',
+    `Title: ${plan.title}`,
+    `Summary: ${plan.summary}`,
+    'Steps:',
+    ...plan.steps.map((st, k) => `${k + 1}. ${st}`),
+    ...(plan.changes ? [`Expected changes: ${plan.changes}`] : []),
+    ...(plan.assumptions?.length ? ['Assumptions:', ...plan.assumptions.map((a) => `- ${a}`)] : []),
+  ].join('\n')
+}
 
 /**
  * 对话页的操作（会话接口与批量任务共用，see docs/agent.md）：发消息开一轮或追加 / 排队、中断、手动压缩、
@@ -55,8 +81,8 @@ export class TurnControlService implements TurnControl {
     private readonly queue: TurnQueue,
     private readonly runner: TurnRunner,
     private readonly providers: ProviderRegistry,
-    private readonly params: ParamService,
     private readonly i18n: I18nService,
+    private readonly params: ParamService,
     @Optional() @Inject(SKILL_SOURCE) private readonly skills?: SkillSource,
     @Optional() @Inject(ATTACHMENT_SOURCE) private readonly attachments?: AttachmentSource,
   ) {}
@@ -70,8 +96,8 @@ export class TurnControlService implements TurnControl {
 
   /**
    * 发一条消息：没有进行中的轮次就开新一轮并入队（急停时拒绝，本人同时运行的轮次有上限）；有就按
-   * `mode` 追加到当前轮（下一步起模型就能看到）或排队到下一轮。会话的第一轮开始时，本人的其他临时
-   * 会话被删掉（“开始新对话”）。
+   * `mode` 追加到当前轮（下一步起模型就能看到）或排队到下一轮。本轮正停在审批卡上时，发消息等于“拒绝并
+   * 附这条说明”（见 {@link rejectWaiting}）。会话的第一轮开始时，本人的其他临时会话被删掉（“开始新对话”）。
    */
   async send(p: Principal, threadId: number, msg: AgentMessageSend): Promise<{ turnId: number }> {
     // 进入其他租户的平台人员不经智能体操作那个租户：轮次以会话所有人的身份在会话的租户里执行
@@ -129,6 +155,16 @@ export class TurnControlService implements TurnControl {
         const turns = w.m.getRepository(AgentTurn)
         const active = await turns.findOne({ where: { threadId, status: ACTIVE_TURN } })
         if (active) {
+          const rejected = await this.rejectWaiting(w, p, thread, active, msg.text)
+          if (rejected) {
+            const item = await w.append(threadId, Number(active.id), 'user', {
+              text: msg.text,
+              ...files,
+              mode: 'steer',
+            })
+            const res = await record(item, Number(active.id), false, false)
+            return { ...res, resume: rejected === 'resume' }
+          }
           let item: AgentItem
           if (msg.mode === 'queue')
             item = await w.append(
@@ -178,8 +214,96 @@ export class TurnControlService implements TurnControl {
       res = duplicate
     }
     if (res.start) await this.queue.kick(res.turnId)
+    if (res.resume) await this.queue.resume(res.turnId, p.userId)
     if (res.first) await this.queue.dropTemporary(p.userId, threadId)
     return { turnId: res.turnId }
+  }
+
+  /**
+   * 本轮停在审批卡上时用户又发了消息（追加或排队都一样）：把这一轮所有待定的审批卡——包括须本人逐次确认
+   * 的——记为本人拒绝，备注就是这条消息；同一步里还没轮到出卡、要问人的调用（它们是在这句纠正之前计划的）也
+   * 各记一张已拒绝的卡，不再一张张弹出来。调用方再把消息并入本轮。模型看到每个写入都被拒绝与这条消息，
+   * 按新的说法继续。批量任务开的会话照旧（卡片由批量确认处理），没有待定审批卡时什么也不做
+   * （null）。还有待回答的提问时不替用户作答，等它答完再续跑（`rejected`），否则立即续跑（`resume`）。
+   */
+  private async rejectWaiting(
+    w: ItemWriter,
+    p: Principal,
+    thread: AgentThread,
+    turn: AgentTurn,
+    text: string,
+  ): Promise<'resume' | 'rejected' | null> {
+    if (turn.status !== 'waiting' || thread.batchId !== null) return null
+    const items = w.m.getRepository(AgentItem)
+    const cards = await items.findBy({ turnId: turn.id, kind: 'approval', status: 'pending' })
+    const proposals = (
+      await items.findBy({ turnId: turn.id, kind: 'question', status: 'pending' })
+    ).filter((q) => (q.payload as QuestionPayload).proposal)
+    if (!cards.length && !proposals.length) return null
+    // 等方案卡时发消息等于“继续完善”并以这条消息为意见：模式不变，消息由调用方并入本轮
+    for (const q of proposals)
+      await w.update(
+        q,
+        {
+          status: 'answered',
+          payload: {
+            ...(q.payload as QuestionPayload),
+            choice: {
+              decision: 'refine',
+              decidedBy: p.userId,
+              decidedAt: new Date().toISOString(),
+              feedback: text.slice(0, 2000),
+            },
+          },
+        },
+        'pending',
+      )
+    const decision = {
+      decision: 'reject' as const,
+      decidedBy: p.userId,
+      decidedAt: new Date().toISOString(),
+      note: text.slice(0, 500),
+    }
+    for (const c of cards)
+      await w.update(
+        c,
+        {
+          status: 'rejected',
+          payload: { ...(c.payload as AgentItemPayloads['approval']), ...decision },
+        },
+        'pending',
+      )
+    // 同一步里还没处理到、会停下问人的调用（写入，或 root 设成 ask 的读取）：没有结果、也还没有审批卡的
+    // （只有当前这一步会有未处理的调用）
+    const handled = new Set(
+      (await items.find({ where: { turnId: turn.id, kind: In(['approval', 'tool_result']) } })).map(
+        (i) => (i.payload as { callId?: string }).callId,
+      ),
+    )
+    const later = await items.find({
+      where: { turnId: turn.id, kind: 'tool_call', status: 'pending' },
+      order: { seq: 'ASC' },
+    })
+    for (const c of later) {
+      const call = c.payload as AgentItemPayloads['tool_call']
+      if (handled.has(call.callId) || (await this.runner.runsWithoutAsking(call))) continue
+      await w.append(
+        Number(thread.id),
+        Number(turn.id),
+        'approval',
+        {
+          callId: call.callId,
+          tool: call.tool,
+          title: call.title,
+          args: call.args,
+          sources: [],
+          ...decision,
+        },
+        'rejected',
+      )
+    }
+    const asking = await items.existsBy({ turnId: turn.id, kind: 'question', status: 'pending' })
+    return asking ? 'rejected' : 'resume'
   }
 
   /** 同一持久标识只回报原接受结果；异载荷或已撤回的消息拒绝复用，不复活业务效果。 */
@@ -287,10 +411,10 @@ export class TurnControlService implements TurnControl {
   }
 
   /**
-   * 本人确认一个审批：同意（只这一次）、本会话内同意（记住工具 + 目标，“信任本会话”模式下普通同意也
-   * 记住）、拒绝（连同备注告诉模型）、取消（结束这一轮）。已处理、被拦或已作废的 409。系统参数
-   * `agent.trust_mode` 为 `false` 时什么信任都不记：“本会话内同意”只当这一次同意。记住的目标见
-   * `trustKey`；每条信任连同记下它的轮次一起存（撤回那一轮时一并去掉）。
+   * 本人确认一个审批：同意（只这一次）、同意并“本会话内此工具不再询问”（记住工具名）、拒绝（连同备注告诉
+   * 模型）、取消（结束这一轮）。已处理、被拦或已作废的 409。只有卡片提供了放行（`sessionAllow`，运行时只给
+   * 策略为 `ask`、不须本人逐次确认的本系统工具）时才能选“不再询问”，否则 400：会话放行不能代替本人对单次
+   * 调用的确认。记下之前按工具此刻的策略再核对，已不可放行的只同意这一次。每条放行连同记下它的轮次一起存（撤回那一轮时一并去掉）。
    */
   async decideApproval(
     p: Principal,
@@ -298,7 +422,6 @@ export class TurnControlService implements TurnControl {
     body: AgentApprovalDecide,
     source?: 'interactive' | 'batch',
   ): Promise<void> {
-    const trustMode = trustModeOn(await this.params.get(AGENT_TRUST_MODE_PARAM))
     const out = await this.decide(p, itemId, 'approval', async (w, item, thread, turn) => {
       const a = item.payload as AgentItemPayloads['approval'] & { internal?: ItemInternal }
       if (a.blocked) throw new BizError(Err.AGENT_APPROVAL_CLOSED)
@@ -329,6 +452,8 @@ export class TurnControlService implements TurnControl {
           }
         }
       }
+      if (body.decision === 'approve_session' && a.sessionAllow !== true)
+        throw new BizError(Err.VALIDATION_FAILED)
       const ok = body.decision === 'approve' || body.decision === 'approve_session'
       await w.update(
         item,
@@ -344,19 +469,19 @@ export class TurnControlService implements TurnControl {
         },
         'pending',
       )
-      const remember =
+      // 卡片出来之后 root 可能已改了这个工具的策略：此刻不再可放行的只同意这一次，不记放行
+      if (
+        body.decision === 'approve_session' &&
         !perCall &&
-        trustMode &&
-        (body.decision === 'approve_session' ||
-          (body.decision === 'approve' && thread.approvalMode === 'trust'))
-      const key = a.internal?.key
-      if (remember && key && !isTrusted(thread.trusted, key))
-        await w.m
-          .getRepository(AgentThread)
-          .update(
-            { id: thread.id },
-            { trusted: [...(thread.trusted ?? []), trustEntry(Number(turn.id), key)].slice(-200) },
-          )
+        !isAllowed(thread.trusted, a.tool) &&
+        (await this.runner.sessionAllowableNow(a.tool))
+      )
+        await w.m.getRepository(AgentThread).update(
+          { id: thread.id },
+          {
+            trusted: [...(thread.trusted ?? []), allowEntry(Number(turn.id), a.tool)].slice(-200),
+          },
+        )
       if (body.decision === 'cancel') {
         await w.patchTurn(turn, { status: 'cancelled', endedAt: new Date() })
         await this.runner.expireOpen(w.m, turn, (i, s) => w.update(i, { status: s }))
@@ -368,10 +493,12 @@ export class TurnControlService implements TurnControl {
     await this.after(out, p.userId)
   }
 
-  /** 本人回答一个提问（选项与补充文字、表单值，或不回答）；已回答或已作废的 409。 */
+  /** 本人回答一个提问（选项与补充文字、表单值，或不回答）；已回答或已作废的 409，方案卡 400（另有接口）。 */
   async answerQuestion(p: Principal, itemId: number, body: AgentQuestionAnswer): Promise<void> {
     const out = await this.decide(p, itemId, 'question', async (w, item) => {
-      const q = item.payload as { form?: unknown; internal?: ItemInternal }
+      const q = item.payload as QuestionPayload
+      // 方案卡的“批准”会切换模式：只能走 decidePlan，不能当成普通回答续跑
+      if (q.proposal) throw new BizError(Err.VALIDATION_FAILED)
       const internal: ItemInternal = {
         ...q.internal,
         ...(body.decline && { declined: true }),
@@ -389,6 +516,92 @@ export class TurnControlService implements TurnControl {
       return q.form ? 'none' : 'resume'
     })
     await this.after(out, p.userId)
+  }
+
+  /**
+   * 本人对方案卡的选择。继续完善：卡片记下选择与意见，意见作为一条用户消息并入本轮，本轮接着在计划模式里
+   * 规划。批准：卡片记下选择，`plan.propose` 这次调用记为已批准，规划的这一轮结束（同一步里别的待定卡片与
+   * 调用作废），会话切到所选模式（`auto_review` 要平台此刻提供自动审查，否则 400），再开新的一轮，第一条
+   * 消息是运行时写的已批准方案（{@link approvedPlanText}）。新一轮先置为等名额，由 TurnQueue 按并发上限启动。
+   * 模型自己没有任何途径做这件事：只有本人在这里（或用模式选择器）才能离开计划模式。不是方案卡的提问 404。
+   */
+  async decidePlan(p: Principal, itemId: number, body: AgentPlanDecide): Promise<void> {
+    // 急停时与发送一样先拒绝，不改任何状态：解除后这张方案卡还能原样再批准
+    if (await this.runner.paused()) throw new BizError(Err.AGENT_PAUSED)
+    if (
+      body.decision === 'auto_review' &&
+      !parseReviewModel(await this.params.get(AGENT2_PARAMS.reviewModel))
+    )
+      throw new BizError(Err.VALIDATION_FAILED)
+    let next = 0
+    const out = await this.decide(p, itemId, 'question', async (w, item, thread, turn) => {
+      const q = item.payload as QuestionPayload
+      if (!q.proposal) throw notFound()
+      const threadId = Number(thread.id)
+      const feedback = body.feedback || undefined
+      await w.update(
+        item,
+        {
+          status: 'answered',
+          payload: {
+            ...q,
+            choice: {
+              decision: body.decision,
+              decidedBy: p.userId,
+              decidedAt: new Date().toISOString(),
+              ...(feedback && { feedback }),
+            },
+          },
+        },
+        'pending',
+      )
+      if (body.decision === 'refine') {
+        if (feedback)
+          await w.append(threadId, Number(turn.id), 'user', { text: feedback, mode: 'steer' })
+        return 'resume'
+      }
+      const items = w.m.getRepository(AgentItem)
+      const call = (
+        await items.findBy({ turnId: turn.id, kind: 'tool_call', status: 'pending' })
+      ).find((c) => (c.payload as { callId?: string }).callId === q.callId)
+      const content = 'The user approved this plan; it runs in a new turn.'
+      await w.append(threadId, Number(turn.id), 'tool_result', {
+        callId: q.callId,
+        ok: true,
+        preview: content,
+        untrusted: false,
+        internal: { content },
+      })
+      if (call) await w.update(call, { status: 'done' })
+      await w.patchTurn(turn, { status: 'completed', endedAt: new Date() })
+      await this.runner.expireOpen(w.m, turn, (i, s) => w.update(i, { status: s }))
+      // 规划这一轮的第一条用户消息：方案轮不经 complete() 结束，标题按同样的规则在这里起；它选的技能
+      // （及预先同意时记下的技能 id 与范围）带到执行轮的第一条消息上，技能的说明、工具清单与研究限额照旧生效
+      const planFirst = await items.findOne({
+        where: { turnId: turn.id, kind: 'user' },
+        order: { seq: 'ASC' },
+      })
+      const asked = planFirst?.payload as
+        | ({ text: string; skill?: string; fromPlan?: number } & { internal?: ItemInternal })
+        | undefined
+      if (asked && !asked.fromPlan) await this.runner.nameUntitled(w.m, thread, asked.text)
+      const skillRef = asked?.internal?.skillRef
+      await w.m
+        .getRepository(AgentThread)
+        .update({ id: thread.id }, { approvalMode: body.decision })
+      const run = await w.createTurn(threadId, p.userId)
+      await w.patchTurn(run, { status: 'waiting' })
+      await w.append(threadId, Number(run.id), 'user', {
+        text: approvedPlanText(q.proposal, body.decision),
+        fromPlan: Number(item.id),
+        ...(asked?.skill && { skill: asked.skill }),
+        ...(skillRef && { internal: { skillRef } }),
+      })
+      next = Number(run.id)
+      return 'none'
+    })
+    if (next) await this.queue.resume(next, p.userId)
+    else await this.after(out, p.userId)
   }
 
   /**

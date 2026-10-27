@@ -5,7 +5,6 @@ import { useRoute, useRouter } from 'vue-router'
 import { useDebounceFn, useDocumentVisibility } from '@vueuse/core'
 import { ElMessage } from 'element-plus'
 import { RT, type AgentBatchDetailVo } from '@qiwu/shared'
-import { agentApi } from '@/api/platform/agent'
 import { agentBatchApi } from '@/api/platform/agent-batch'
 import { toastRest } from '@/core/composables/use-crud'
 import { onRealtime } from '@/core/realtime/socket'
@@ -33,12 +32,6 @@ const pendingCount = computed(
 let timer: ReturnType<typeof setTimeout> | undefined
 let active = true
 const visibility = useDocumentVisibility()
-/** “本会话内同意”是否提供（系统参数）；读不到时不提供，服务端也会拒绝 */
-const trust = ref(false)
-agentApi
-  .options()
-  .then((o) => (trust.value = o.trustSession))
-  .catch(() => undefined)
 
 /** 读批次；进行中且页面显示着时稍后再读。 */
 async function load() {
@@ -155,13 +148,7 @@ onBeforeUnmount(() => clearTimeout(timer))
               {{ t('agent.batch.open') }}
             </el-button>
           </div>
-          <ApprovalCard
-            v-for="item in row.pending"
-            :key="item.id"
-            :item="item"
-            :trust
-            @decided="load"
-          />
+          <ApprovalCard v-for="item in row.pending" :key="item.id" :item="item" @decided="load" />
         </li>
       </ul>
     </el-card>

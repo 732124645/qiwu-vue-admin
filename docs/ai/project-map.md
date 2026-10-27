@@ -213,6 +213,7 @@
 |  | POST | `/api/agent/threads/:id/compact` | agent.chat.use |  |
 |  | POST | `/api/agent/approvals/:itemId` | agent.chat.use |  |
 |  | POST | `/api/agent/questions/:itemId` | agent.chat.use |  |
+|  | POST | `/api/agent/plans/:itemId` | agent.chat.use |  |
 | `AgentBatchController`（core/agent/batch/batch.controller.ts） | POST | `/api/agent/batches` | agent.batch.run | Idempotent |
 |  | GET | `/api/agent/batches/:id` | agent.batch.run |  |
 |  | POST | `/api/agent/batches/:id/decide` | agent.batch.run |  |
@@ -250,6 +251,7 @@
 |  | DELETE | `/api/agent/profiles/:id` | agent.chat.use |  |
 | `AgentProviderController`（core/agent/provider/provider.controller.ts） | GET | `/api/agent/providers` | agent.setting.browse | PlatformOnly |
 |  | POST | `/api/agent/providers` | agent.setting.modify | PlatformOnly(root), Idempotent |
+|  | POST | `/api/agent/providers/models` | agent.setting.modify | PlatformOnly(root) |
 |  | PUT | `/api/agent/providers/:id` | agent.setting.modify | PlatformOnly(root) |
 |  | DELETE | `/api/agent/providers/:id` | agent.setting.modify | PlatformOnly(root) |
 | `AgentSearchProviderController`（core/agent/provider/provider.controller.ts） | GET | `/api/agent/search-providers` | agent.setting.browse | PlatformOnly |
@@ -270,6 +272,7 @@
 |  | POST | `/api/agent/threads/:id/recovery/acknowledge` | agent.chat.use |  |
 |  | PATCH | `/api/agent/threads/:id` | agent.chat.use |  |
 |  | DELETE | `/api/agent/threads/:id` | agent.chat.use |  |
+|  | DELETE | `/api/agent/threads/:id/allowed-tools/:tool` | agent.chat.use |  |
 |  | GET | `/api/agent/threads/:id/items` | agent.chat.use |  |
 |  | POST | `/api/agent/threads/:id/fork` | agent.chat.use | Idempotent |
 |  | POST | `/api/agent/threads/read-all` | agent.chat.use |  |
@@ -1016,7 +1019,6 @@
 | `agent.memory.per_turn` | db/seeds/settings/settings.seed.ts |
 | `agent.paused` | db/seeds/settings/settings.seed.ts |
 | `agent.review.model` | db/seeds/settings/settings.seed.ts |
-| `agent.trust_mode` | db/seeds/settings/settings.seed.ts |
 | `agent.web.allowed_domains` | db/seeds/settings/settings.seed.ts |
 | `agent.web.mode` | db/seeds/settings/settings.seed.ts |
 | `app.update.enabled` | db/seeds/settings/settings.seed.ts |

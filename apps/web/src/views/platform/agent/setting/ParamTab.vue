@@ -8,14 +8,13 @@ import {
   AGENT_LIMIT_PARAMS,
   AGENT_PAUSED_PARAM,
   AGENT_SKILL_BODY_MAX,
-  AGENT_TRUST_MODE_PARAM,
 } from '@qiwu/shared'
 import { noCreditCap } from './setup-guide'
 import { useAgentParams } from './use-params'
 
 /**
  * “说明与限额”标签（系统参数，只有 root 能改，其他人只读）：平台说明（拼在每个系统提示最前面）、
- * 每轮与每日限额、是否提供“信任本会话”、紧急暂停（暂停前确认：新的轮次与工具调用立即被拒）。
+ * 每轮与每日限额、紧急暂停（暂停前确认：新的轮次与工具调用立即被拒）。
  * 三个积分额度都是 0 时在顶部提醒“没有积分额度上限”，root 可一键跳到额度输入框。
  */
 defineOptions({ name: 'AgentParamTab' })
@@ -105,17 +104,6 @@ async function setPaused(paused: boolean) {
           @change="setPaused($event as boolean)"
         />
         <span class="param-tab__note">{{ t('agent.admin.param.pausedHint') }}</span>
-      </el-form-item>
-      <el-form-item :label="t('agent.admin.param.trustMode')">
-        <el-switch
-          class="param-tab__trust"
-          :model-value="on(AGENT_TRUST_MODE_PARAM)"
-          :disabled="!isRoot || saving != null"
-          :loading="saving === AGENT_TRUST_MODE_PARAM"
-          :aria-label="t('agent.admin.param.trustMode')"
-          @change="save({ [AGENT_TRUST_MODE_PARAM]: String($event) })"
-        />
-        <span class="param-tab__note">{{ t('agent.admin.param.trustModeHint') }}</span>
       </el-form-item>
     </el-form>
 

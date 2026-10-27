@@ -5,7 +5,6 @@ import {
   AGENT_RESEARCH_SKILL,
   AGENT2_PARAMS,
   AGENT_LIMIT_PARAMS,
-  AGENT_TRUST_MODE_PARAM,
   AGENT_WEB_DOMAINS_PARAM,
   AGENT_WEB_MODE_PARAM,
   type AgentItemPayloads,
@@ -83,7 +82,7 @@ import type {
 import { ProviderRegistry, type ResolvedModel, usageTarget } from '../provider/provider-registry.js'
 import { estimateInputTokens, estimatedUsage, estimateOutputTokens } from '../provider/usage.js'
 import { creditLimitReached } from './billing.js'
-import { trustModeOn } from '../threads/thread-vo.js'
+import { parseReviewModel } from './auto-reviewer.js'
 import { AgentToolPolicies, effectivePolicy } from '../tools/tool-policy.js'
 import { TurnUrls } from '../web/turn-urls.js'
 import { WEB_TOOLS, WebTools, wrapUntrusted } from '../web/web-tools.js'
@@ -117,12 +116,13 @@ import { automationRecoveryRequired } from './recovery.js'
 import { InvocationLeaseLost, UsageBook, usageDay } from './usage-book.js'
 import { AgentExtensions, isToolItemKind, runThread, toolItemPayload } from './agent-extensions.js'
 import {
-  isTrusted,
+  isAllowed,
   keepForSubagent,
   type OfferedTool,
+  readOnlyMode,
   SUBAGENT_STEPS,
   IMAGE_TOOL,
-  trustKey,
+  PROPOSE_TOOL,
 } from './turn-tools.js'
 
 /** How often a running turn re-reads its status and `agent.paused` (cancel and pause reach it by then). */
@@ -230,8 +230,8 @@ interface RunCtx {
 
 /**
  * 内置工具此刻生效的策略：平台停用了的按 deny；否则显式策略优先（`cfg_mcp_tool` 按名字一行），再按类型
- * 默认（写入工具即使被写成 auto 也是 ask）。声明了 `humanOnly` 的只有 deny 或 ask：管理员设的 auto 与
- * review 都按 ask。
+ * 默认（写入工具即使被写成 auto 也需确认）。声明了 `humanOnly` 的只有 deny 或 human：管理员设的别的策略
+ * 都按 human（只能由本人逐次确认）。
  */
 function builtinPolicy(
   meta: Pick<AgentBuiltinToolMeta, 'name' | 'kind' | 'humanOnly'>,
@@ -241,8 +241,11 @@ function builtinPolicy(
   const row = switches.find((s) => s.name === meta.name)
   if (row && !row.enabled) return 'deny'
   const policy = policies.get(meta.name) ?? effectivePolicy(meta.kind, row?.agentPolicy ?? null)
-  return meta.humanOnly && policy !== 'deny' ? 'ask' : policy
+  return meta.humanOnly && policy !== 'deny' ? 'human' : policy
 }
+
+/** 外部 MCP 工具在模型面前的名字前缀（`ext.<服务器>.<工具>`）。 */
+const isExternalName = (name: string) => name.startsWith('ext.')
 
 /** A tool's outcome as the runtime stores it. */
 interface Outcome {
@@ -612,10 +615,10 @@ export class TurnRunner {
     const first = items.find((i) => i.kind === 'user')
     // 子智能体的会话总是只读（见 keepForSubagent）
     const child = thread.parentThreadId !== null
-    const readOnly = thread.approvalMode === 'read_only' || thread.planMode || child
+    const readOnly = readOnlyMode(thread.approvalMode) || child
     const switches = await this.ds.getRepository(McpToolSwitch).find()
     const disabled = new Set(switches.filter((s) => !s.enabled).map((s) => s.name))
-    // 生效策略（写入工具即使被设成 auto 也是 ask）；没有记录的按类型默认
+    // 生效策略（写入工具即使被设成 auto 也需确认，读取工具只有 auto）；没有记录的按类型默认
     const policies = await this.toolPolicies.policies()
     const policyOf = (name: string, kind: McpToolKind) =>
       policies.get(name) ?? effectivePolicy(kind, null)
@@ -623,7 +626,8 @@ export class TurnRunner {
     const usable = await this.host.list(p)
     for (const t of usable) {
       const configured = policyOf(t.name, t.kind)
-      const policy = t.perCallConfirmation && configured !== 'deny' ? 'ask' : configured
+      // 须本人逐次确认的工具：除 deny 外一律只能由人确认（不送审、不能本会话放行）
+      const policy = t.perCallConfirmation && configured !== 'deny' ? 'human' : configured
       if (policy === 'deny' || (readOnly && t.kind === 'write')) continue
       tools.set(t.name, {
         name: t.name,
@@ -1120,7 +1124,7 @@ export class TurnRunner {
       activeSkill: ctx.skill,
       context: ctx.thread.context,
       readOnly: ctx.readOnly,
-      planMode: ctx.thread.planMode,
+      planMode: ctx.thread.approvalMode === 'plan',
     })
     await this.readAttachments(ctx, items)
     const parts = this.ext.hasContributors()
@@ -1246,10 +1250,14 @@ export class TurnRunner {
         return this.finish(ctx, call, this.rejectOutcome(approval))
       // 确认之后又被收回（权限、模式或策略变了）：照样拦下
       if (!def) return this.block(ctx, call)
-      // 审批审查者放行的卡片在续跑时（重启、丢锁之后）执行前再核对一次资格：放行之后预先同意可能已失效、
-      // 会话可能已切到只读或计划模式
-      const auto = pl<'approval'>(approval).auto
-      if (auto?.verdict === 'approve' && !(await this.entitled(ctx, def, auto)))
+      // 审批审查者放行或本会话放行的卡片在续跑时（重启、丢锁之后）执行前再核对一次资格：放行之后预先同意
+      // 可能已失效、会话可能已切到只读或计划模式、本会话的放行可能已撤销（人确认的卡片不在此列）
+      const a = pl<'approval'>(approval)
+      const stale =
+        a.decidedBy === undefined &&
+        ((a.auto?.verdict === 'approve' && !(await this.entitled(ctx, def, a.auto))) ||
+          (a.allowedBy === 'session' && !(await this.allowedNow(ctx, def))))
+      if (stale)
         return this.finish(ctx, call, {
           ok: false,
           content:
@@ -1276,58 +1284,67 @@ export class TurnRunner {
           this.fail(Err.VALIDATION_FAILED, ctx.lang, z.prettifyError(parsed.error)),
         )
     }
-    // `ask` 与 `review`（自动审查）都要先经人或审批审查者：只有 `auto` 直接执行
+    // 只有 `auto` 直接执行；`ask` 与 `human` 先经人（`ask` 也可经本会话的放行或审批审查者）
     if (def.policy !== 'auto') {
-      // 信任的目标：写入预览给出的记录；没有预览的工具按参数里的 `id`，外部工具与没有 `id` 的只信任一模
-      // 一样的参数（见 trustKey）。平台关掉信任（agent.trust_mode=false）时，已记下的信任一概不算
       const preview =
         def.preview && !def.perCallConfirmation
           ? await this.host.preview(ctx.p, def.name, c.args)
           : null
-      const key = trustKey(def.name, c.args, preview?.target, def.origin === 'mcp')
-      const trustOn = trustModeOn(await this.params.get(AGENT_TRUST_MODE_PARAM))
-      if (def.perCallConfirmation || !trustOn || !isTrusted(ctx.thread.trusted, key)) {
-        let card: Pl<'approval'> = {
-          callId: c.callId,
-          tool: def.name,
-          title: def.title,
-          args: c.args,
-          ...(preview && { changes: preview }),
-          sources: this.sources(ctx),
-          internal: { key },
-        }
-        if (def.perCallConfirmation) {
-          try {
-            const fresh = await this.confirmation.prepare(
-              ctx.p,
-              {
-                threadId: Number(ctx.thread.id),
-                turnId: Number(ctx.turn.id),
-                callId: c.callId,
-              },
-              def.name,
-              c.args,
-            )
-            card = this.confirmation.renew(card, fresh)
-          } catch (e) {
-            return this.finish(
-              ctx,
-              call,
-              this.fail(e instanceof BizError ? e.err : Err.UNPROCESSABLE, ctx.lang),
-            )
-          }
-        }
-        const v = await this.reviewed(ctx, def, card)
-        if (v && v.verdict !== 'escalate') {
-          const decided = await this.autoDecide(ctx, card, v)
-          if (v.verdict === 'reject') return this.finish(ctx, call, this.rejectOutcome(decided))
-          // 记卡期间被中断（停止、急停、丢锁）：不再执行
-          ctx.signal.throwIfAborted()
-          return this.execute(ctx, call, def, c.args)
-        }
-        await this.pause(ctx, 'approval', { ...card, ...(v && { auto: v }) })
-        return 'wait'
+      const sessionAllow = this.sessionAllowable(def)
+      let card: Pl<'approval'> = {
+        callId: c.callId,
+        tool: def.name,
+        title: def.title,
+        args: c.args,
+        ...(preview && { changes: preview }),
+        sources: this.sources(ctx),
+        ...(sessionAllow && { sessionAllow: true }),
+        // 只能由人逐次确认（human 策略、humanOnly 内置工具）：记在卡片上，批量“全部同意”据此留给人逐条看
+        ...(def.policy === 'human' && { human: true as const }),
       }
+      // 本人已在本会话放行这个工具：不再问人，也不送审；照样记一张已同意的卡片（写明是因为放行），对话里
+      // 看得出它为什么没问就执行了
+      if (sessionAllow && (await this.allowedNow(ctx, def))) {
+        await this.autoDecide(ctx, { ...card, allowedBy: 'session' })
+        ctx.signal.throwIfAborted()
+        return this.execute(ctx, call, def, c.args)
+      }
+      if (def.perCallConfirmation) {
+        try {
+          const fresh = await this.confirmation.prepare(
+            ctx.p,
+            {
+              threadId: Number(ctx.thread.id),
+              turnId: Number(ctx.turn.id),
+              callId: c.callId,
+            },
+            def.name,
+            c.args,
+          )
+          card = this.confirmation.renew(card, fresh)
+        } catch (e) {
+          return this.finish(
+            ctx,
+            call,
+            this.fail(e instanceof BizError ? e.err : Err.UNPROCESSABLE, ctx.lang),
+          )
+        }
+      }
+      const v = await this.reviewed(ctx, def, card)
+      if (v?.verdict === 'approve') {
+        await this.autoDecide(ctx, { ...card, auto: v })
+        // 记卡期间被中断（停止、急停、丢锁）：不再执行
+        ctx.signal.throwIfAborted()
+        return this.execute(ctx, call, def, c.args)
+      }
+      // 审查者驳回或拿不准：不替人做决定，卡片带上结论与理由停下等人（人仍可同意或拒绝）
+      const unreviewed = v ? undefined : await this.unreviewed(ctx, def)
+      await this.pause(ctx, 'approval', {
+        ...card,
+        ...(v && { auto: v }),
+        ...(unreviewed && { unreviewed }),
+      })
+      return 'wait'
     }
     return this.execute(ctx, call, def, c.args)
   }
@@ -1370,14 +1387,17 @@ export class TurnRunner {
     def: OfferedTool,
     card: Pl<'approval'>,
   ): Promise<AgentReviewVerdict | null> {
-    if (def.perCallConfirmation || !this.ext.hasReviewers() || ctx.readOnly) return null
+    // 读取工具被 root 显式设成 ask 是要本人看一眼（例如花钱的生成图片），从不交给审查者
+    if (def.perCallConfirmation || def.kind === 'read' || !this.ext.hasReviewers() || ctx.readOnly)
+      return null
     // 只能由人确认的内置工具（如记住个人信息）从不交给审查者
     if (def.origin === 'builtin' && this.ext.builtin(def.name)?.meta.humanOnly) return null
     if (await this.paused()) return null
     const now = await this.modeNow(ctx)
-    if (!now || now.approvalMode === 'read_only' || now.planMode) return null
+    if (!now || readOnlyMode(now.approvalMode)) return null
+    // 只有需确认的 `ask` 会送审；`human`（只能由人确认）从不
     const policy = await this.policyNow(ctx, def)
-    if (policy !== 'ask' && policy !== 'review') return null
+    if (policy !== 'ask') return null
     // 审查者自己的模型调用与正常的一步同样记账：计入本轮积分（受单轮上限约束）与发起人的每日用量
     const review: AgentReviewContext = {
       ...ctx.view,
@@ -1412,35 +1432,109 @@ export class TurnRunner {
   }
 
   /**
+   * 会话处于自动审查模式、这次调用却没有经过审查就要等人时，说明为什么（只用于卡片显示，不改变哪些调用
+   * 送审）：须本人逐次确认的工具、只读或计划模式、急停、工具策略是 `human`、平台没有指定审查模型。不是
+   * 自动审查模式（或查不出原因）时返回 undefined，卡片照旧。原因是运行时给出的代码，由页面翻译，不是模型的文字。
+   */
+  private async unreviewed(ctx: RunCtx, def: OfferedTool): Promise<Pl<'approval'>['unreviewed']> {
+    const now = await this.modeNow(ctx)
+    if (now?.approvalMode !== 'auto_review') return undefined
+    if (
+      def.perCallConfirmation ||
+      (def.origin === 'builtin' && this.ext.builtin(def.name)?.meta.humanOnly)
+    )
+      return 'personal'
+    if (def.kind === 'read') return 'read'
+    if (ctx.readOnly) return 'mode'
+    if (await this.paused()) return 'paused'
+    if ((await this.policyNow(ctx, def)) === 'human') return 'policy'
+    if (!parseReviewModel(await this.params.get(AGENT2_PARAMS.reviewModel))) return 'no_model'
+    return undefined
+  }
+
+  /**
    * 审查者的放行有没有资格生效（审查期间情况可能变了，所以在它答完之后重新读取）：会话此刻不能是只读或
-   * 计划模式；自动审查（`review`）还要求工具此刻的策略是 `review`、会话此刻的审批模式是 `auto_review`；
-   * 预先同意（`pre_approved`）只在自动化开的会话里有效。审查者是可以由任何模块登记的代码，运行时不能只信
-   * 它自己报的身份。
+   * 计划模式，工具此刻的策略须是 `ask`（被改成 `human` 的只能由人确认）；自动审查（`review`）还要求会话此刻
+   * 的模式是 `auto_review`；预先同意（`pre_approved`）只在自动化开的会话里有效。审查者是可以由任何模块
+   * 登记的代码，运行时不能只信它自己报的身份。
    */
   private async entitled(ctx: RunCtx, def: OfferedTool, v: AgentReviewVerdict): Promise<boolean> {
-    if (def.perCallConfirmation) return false
+    if (def.perCallConfirmation || def.kind === 'read') return false
     if (v.by === 'pre_approved') {
       if (ctx.thread.automationRunId === null) return false
       // 链条里拿不到给出结论的是哪个审查者：由自动化的预先同意本身再复核一次，别的审查者冒称的不算
       if (def.origin !== 'local' || !(await this.preApproval?.approves(ctx.view, def.name)))
         return false
       const now = await this.modeNow(ctx)
-      return !!now && now.approvalMode !== 'read_only' && !now.planMode
+      return !!now && !readOnlyMode(now.approvalMode) && (await this.policyNow(ctx, def)) === 'ask'
     }
     const now = await this.modeNow(ctx)
-    return (
-      now?.approvalMode === 'auto_review' &&
-      !now.planMode &&
-      (await this.policyNow(ctx, def)) === 'review'
-    )
+    return now?.approvalMode === 'auto_review' && (await this.policyNow(ctx, def)) === 'ask'
   }
 
-  /** 会话此刻的审批模式与计划模式（不用运行开始时的快照）；会话已不在时为 null。 */
-  private modeNow(ctx: RunCtx): Promise<Pick<AgentThread, 'approvalMode' | 'planMode'> | null> {
+  /** 会话此刻的模式与本会话放行的工具（不用运行开始时的快照）；会话已不在时为 null。 */
+  private modeNow(ctx: RunCtx): Promise<Pick<AgentThread, 'approvalMode' | 'trusted'> | null> {
     return this.ds.getRepository(AgentThread).findOne({
       where: { id: ctx.thread.id },
-      select: { id: true, approvalMode: true, planMode: true },
+      select: { id: true, approvalMode: true, trusted: true },
     })
+  }
+
+  /**
+   * 这个工具能不能“本会话内不再询问”：只有策略为 `ask` 的本系统工具（写入，或 root 设成 ask 的读取）；
+   * 须本人逐次确认的、只能由人确认的（`human`、`humanOnly`）从不（会话放行不能代替本人对单次调用的确认）。
+   * 外部 MCP 工具也从不：模型看到的名字 `ext.<服务器>.<工具>` 不是稳定身份（规整后撞名、改派后缀、同名
+   * 服务器重建都会让同一个名字指向别的操作），而且常是任意操作的接口。
+   */
+  private sessionAllowable(def: OfferedTool): boolean {
+    if (def.policy !== 'ask' || def.perCallConfirmation || isExternalName(def.name)) return false
+    if (def.origin === 'mcp') return false
+    return !(def.origin === 'builtin' && this.ext.builtin(def.name)?.meta.humanOnly)
+  }
+
+  /**
+   * 记下“本会话内不再询问”之前，按工具此刻的情况再核对一次（卡片出来之后 root 可能已把它改成 `human`、
+   * `deny` 或停用）：只有此刻仍可放行的本系统工具才记；外部工具一律不记。
+   */
+  async sessionAllowableNow(tool: string): Promise<boolean> {
+    if (isExternalName(tool)) return false
+    const policies = await this.toolPolicies.policies()
+    const row = await this.ds.getRepository(McpToolSwitch).findOneBy({ name: tool })
+    const builtin = this.ext.builtin(tool)
+    if (builtin)
+      return (
+        !builtin.meta.humanOnly && builtinPolicy(builtin.meta, policies, row ? [row] : []) === 'ask'
+      )
+    if (this.registry.get(tool)?.perCallConfirmation || (row && !row.enabled)) return false
+    return policies.get(tool) === 'ask'
+  }
+
+  /**
+   * 一个已记下、还没处理的调用此刻会不会不问人就执行（策略为 `auto` 的读取）：发消息拒绝等卡时，同一步里
+   * 其余要问人的调用（写入、root 设成 ask 的读取）一起拒绝。外部工具记成读取说明它当时就是 `auto`。
+   */
+  async runsWithoutAsking(call: { tool: string; kind: McpToolKind; source: string }) {
+    if (call.kind === 'write') return false
+    if (call.source === 'mcp') return true
+    const builtin = this.ext.builtin(call.tool)
+    const policies = await this.toolPolicies.policies()
+    if (builtin) {
+      const row = await this.ds.getRepository(McpToolSwitch).findOneBy({ name: call.tool })
+      return builtinPolicy(builtin.meta, policies, row ? [row] : []) === 'auto'
+    }
+    return (policies.get(call.tool) ?? 'auto') === 'auto'
+  }
+
+  /**
+   * 本人此刻是否已在本会话放行这个工具（重新读取：运行中撤销的放行立即不算），且工具此刻的策略仍是 `ask`
+   * （被改成 `human` 或停用的不再按放行执行）；写入还要求会话此刻不是只读或计划模式，读取在任何模式下都可。
+   */
+  private async allowedNow(ctx: RunCtx, def: OfferedTool): Promise<boolean> {
+    if (!this.sessionAllowable(def)) return false
+    const now = await this.modeNow(ctx)
+    if (!now || !isAllowed(now.trusted, def.name)) return false
+    if (def.kind === 'write' && readOnlyMode(now.approvalMode)) return false
+    return (await this.policyNow(ctx, def)) === 'ask'
   }
 
   /**
@@ -1459,16 +1553,12 @@ export class TurnRunner {
   }
 
   /**
-   * 审批审查者的放行或驳回：照样记一张审批卡（已决定，载荷带 `auto` 与理由，留作记录），与人的决定同一
-   * 形状。在会话行锁里再确认一次：轮次已被中断时直接停；审查期间急停了的按急停停下（放行作废）；这个
-   * 调用已经有审批卡（另一次运行抢先处理了它，这次运行已是过期的）时不写、按丢锁重新入队。
+   * 不经人就同意的调用（审批审查者放行，载荷带 `auto` 与理由；或本会话放行，载荷带 `allowedBy`）：照样记
+   * 一张已同意的审批卡留作记录，与人的决定同一形状。在会话行锁里再确认一次：轮次已被中断时直接停；期间
+   * 急停了的按急停停下（放行作废）；这个调用已经有审批卡（另一次运行抢先处理了它，这次运行已是过期的）时
+   * 不写、按丢锁重新入队。
    */
-  private async autoDecide(
-    ctx: RunCtx,
-    card: Pl<'approval'>,
-    v: AgentReviewVerdict,
-  ): Promise<AgentItem> {
-    const approve = v.verdict === 'approve'
+  private async autoDecide(ctx: RunCtx, card: Pl<'approval'>): Promise<AgentItem> {
     const item = await this.store.tx(async (w) => {
       await w.thread(Number(ctx.thread.id))
       const now = await w.m.getRepository(AgentTurn).findOneBy({ id: ctx.turn.id })
@@ -1490,13 +1580,8 @@ export class TurnRunner {
         Number(ctx.thread.id),
         Number(ctx.turn.id),
         'approval',
-        {
-          ...card,
-          decision: approve ? 'approve' : 'reject',
-          decidedAt: new Date().toISOString(),
-          auto: v,
-        },
-        approve ? 'approved' : 'rejected',
+        { ...card, decision: 'approve', decidedAt: new Date().toISOString() },
+        'approved',
       )
     })
     ctx.items.push(item)
@@ -1504,13 +1589,18 @@ export class TurnRunner {
   }
 
   /**
-   * 审批被拒或作废时给模型的结果。审批审查者驳回的附上它的理由：理由是另一个模型写的文字（可能复述了
-   * 外部内容），按不可信数据包起来交给模型，结果标为 untrusted。
+   * 审批被拒或作废时给模型的结果。审批审查者驳回过的（之后由人拒绝，或早先版本里由审查者直接驳回）附上
+   * 它的理由：理由是另一个模型写的文字（可能复述了外部内容），按不可信数据包起来交给模型，结果标为
+   * untrusted。
    */
   private rejectOutcome(approval: AgentItem): Outcome {
     const a = pl<'approval'>(approval)
-    if (a.auto?.verdict === 'reject') {
-      const content = `The automatic review rejected this call. Do not retry it unless the user asks. Its stated reason follows:\n${wrapUntrusted('automatic review', a.auto.reason)}`
+    if (a.auto?.verdict === 'reject' && a.decision === 'reject') {
+      const by =
+        a.decidedBy === undefined
+          ? 'The automatic review rejected this call.'
+          : `The automatic review rejected this call and the user rejected it too${a.note ? `: ${a.note}` : '.'}`
+      const content = `${by} Do not retry it the same way; ask the user or choose a safer approach. The review's stated reason follows:\n${wrapUntrusted('automatic review', a.auto.reason)}`
       return { ok: false, content, untrusted: true, error: { code: 'rejected', message: content } }
     }
     const content =
@@ -1520,9 +1610,23 @@ export class TurnRunner {
     return { ok: false, content, untrusted: false, error: { code: 'rejected', message: content } }
   }
 
-  /** 提问的回答给模型的结果：选项与补充文字、表单值，或用户没有回答。 */
+  /**
+   * 提问的回答给模型的结果：选项与补充文字、表单值，或用户没有回答。方案卡只会在“继续完善”后续跑到这里
+   * （批准时由 TurnControlService 直接记结果并结束本轮）：意见作为下一条用户消息送达，这里只说明要接着规划。
+   */
   private answerOutcome(q: AgentItem): Outcome {
     const p = pl<'question'>(q)
+    if (p.proposal)
+      return {
+        ok: true,
+        content:
+          q.status === 'answered' && p.choice?.decision === 'refine'
+            ? 'The user did not approve this plan yet and wants it refined; their feedback, if any, follows as ' +
+              'a user message. You are still in plan mode (read-only): revise the plan, ask with ask.user ' +
+              'if needed, and call plan.propose again.'
+            : 'The plan was not decided. Do not act on it.',
+        untrusted: false,
+      }
     if (q.status !== 'answered' || p.internal?.declined)
       return { ok: true, content: 'The user did not answer.', untrusted: false }
     const content = JSON.stringify(
@@ -1986,10 +2090,13 @@ export class TurnRunner {
     try {
       const r = await this.builtin(ctx, call, def, args)
       if ('wait' in r) {
+        // 方案卡只认运行时自己的 plan.propose：别的内置工具不能借它让本人“批准”并切换模式
+        const proposal = def.name === PROPOSE_TOOL ? r.proposal : undefined
         await this.pause(ctx, 'question', {
           callId: pl<'tool_call'>(call).callId,
           from: 'agent',
-          questions: r.questions,
+          questions: proposal ? [] : r.questions,
+          ...(proposal && { proposal }),
         })
         return 'wait'
       }
@@ -2305,16 +2412,9 @@ export class TurnRunner {
         return false
       }
       await w.patchTurn(ctx.turn, { status: 'completed', endedAt: new Date() })
-      const untitled = LOCALES.map((lang) =>
-        String(this.i18n.translate('agent.thread.untitled', { lang })),
-      )
-      if (!thread.title.trim() || untitled.includes(thread.title)) {
-        const first = ctx.items.find((i) => i.kind === 'user')
-        if (first)
-          await w.m
-            .getRepository(AgentThread)
-            .update({ id: thread.id }, { title: titleOf(pl<'user'>(first).text) })
-      }
+      // 运行时写的“已批准方案”不是本人的话，不拿来起标题（方案轮结束时已按方案轮的第一条消息起过）
+      const first = ctx.items.find((i) => i.kind === 'user' && !pl<'user'>(i).fromPlan)
+      if (first) await this.nameUntitled(w.m, thread, pl<'user'>(first).text)
       return true
     })
     if (!done) return false
@@ -2324,6 +2424,15 @@ export class TurnRunner {
       await this.queue.startNext(Number(ctx.thread.id), Number(ctx.thread.userId))
     }
     return true
+  }
+
+  /** 会话还没有标题（空或任一语言的“新会话”）时用这段本人的文字起标题；在调用方的会话行锁里执行。 */
+  async nameUntitled(m: EntityManager, thread: AgentThread, text: string): Promise<void> {
+    const untitled = LOCALES.map((lang) =>
+      String(this.i18n.translate('agent.thread.untitled', { lang })),
+    )
+    if (thread.title.trim() && !untitled.includes(thread.title)) return
+    await m.getRepository(AgentThread).update({ id: thread.id }, { title: titleOf(text) })
   }
 
   /**

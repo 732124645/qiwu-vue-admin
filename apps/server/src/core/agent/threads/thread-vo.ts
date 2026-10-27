@@ -7,6 +7,7 @@ import type {
 } from '@qiwu/shared'
 import { MASK, redactedJson } from '../../redact.js'
 import type { AgentThread, AgentTurn } from '../entities/agent-thread.entity.js'
+import { allowedTools } from '../runtime/turn-tools.js'
 
 /** bigint 列可能以字符串读出：统一转成数字。 */
 export const num = (v: unknown): number => Number(v)
@@ -29,7 +30,7 @@ export function threadVo(
     approvalMode: t.approvalMode,
     recoveryRequired: !!t.recoveryRequired,
     recoveryRevision: t.recoveryRevision ?? 0,
-    planMode: !!t.planMode,
+    allowedTools: allowedTools(t.trusted),
     pinned: !!t.pinned,
     temporary: !!t.temporary,
     unread: extra.unread,
@@ -125,10 +126,6 @@ function sharedItem(i: AgentItemVo): AgentItemVo {
 export const sharedTurn = (t: AgentTurnVo): AgentTurnVo =>
   t.error ? { ...t, error: { code: t.error.code, message: '' } } : t
 
-/** 平台参数 `agent.trust_mode`：只有（去空白、不分大小写）恰好是 `false` 才关闭，缺失或其他值都算打开。 */
-export const trustModeOn = (raw: string | null | undefined): boolean =>
-  raw?.trim().toLowerCase() !== 'false'
-
 /** 导出用到的界面文字（调用方按调用者语言翻译）。 */
 export type ExportLabel =
   | 'user'
@@ -190,6 +187,15 @@ export function threadMarkdown(
         )
         break
       case 'question':
+        // 方案卡：标题、概述、编号步骤与本人的选择
+        if (i.payload.proposal) {
+          const pr = i.payload.proposal
+          out.push(`## ${l('plan')}: ${pr.title}`, '', pr.summary, '')
+          pr.steps.forEach((st, k) => out.push(`${k + 1}. ${st}`))
+          out.push('')
+          if (i.payload.choice) out.push(`> ${l('answer')}: ${i.payload.choice.decision}`, '')
+          break
+        }
         out.push(`## ${l('question')}`, '')
         for (const q of i.payload.questions) out.push(`- ${q.header}: ${q.question}`)
         for (const a of i.payload.answers ?? [])

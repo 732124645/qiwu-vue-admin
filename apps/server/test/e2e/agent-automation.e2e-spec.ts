@@ -949,7 +949,6 @@ describe('write modes', () => {
       thread: {
         id: Number(run.thread_id),
         mode: 'ask',
-        planMode: false,
         readOnly: false,
         memoryEnabled: true,
         profileId: null,
@@ -1047,7 +1046,7 @@ describe('write modes', () => {
   it('a run that switches to plan or read-only mode during the review hands the write to a person', async () => {
     const reviewer = app.get(AutomationPreApproval)
     const switches: [string, number | string][] = [
-      ['plan_mode', 1],
+      ['approval_mode', 'plan'],
       ['approval_mode', 'read_only'],
     ]
     for (const [column, value] of switches) {
@@ -1130,7 +1129,7 @@ describe('profiles', () => {
     )[0]!
 
   it("runs with the owner's profile: its model and reasoning, its tool list; not the profile's approval mode", async () => {
-    const id = await profile(owner.token, { tools: [OTHER], approvalMode: 'trust' })
+    const id = await profile(owner.token, { tools: [OTHER], approvalMode: 'plan' })
     const a = await created(owner.token, {
       profileId: id,
       writeMode: 'ask',

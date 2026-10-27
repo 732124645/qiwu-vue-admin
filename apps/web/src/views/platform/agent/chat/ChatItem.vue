@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import type { AgentPlanDecide } from '@qiwu/shared'
 import { toolTitle } from '../tool-presentation'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { agentApi } from '@/api/platform/agent'
@@ -11,16 +12,17 @@ import ApprovalCard from './ApprovalCard.vue'
 import { MarkdownText, safeMarkdownHref } from './markdown'
 import { saveBlob } from '@/core/request/http'
 import OutputCard from './OutputCard.vue'
+import PlanCard from './PlanCard.vue'
 import QuestionCard from './QuestionCard.vue'
 import { show, type ChatRow } from './thread-state'
 
 /**
  * 对话里的一行：用户气泡（附件、排队标记）、助手回答（Markdown 安全子集、编号来源、后续建议）、
  * 可折叠的“思考”、压缩分隔线、工具调用与结果合成的折叠卡（轮次结束仍没有结果的显示“已停止”）、审批卡、
- * 反问卡、计划清单、图表 / 图片 / 报告 / 子任务卡片（OutputCard）、错误提示（显示翻译后的说明，不显示错误码）。
+ * 反问卡、方案卡（计划模式的 `plan.propose`）、计划清单、图表 / 图片 / 报告 / 子任务卡片（OutputCard）、错误提示（显示翻译后的说明，不显示错误码）。
  * 消息上的操作只有一行，悬停或焦点在这条消息里时才显示：用户消息复制、编辑最后一条重发、分叉；回答复制、
- * 分叉，其余（查看源码、下载、展开阅读、点赞 / 点踩，可附说明）收在“更多”里，展开后接在同一行。计划模式下
- * 最后一条回答可“执行此计划”。
+ * 分叉，其余（查看源码、下载、展开阅读、点赞 / 点踩，可附说明）收在“更多”里，展开后接在同一行。批准方案后
+ * 运行时写的那条执行消息只显示一行“按已批准的方案执行”，原文可展开查看。
  */
 defineOptions({ name: 'AgentChatItem' })
 const {
@@ -30,9 +32,7 @@ const {
   last = false,
   readonly = false,
   canInspect = true,
-  trust = true,
-  canRunPlan = false,
-  runningPlan = false,
+  autoReview = false,
 } = defineProps<{
   row: ChatRow
   canFork?: boolean
@@ -44,18 +44,15 @@ const {
   readonly?: boolean
   /** 已位于只读详情时不重复提供没有接收方的展开按钮。 */
   canInspect?: boolean
-  /** 审批卡是否提供“本会话内同意” */
-  trust?: boolean
-  /** 计划模式下最后一条已完成的回答：可执行此计划 */
-  canRunPlan?: boolean
-  runningPlan?: boolean
+  /** 平台提供自动审查模式：方案卡多给一个“批准并自动审查执行” */
+  autoReview?: boolean
 }>()
 const emit = defineEmits<{
   fork: [seq: number]
   edit: [seq: number, text: string]
   suggest: [text: string]
   changed: []
-  runPlan: []
+  planDecided: [decision: AgentPlanDecide['decision']]
   inspect: [itemId: number]
   inspectChild: [threadId: number]
 }>()
@@ -167,7 +164,14 @@ async function rate(itemId: number, value: 1 | -1) {
   </details>
 
   <template v-else>
-    <div v-if="row.item.kind === 'user'" class="agent-msg agent-msg--user">
+    <details
+      v-if="row.item.kind === 'user' && row.item.payload.fromPlan"
+      class="agent-reasoning agent-msg__from-plan"
+    >
+      <summary>{{ t('agent.chat.planCard.started') }}</summary>
+      <p class="agent-msg__text">{{ row.item.payload.text }}</p>
+    </details>
+    <div v-else-if="row.item.kind === 'user'" class="agent-msg agent-msg--user">
       <div class="agent-msg__bubble">
         <div
           v-if="
@@ -325,17 +329,6 @@ async function rate(itemId: number, value: 1 | -1) {
             </template>
           </span>
         </div>
-        <el-button
-          v-if="canRunPlan && !readonly && row.item.status === 'done'"
-          type="primary"
-          size="small"
-          class="agent-msg__run-plan"
-          :loading="runningPlan"
-          :disabled="runningPlan"
-          @click="emit('runPlan')"
-        >
-          {{ t('agent.chat.planRun.action') }}
-        </el-button>
         <div
           v-if="last && !readonly && row.item.payload.suggestions?.length"
           class="agent-msg__suggest"
@@ -377,8 +370,14 @@ async function rate(itemId: number, value: 1 | -1) {
       v-else-if="row.item.kind === 'approval'"
       :item="row.item"
       :readonly
-      :trust
       @decided="emit('changed')"
+    />
+    <PlanCard
+      v-else-if="row.item.kind === 'question' && row.item.payload.proposal"
+      :item="row.item"
+      :readonly
+      :auto-review="autoReview"
+      @decided="emit('planDecided', $event)"
     />
     <QuestionCard
       v-else-if="row.item.kind === 'question'"

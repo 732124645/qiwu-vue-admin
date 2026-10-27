@@ -22,7 +22,10 @@ const tools = ref<AgentExternalToolVo[]>([...server.tools])
 /** 正在保存的工具 id：其控件加载并禁用，防止重复提交 */
 const busy = ref<number>()
 
-const policies: AgentToolPolicy[] = ['auto', 'ask', 'review', 'deny']
+/** 外部工具的策略：“直接执行”只表示管理员确认它确实只读；其余与本系统写入工具相同。 */
+const policies: AgentToolPolicy[] = ['auto', 'ask', 'human', 'deny']
+const hint = (p: AgentToolPolicy) =>
+  t(p === 'auto' ? 'agent.admin.policyHint.mcpAuto' : `agent.admin.policyHint.${p}`)
 
 /** 保存一个工具的启用或策略；选“自动”先确认。成功后以服务端应答替换该行。 */
 async function update(
@@ -57,6 +60,15 @@ async function update(
 </script>
 
 <template>
+  <div class="mcp-tools__note">
+    <p>{{ t('agent.admin.policy.note') }}</p>
+    <ul>
+      <li v-for="p in policies" :key="p">
+        <strong>{{ t(`agent.admin.policy.${p}`) }}</strong
+        >{{ t('agent.admin.policy.sep') }}{{ hint(p) }}
+      </li>
+    </ul>
+  </div>
   <el-table :data="tools" max-height="480" row-key="id">
     <el-table-column :label="t('agent.admin.tool.name')" min-width="180">
       <template #default="{ row }">
@@ -96,6 +108,7 @@ async function update(
             :key="p"
             :value="p"
             :label="t(`agent.admin.policy.${p}`)"
+            :title="hint(p)"
           />
         </el-select>
       </template>
@@ -123,5 +136,18 @@ async function update(
 }
 .mcp-tools__policy {
   width: 120px;
+}
+.mcp-tools__note {
+  margin: 0 0 8px;
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--qw-text-3);
+}
+.mcp-tools__note p,
+.mcp-tools__note ul {
+  margin: 0;
+}
+.mcp-tools__note ul {
+  padding-left: 18px;
 }
 </style>

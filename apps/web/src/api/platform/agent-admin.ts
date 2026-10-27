@@ -6,6 +6,8 @@ import type {
   AgentMcpServerVo,
   AgentPromptSave,
   AgentPromptVo,
+  AgentProviderModelsQuery,
+  AgentProviderModelsVo,
   AgentProviderSave,
   AgentProviderVo,
   AgentSearchProviderSave,
@@ -61,8 +63,15 @@ export function dropEmpty<T extends Record<string, unknown>>(dto: T, ...keys: (k
   return out
 }
 
-/** /api/agent/providers：模型提供方（平台页“智能体设置”）。 */
-export const agentProviderApi = listApi<AgentProviderVo, AgentProviderSave>('/agent/providers')
+/**
+ * /api/agent/providers：模型提供方（平台页“智能体设置”）；`models` 从服务读取可用模型，
+ * 不填密钥时服务端只在地址未改时用已保存的密钥。
+ */
+export const agentProviderApi = {
+  ...listApi<AgentProviderVo, AgentProviderSave>('/agent/providers'),
+  models: (dto: AgentProviderModelsQuery) =>
+    api.post<AgentProviderModelsVo>('/agent/providers/models', dto),
+}
 /** /api/agent/search-providers：联网搜索提供方。 */
 export const agentSearchApi = listApi<AgentSearchProviderVo, AgentSearchProviderSave>(
   '/agent/search-providers',

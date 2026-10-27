@@ -49,7 +49,7 @@
         "read_only": "Read only: no write tools are offered.",
         "ask": "Ask: a write stops and its approval card goes to your inbox; it goes on once you confirm it in the conversation.",
         "pre_approved": "Pre-approved: the write tools ticked here run at once, other writes still wait for you; a change of permissions, a tool switched off or denied ends the approval.",
-        "auto_review": "Auto review: writes allowed for automatic review go to the review model, other writes wait for you."
+        "auto_review": "Auto review: writes that need confirmation go to the review model first; tools set to \"People only\" and actions that always need your own confirmation wait for you."
       },
       "noTools": "You have no write tools to pre-approve right now",
       "sharedHint": "Everyone in the tenant sees it; it runs as you and only you can change it.",

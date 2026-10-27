@@ -27,6 +27,7 @@ import {
   type AgentThreadCreate,
   type AgentItemVo,
   type AgentOptionsVo,
+  type AgentPlanDecide,
   type AgentProfileVo,
   type AgentStatusVo,
   type AgentThreadVo,
@@ -60,10 +61,12 @@ import {
   loadDelivery,
   saveDelivery,
   clearHistory,
+  togglePlanMode,
   type PendingDeliveryIds,
   type SlashCommand,
 } from './thread-state'
 import { pendingContext, pendingRoute } from './use-agent-context'
+import { toolTitle } from '../tool-presentation'
 
 /**
  * “智能助手”对话页（整页的对话应用）：左侧会话列表 | 对话区 | 右侧面板，两条分隔线可拖动或用方向键调宽，
@@ -180,7 +183,6 @@ function defaultSettings(): ComposerSettings {
     model: options.value?.defaults?.model ?? null,
     reasoning: null,
     approvalMode: modes.includes('ask') ? 'ask' : (modes[0] ?? 'ask'),
-    planMode: false,
   }
 }
 /** 只接收最新草稿来源的选项；慢响应不能覆盖用户已选的模型、审批模式或方案。 */
@@ -270,17 +272,29 @@ const records = computed(() => {
   const target = ctx?.target
   return target ? (ctx!.ids ?? []).map((id) => ({ target, id })) : []
 })
-/** 计划模式下最后一条回答已完成：可“执行此计划” */
-const canRunPlan = computed(() => {
-  const last = items.value.at(-1)
-  return (
-    !!thread.value &&
-    thread.value.planMode &&
-    !running.value &&
-    last?.kind === 'assistant' &&
-    last.status === 'done'
-  )
-})
+/** 本轮停在待确认的操作上：输入框提示发送即拒绝它们并把这句话告诉助手 */
+const awaitingApproval = computed(
+  () =>
+    turn.value?.status === 'waiting' &&
+    items.value.some((i) => i.kind === 'approval' && i.status === 'pending'),
+)
+/** 本会话已放行（不再询问）的工具，按工具标题显示 */
+const allowedTools = computed(() => thread.value?.allowedTools ?? [])
+const revokingTool = ref<string | null>(null)
+/** 撤销一个工具的本会话放行，之后它的每次写入重新询问；完成后以服务端的会话为准。 */
+async function revokeTool(tool: string) {
+  const th = thread.value
+  if (!th || revokingTool.value) return
+  revokingTool.value = tool
+  try {
+    const next = await agentApi.revokeAllowedTool(th.id, tool)
+    onThreadUpdated(next)
+  } catch (e) {
+    toastRest(e)
+  } finally {
+    revokingTool.value = null
+  }
+}
 const contextUse = computed(() =>
   status.value && thread.value && status.value.threadId === thread.value.id
     ? { used: status.value.contextUsed, window: status.value.contextWindow }
@@ -527,7 +541,6 @@ const settingsOf = (th: AgentThreadVo): ComposerSettings => ({
   model: th.model,
   reasoning: th.reasoning,
   approvalMode: th.approvalMode,
-  planMode: th.planMode,
 })
 function setQuery(p: { thread?: number; shared?: string }) {
   if (props.embedded) return
@@ -758,7 +771,6 @@ async function createThread(delivery: Delivery) {
   const input = delivery.create ?? {
     clientDraftId: delivery.clientDraftId,
     approvalMode: s.approvalMode,
-    planMode: s.planMode,
     // undefined：服务端取本人的默认方案；null：明确不用方案
     ...(d.profileId !== undefined ? { profileId: d.profileId } : {}),
     // 记忆默认开，只在关掉时才带上（临时会话不读不写记忆）
@@ -779,7 +791,6 @@ function applyProfile(p: AgentProfileVo | null) {
   const modes = options.value?.approvalModes ?? []
   settings.value = {
     ...base,
-    planMode: settings.value.planMode,
     ...(p?.providerId != null && p.model ? { providerId: p.providerId, model: p.model } : {}),
     reasoning: p?.reasoning ?? null,
     ...(p && modes.includes(p.approvalMode) ? { approvalMode: p.approvalMode } : {}),
@@ -914,7 +925,21 @@ async function stop() {
   }
 }
 
-// 已有会话时，换模型、推理强度、审批模式或计划模式立即保存到会话上
+/**
+ * 会话模式以服务器为准：批准方案、别的标签页或嵌入式助手改了模式后，补齐带回的新模式同步到输入框。
+ * 输入框此前与服务器一致（没有尚未保存的本地改动）才跟随，避免之后换模型时把过期的模式存回去；
+ * 不依赖某一次补齐，因为较早的补齐可能被较新的一次取代而丢弃。
+ */
+watch(
+  () => [thread.value?.id, thread.value?.approvalMode] as const,
+  ([id, mode], [oldId, oldMode]) => {
+    if (id == null || id !== oldId || !mode || mode === oldMode) return
+    if (settings.value.approvalMode === oldMode)
+      settings.value = { ...settings.value, approvalMode: mode }
+  },
+)
+
+// 已有会话时，换模型、推理强度或会话模式立即保存到会话上
 watch(settings, async (s) => {
   const th = thread.value
   if (!th || readOnly.value) return
@@ -925,7 +950,6 @@ watch(settings, async (s) => {
       ...(s.providerId != null && s.model ? { providerId: s.providerId, model: s.model } : {}),
       reasoning: s.reasoning,
       approvalMode: s.approvalMode,
-      planMode: s.planMode,
     })
     if (thread.value?.id !== th.id) return
     thread.value = mergeThread(thread.value, next)
@@ -1057,26 +1081,14 @@ function onThreadCommand(cmd: ThreadCommand) {
 }
 
 /**
- * 执行此计划：先在会话上关掉计划模式（保存成功后才发，免得这一轮仍按只读计划运行），
- * 再发一条“按计划执行”。
+ * 方案卡决定之后补齐条目与会话：批准时服务器已切换会话模式并开始执行，输入框的模式由上面跟随服务器的
+ * 监听同步（与会话一致，不会再触发保存）；继续完善时模式不变。
  */
-const runningPlan = ref(false)
-async function runPlan() {
+async function onPlanDecided(decision: AgentPlanDecide['decision']) {
   const th = thread.value
-  if (!th || runningPlan.value) return
-  runningPlan.value = true
-  try {
-    const next = await agentApi.updateThread(th.id, { planMode: false })
-    if (thread.value?.id !== th.id) return
-    thread.value = mergeThread(thread.value, next)
-    settings.value = settingsOf(next)
-    listRef.value?.upsert(next)
-    await submit({ text: t('agent.chat.planRun.text') })
-  } catch (e) {
-    toastRest(e)
-  } finally {
-    runningPlan.value = false
-  }
+  await catchUp()
+  if (decision === 'refine' || !thread.value || thread.value.id !== th?.id) return
+  listRef.value?.upsert(thread.value)
 }
 
 // ---- 斜杠命令（输入框自己处理模型、审批、计划、技能与提示词） ----
@@ -1133,7 +1145,10 @@ useEventListener(window, 'keydown', (e: KeyboardEvent) => {
   if (combo === map.newChat) newDraft()
   else if (combo === map.focusComposer) composerRef.value?.focus()
   else if (combo === map.togglePlan && !readOnly.value)
-    settings.value = { ...settings.value, planMode: !settings.value.planMode }
+    settings.value = {
+      ...settings.value,
+      approvalMode: togglePlanMode(settings.value.approvalMode, options.value?.approvalModes ?? []),
+    }
   else return
   e.preventDefault()
 })
@@ -1415,6 +1430,29 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
                   @apply="applyProfile"
                   @updated="onThreadUpdated"
                 />
+                <template v-if="thread">
+                  <span class="agent-settings__name agent-settings__section">{{
+                    t('agent.chat.settings.allowed')
+                  }}</span>
+                  <p v-if="!allowedTools.length" class="agent-settings__hint">
+                    {{ t('agent.chat.settings.allowedEmpty') }}
+                  </p>
+                  <ul v-else class="agent-settings__allowed">
+                    <li v-for="tool in allowedTools" :key="tool" class="agent-settings__row">
+                      <span class="agent-settings__name" :title="tool">{{ toolTitle(tool) }}</span>
+                      <el-button
+                        size="small"
+                        link
+                        type="danger"
+                        :loading="revokingTool === tool"
+                        :disabled="revokingTool != null"
+                        :aria-label="t('agent.chat.settings.revoke', { tool: toolTitle(tool) })"
+                        @click="revokeTool(tool)"
+                        >{{ t('agent.chat.settings.revokeShort') }}</el-button
+                      >
+                    </li>
+                  </ul>
+                </template>
               </el-tab-pane>
               <el-tab-pane v-if="!readOnly" name="notify" :label="t('agent.chat.notify.title')">
                 <NotifySettings v-if="settingsOpen && settingsPane === 'notify'" />
@@ -1557,14 +1595,12 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
           "
           :last="i === rows.length - 1 && !running"
           :readonly="readOnly"
-          :trust="options?.trustSession ?? false"
-          :can-run-plan="canRunPlan && i === rows.length - 1"
-          :running-plan="runningPlan"
+          :auto-review="options?.approvalModes.includes('auto_review') ?? false"
           @fork="fork"
           @edit="startEdit"
           @suggest="(s) => composerRef?.suggest(s)"
           @changed="catchUp"
-          @run-plan="runPlan"
+          @plan-decided="onPlanDecided"
           @inspect="inspectItem"
           @inspect-child="inspectChild"
         />
@@ -1689,6 +1725,7 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
           :options
           :submit
           :running
+          :awaiting-approval
           :stopping
           :context="contextUse"
           :records
@@ -2190,9 +2227,6 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
   align-items: center;
   justify-content: space-between;
 }
-.agent-msg__run-plan {
-  align-self: flex-start;
-}
 .qw-md h3,
 .qw-md h4,
 .qw-md h5,
@@ -2232,6 +2266,19 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
   margin: 0;
   font-size: 12px;
   color: var(--qw-warning);
+}
+.agent-composer__reject-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--qw-warning);
+}
+.agent-composer__announce {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 .agent-composer__context {
   display: flex;
@@ -2561,6 +2608,16 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
 }
 .agent-settings__row .el-button {
   margin: 0;
+}
+.agent-settings__section {
+  flex: none;
+  margin-top: 8px;
+  font-weight: 600;
+}
+.agent-settings__allowed {
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 .agent-settings__hint {
   margin: 0 0 4px;

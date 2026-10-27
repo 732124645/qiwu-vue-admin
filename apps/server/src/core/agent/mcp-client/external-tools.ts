@@ -88,7 +88,7 @@ export class AgentExternalTools implements ExternalToolSource {
             title: (tool.title ?? tool.name).slice(0, 200),
             description: (tool.description ?? '').slice(0, MCP_DESCRIPTION_MAX),
             parameters: tool.inputSchema ?? { type: 'object' },
-            // `review`：运行时只在会话为自动审查模式时交给审查模型，否则照“询问”等人
+            // 只有 auto 按只读执行；ask 与 human 都按写入等人（ask 在自动审查模式下可先送审）
             policy: tool.policy,
             serverName: server.name,
           },

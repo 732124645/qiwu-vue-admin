@@ -494,6 +494,34 @@ describe('server settings', () => {
     }
   })
 
+  it('keeps a human or deny policy when the tool changes upstream: a change only tightens', async () => {
+    const saved = { ...toolDefs }
+    try {
+      toolSet = ['lookup', 'confirm', 'big', 'fail']
+      const s = await addServer('tighten')
+      const tools = (await sync(s.id)).body.data.tools as { id: number; name: string }[]
+      const id = (name: string) => tools.find((t) => t.name === name)!.id
+      expect((await setTool(s.id, id('confirm'), { enabled: true, policy: 'human' })).status).toBe(
+        200,
+      )
+      expect((await setTool(s.id, id('big'), { enabled: true, policy: 'deny' })).status).toBe(200)
+      toolDefs.confirm = {
+        name: 'confirm',
+        description: 'now also deletes things',
+        inputSchema: { type: 'object' },
+      }
+      toolDefs.big = { name: 'big', inputSchema: { type: 'object', properties: { x: {} } } }
+      const res = await sync(s.id)
+      expect(res.status).toBe(200)
+      const after = res.body.data.tools as { name: string; policy: string }[]
+      expect(after.find((t) => t.name === 'confirm')).toMatchObject({ policy: 'human' })
+      expect(after.find((t) => t.name === 'big')).toMatchObject({ policy: 'deny' })
+      expect(String(res.body.data.lastError)).toContain('confirm')
+    } finally {
+      Object.assign(toolDefs, saved)
+    }
+  })
+
   it('is a root-only platform page: 403 without the perm or from another tenant, 404 for unknown ids', async () => {
     expect((await http().get('/api/agent/mcp-servers').set(bearer(reader))).status).toBe(403)
     expect((await http().get('/api/agent/mcp-servers').set(bearer(otherAdmin))).status).toBe(403)
@@ -666,6 +694,7 @@ describe('tool policies', () => {
       http().put(`/api/agent/tools/${name}/policy`).set(bearer(token)).send({ policy })
     expect((await put(write.name, 'auto')).status).toBe(400)
     expect((await put(write.name, 'deny')).status).toBe(200)
+    expect((await put(read.name, 'human')).status).toBe(400)
     expect((await put(read.name, 'ask')).status).toBe(200)
     expect((await put('web.fetch', 'deny')).status).toBe(200)
     const after = new Map(
@@ -689,8 +718,8 @@ describe('tool policies', () => {
     expect(reset.find((t) => t.name === write.name)).toMatchObject({ defaulted: true })
 
     expect((await put('nope.nope.nope', 'ask')).status).toBe(404)
-    expect((await put(read.name, 'ask', reader)).status).toBe(403)
-    expect((await put(read.name, 'ask', otherAdmin)).status).toBe(403)
+    expect((await put(read.name, 'deny', reader)).status).toBe(403)
+    expect((await put(read.name, 'deny', otherAdmin)).status).toBe(403)
     expect((await http().get('/api/agent/tools').set(bearer(otherAdmin))).status).toBe(403)
   })
 })

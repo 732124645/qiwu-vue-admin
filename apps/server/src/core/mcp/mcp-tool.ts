@@ -57,7 +57,13 @@ export interface McpToolMeta {
    * would change: `{ target, fields: [{ field, from, to }] }`; the in-app agent shows it on the approval card
    */
   preview?: string
-  /** 每次写入都须本人确认本次预览；不接受会话信任、自动审查、预批准或直接令牌调用。 */
+  /**
+   * a high-risk write (deletes records, changes many at once, sends something outside the system, moves
+   * money): in the in-app agent its default policy is `human` (only the owner confirms, never the review
+   * model, never allowed for a whole thread); an administrator may still set `ask`
+   */
+  highRisk?: true
+  /** 每次写入都须本人确认本次预览；不接受会话放行、自动审查、预批准或直接令牌调用。 */
   perCallConfirmation?: true
   /** 人工逐次确认时必填；不体现在 JSON Schema 的校验、转换或默认值语义改变时必须递增。 */
   confirmationRevision?: string

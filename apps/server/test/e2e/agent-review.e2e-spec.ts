@@ -1,15 +1,16 @@
 import { UsageBook } from '../../src/core/agent/runtime/usage-book.js'
 import { TEST_AGENT_PRICING, clearAgentUsage } from '../setup/agent-pricing.js'
-// Automatic review of writes (see docs/agent.md): an administrator sets a write tool's policy to `review`
-// (a read tool cannot take it; built-in tools are listed, take deny / review and can be switched off), and
-// in the auto-review mode such a write goes to the review model set by `agent.review.model` before a human:
-// approve runs it (the card records the verdict and reason), reject tells the model, escalate leaves the card
-// waiting with the review's note. A tool with policy `ask`, read-only and plan mode never go to review; the
+// Automatic review of writes (see docs/agent.md): in the auto-review mode every write with policy `ask` (the
+// default; built-in tools are listed, take deny / ask / human and can be switched off) goes to the review
+// model set by `agent.review.model` before a human: approve runs it (the card records the verdict and
+// reason), reject and escalate leave the card waiting for the owner with the review's verdict and note (the
+// owner may still approve). A tool with policy `human`, read-only and plan mode never go to review; in the
+// auto-review mode such a card says why it was not reviewed (and stays as it was in the ask mode). The
 // mode is offered and accepted only once a review model is set. A garbled, slow or failing review model hands
 // over to a human. Text from outside (source titles, an external tool's title) reaches the review model only
 // inside the marked untrusted block, and an instruction there cannot win an approval. The review call counts
 // in the owner's usage, is skipped while the agent is paused and when the daily quota is used up. External
-// tools with policy `review` take the same path. The review model is a local OpenAI-compatible stub server.
+// tools with policy `ask` take the same path. The review model is a local OpenAI-compatible stub server.
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { Injectable, Module } from '@nestjs/common'
@@ -122,6 +123,9 @@ const reviewOn = () => setParam(AGENT2_PARAMS.reviewModel, `${reviewProviderId}:
 /** Sets a tool policy through the platform settings API as root. */
 const policy = (name: string, value: string | null, token = root) =>
   http().put(`/api/agent/tools/${name}/policy`).set(bearer(token)).send({ policy: value })
+/** The owner decides an approval card. */
+const decide = (itemId: number, decision: string) =>
+  http().post(`/api/agent/approvals/${itemId}`).set(bearer(owner)).send({ decision })
 
 /** A test-only write built-in tool. */
 @Injectable()
@@ -135,6 +139,18 @@ class ReviewBuiltins {
   })
   memo() {
     ran.memo++
+    return { ok: true, content: 'saved' }
+  }
+
+  @AgentBuiltinTool({
+    name: 'test.rv.mine',
+    title: 'Save a personal note',
+    description: 'Saves a personal note (only the owner may confirm it)',
+    kind: 'write',
+    humanOnly: true,
+    input: z.object({ text: z.string() }),
+  })
+  mine() {
     return { ok: true, content: 'saved' }
   }
 }
@@ -208,7 +224,6 @@ const runCtx = (threadId: number, signal = new AbortController().signal): AgentR
   thread: {
     id: threadId,
     mode: 'auto_review',
-    planMode: false,
     readOnly: false,
     memoryEnabled: true,
     profileId: null,
@@ -229,7 +244,7 @@ const reviewCall: AgentReviewCall = {
   tool: 'test.rv.update',
   title: 'Change a note',
   origin: 'local',
-  policy: 'review',
+  policy: 'ask',
   args: { id: 1, title: 'T' },
   sources: [],
 }
@@ -402,7 +417,7 @@ beforeAll(async () => {
     name: 'create',
     title: `Create a thing ${INJECTED}`,
     enabled: 1,
-    policy: 'review',
+    policy: 'ask',
     input_schema: { type: 'object', properties: { name: { type: 'string' } } },
   })
   vi.spyOn(app.get<ExternalToolSource>(EXTERNAL_TOOL_SOURCE), 'call').mockImplementation(
@@ -456,7 +471,6 @@ beforeEach(async () => {
   await ds.query("DELETE FROM cfg_mcp_tool WHERE name LIKE 'test.%'")
   await setParam(AGENT_PAUSED_PARAM, 'false')
   await reviewOn()
-  await policy('test.rv.update', 'review').expect(200)
 })
 
 describe('the review verdicts', () => {
@@ -494,22 +508,37 @@ describe('the review verdicts', () => {
     expect([Number(turn!.prompt_tokens), Number(turn!.completion_tokens)]).toEqual([97, 21])
   })
 
-  it('reject tells the model and runs nothing', async () => {
+  it('reject stops for the owner with the reason; the owner may still approve it', async () => {
     reply = { verdict: 'reject', reason: 'The user asked for note 2.' }
-    const { status, cards, id } = await write(update(1))
-    expect(status).toBe('completed')
+    const { status, cards, turnId } = await write(update(1))
+    expect(status).toBe('waiting')
     expect(ran.update).toBe(0)
     expect(cards[0]).toMatchObject({
-      status: 'rejected',
-      payload: { auto: { by: 'review', verdict: 'reject', reason: 'The user asked for note 2.' } },
+      status: 'pending',
+      payload: {
+        sessionAllow: true,
+        auto: { by: 'review', verdict: 'reject', reason: 'The user asked for note 2.' },
+      },
     })
-    // the review model's reason reaches the chat model only as quoted untrusted data
+    expect((await decide(cards[0]!.id, 'approve')).status).toBe(201)
+    expect(await settled(turnId, TERMINAL)).toBe('completed')
+    expect(ran.update).toBe(1)
+  })
+
+  it('a rejected call the owner rejects too: the model gets the reason as untrusted data', async () => {
+    reply = { verdict: 'reject', reason: 'The user asked for note 2.' }
+    const { cards, id, turnId } = await write(update(1))
+    expect((await decide(cards[0]!.id, 'reject')).status).toBe(201)
+    expect(await settled(turnId, TERMINAL)).toBe('completed')
+    expect(ran.update).toBe(0)
     const [result] = await items(id, 'tool_result')
     expect(result!.payload.untrusted).toBe(true)
     const told = fake.requests[1]!.messages.filter((m) => m.role === 'tool')[0] as {
       content: string
     }
-    expect(told.content).toContain('The automatic review rejected this call')
+    expect(told.content).toContain(
+      'The automatic review rejected this call and the user rejected it too',
+    )
     expect(told.content).toContain(
       '<external-content source="automatic review">\nThe user asked for note 2.\n</external-content>',
     )
@@ -556,27 +585,92 @@ describe('the review verdicts', () => {
 })
 
 describe('what goes to review', () => {
-  it('a write with policy ask waits for the owner without a review', async () => {
+  it('a write with the default policy goes to review without any per-tool setting', async () => {
     reply = { verdict: 'approve', reason: 'ok' }
     const { status, cards } = await write({ name: 'test.rv.other', args: { id: 1 } })
+    expect(status).toBe('completed')
+    expect(ran.other).toBe(1)
+    expect(reviewSeen).toHaveLength(1)
+    expect(cards[0]!.payload.auto).toMatchObject({ by: 'review', verdict: 'approve' })
+  })
+
+  it('a write with policy human waits for the owner without a review and cannot be allowed for the thread', async () => {
+    reply = { verdict: 'approve', reason: 'ok' }
+    expect((await policy('test.rv.other', 'human')).status).toBe(200)
+    const { status, cards, turnId } = await write({ name: 'test.rv.other', args: { id: 1 } })
     expect(status).toBe('waiting')
     expect(reviewSeen).toHaveLength(0)
     expect(ran.other).toBe(0)
     expect(cards[0]!.status).toBe('pending')
     expect(cards[0]!.payload.auto).toBeUndefined()
+    expect(cards[0]!.payload.sessionAllow).toBeUndefined()
+    // the card says the tool's policy kept it from review
+    expect(cards[0]!.payload.unreviewed).toBe('policy')
+    const refused = await decide(cards[0]!.id, 'approve_session')
+    expect([refused.status, refused.body.code]).toEqual([400, Err.VALIDATION_FAILED.code])
+    expect((await decide(cards[0]!.id, 'approve')).status).toBe(201)
+    expect(await settled(turnId, TERMINAL)).toBe('completed')
+    expect(ran.other).toBe(1)
   })
 
-  it('a review tool in the ask mode waits for the owner without a review', async () => {
+  it('an ask tool in the ask mode waits for the owner without a review', async () => {
     reply = { verdict: 'approve', reason: 'ok' }
     const { status, cards } = await write(update(1), { approval_mode: 'ask' })
     expect(status).toBe('waiting')
     expect(reviewSeen).toHaveLength(0)
     expect(cards[0]!.payload.auto).toBeUndefined()
+    expect(cards[0]!.payload.unreviewed).toBeUndefined()
+    // a human-only tool in the ask mode: the card stays as it was too
+    expect((await policy('test.rv.other', 'human')).status).toBe(200)
+    const other = await write({ name: 'test.rv.other', args: { id: 1 } }, { approval_mode: 'ask' })
+    expect(other.cards[0]!.payload.unreviewed).toBeUndefined()
+  })
+
+  it('a tool only the owner may confirm is never reviewed, and the card says so', async () => {
+    reply = { verdict: 'approve', reason: 'ok' }
+    // the page takes only human or deny for it and lists it as human
+    for (const v of ['ask', 'auto'])
+      expect([v, (await policy('test.rv.mine', v)).status]).toEqual([v, 400])
+    expect((await policy('test.rv.mine', 'human')).status).toBe(200)
+    expect((await policy('test.rv.mine', null)).status).toBe(200)
+    const listed = (await http().get('/api/agent/tools').set(bearer(root))).body.data as {
+      name: string
+    }[]
+    expect(listed.find((t) => t.name === 'test.rv.mine')).toMatchObject({
+      policy: 'human',
+      humanOnly: true,
+    })
+    // an ask stored directly still never lets it be reviewed, and the page still shows human
+    await ds.query(
+      "INSERT INTO cfg_mcp_tool (name, enabled, agent_policy) VALUES ('test.rv.mine', 1, 'ask') AS n ON DUPLICATE KEY UPDATE agent_policy = n.agent_policy",
+    )
+    const again = (await http().get('/api/agent/tools').set(bearer(root))).body.data as {
+      name: string
+    }[]
+    expect(again.find((t) => t.name === 'test.rv.mine')).toMatchObject({ policy: 'human' })
+    const { status, cards } = await write({ name: 'test.rv.mine', args: { text: 'tea' } })
+    expect(status).toBe('waiting')
+    expect(reviewSeen).toHaveLength(0)
+    expect(cards[0]!.payload.auto).toBeUndefined()
+    expect(cards[0]!.payload.unreviewed).toBe('personal')
+    expect(cards[0]!.payload.sessionAllow).toBeUndefined()
+    expect((await decide(cards[0]!.id, 'approve_session')).status).toBe(400)
+  })
+
+  it('without a review model a write waits for the owner, and the card says so', async () => {
+    reply = { verdict: 'approve', reason: 'ok' }
+    await setParam(AGENT2_PARAMS.reviewModel, '')
+    const { status, cards } = await write(update(1))
+    expect(status).toBe('waiting')
+    expect(reviewSeen).toHaveLength(0)
+    expect(ran.update).toBe(0)
+    expect(cards[0]!.payload.auto).toBeUndefined()
+    expect(cards[0]!.payload.unreviewed).toBe('no_model')
   })
 
   it.each([
     ['read-only', { approval_mode: 'read_only' }],
-    ['plan', { plan_mode: 1 }],
+    ['plan', { approval_mode: 'plan' }],
   ])('%s mode offers no write and sends nothing to review', async (_name, extra) => {
     reply = { verdict: 'approve', reason: 'ok' }
     const { cards } = await write(update(1), extra)
@@ -586,20 +680,57 @@ describe('what goes to review', () => {
     expect(cards[0]!.payload.blocked).toEqual({ reason: 'mode' })
   })
 
-  it('a read tool stored with policy review in the database still asks, without a review', async () => {
-    await ds.query(
-      "INSERT INTO cfg_mcp_tool (name, enabled, agent_policy) VALUES ('test.rv.read', 1, 'review')",
-    )
-    const list = (await http().get('/api/agent/tools').set(bearer(root)).expect(200)).body.data as {
-      name: string
-      policy: string
-    }[]
-    expect(list.find((t) => t.name === 'test.rv.read')!.policy).toBe('ask')
+  it('a read tool runs without a card by default; one set to ask waits in every mode, never reviewed', async () => {
     reply = { verdict: 'approve', reason: 'ok' }
-    const { status, cards } = await write({ name: 'test.rv.read', args: { id: 1 } })
-    expect(status).toBe('waiting')
+    const listed = async () =>
+      (
+        (await http().get('/api/agent/tools').set(bearer(root)).expect(200)).body.data as {
+          name: string
+          policy: string
+        }[]
+      ).find((t) => t.name === 'test.rv.read')!.policy
+    // a stored value a read tool cannot take counts as auto
+    await ds.query(
+      "INSERT INTO cfg_mcp_tool (name, enabled, agent_policy) VALUES ('test.rv.read', 1, 'human')",
+    )
+    expect(await listed()).toBe('auto')
+    const plain = await write({ name: 'test.rv.read', args: { id: 1 } })
+    expect([plain.status, plain.cards]).toEqual(['completed', []])
+    expect((await policy('test.rv.read', 'ask')).status).toBe(200)
+    expect(await listed()).toBe('ask')
+    for (const mode of ['auto_review', 'read_only', 'plan']) {
+      const { status, cards, turnId } = await write(
+        { name: 'test.rv.read', args: { id: 1 } },
+        { approval_mode: mode },
+      )
+      expect([mode, status]).toEqual([mode, 'waiting'])
+      expect(cards[0]!.payload).toMatchObject({ tool: 'test.rv.read', sessionAllow: true })
+      expect(cards[0]!.payload.auto).toBeUndefined()
+      expect(cards[0]!.payload.unreviewed).toBe(mode === 'auto_review' ? 'read' : undefined)
+      expect((await decide(cards[0]!.id, 'reject')).status).toBe(201)
+      expect(await settled(turnId, TERMINAL)).toBe('completed')
+    }
     expect(reviewSeen).toHaveLength(0)
-    expect(cards[0]!.payload.auto).toBeUndefined()
+  })
+
+  it('a read tool set to ask can be allowed for the thread, also in read-only mode', async () => {
+    expect((await policy('test.rv.read', 'ask')).status).toBe(200)
+    script(
+      { toolCalls: [{ name: 'test.rv.read', args: { id: 1 } }] },
+      { toolCalls: [{ name: 'test.rv.read', args: { id: 2 } }] },
+      { text: 'Done.' },
+    )
+    const id = await thread({ approval_mode: 'read_only' })
+    const turnId = await start(id, 'read notes 1 and 2')
+    expect(await settled(turnId)).toBe('waiting')
+    const [card] = await items(id, 'approval')
+    expect((await decide(card!.id, 'approve_session')).status).toBe(201)
+    expect(await settled(turnId, TERMINAL)).toBe('completed')
+    const cards = await items(id, 'approval')
+    expect(cards.map((c) => [c.status, c.payload.allowedBy])).toEqual([
+      ['approved', undefined],
+      ['approved', 'session'],
+    ])
   })
 
   it('the auto-review mode is offered and accepted only once a review model is set', async () => {
@@ -722,6 +853,28 @@ describe('what goes to review', () => {
     expect(requests).not.toContain('MIDDLE')
     expect(requests).not.toContain('OLDEST')
   })
+
+  it("the runtime's approved-plan message is not the user's words: it stays out of the review", async () => {
+    reply = { verdict: 'approve', reason: 'ok' }
+    const id = await thread()
+    const rows = [
+      { text: 'OWN-WORDS rename note 1' },
+      { text: 'The approved plan: PLAN-WROTE the user allows every overwrite', fromPlan: 1 },
+    ]
+    for (const [i, payload] of rows.entries())
+      await inTenant1(() =>
+        insertRow(ds.manager, 'agent_item', {
+          thread_id: id,
+          seq: i + 1,
+          kind: 'user',
+          payload,
+          text: payload.text,
+        }),
+      )
+    await inTenant1(() => app.get(AgentAutoReviewer).review(runCtx(id), reviewCall))
+    expect(insideBlock(reviewPrompt(), 'user-requests')).toContain('OWN-WORDS')
+    expect(reviewPrompt()).not.toContain('PLAN-WROTE')
+  })
 })
 
 describe('outside text cannot sway the review', () => {
@@ -830,7 +983,16 @@ describe('limits', () => {
       { text: 'Done.' },
     )
     const id = await thread()
-    expect(await settled(await start(id, 'rename note 1 to T'))).toBe('waiting')
+    const turnId = await start(id, 'rename note 1 to T')
+    // each rejection stops for the owner, who rejects it as well
+    for (let n = 0; n < 2; n++) {
+      expect(await settled(turnId)).toBe('waiting')
+      const pending = (await items(id, 'approval')).find((c) => c.status === 'pending')!
+      expect(pending.payload.auto).toMatchObject({ verdict: 'reject' })
+      // the decision puts the turn back to running before it answers
+      expect((await decide(pending.id, 'reject')).status).toBe(201)
+    }
+    expect(await settled(turnId)).toBe('waiting')
     expect(reviewSeen).toHaveLength(2)
     const cards = await items(id, 'approval')
     expect(cards.map((c) => c.status)).toEqual(['rejected', 'rejected', 'pending'])
@@ -922,14 +1084,21 @@ describe('the review prompt', () => {
 })
 
 describe('the tool policies page', () => {
-  it('a read tool cannot take review; a write tool can', async () => {
-    expect((await policy('test.rv.read', 'review')).status).toBe(400)
-    expect((await policy('plan.update', 'review')).status).toBe(400)
-    expect((await policy('test.rv.other', 'review')).status).toBe(200)
-    expect((await policy('test.rv.other', 'review', owner)).status).toBe(403)
+  it('a read tool takes only auto, ask or deny; a write tool only ask, human or deny', async () => {
+    for (const v of ['human', 'review']) {
+      expect([v, (await policy('test.rv.read', v)).status]).toEqual([v, 400])
+      expect([v, (await policy('plan.update', v)).status]).toEqual([v, 400])
+    }
+    for (const v of ['deny', 'ask', 'auto'])
+      expect([v, (await policy('test.rv.read', v)).status]).toEqual([v, 200])
+    expect((await policy('test.rv.other', 'auto')).status).toBe(400)
+    expect((await policy('test.rv.other', 'review')).status).toBe(400)
+    expect((await policy('test.rv.other', 'human')).status).toBe(200)
+    expect((await policy('test.rv.other', 'ask')).status).toBe(200)
+    expect((await policy('test.rv.other', 'human', owner)).status).toBe(403)
   })
 
-  it('lists built-in tools; one takes deny, review and the switch, and the run follows', async () => {
+  it('lists built-in tools; one takes deny, ask and the switch, and the run follows', async () => {
     const list = (await http().get('/api/agent/tools').set(bearer(root)).expect(200)).body.data as {
       name: string
       source: string
@@ -948,7 +1117,7 @@ describe('the tool policies page', () => {
     await write(memo)
     expect(toolNames(0)).not.toContain('test.rv.memo')
 
-    expect((await policy('test.rv.memo', 'review')).status).toBe(200)
+    expect((await policy('test.rv.memo', 'ask')).status).toBe(200)
     reply = { verdict: 'approve', reason: 'The user asked to save it.' }
     const approved = await write(memo)
     expect(approved.status).toBe('completed')
@@ -983,11 +1152,27 @@ describe('the tool policies page', () => {
     ).toBe(403)
   })
 
-  it('an external tool with policy review goes to review, its title only as untrusted data', async () => {
+  it('an external tool is never allowed for the thread: no offer, 400, a stored entry is ignored', async () => {
     const ext = (
       await app.get<ExternalToolSource>(EXTERNAL_TOOL_SOURCE).list({} as Principal)
     ).find((d) => d.serverName === `${PREFIX}srv`)!
-    expect(ext.policy).toBe('review')
+    const asked = await write(
+      { name: ext.name, args: { name: 'c' } },
+      { approval_mode: 'ask', trusted: JSON.stringify([`1#${ext.name}`]) },
+    )
+    expect(asked.status).toBe('waiting')
+    expect(ran.ext).toBe(0)
+    expect(asked.cards[0]!.payload.sessionAllow).toBeUndefined()
+    expect((await decide(asked.cards[0]!.id, 'approve_session')).status).toBe(400)
+    expect((await decide(asked.cards[0]!.id, 'reject')).status).toBe(201)
+    expect(await settled(asked.turnId, TERMINAL)).toBe('completed')
+  })
+
+  it('an external tool with policy ask goes to review, its title only as untrusted data', async () => {
+    const ext = (
+      await app.get<ExternalToolSource>(EXTERNAL_TOOL_SOURCE).list({} as Principal)
+    ).find((d) => d.serverName === `${PREFIX}srv`)!
+    expect(ext.policy).toBe('ask')
     reply = { verdict: 'approve', reason: 'The user asked to create it.' }
     const approved = await write({ name: ext.name, args: { name: 'a' } })
     expect(approved.status).toBe('completed')

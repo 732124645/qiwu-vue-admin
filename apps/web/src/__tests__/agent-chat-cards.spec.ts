@@ -32,6 +32,11 @@ const global = { plugins: [ElementPlus, i18n] }
 type Call = { method?: string; url?: string; data?: unknown }
 const body = (c: Call | undefined) => JSON.parse(String(c?.data)) as unknown
 const button = (text: string) => w.findAll('button').find((b) => b.text() === text)
+/** the "don't ask again" button label for the sample tool */
+const sessionLabel = () =>
+  i18n.global.t('agent.chat.approval.action.approve_session', {
+    tool: i18n.global.t('agent.tools.demo_customer_update.title'),
+  })
 
 /** a route that answers only when the test lets it */
 function held(): { route: Route; release: () => void } {
@@ -302,15 +307,15 @@ describe('approval card', () => {
       },
       global,
     })
-    await button('Approve')!.trigger('click')
+    await button('Allow once')!.trigger('click')
     await flushPromises()
-    expect(button('Approve')).toBeUndefined()
+    expect(button('Allow once')).toBeUndefined()
     await w.setProps({
       item: approval('pending', { perCallConfirmation: true, confirmationToken: next }),
     })
-    expect(button('Approve')).toBeDefined()
-    expect(button('Approve')!.attributes('disabled')).toBeUndefined()
-    await button('Approve')!.trigger('click')
+    expect(button('Allow once')).toBeDefined()
+    expect(button('Allow once')!.attributes('disabled')).toBeUndefined()
+    await button('Allow once')!.trigger('click')
     await flushPromises()
     expect(body(calls.filter((c) => c.url === '/agent/approvals/11').at(-1))).toEqual({
       decision: 'approve',
@@ -333,7 +338,7 @@ describe('approval card', () => {
       global,
     })
     expect(button('Approve for this conversation')).toBeUndefined()
-    await button('Approve')!.trigger('click')
+    await button('Allow once')!.trigger('click')
     await flushPromises()
     expect(body(calls.find((c) => c.url === '/agent/approvals/11'))).toEqual({
       decision: 'approve',
@@ -344,8 +349,8 @@ describe('approval card', () => {
     })
     gate.release()
     await flushPromises()
-    expect(button('Approve')!.attributes('disabled')).toBeUndefined()
-    await button('Approve')!.trigger('click')
+    expect(button('Allow once')!.attributes('disabled')).toBeUndefined()
+    await button('Allow once')!.trigger('click')
     await flushPromises()
     expect(body(calls.filter((c) => c.url === '/agent/approvals/11').at(-1))).toEqual({
       decision: 'approve',
@@ -353,10 +358,13 @@ describe('approval card', () => {
     })
   })
 
-  it('approves once with a note: every button disabled while the request is pending', async () => {
+  it('allows once: every button disabled while the request is pending, no note is sent', async () => {
     const gate = held()
     const calls = mockApi({ 'POST /agent/approvals/11': gate.route })
-    w = mount(ApprovalCard, { props: { item: approval() }, global })
+    w = mount(ApprovalCard, {
+      props: { item: approval('pending', { sessionAllow: true }) },
+      global,
+    })
     expect(w.find('tbody').text()).toContain('website')
     expect(w.find('tbody').text()).toContain('(empty)')
     expect(w.find('tbody').text()).toContain('https://acme.example')
@@ -366,71 +374,100 @@ describe('approval card', () => {
       href: 'https://acme.example',
       rel: 'noopener noreferrer',
     })
+    // the note box opens only for a rejection
+    expect(w.find('input').exists()).toBe(false)
 
-    await w.find('input').setValue('  checked the site ')
-    await button('Approve')!.trigger('click')
+    await button('Allow once')!.trigger('click')
     await flushPromises()
-    for (const label of ['Approve', 'Approve for this conversation', 'Reject', 'Cancel turn'])
+    for (const label of ['Allow once', sessionLabel(), 'Reject'])
       expect(button(label)!.attributes('disabled')).toBeDefined()
     // a second click while pending sends nothing
-    await button('Reject')!.trigger('click')
+    await button(sessionLabel())!.trigger('click')
     gate.release()
     await flushPromises()
     const sent = calls.filter((c) => c.url === '/agent/approvals/11')
     expect(sent).toHaveLength(1)
-    expect(body(sent[0])).toEqual({ decision: 'approve', note: 'checked the site' })
+    expect(body(sent[0])).toEqual({ decision: 'approve' })
     expect(w.emitted('decided')).toHaveLength(1)
-    expect(button('Approve')).toBeUndefined()
+    expect(button('Allow once')).toBeUndefined()
   })
 
-  it('rejects without a note, stays open after a failure and shows the decided state', async () => {
+  it('rejects through the note box ("tell the assistant"), stays open after a failure and shows the decided state', async () => {
     const calls = mockApi({
       'POST /agent/approvals/11': [409, { code: 'B8005', msg: 'closed', data: null }],
     })
-    w = mount(ApprovalCard, { props: { item: approval() }, global })
+    w = mount(ApprovalCard, { props: { item: approval() }, global, attachTo: document.body })
     await button('Reject')!.trigger('click')
     await flushPromises()
-    expect(body(calls[0])).toEqual({ decision: 'reject' })
+    expect(calls).toHaveLength(0)
+    const input = w.find('input')
+    expect(input.attributes('placeholder')).toBe(i18n.global.t('agent.chat.approval.note'))
+    expect(document.activeElement).toBe(input.element)
+    expect(button('Allow once')).toBeUndefined()
+    await input.setValue('  use the other Acme ')
+    await button('Reject')!.trigger('click')
+    await flushPromises()
+    expect(body(calls[0])).toEqual({ decision: 'reject', note: 'use the other Acme' })
     expect(button('Reject')!.attributes('disabled')).toBeUndefined()
     await w.setProps({ item: approval('rejected', { note: 'wrong company', decidedAt: AT }) })
     expect(w.text()).toContain('Rejected')
     expect(w.text()).toContain('wrong company')
-    expect(button('Approve')).toBeUndefined()
+    expect(button('Reject')).toBeUndefined()
   })
 
-  it('approves for the conversation, cancels the turn; Enter approves and Esc rejects on the focused card', async () => {
+  it('offers "don\'t ask again for this tool" only with sessionAllow and never on a per-call confirmation', async () => {
+    const calls = mockApi({ 'POST /agent/approvals/11': ok(null) })
+    w = mount(ApprovalCard, { props: { item: approval() }, global })
+    expect(button('Allow once')).toBeDefined()
+    expect(button(sessionLabel())).toBeUndefined()
+    // the per-card "cancel the turn" is gone: the composer's stop button ends the turn
+    expect(button('Cancel turn')).toBeUndefined()
+    w.unmount()
+    w = mount(ApprovalCard, {
+      props: { item: approval('pending', { sessionAllow: true, perCallConfirmation: true }) },
+      global,
+    })
+    expect(button(sessionLabel())).toBeUndefined()
+    w.unmount()
+    w = mount(ApprovalCard, {
+      props: { item: approval('pending', { sessionAllow: true }) },
+      global,
+    })
+    await button(sessionLabel())!.trigger('click')
+    await flushPromises()
+    expect(body(calls[0])).toEqual({ decision: 'approve_session' })
+    expect(w.text()).toContain('Allowed for this conversation')
+  })
+
+  it('Enter allows once and Esc opens the rejection on the focused card; in the note Enter rejects, Esc goes back', async () => {
     const calls = mockApi({ 'POST /agent/approvals/11': ok(null) })
     const decisions = () => calls.map((c) => (body(c) as { decision: string }).decision)
     w = mount(ApprovalCard, { props: { item: approval() }, global, attachTo: document.body })
-    await button('Approve for this conversation')!.trigger('click')
+    await w.find('section').trigger('keydown', { key: 'Enter' })
     await flushPromises()
-    expect(w.text()).toContain('Approved for this conversation')
+    expect(decisions()).toEqual(['approve'])
     w.unmount()
-    for (const [key, decision] of [
-      ['Enter', 'approve'],
-      ['Escape', 'reject'],
-    ] as const) {
-      w = mount(ApprovalCard, { props: { item: approval() }, global, attachTo: document.body })
-      await w.find('section').trigger('keydown', { key })
-      await flushPromises()
-      expect(decisions().at(-1)).toBe(decision)
-      w.unmount()
-    }
-    // Esc inside the note box is not a rejection
     w = mount(ApprovalCard, { props: { item: approval() }, global, attachTo: document.body })
-    await w.find('input').trigger('keydown', { key: 'Escape' })
-    await button('Cancel turn')!.trigger('click')
+    await w.find('section').trigger('keydown', { key: 'Escape' })
     await flushPromises()
-    expect(decisions()).toEqual(['approve_session', 'approve', 'reject', 'cancel'])
+    expect(decisions()).toEqual(['approve'])
+    await w.find('input').trigger('keydown', { key: 'Escape' })
+    expect(w.find('input').exists()).toBe(false)
+    await w.find('section').trigger('keydown', { key: 'Escape' })
+    await flushPromises()
+    await w.find('input').setValue('not now')
+    await w.find('input').trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+    expect(decisions()).toEqual(['approve', 'reject'])
+    expect(body(calls[1])).toEqual({ decision: 'reject', note: 'not now' })
   })
 
-  it('Enter or Esc on a button, link or the note never decides for the card; only the card itself takes them', async () => {
+  it('Enter or Esc on a button or link never decides for the card; only the card itself takes them', async () => {
     const calls = mockApi({ 'POST /agent/approvals/11': ok(null) })
     w = mount(ApprovalCard, { props: { item: approval() }, global, attachTo: document.body })
     for (const k of ['Enter', 'Escape']) {
       await button('Reject')!.trigger('keydown', { key: k })
       await w.find('.agent-approval__sources a').trigger('keydown', { key: k })
-      await w.find('input').trigger('keydown', { key: k })
     }
     await flushPromises()
     expect(calls).toHaveLength(0)
@@ -439,12 +476,14 @@ describe('approval card', () => {
     expect(calls).toHaveLength(1)
   })
 
-  it('offers no "approve for this conversation" when trust is off', () => {
-    w = mount(ApprovalCard, { props: { item: approval(), trust: false }, global })
-    expect(button('Approve')).toBeDefined()
-    expect(button('Approve for this conversation')).toBeUndefined()
+  it('says when a card ran because the tool was allowed for the conversation', () => {
+    w = mount(ApprovalCard, {
+      props: { item: approval('approved', { allowedBy: 'session', decision: 'approve_session' }) },
+      global,
+    })
+    expect(w.text()).toContain('Ran because it is allowed for this conversation')
+    expect(button('Allow once')).toBeUndefined()
   })
-
   it('a blocked approval explains what is missing instead of offering buttons; a shared view never decides', () => {
     w = mount(ApprovalCard, {
       props: {
@@ -455,10 +494,10 @@ describe('approval card', () => {
       global,
     })
     expect(w.find('.el-alert').text()).toContain('Sample customers · Edit')
-    expect(button('Approve')).toBeUndefined()
+    expect(button('Allow once')).toBeUndefined()
     w.unmount()
     w = mount(ApprovalCard, { props: { item: approval(), readonly: true }, global })
-    expect(button('Approve')).toBeUndefined()
+    expect(button('Allow once')).toBeUndefined()
   })
 
   it('shows the automatic review: approved or rejected with the reason, or handed over with its note', () => {
@@ -487,6 +526,17 @@ describe('approval card', () => {
     expect(note().text()).toContain('Rejected by automatic review')
     expect(note().text()).toContain('Wrong record.')
     w.unmount()
+    // a review rejection leaves the card to the person, with the reviewer's reason above the buttons
+    w = mount(ApprovalCard, {
+      props: { item: approval('pending', auto('reject', 'Looks like the wrong Acme.')) },
+      global,
+    })
+    expect(note().text()).toContain('Automatic review suggests rejecting')
+    expect(note().text()).toContain('Looks like the wrong Acme.')
+    expect(note().classes()).toContain('agent-approval__review--reject')
+    expect(button('Allow once')).toBeDefined()
+    expect(button('Reject')).toBeDefined()
+    w.unmount()
     // handed over: the note shows and the owner still decides
     w = mount(ApprovalCard, {
       props: { item: approval('pending', auto('escalate', 'Not sure.')) },
@@ -494,10 +544,44 @@ describe('approval card', () => {
     })
     expect(note().text()).toContain('Automatic review left it to you')
     expect(note().text()).toContain('Not sure.')
-    expect(button('Approve')).toBeDefined()
+    expect(button('Allow once')).toBeDefined()
     w.unmount()
     w = mount(ApprovalCard, { props: { item: approval() }, global })
     expect(note().exists()).toBe(false)
+  })
+
+  it('says why a call in the auto-review mode was not reviewed', () => {
+    w = mount(ApprovalCard, {
+      props: { item: approval('pending', { unreviewed: 'policy' }) },
+      global,
+    })
+    const note = w.find('.agent-approval__review')
+    expect(note.text()).toContain('Not reviewed automatically')
+    expect(note.text()).toContain('"People only"')
+    expect(button('Allow once')).toBeDefined()
+    w.unmount()
+    w = mount(ApprovalCard, {
+      props: { item: approval('pending', { unreviewed: 'personal' }) },
+      global,
+    })
+    expect(w.find('.agent-approval__review').text()).toContain('confirmed by you in person')
+    w.unmount()
+    w = mount(ApprovalCard, {
+      props: { item: approval('pending', { unreviewed: 'read' }) },
+      global,
+    })
+    expect(w.find('.agent-approval__review').text()).toContain('reads are never sent')
+    w.unmount()
+    // a reason code this page does not know yet still gets a sentence, never the bare code
+    w = mount(ApprovalCard, {
+      props: {
+        item: approval('pending', { unreviewed: 'later_code' as 'policy' }),
+      },
+      global,
+    })
+    expect(w.find('.agent-approval__review').text()).toContain(
+      'not sent to automatic review and needs your confirmation',
+    )
   })
 })
 

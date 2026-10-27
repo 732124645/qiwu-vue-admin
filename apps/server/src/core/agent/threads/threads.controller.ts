@@ -151,6 +151,17 @@ export class AgentThreadController {
     return this.threads.remove(me(), id)
   }
 
+  @Delete(':id/allowed-tools/:tool')
+  @ActionLog({ domain: 'agent.thread', verb: 'modify' })
+  @ApiOperation({
+    summary: 'Ask again for a tool (name URL-encoded) the owner allowed for this thread',
+  })
+  @ApiEnvelope(agentThreadVo)
+  revokeTool(@Param('id', ParseIntPipe) id: number, @Param('tool') tool: string) {
+    if (!tool || tool.length > 300) throw new BizError(Err.VALIDATION_FAILED)
+    return this.threads.revokeTool(me(), id, tool)
+  }
+
   @Get(':id/items')
   @ApiOperation({ summary: 'Items after afterSeq (all when absent) and the latest turn' })
   @ApiEnvelope()
@@ -255,7 +266,7 @@ export class AgentChatController {
   @RequirePerm(agentPerms.chat.use)
   @ApiOperation({
     summary:
-      'Models, defaults, skills, modes, web search, starters for the page (route name), prompts, trust, external servers, tone',
+      'Models, defaults, skills, modes, web search, starters for the page (route name), prompts, external servers, tone',
   })
   @ApiEnvelope(agentOptionsVo)
   getOptions(@Query({ schema: agentOptionsQuery }) query: z.infer<typeof agentOptionsQuery>) {

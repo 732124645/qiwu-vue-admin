@@ -324,7 +324,6 @@ export class AgentAutomationRunner
             // 推理强度只给支持它的模型（与新建会话套用方案的规则相同）
             reasoning: model.model.reasoning ? (profile?.reasoning ?? null) : null,
             approvalMode: MODE[a.writeMode],
-            planMode: false,
             pinned: false,
             temporary: false,
             readSeq: 0,

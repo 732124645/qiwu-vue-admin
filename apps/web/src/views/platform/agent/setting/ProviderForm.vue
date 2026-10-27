@@ -1,16 +1,18 @@
 <script setup lang="ts">
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { FormItemRule } from 'element-plus'
+import { ElMessage, type FormItemRule } from 'element-plus'
 import {
   AGENT_REASONING,
   agentCreditAmount,
   agentProviderSave,
   type AgentModelPricing,
+  type AgentProviderModelsVo,
   type AgentProviderSave,
 } from '@qiwu/shared'
 import { agentProviderApi, dropEmpty } from '@/api/platform/agent-admin'
 import QwEditTable from '@/core/components/QwEditTable.vue'
-import { useCrudForm } from '@/core/composables/use-crud'
+import { toastRest, useCrudForm } from '@/core/composables/use-crud'
 import { zodRules } from '@/core/form/zod-rules'
 
 /**
@@ -74,6 +76,43 @@ const modelColumns = [
   { prop: 'image', label: 'agent.admin.model.image', width: 80 },
   { prop: 'contextWindow', label: 'agent.admin.model.contextWindow', width: 170 },
 ]
+
+// ---- 从服务加载模型 ----
+const loadingModels = ref(false)
+const upstream = ref<AgentProviderModelsVo['items'] | null>(null)
+const picked = ref<string[]>([])
+// 有地址即可加载：不需要密钥的本地服务不带密钥；改了地址又没填新密钥时由服务端拒绝，不会带出已保存的密钥
+const canLoad = computed(() => !!model.baseUrl)
+const added = (mid: string) => model.models.some((m) => m.id === mid)
+/** 读取服务的模型清单；失败时提示翻译后的错误（地址不合法的 400、提供方已删除的 404 请求层不提示） */
+async function loadModels() {
+  loadingModels.value = true
+  try {
+    const { items } = await agentProviderApi.models({
+      ...(id !== undefined && { id }),
+      baseUrl: model.baseUrl,
+      ...(model.apiKey && { apiKey: model.apiKey }),
+    })
+    upstream.value = items
+    picked.value = []
+    if (!items.length) ElMessage.info(t('agent.admin.model.noneLoaded'))
+  } catch (e) {
+    toastRest(e)
+  } finally {
+    loadingModels.value = false
+  }
+}
+/** 把勾选的模型加成普通的模型行（其他字段取默认、不配费率）；已在清单里的跳过，空白行让位 */
+function addPicked() {
+  const fresh = picked.value.filter((mid) => !added(mid))
+  if (fresh.length) {
+    model.models = [
+      ...model.models.filter((m) => m.id.trim()),
+      ...fresh.map((mid) => ({ ...newModel(), id: mid })),
+    ]
+  }
+  picked.value = []
+}
 
 const rates = ['input', 'output', 'cacheRead', 'cacheWrite', 'imageCredits'] as const
 const rateLabel = (key: (typeof rates)[number]) =>
@@ -161,6 +200,41 @@ function setReasoningStyle(m: Model, value: 'standard' | 'vllm') {
         </el-form-item>
       </template>
     </QwEditTable>
+    <div class="provider-form__load">
+      <el-button :loading="loadingModels" :disabled="!canLoad || loadingModels" @click="loadModels">
+        {{ t('agent.admin.model.loadFromService') }}
+      </el-button>
+      <template v-if="upstream?.length">
+        <el-select
+          v-model="picked"
+          class="provider-form__pick"
+          multiple
+          filterable
+          collapse-tags
+          collapse-tags-tooltip
+          :placeholder="t('agent.admin.model.pickLoaded')"
+          :aria-label="t('agent.admin.model.pickLoaded')"
+        >
+          <el-option
+            v-for="m in upstream"
+            :key="m.id"
+            :value="m.id"
+            :label="m.id"
+            :disabled="added(m.id)"
+          >
+            {{ m.id }}
+            <span v-if="added(m.id)" class="provider-form__added">
+              {{ t('agent.admin.model.alreadyAdded') }}
+            </span>
+            <span v-else-if="m.ownedBy" class="provider-form__added">{{ m.ownedBy }}</span>
+          </el-option>
+        </el-select>
+        <el-button type="primary" :disabled="!picked.length" @click="addPicked">
+          {{ t('agent.admin.model.addPicked') }}
+        </el-button>
+      </template>
+    </div>
+    <p v-if="!canLoad" class="provider-form__hint">{{ t('agent.admin.model.loadHint') }}</p>
     <!-- the list itself (at least one model) reports here -->
     <el-form-item class="provider-form__models" prop="models" :rules="modelsRule" />
     <el-collapse class="provider-form__config">
@@ -282,6 +356,20 @@ function setReasoningStyle(m: Model, value: 'standard' | 'vllm') {
 }
 .provider-form__config {
   margin: 16px 0;
+}
+.provider-form__load {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+.provider-form__pick {
+  flex: 1;
+}
+.provider-form__added {
+  margin-left: 8px;
+  color: var(--qw-text-3);
+  font-size: 12px;
 }
 .provider-form__config :deep(.el-tag) {
   margin: 0 8px;

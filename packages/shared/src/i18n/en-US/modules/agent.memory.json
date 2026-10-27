@@ -7,7 +7,7 @@
         "providerId": "Model provider",
         "model": "Model",
         "reasoning": "Reasoning",
-        "approvalMode": "Approval mode",
+        "approvalMode": "Mode",
         "tools": "Allowed tools",
         "instructions": "Instructions",
         "isDefault": "Default"

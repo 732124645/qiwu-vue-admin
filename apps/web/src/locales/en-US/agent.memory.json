@@ -3,7 +3,7 @@
     "profile": {
       "title": "Profiles",
       "entity": "profile",
-      "hint": "Pick a profile for a new conversation: it brings its model, reasoning and approval mode, limits the tools the assistant may use and adds its instructions.",
+      "hint": "Pick a profile for a new conversation: it brings its model, reasoning and mode, limits the tools the assistant may use and adds its instructions.",
       "pick": "Profile",
       "none": "No profile",
       "default": "Default",

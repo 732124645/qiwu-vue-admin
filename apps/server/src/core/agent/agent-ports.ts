@@ -2,12 +2,15 @@ import { SetMetadata } from '@nestjs/common'
 import type {
   AgentApprovalDecide,
   AgentApprovalMode,
+  AgentToolPolicy,
   AgentAttachment,
   AgentItemKind,
   AgentItemPayloads,
   AgentMessageSend,
   AgentModelPricing,
   AgentNotifySettings,
+  AgentPlanDecide,
+  AgentPlanProposal,
   AgentQuestionAnswer,
   AgentSkillScope,
   AgentSource,
@@ -35,10 +38,10 @@ export interface ExternalToolDescriptor {
   /** 参数的 JSON Schema（来自服务器） */
   parameters: Record<string, unknown>
   /**
-   * 管理员为它设的审批策略（外部工具一律视为可能写入：只有管理员显式设为 auto 才直接执行；`review` 只在
-   * 会话为自动审查模式时交给审查模型，其余照 ask 等人）
+   * 管理员为它设的审批策略（外部工具一律视为可能写入：只有管理员显式设为 auto 才直接执行；`ask` 在会话为
+   * 自动审查模式时可先交给审查模型，`human` 只能由人确认）
    */
-  policy: 'auto' | 'ask' | 'review' | 'deny'
+  policy: AgentToolPolicy
   serverName: string
 }
 
@@ -120,6 +123,8 @@ export interface TurnControl {
     source?: 'interactive' | 'batch',
   ): Promise<void>
   answerQuestion(p: Principal, itemId: number, body: AgentQuestionAnswer): Promise<void>
+  /** 本人对方案卡的选择：批准并按所选模式执行，或继续完善 */
+  decidePlan(p: Principal, itemId: number, body: AgentPlanDecide): Promise<void>
 }
 export const TURN_CONTROL = Symbol('qw:agent:turn-control')
 
@@ -187,9 +192,8 @@ export const PROFILE_SOURCE = Symbol('qw:agent:profiles')
 /** 本次运行所在会话的设置（运行开始时读出）。 */
 export interface AgentRunThread {
   id: number
-  /** 会话的审批模式 */
+  /** 会话的模式（`plan` 为计划模式） */
   mode: AgentApprovalMode
-  planMode: boolean
   /** 只读或计划模式：不提供写入工具 */
   readOnly: boolean
   memoryEnabled: boolean
@@ -262,6 +266,8 @@ export type AgentToolQuestion = AgentItemPayloads['question']['questions'][numbe
 export interface AgentToolWait {
   readonly wait: 'question'
   readonly questions: AgentToolQuestion[]
+  /** 方案卡（只认运行时自己的 `plan.propose`，别的工具带了也不算） */
+  readonly proposal?: AgentPlanProposal
 }
 
 /** 扩展模型调用的持久入口：先留调用记录，再发上游，统一使用当前轮次与父轮的预算。 */
@@ -321,7 +327,7 @@ export interface AgentBuiltinToolMeta<S extends z.ZodObject = z.ZodObject> {
   /** 参数，执行前校验；也是模型看到的 JSON Schema */
   input: S
   /**
-   * 写入类：只能由人逐次确认（或“信任本会话”）——管理员设的 auto 与 review 都按 ask，也从不交给审批审查者
+   * 写入类：只能由人逐次确认——管理员设的策略除 deny 外都按 human，从不交给审批审查者，也不能在本会话内
    * 放行；deny 与平台停用照常有效。用于记住个人信息这类须本人同意的写入
    */
   humanOnly?: boolean
@@ -387,8 +393,8 @@ export interface AgentReviewCall {
   title: string
   /** local：本系统工具；web：联网工具；mcp：外部服务器；builtin：内置工具 */
   origin: 'local' | 'web' | 'mcp' | 'builtin'
-  /** 此刻生效的策略（`review`：管理员允许自动审查） */
-  policy: 'ask' | 'review'
+  /** 此刻生效的策略（只有需确认、可自动审查的 `ask` 会送审） */
+  policy: 'ask'
   args: unknown
   changes?: AgentItemPayloads['approval']['changes']
   /** 本轮联网工具带回的来源：链接与标题来自外部，不可信，只能当数据看 */
@@ -396,9 +402,9 @@ export interface AgentReviewCall {
 }
 
 /**
- * 审查结论：approve 直接执行、reject 告诉模型、escalate 交给人；`by` 说明是谁做的决定。运行时核对 approve
- * 是否有权放行，不符合的降为 escalate 交给人：`review` 要求工具此刻的策略是 `review`、会话此刻的审批模式是
- * `auto_review`；`pre_approved` 只在自动化开的会话里有效。
+ * 审查结论：approve 直接执行，reject 与 escalate 都停下交给人（卡片写明结论与理由）；`by` 说明是谁做的
+ * 决定。运行时核对 approve 是否有权放行，不符合的降为 escalate 交给人：`review` 要求工具此刻的策略是
+ * `ask`、会话此刻的模式是 `auto_review`；`pre_approved` 只在自动化开的会话里有效。
  */
 export interface AgentReviewVerdict {
   verdict: 'approve' | 'reject' | 'escalate'

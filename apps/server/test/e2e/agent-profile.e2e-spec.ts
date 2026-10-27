@@ -81,7 +81,13 @@ const profile = (extra: Record<string, unknown> = {}) => ({
 async function createProfile(who: keyof typeof users, extra: Record<string, unknown> = {}) {
   const res = await http().post(URL).set(as(who)).send(profile(extra))
   expect(res.status).toBe(201)
-  return res.body.data as { id: number; scope: string; isDefault: boolean; editable: boolean }
+  return res.body.data as {
+    id: number
+    scope: string
+    isDefault: boolean
+    editable: boolean
+    approvalMode: string
+  }
 }
 
 async function newThread(who: keyof typeof users, body: Record<string, unknown> = {}) {
@@ -319,29 +325,45 @@ describe('agent profiles', () => {
     await http().delete(`${URL}/${shared.id}`).set(as('manager')).expect(200)
   })
 
-  it('a tenant-wide profile may only be read-only or ask: trust is the user’s own choice', async () => {
-    for (const approvalMode of ['trust', 'auto_review'])
+  it('a tenant-wide profile may only be read-only, plan or ask: auto-review is the user’s own choice', async () => {
+    const params = app.get(ParamService)
+    const get = params.get.bind(params)
+    const spy = vi
+      .spyOn(params, 'get')
+      .mockImplementation(async (key) => (key === AGENT2_PARAMS.reviewModel ? '1:pm1' : get(key)))
+    try {
+      // the retired trust mode is no mode at all
+      for (const approvalMode of ['trust', 'auto_review'])
+        await http()
+          .post(URL)
+          .set(as('manager'))
+          .send(profile({ scope: 'tenant', isDefault: true, approvalMode }))
+          .expect(400)
       await http()
         .post(URL)
         .set(as('manager'))
-        .send(profile({ scope: 'tenant', isDefault: true, approvalMode }))
+        .send(profile({ approvalMode: 'trust' }))
         .expect(400)
-    const shared = await createProfile('manager', { scope: 'tenant', approvalMode: 'read_only' })
-    await http()
-      .put(`${URL}/${shared.id}`)
-      .set(as('manager'))
-      .send(profile({ scope: 'tenant', approvalMode: 'trust' }))
-      .expect(400)
-    // a personal one may (trust is offered)
-    const mine = await createProfile('manager', { approvalMode: 'trust' })
-    // a personal trust profile cannot be turned tenant-wide either
-    await http()
-      .put(`${URL}/${mine.id}`)
-      .set(as('manager'))
-      .send(profile({ scope: 'tenant', approvalMode: 'trust' }))
-      .expect(400)
-    await http().delete(`${URL}/${shared.id}`).set(as('manager')).expect(200)
-    await http().delete(`${URL}/${mine.id}`).set(as('manager')).expect(200)
+      const shared = await createProfile('manager', { scope: 'tenant', approvalMode: 'plan' })
+      expect(shared.approvalMode).toBe('plan')
+      await http()
+        .put(`${URL}/${shared.id}`)
+        .set(as('manager'))
+        .send(profile({ scope: 'tenant', approvalMode: 'auto_review' }))
+        .expect(400)
+      // a personal one may (a review model is set)
+      const mine = await createProfile('manager', { approvalMode: 'auto_review' })
+      // a personal auto-review profile cannot be turned tenant-wide either
+      await http()
+        .put(`${URL}/${mine.id}`)
+        .set(as('manager'))
+        .send(profile({ scope: 'tenant', approvalMode: 'auto_review' }))
+        .expect(400)
+      await http().delete(`${URL}/${shared.id}`).set(as('manager')).expect(200)
+      await http().delete(`${URL}/${mine.id}`).set(as('manager')).expect(200)
+    } finally {
+      spy.mockRestore()
+    }
   })
 
   it('a default profile never overrides what the user chose; profileId null takes none', async () => {
@@ -406,12 +428,12 @@ describe('agent profiles', () => {
       memoryEnabled: true,
     })
     // fields given in the request win
-    const own = await newThread('peer', { providerId, model: 'pm1', approvalMode: 'trust' })
+    const own = await newThread('peer', { providerId, model: 'pm1', approvalMode: 'plan' })
     expect(own.body.data).toMatchObject({
       profileId: second.id,
       model: 'pm1',
       reasoning: null,
-      approvalMode: 'trust',
+      approvalMode: 'plan',
     })
     await http().delete(`${URL}/${second.id}`).set(as('peer')).expect(200)
     await http().delete(`${URL}/${first.id}`).set(as('peer')).expect(200)

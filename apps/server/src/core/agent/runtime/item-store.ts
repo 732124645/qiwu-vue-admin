@@ -28,7 +28,7 @@ export type AgentItemStatus = (typeof AGENT_ITEM_STATUSES)[number]
 
 /**
  * What the runtime keeps in an item's payload for itself (the model's full tool output, the sources and
- * readable URLs a web call brought, an approval's trust key, an elicitation's form values): stripped by
+ * readable URLs a web call brought, an elicitation's form values): stripped by
  * {@link itemVo}, never sent to the page.
  */
 export interface ItemInternal {
@@ -42,8 +42,6 @@ export interface ItemInternal {
    * turn; on a subagent's task message, the parent turn's readable URLs, the only ones its thread starts with
    */
   urls?: string[]
-  /** `<tool>|<target>`: what `approve_session` trusts */
-  key?: string
   /** 本次预览绑定及单次消耗标记，只留在服务端，不进入模型或公开条目。 */
   confirmation?: {
     digest: string

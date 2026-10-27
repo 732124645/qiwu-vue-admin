@@ -25,7 +25,7 @@ const REVIEW_TIMEOUT_MS = 30_000
 const REVIEW_MAX_TOKENS = 2000
 /** 一轮里最多送审这么多次（含交给人的），之后一律交给人。 */
 export const REVIEWS_PER_TURN = 10
-/** 同一个工具在本轮被审查驳回这么多次后，不再送审，一律交给人。 */
+/** 同一个工具在本轮被审查驳回这么多次后，不再送审，直接交给人。 */
 export const REJECTS_PER_TOOL = 2
 /** 交给审查模型的用户消息：最近几条，每条先截到这么多字符，全部按转义后的长度共用一份额度。 */
 const USER_MESSAGES = 5
@@ -211,9 +211,9 @@ export function parseReviewAnswer(text: string): z.infer<typeof reviewAnswer> | 
 }
 
 /**
- * 自动审查（see docs/agent.md）：管理员把一个写入工具设成 `review`、会话选了“自动审查”模式时，写入停下
- * 等人之前先交给平台参数 `agent.review.model` 指定的审查模型判断，放行、驳回或交给人。其余情形（包括没有
- * 指定审查模型）一律返回 null（照常等人）；指定的模型不可用、本轮或今日积分 用完、本轮送审次数到顶、
+ * 自动审查（see docs/agent.md）：会话选了“自动审查”模式时，策略为 `ask` 的写入停下等人之前先交给平台
+ * 参数 `agent.review.model` 指定的审查模型判断：放行即执行，驳回或拿不准都停下交给人（卡片写明结论与
+ * 理由）。其余情形（包括没有指定审查模型、`human` 策略）一律返回 null（照常等人）；指定的模型不可用、本轮或今日积分 用完、本轮送审次数到顶、
  * 同一工具本轮已被驳回两次、写入太大看不全、调用出错、超时或回答不合格时交给人并写明原因，从不默认放行。
  * 审查模型只看到用户本人在本会话的最近几条消息、工具、改动预览、参数和来源的链接与标题，不看任何工具
  * 的输出或网页正文；用量经运行时记进本轮与发起人的每日用量。运行时还会核对放行的资格
@@ -234,9 +234,9 @@ export class AgentAutoReviewer implements AgentApprovalReviewer {
     private readonly i18n: I18nService,
   ) {}
 
-  /** 审查一次写入：只处理 `review` 策略且会话为自动审查模式的调用，其余返回 null。 */
+  /** 审查一次写入：只处理 `ask` 策略且会话为自动审查模式的调用，其余返回 null。 */
   async review(ctx: AgentReviewContext, call: AgentReviewCall): Promise<AgentReviewVerdict | null> {
-    if (call.policy !== 'review' || ctx.thread.mode !== 'auto_review' || ctx.thread.readOnly)
+    if (call.policy !== 'ask' || ctx.thread.mode !== 'auto_review' || ctx.thread.readOnly)
       return null
     // 急停：不调用审查模型（运行时也不会继续执行）
     if (await this.queue.paused()) return null
@@ -308,7 +308,7 @@ export class AgentAutoReviewer implements AgentApprovalReviewer {
 
   /**
    * 用户本人在本会话最近的几条消息的文字（只取 user 条目，不取助手与工具的内容），从新到旧。不是本人的话的
-   * 部分不算：照抄前一条回答里后续建议的消息（建议是模型写的）整条跳过，事件自动化消息末尾的事件行（领域、
+   * 部分不算：照抄前一条回答里后续建议的消息（建议是模型写的）与批准方案后运行时写的方案消息整条跳过，事件自动化消息末尾的事件行（领域、
    * 动作与记录 id，记录 id 可能来自外部数据）去掉。
    */
   private async requests(threadId: number): Promise<string[]> {
@@ -320,8 +320,10 @@ export class AgentAutoReviewer implements AgentApprovalReviewer {
     })
     const out: string[] = []
     for (const r of rows) {
+      const p = r.payload as { text?: unknown; fromPlan?: unknown; internal?: ItemInternal }
+      // 批准方案后运行时写的方案消息：文字是模型写的（规划时可能读过被注入的网页），不能当本人的请求作审查依据
+      if (p.fromPlan) continue
       if (await copiesSuggestion(this.ds.manager, threadId, r)) continue
-      const p = r.payload as { text?: unknown; internal?: ItemInternal }
       const text = String(p.text ?? '')
       const from = p.internal?.eventFrom
       const own = (typeof from === 'number' ? text.slice(0, from) : text).trim()

@@ -91,21 +91,15 @@ it('renders every line, exact amount, version, attachment and reviewer as plain 
   ])
     expect(text).toContain(value)
   expect(wrapper.find('img').exists()).toBe(false)
-  expect(
-    wrapper
-      .findAll('button')
-      .some(
-        (button) => button.text() === i18n.global.t('agent.chat.approval.action.approve_session'),
-      ),
-  ).toBe(false)
+  expect(wrapper.findAll('button').some((button) => button.text().startsWith('Don'))).toBe(false)
   await wrapper
     .findAll('button')
-    .find((button) => button.text() === 'Approve')!
+    .find((button) => button.text() === 'Allow once')!
     .trigger('click')
   await flushPromises()
   expect(calls).toHaveLength(1)
   expect(JSON.parse(String(calls[0]?.data))).toEqual({ decision: 'approve', confirmationToken })
-  expect(wrapper.findAll('button').some((button) => button.text() === 'Approve')).toBe(false)
+  expect(wrapper.findAll('button').some((button) => button.text() === 'Allow once')).toBe(false)
 })
 
 it('keeps the complete preview visible in a read-only shared card', () => {

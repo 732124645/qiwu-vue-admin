@@ -210,8 +210,8 @@ export class AutomationPreApproval implements AgentApprovalReviewer {
   }
 
   /**
-   * 此刻可以预先同意的写入工具（创建人能触达、平台没停用、策略不是 deny 的本系统写入工具），按名字排序。
-   * 外部 MCP 工具与内置工具不在其中：它们的写入照常停下等人。
+   * 此刻可以预先同意的写入工具（创建人能触达、平台没停用、策略为 `ask` 的本系统写入工具），按名字排序。
+   * 外部 MCP 工具、内置工具与只能由人确认的（`human`）不在其中：它们的写入照常停下等人。
    */
   async offerable(p: Principal): Promise<AgentAutomationToolVo[]> {
     const policies = await this.policies.policies()
@@ -220,7 +220,7 @@ export class AutomationPreApproval implements AgentApprovalReviewer {
         (t) =>
           t.kind === 'write' &&
           !t.perCallConfirmation &&
-          (policies.get(t.name) ?? effectivePolicy('write', null)) !== 'deny',
+          (policies.get(t.name) ?? effectivePolicy('write', null)) === 'ask',
       )
       .map((t) => ({ name: t.name, title: t.title }))
       .sort((x, y) => x.name.localeCompare(y.name))

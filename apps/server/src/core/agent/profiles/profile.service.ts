@@ -4,7 +4,6 @@ import { TransactionHost } from '@nestjs-cls/transactional'
 import type { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm'
 import {
   AGENT_APPROVAL_MODES,
-  AGENT_TRUST_MODE_PARAM,
   AGENT2_PARAMS,
   type AgentApprovalMode,
   type AgentProfileSave,
@@ -28,27 +27,24 @@ import { AgentProfile } from '../entities/agent-memory.entity.js'
 import { ProviderSettingsService } from '../provider/provider-settings.service.js'
 import { AgentExtensions } from '../runtime/agent-extensions.js'
 import { parseReviewModel } from '../runtime/auto-reviewer.js'
-import { num, trustModeOn } from '../threads/thread-vo.js'
+import { num } from '../threads/thread-vo.js'
 import { WEB_TOOLS } from '../web/web-tools.js'
 
 /** 每人（含全租户共用的）最多这么多个配置方案。 */
 export const PROFILES_MAX = 50
 /**
- * 全租户共用的方案只能用这两种审批模式：“信任本会话”与“自动审查”是替本人同意写入，只能由本人在个人方案
- * 或会话里选，别人建的方案不能替他选。
+ * 全租户共用的方案只能用这三种模式：“自动审查”是让审查模型替本人同意写入，只能由本人在个人方案或会话里
+ * 选，别人建的方案不能替他选。
  */
-export const TENANT_PROFILE_MODES: readonly AgentApprovalMode[] = ['read_only', 'ask']
+export const TENANT_PROFILE_MODES: readonly AgentApprovalMode[] = ['read_only', 'plan', 'ask']
 
 /**
- * 平台此刻允许的审批模式（与对话页选项、新建会话的 `modeOffered` 同一条规则）：“信任本会话”被
- * `agent.trust_mode` 关掉时不行，自动审查要先由平台指定有效的审查模型（`parseReviewModel`）。
+ * 平台此刻提供的模式（与对话页选项、新建会话的 `modeOffered` 同一条规则）：自动审查要先由平台指定有效的
+ * 审查模型（`parseReviewModel`），其余总是提供。
  */
 export async function offeredModes(params: ParamService): Promise<AgentApprovalMode[]> {
-  const trust = trustModeOn(await params.get(AGENT_TRUST_MODE_PARAM))
   const review = !!parseReviewModel(await params.get(AGENT2_PARAMS.reviewModel))
-  return AGENT_APPROVAL_MODES.filter(
-    (m) => (trust || m !== 'trust') && (m !== 'auto_review' || review),
-  )
+  return AGENT_APPROVAL_MODES.filter((m) => m !== 'auto_review' || review)
 }
 
 const runProfile = (r: AgentProfile): AgentRunProfile => ({

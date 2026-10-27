@@ -1,6 +1,12 @@
 import dayjs from 'dayjs'
 import { watch } from 'vue'
-import type { AgentEvent, AgentItemVo, AgentThreadVo, AgentTurnVo } from '@qiwu/shared'
+import type {
+  AgentApprovalMode,
+  AgentEvent,
+  AgentItemVo,
+  AgentThreadVo,
+  AgentTurnVo,
+} from '@qiwu/shared'
 import { accessToken } from '@/core/request/http'
 
 // 对话页的条目合并、会话内状态、断线补齐、技能与斜杠命令解析。
@@ -231,6 +237,27 @@ export function show(value: unknown): string {
   if (value == null) return ''
   if (typeof value === 'string') return value
   return JSON.stringify(value, null, 2)
+}
+
+/**
+ * 计划模式开关（`/plan`、快捷键）：在“计划”与默认的“每次询问”之间切换；“每次询问”不可用时退到第一个
+ * 其他可用模式，平台不提供计划模式时保持不变。
+ */
+export function togglePlanMode(
+  mode: AgentApprovalMode,
+  modes: readonly AgentApprovalMode[],
+): AgentApprovalMode {
+  if (mode !== 'plan') return modes.includes('plan') ? 'plan' : mode
+  return modes.includes('ask') ? 'ask' : (modes.find((m) => m !== 'plan') ?? mode)
+}
+
+/** Shift+Tab 循环到下一个可用模式；当前模式不在列表里时从第一个开始。 */
+export function nextMode(
+  mode: AgentApprovalMode,
+  modes: readonly AgentApprovalMode[],
+): AgentApprovalMode {
+  if (!modes.length) return mode
+  return modes[(modes.indexOf(mode) + 1) % modes.length]!
 }
 
 export const SLASH_COMMANDS = [

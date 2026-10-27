@@ -27,18 +27,27 @@ import { AgentRootOnly } from './root-only.js'
 
 type Kind = (typeof MCP_TOOL_KINDS)[number]
 
-/** 类型默认的审批策略：只读直接执行，写入停下等人确认。 */
-export const defaultPolicy = (kind: Kind): AgentToolPolicy => (kind === 'write' ? 'ask' : 'auto')
+/** 默认的审批策略：只读直接执行；写入需确认（高风险的写入只能由人确认）。 */
+export const defaultPolicy = (kind: Kind, highRisk = false): AgentToolPolicy =>
+  kind === 'write' ? (highRisk ? 'human' : 'ask') : 'auto'
+
+/** 每类工具接口允许设的策略：只读只有 auto、ask 与 deny，写入只有 ask、human 与 deny。 */
+export const allowedPolicy = (kind: Kind, policy: AgentToolPolicy): boolean =>
+  kind === 'write' ? policy !== 'auto' : policy !== 'human'
 
 /**
- * 实际生效的策略：显式设置优先，否则按类型默认；写入工具即使库里被写成 auto 也按 ask（写入从不自动执行），
- * 只读工具被写成 review 也按 ask（自动审查只为写入工具设计，接口不允许这样设，库里被直接改了也不放宽）。
+ * 实际生效的策略：deny 总是生效；只读工具只有 root 显式设了 ask（如花钱的生成图片）才停下问人，其余一律
+ * auto；写入工具取显式的 ask 或 human，否则按默认——库里被直接写成 auto 的写入也按默认（写入从不自动
+ * 执行，高风险的不因此放宽成 ask）。
  */
-export const effectivePolicy = (kind: Kind, stored: AgentToolPolicy | null): AgentToolPolicy => {
-  const p = stored ?? defaultPolicy(kind)
-  if (kind === 'write' && p === 'auto') return 'ask'
-  if (kind !== 'write' && p === 'review') return 'ask'
-  return p
+export const effectivePolicy = (
+  kind: Kind,
+  stored: AgentToolPolicy | null,
+  highRisk = false,
+): AgentToolPolicy => {
+  if (stored === 'deny') return 'deny'
+  if (kind !== 'write') return stored === 'ask' ? 'ask' : 'auto'
+  return stored === 'ask' || stored === 'human' ? stored : defaultPolicy(kind, highRisk)
 }
 
 type Source = 'local' | 'web' | 'builtin'
@@ -63,6 +72,8 @@ export class AgentToolPolicies {
     kind: Kind
     source: Source
     perm: string | null
+    highRisk: boolean
+    humanOnly?: true
   }[] {
     return [
       ...this.registry.list().map((t) => ({
@@ -71,6 +82,7 @@ export class AgentToolPolicies {
         kind: t.kind,
         source: 'local' as const,
         perm: t.perm,
+        highRisk: t.highRisk === true,
       })),
       ...WEB_TOOLS.map((t) => ({
         name: t.name,
@@ -78,14 +90,17 @@ export class AgentToolPolicies {
         kind: t.kind,
         source: 'web' as const,
         perm: null,
+        highRisk: false,
       })),
-      // 内置工具按发起人本人的身份办事，自己做权限检查，没有统一的权限点
+      // 内置工具按发起人本人的身份办事，自己做权限检查，没有统一的权限点；只能由人确认的按高风险
       ...this.ext.allBuiltins().map((t) => ({
         name: t.meta.name,
         title: t.meta.title,
         kind: t.meta.kind,
         source: 'builtin' as const,
         perm: null,
+        highRisk: t.meta.humanOnly === true,
+        ...(t.meta.humanOnly && { humanOnly: true as const }),
       })),
     ]
   }
@@ -100,16 +115,20 @@ export class AgentToolPolicies {
     return this.txHost.tx.getRepository(McpToolSwitch).find()
   }
 
-  /** 平台页的工具列表：每个工具此刻生效的策略、是否是类型默认，以及平台开关（没有行的为启用）。 */
+  /**
+   * 平台页的工具列表：每个工具此刻生效的策略、是否是类型默认，以及平台开关（没有行的为启用）。只能由人确认的
+   * 内置工具（`humanOnly`）除停用外一律显示 human：运行时就是这样对待它的，页面不能显示一个更宽的策略。
+   */
   async list(): Promise<AgentToolVo[]> {
     const rows = new Map((await this.rows()).map((r) => [r.name, r]))
     return this.known()
-      .map((t) => {
+      .map(({ highRisk, ...t }) => {
         const row = rows.get(t.name)
         const stored = row?.agentPolicy ?? null
+        const policy = effectivePolicy(t.kind, stored, highRisk)
         return {
           ...t,
-          policy: effectivePolicy(t.kind, stored),
+          policy: t.humanOnly && policy !== 'deny' ? ('human' as const) : policy,
           defaulted: stored === null,
           enabled: row?.enabled ?? true,
         }
@@ -117,23 +136,29 @@ export class AgentToolPolicies {
       .sort((a, b) => a.name.localeCompare(b.name))
   }
 
-  /** 运行时用：全部本系统工具此刻生效的策略，按工具名。 */
+  /** 运行时用：全部本系统工具此刻生效的策略，按工具名（humanOnly 内置工具除 deny 外按 human，与列表一致）。 */
   async policies(): Promise<Map<string, AgentToolPolicy>> {
     const stored = await this.stored()
     return new Map(
-      this.known().map((t) => [t.name, effectivePolicy(t.kind, stored.get(t.name) ?? null)]),
+      this.known().map((t) => {
+        const policy = effectivePolicy(t.kind, stored.get(t.name) ?? null, t.highRisk)
+        return [t.name, t.humanOnly && policy !== 'deny' ? 'human' : policy]
+      }),
     )
   }
 
   /**
-   * 设一个工具的策略（null 回到类型默认）；未知工具 404，写入工具设 auto、只读工具设 review 回 400。
+   * 设一个工具的策略（null 回到默认）；未知工具 404，不是这类工具可设的策略回 400。
    */
   async set(name: string, policy: AgentToolPolicy | null, by: number): Promise<null> {
     const tool = this.known().find((t) => t.name === name)
     if (!tool) throw new BizError(Err.NOT_FOUND)
-    // 写入工具从不自动执行：只能 ask、review 或 deny；自动审查只用于写入工具
-    if (tool.kind === 'write' && policy === 'auto') throw new BizError(Err.VALIDATION_FAILED)
-    if (tool.kind !== 'write' && policy === 'review') throw new BizError(Err.VALIDATION_FAILED)
+    // 写入工具从不自动执行（只能 ask、human 或 deny）；读取工具不送审，也就没有 human（只能 auto、ask 或 deny）
+    if (policy !== null && !allowedPolicy(tool.kind, policy))
+      throw new BizError(Err.VALIDATION_FAILED)
+    // 只能由人确认的内置工具只有 human 或 deny：设成 ask 运行时也不会送审或放行，存下来只会让页面显示失真
+    if (tool.humanOnly && policy !== null && policy !== 'human' && policy !== 'deny')
+      throw new BizError(Err.VALIDATION_FAILED)
     // 平台表：一个工具名一行（唯一键 name + alive），没有行时新建（启用状态保持默认的启用）
     await this.txHost.tx.query(
       `INSERT INTO cfg_mcp_tool (name, enabled, agent_policy, created_by, updated_by) VALUES (?, 1, ?, ?, ?) AS n
@@ -182,7 +207,7 @@ export class AgentToolPolicyController {
   @ActionLog({ domain: 'agent.tool', verb: 'modify', bizId: (req) => req.params.name })
   @ApiOperation({
     summary:
-      'Set a tool policy; null resets to the default (read auto, write ask); write never auto, review only for write',
+      'Set a tool policy; null resets to the default; read takes auto, ask or deny, write ask, human or deny',
   })
   @ApiEnvelope()
   set(

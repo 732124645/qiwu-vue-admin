@@ -1,6 +1,6 @@
 // Automatic review end to end (see docs/agent.md): a fake model (agent-fake.ts) serves both the chat model
 // and the review model. Root sets the review model (`agent.review.model`) and the policy of the sample
-// customer update tool to 自动审查 through the API; in 智能助手 the 自动审查 mode is picked before the first
+// customer update tool to 需确认 (reviewed in the auto-review mode) through the API; in 智能助手 the 自动审查 mode is picked before the first
 // message and the chat model fills one empty field of a seeded customer. When the review model approves, the
 // card shows the review's pass and its words and the write runs without a click; when it hands over, the
 // card waits with its buttons and the write runs once the user approves.
@@ -93,7 +93,7 @@ test.beforeAll(async ({ playwright }) => {
     UPDATE.test(t.name),
   )?.name
   expect(tool, 'customer update tool').toBeDefined()
-  await setPolicy('review')
+  await setPolicy('ask')
 })
 
 test.afterAll(async () => {

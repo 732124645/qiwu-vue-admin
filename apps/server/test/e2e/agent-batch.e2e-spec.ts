@@ -401,6 +401,75 @@ describe('batch runs', () => {
     expect(await customerRow(c)).toMatchObject({ website: null, city: null, industry: null })
   })
 
+  it('approve all leaves a card whose tool only a person confirms pending (skipped)', async () => {
+    await ds.query(
+      `INSERT INTO cfg_mcp_tool (name, enabled, agent_policy) VALUES ('demo.customer.update', 1, 'human') AS n
+        ON DUPLICATE KEY UPDATE agent_policy = n.agent_policy`,
+    )
+    try {
+      const c = await customer({})
+      const res = await create({ skill: ENRICH_SKILL, target: 'demo.customer', ids: [c] })
+      expect(res.status).toBe(201)
+      const id = res.body.data.id
+      await allRows(id, ['waiting'])
+      const detail = (await http().get(`${URL}/${id}`).set(bearer(tok.owner)).expect(200)).body.data
+      expect(detail.rows[0].pending[0].payload).toMatchObject({
+        tool: 'demo.customer.update',
+        human: true,
+      })
+      const out = await http()
+        .post(`${URL}/${id}/decide`)
+        .set(bearer(tok.owner))
+        .send({ decision: 'approve' })
+      expect(out.body.data).toEqual({ decided: 0, skipped: 1 })
+      expect((await customerRow(c)).website).toBeNull()
+      // rejecting all only tightens: it still goes through
+      const rejected = await http()
+        .post(`${URL}/${id}/decide`)
+        .set(bearer(tok.owner))
+        .send({ decision: 'reject' })
+      expect(rejected.body.data).toEqual({ decided: 1, skipped: 0 })
+      await allRows(id, ['completed'])
+      expect((await customerRow(c)).website).toBeNull()
+    } finally {
+      await ds.query(
+        "UPDATE cfg_mcp_tool SET agent_policy = NULL WHERE name = 'demo.customer.update'",
+      )
+    }
+  })
+
+  it('approve all re-checks the policy: a tool set to human while its card waits is skipped', async () => {
+    try {
+      const c = await customer({})
+      const res = await create({ skill: ENRICH_SKILL, target: 'demo.customer', ids: [c] })
+      expect(res.status).toBe(201)
+      const id = res.body.data.id
+      await allRows(id, ['waiting'])
+      const detail = (await http().get(`${URL}/${id}`).set(bearer(tok.owner)).expect(200)).body.data
+      expect(detail.rows[0].pending[0].payload.human).toBeUndefined()
+      await ds.query(
+        `INSERT INTO cfg_mcp_tool (name, enabled, agent_policy) VALUES ('demo.customer.update', 1, 'human') AS n
+          ON DUPLICATE KEY UPDATE agent_policy = n.agent_policy`,
+      )
+      const out = await http()
+        .post(`${URL}/${id}/decide`)
+        .set(bearer(tok.owner))
+        .send({ decision: 'approve' })
+      expect(out.body.data).toEqual({ decided: 0, skipped: 1 })
+      expect((await customerRow(c)).website).toBeNull()
+      await http()
+        .post(`${URL}/${id}/decide`)
+        .set(bearer(tok.owner))
+        .send({ decision: 'reject' })
+        .expect(200)
+      await allRows(id, ['completed'])
+    } finally {
+      await ds.query(
+        "UPDATE cfg_mcp_tool SET agent_policy = NULL WHERE name = 'demo.customer.update'",
+      )
+    }
+  })
+
   it("decide all leaves an approval that writes another row's record pending (skipped)", async () => {
     const a = await customer({})
     const b = await customer({})

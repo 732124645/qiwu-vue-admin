@@ -41,6 +41,10 @@
         "title": "更新计划",
         "description": "展示并更新当前任务的步骤与进度。"
       },
+      "plan_propose": {
+        "title": "提交方案",
+        "description": "计划模式下提交方案，等你批准执行或继续完善。"
+      },
       "ask_user": {
         "title": "向我提问",
         "description": "在需要补充信息或选择时向你提问。"

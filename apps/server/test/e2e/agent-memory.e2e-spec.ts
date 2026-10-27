@@ -36,6 +36,7 @@ import {
   EXTRACT_PER_DAY,
 } from '../../src/core/agent/memory/memory-extract.js'
 import { MEMORY_MAX } from '../../src/core/agent/memory/memory.service.js'
+import { AgentExtensions } from '../../src/core/agent/runtime/agent-extensions.js'
 import { FakeChatModel, type FakeTurn } from '../../src/core/agent/provider/fake-chat-model.js'
 import { ProviderRegistry } from '../../src/core/agent/provider/provider-registry.js'
 import type { Session } from '../../src/core/auth/token.service.js'
@@ -588,31 +589,36 @@ describe('memories in a chat', () => {
 
   it('memory.save checks the switch when it runs: memory switched off during the turn saves nothing', async () => {
     await clear('member')
-    const id = await thread('member', { approval_mode: 'trust' })
+    const id = await thread('member')
     const save = { toolCalls: [{ name: 'memory.save', args: { content: 'Likes oolong' } }] }
-    // the first save is approved for the rest of the thread
     script(save, { text: 'OK.' })
-    const first = await start('member', id, 'remember oolong')
-    expect(await settled(first)).toBe('waiting')
+    const second = await start('member', id, 'remember oolong')
+    expect(await settled(second)).toBe('waiting')
+    const card = (await pendingCard(id))!
+    // a personal save is never offered for the whole thread
+    expect(card.payload.sessionAllow).toBeUndefined()
     await http()
-      .post(`/api/agent/approvals/${(await pendingCard(id))!.id}`)
+      .post(`/api/agent/approvals/${card.id}`)
       .set(as('member'))
       .send({ decision: 'approve_session' })
-      .expect(201)
-    expect(await settled(first, ['completed', 'failed', 'cancelled'])).toBe('completed')
-    expect(await rows('member')).toHaveLength(1)
-    await clear('member')
-
-    // the same save again, trusted, while the user switches memory off before the call runs
-    script({ ...save, delayMs: 800 }, { text: 'OK.' })
-    const second = await start('member', id, 'remember oolong again')
-    await sleep(150)
-    await http()
-      .patch(`/api/agent/threads/${id}`)
-      .set(as('member'))
-      .send({ memoryEnabled: false })
-      .expect(200)
-    expect(await settled(second, ['completed', 'failed', 'cancelled'])).toBe('failed')
+      .expect(400)
+    // the user switches memory off after approving, right before the call runs
+    const builtin = app.get(AgentExtensions).builtin('memory.save')!
+    const run = builtin.run
+    builtin.run = async (input, ctx) => {
+      await ds.query('UPDATE agent_thread SET memory_enabled = 0 WHERE id = ?', [id])
+      return run(input, ctx)
+    }
+    try {
+      await http()
+        .post(`/api/agent/approvals/${card.id}`)
+        .set(as('member'))
+        .send({ decision: 'approve' })
+        .expect(201)
+      expect(await settled(second, ['completed', 'failed', 'cancelled'])).toBe('failed')
+    } finally {
+      builtin.run = run
+    }
     expect(await rows('member')).toHaveLength(0)
     expect(fake.requests).toHaveLength(1)
     const [result] = await ds.query(
@@ -628,7 +634,7 @@ describe('memories in a chat', () => {
     expect(risk.recovery_required).toBe(1)
   })
 
-  it('memory.save always waits for a person: neither an auto nor a review policy lets it through', async () => {
+  it('memory.save always waits for a person: neither an auto nor an ask policy lets it through', async () => {
     await clear('member')
     await setPolicy('memory.save', 'auto')
     const id = await thread('member')
@@ -639,8 +645,8 @@ describe('memories in a chat', () => {
     expect(await settled(await start('member', id, 'remember puer'))).toBe('waiting')
     expect(await pendingCard(id)).toBeDefined()
 
-    // auto-review thread, review policy and a reviewer approving everything: still a card for the person
-    await setPolicy('memory.save', 'review')
+    // auto-review thread, ask policy and a reviewer approving everything: still a card for the person
+    await setPolicy('memory.save', 'ask')
     approveAll = true
     const reviewed = await thread('member', { approval_mode: 'auto_review' })
     script(
@@ -709,7 +715,10 @@ describe('memories in a chat', () => {
 })
 
 describe('distilling memories', () => {
-  /** An idle thread of the peer: its own words, an answer, external tool output and a followed suggestion. */
+  /**
+   * An idle thread of the peer: its own words, an answer, external tool output, a followed suggestion and the
+   * runtime's message carrying an approved plan.
+   */
   async function talk() {
     const id = await idleThread('peer')
     await item(id, 1, 'user', { text: 'I run the Shanghai sales team, keep answers short' })
@@ -727,6 +736,10 @@ describe('distilling memories', () => {
     )
     await item(id, 4, 'user', { text: 'SUGGESTED-FACT tell me more' })
     await item(id, 5, 'user', { text: 'my password is hunter22' })
+    await item(id, 6, 'user', {
+      text: 'The approved plan: PLAN-FACT the user heads finance',
+      fromPlan: 1,
+    })
     return id
   }
   const answer = (...memories: string[]) => ({ text: JSON.stringify({ memories }) })
@@ -743,6 +756,7 @@ describe('distilling memories', () => {
     expect(sent).not.toContain('WEB-FACT')
     expect(sent).not.toContain('ANSWER-FACT')
     expect(sent).not.toContain('SUGGESTED-FACT')
+    expect(sent).not.toContain('PLAN-FACT')
     const saved = await rows('peer')
     expect(saved.map((r) => [r.content, r.source, r.source_thread_id])).toEqual([
       ['Runs the Shanghai sales team', 'extract', id],
@@ -759,7 +773,7 @@ describe('distilling memories', () => {
     expect(await distil('peer', id)).toBeNull()
     expect(fake.requests).toHaveLength(0)
     // a new message after the mark: only it is read
-    await item(id, 6, 'user', { text: 'I also manage the Beijing office' })
+    await item(id, 7, 'user', { text: 'I also manage the Beijing office' })
     await ds.query('UPDATE agent_thread SET last_active_at = ? WHERE id = ?', [
       new Date(Date.now() - 3000_000),
       id,

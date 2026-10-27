@@ -7,9 +7,8 @@
         "providerId": "模型提供方",
         "model": "模型",
         "reasoning": "推理强度",
-        "approvalMode": "审批模式",
+        "approvalMode": "会话模式",
         "context": "页面上下文",
-        "planMode": "计划模式",
         "pinned": "置顶",
         "temporary": "临时会话",
         "clientDraftId": "草稿接收标识",
@@ -26,6 +25,10 @@
         "decision": "决定",
         "note": "备注",
         "confirmationToken": "确认信息"
+      },
+      "plan": {
+        "decision": "选择",
+        "feedback": "修改意见"
       },
       "skill": {
         "scope": "范围",

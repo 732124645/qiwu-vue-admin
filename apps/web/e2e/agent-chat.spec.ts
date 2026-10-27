@@ -219,9 +219,13 @@ test('reject: the model is told so and the field stays empty', async ({ page }) 
   script = { id: c.id, field: 'industry', value: '本地生活服务' }
   const card = await askAndWait(page, `补齐 ${c.name} 的行业`, c, '本地生活服务')
 
-  await card
-    .getByRole('button', { name: msg('agent.chat.approval.action.reject'), exact: true })
-    .click()
+  // the first click opens the note box, the second rejects
+  const reject = card.getByRole('button', {
+    name: msg('agent.chat.approval.action.reject'),
+    exact: true,
+  })
+  await reject.click()
+  await reject.click()
   await expect(answer(page, REJECTED)).toBeVisible({ timeout: 20_000 })
   expect(await industryOf(c.id)).toBeNull()
 })

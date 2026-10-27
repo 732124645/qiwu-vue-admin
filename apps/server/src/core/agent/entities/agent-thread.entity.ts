@@ -45,21 +45,17 @@ export class AgentThread extends BaseEntity {
   @Column({ type: 'varchar', length: 16, nullable: true })
   reasoning: (typeof AGENT_REASONING)[number] | null
 
-  /** 审批模式（read_only、ask、trust、auto_review） */
+  /** 会话模式（read_only、plan、ask、auto_review） */
   @Column({ name: 'approval_mode', type: 'varchar', length: 16, default: 'ask' })
   approvalMode: AgentApprovalMode
 
-  /** 执行结果未知的写入需要本人核对，任何信任或自动策略都不能越过。 */
+  /** 执行结果未知的写入需要本人核对，任何会话放行或自动策略都不能越过。 */
   @Column({ name: 'recovery_required', type: 'boolean', default: false })
   recoveryRequired: boolean
 
   /** 每次新增不确定结果递增，旧界面的核对不能清除后来发生的风险。 */
   @Column({ name: 'recovery_revision', type: 'int', unsigned: true, default: 0 })
   recoveryRevision: number
-
-  /** 计划模式（先出计划、只读） */
-  @Column({ name: 'plan_mode', type: 'boolean', default: false })
-  planMode: boolean
 
   /** 是否置顶 */
   @Column({ type: 'boolean', default: false })
@@ -77,7 +73,7 @@ export class AgentThread extends BaseEntity {
   @Column({ name: 'share_token', type: 'char', length: 32, nullable: true, select: false })
   shareToken?: string | null
 
-  /** 信任本会话时已确认过的操作（工具名 + 目标） */
+  /** 本会话内不再询问的工具：`<放行它的轮次 id>#<工具名>`（撤回那一轮时一并去掉） */
   @Column({ type: 'json', nullable: true })
   trusted: string[] | null
 

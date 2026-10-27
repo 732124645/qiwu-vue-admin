@@ -1,7 +1,20 @@
-import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put } from '@nestjs/common'
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Param,
+  ParseIntPipe,
+  Post,
+  Put,
+} from '@nestjs/common'
 import { ApiOperation, ApiTags } from '@nestjs/swagger'
 import {
   agentPerms,
+  type AgentProviderModelsQuery,
+  agentProviderModelsQuery,
+  agentProviderModelsVo,
   type AgentProviderSave,
   agentProviderSave,
   agentProviderVo,
@@ -10,10 +23,11 @@ import {
   agentSearchProviderVo,
 } from '@qiwu/shared'
 import { z } from 'zod'
-import { ActionLog } from '../../audit/action-log.js'
+import { ActionLog, SkipActionLog } from '../../audit/action-log.js'
 import { RequirePerm } from '../../auth/decorators.js'
 import { PlatformOnly } from '../../auth/platform-only.js'
 import { Idempotent } from '../../guard/idempotent.js'
+import { RateLimit } from '../../guard/rate-limit.decorator.js'
 import { ApiEnvelope } from '../../http/api-envelope.decorator.js'
 import {
   ProviderSettingsService,
@@ -51,6 +65,23 @@ export class AgentProviderController {
   @ApiEnvelope(agentProviderVo, 201)
   create(@Body({ schema: agentProviderSave }) dto: AgentProviderSave) {
     return this.settings.save(null, dto)
+  }
+
+  /** 表单里“从服务加载模型”：用已保存的密钥发出站请求，所以与改动一样只有 root 能调用。 */
+  @Post('models')
+  @HttpCode(200)
+  @RequirePerm(agentPerms.setting.modify)
+  @PlatformOnly('root')
+  @RateLimit(20, 60_000)
+  // 只读查询上游的模型清单，不改任何数据，不记操作日志
+  @SkipActionLog()
+  @ApiOperation({
+    summary:
+      "List the upstream's models (GET {baseUrl}/models); without apiKey the stored key of id is used only for its stored baseUrl",
+  })
+  @ApiEnvelope(agentProviderModelsVo)
+  models(@Body({ schema: agentProviderModelsQuery }) dto: AgentProviderModelsQuery) {
+    return this.settings.upstreamModels(dto)
   }
 
   @Put(':id')

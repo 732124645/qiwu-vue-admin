@@ -236,8 +236,11 @@ export function systemPrompt(s: PromptParts): string {
   if (s.readOnly)
     parts.push(
       s.planMode
-        ? 'Plan mode: investigate with read-only tools and present a plan (plan.update) of the changes. ' +
-            'Do not change any data; the user switches plan mode off to execute the plan.'
+        ? 'Plan mode: explore with read-only tools only; nothing can change data in this mode. When a ' +
+            'choice is the user’s to make, ask with ask.user. When the plan is ready, call plan.propose ' +
+            '(title, short summary, numbered steps, the data you expect to change, your assumptions) instead ' +
+            'of asking whether to proceed, and stop. The user approves it, which runs it in a new turn, or ' +
+            'asks you to refine it. You cannot leave plan mode yourself.'
         : 'Read-only mode: only read-only tools are available; tell the user what would need a change.',
     )
   if (s.skills.length)

@@ -137,7 +137,7 @@ export class HumanConfirmation {
     return { rawArgs: args, schema, revision, args: prepared.args, preview, digest }
   }
 
-  /** 预览每次换版本都生成新 token；清掉旧决定与会话信任键，旧界面的迟到点击不能批准新内容。 */
+  /** 预览每次换版本都生成新 token；清掉旧决定，旧界面的迟到点击不能批准新内容。 */
   renew(card: Card, fresh: ConfirmationPreview): Card {
     const token = randomUUID()
     const next: Card = {
@@ -163,7 +163,7 @@ export class HumanConfirmation {
     delete next.decidedAt
     delete next.auto
     delete next.note
-    delete next.internal!.key
+    delete next.sessionAllow
     return next
   }
 
@@ -191,7 +191,7 @@ export class HumanConfirmation {
         !thread ||
         Number(thread.userId) !== p.userId ||
         thread.parentThreadId !== null ||
-        thread.planMode ||
+        thread.approvalMode === 'plan' ||
         thread.approvalMode === 'read_only'
       )
         throw new BizError(Err.AGENT_APPROVAL_CLOSED)

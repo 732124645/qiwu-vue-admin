@@ -25,14 +25,30 @@
         "user": "Personal"
       },
       "policy": {
-        "auto": "Run automatically",
-        "ask": "Ask",
-        "deny": "Deny"
+        "auto": "Run directly",
+        "ask": "Needs confirmation",
+        "human": "People only",
+        "deny": "Off",
+        "note": "Auto review covers every write that needs confirmation; set deleting, bulk changes, sending outside and money to \"People only\".",
+        "sep": ": "
+      },
+      "policyHint": {
+        "auto": "A read tool runs at once without asking",
+        "ask": "Confirmed before each call; in auto review a write goes to the review model first, a read is never reviewed",
+        "human": "Only you confirm each call: never reviewed, never allowed for the conversation",
+        "deny": "The assistant cannot use it",
+        "mcpAuto": "An administrator confirmed it only reads: runs without asking"
       },
       "provider": {
         "entity": "model provider"
       },
       "model": {
+        "loadFromService": "Load models from service",
+        "loadHint": "Fill in the address and key to read the available models from the service; with a stored key and an unchanged address it loads directly",
+        "pickLoaded": "Pick models to add (searchable)",
+        "addPicked": "Add selected models",
+        "alreadyAdded": "Added",
+        "noneLoaded": "The service returned no models",
         "id": "Model ID",
         "label": "Display name",
         "reasoning": "Reasoning",
@@ -133,8 +149,6 @@
         "paused": "Pause the agent",
         "pausedHint": "New turns and tool calls are refused at once; running turns stop",
         "pauseConfirm": "Pause the agent? New conversations and tool calls of every user are refused at once, and running turns stop.",
-        "trustMode": "Offer \"trust this conversation\"",
-        "trustModeHint": "When off, the chat page no longer offers this approval mode",
         "instructions": "Platform instructions",
         "instructionsHint": "Put first into every system prompt, for every tenant.",
         "limits": "Limits",

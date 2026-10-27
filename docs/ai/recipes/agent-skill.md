@@ -42,7 +42,7 @@
 4. **注册。** 把工具类加进模块的 `providers`；模块文件是生成物时像样例那样在工具文件里单独建一个小模块（`CustomerMcpModule`），加进 `apps/server/src/modules/project.module.ts` 的 `imports`。不需要迁移和菜单。
 5. **列表页（可选）。** 用 `useAgentContext('<domain>.<resource>', () => 选中行的 id)`（`apps/web/src/views/platform/agent/chat/use-agent-context.ts`）把选中记录交给右下角的智能助手入口；批量执行的按钮调用 `agentBatchApi.create({ skill, target, ids })`（`apps/web/src/api/platform/agent-batch.ts`），再打开路由 `agent-batch`（`query: { id }`）。按钮只在菜单里有 `agent-batch` 时显示，写法见 `apps/web/src/views/demo/customer/index.vue`。
 6. **写技能。** 技能是说明文字加允许的工具清单，模型只看名称与描述，用到时才加载正文。项目自带的技能写成种子：照 `apps/server/src/db/seeds/demo/customer-sample.seed.ts`，用 `apps/server/src/db/seeds/upsert.ts` 的 `upsert(q, 'agent_platform_skill', { name }, {}, { description, body, tools, enabled: 1 })` 只在第一次写入（管理员之后的修改保留），把种子函数登记到 `apps/server/src/db/seeds/index.ts` 的 `SEEDS.project`。正文写清楚：每一步用哪个工具、只改哪些字段、查不到或有歧义时怎么办（用 `ask.user` 问用户，不要猜）、最后怎样总结来源；`tools` 只列需要的工具（内置的 `plan.update`、`ask.user`、`skill.load` 总可用，联网用 `web.search`、`web.fetch`）。不想写代码时，也可以在运行中的“技能管理”页新建或导入 `SKILL.md`（格式见[后台智能体](../../agent.md#技能)）。
-7. **授权。** 工具按调用者本人的权限点与数据权限运行：在“角色管理”授权模块的页面权限与“智能助手”（`agent.chat.use`），批量执行再授权 `agent.batch.run`；多租户时把页面与“智能体”菜单组勾进租户套餐。写入工具在智能体里默认要人确认，平台页“智能体设置 → 工具策略”只能把它设为确认或禁用。
+7. **授权。** 工具按调用者本人的权限点与数据权限运行：在“角色管理”授权模块的页面权限与“智能助手”（`agent.chat.use`），批量执行再授权 `agent.batch.run`；多租户时把页面与“智能体”菜单组勾进租户套餐。写入工具在智能体里默认要人确认（会话为自动审查模式时先交审查模型），平台页“智能体设置 → 工具审批”只能把它设为需确认、仅人工确认或停用。删除记录、批量修改、对外发送或涉及金额的写入，在 `@McpTool` 上声明 `highRisk: true`，默认就是“仅人工确认”（从不送审，也不能本会话放行）。
 
 ## 完成检查
 

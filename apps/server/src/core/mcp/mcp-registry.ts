@@ -125,6 +125,8 @@ export class McpRegistry implements OnModuleInit {
       throw new Error(
         `${where}: per-call confirmation requires a stable confirmationRevision (1-64 ASCII letters, digits, dots, underscores or hyphens)`,
       )
+    if (meta.highRisk !== undefined && (meta.highRisk !== true || meta.kind !== 'write'))
+      throw new Error(`${where}: highRisk is only for write tools`)
     const timeoutMs = meta.timeoutMs ?? MCP_TIMEOUT_MS
     if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > MCP_TIMEOUT_MAX_MS)
       throw new Error(`${where}: timeoutMs must be 1 … ${MCP_TIMEOUT_MAX_MS}`)

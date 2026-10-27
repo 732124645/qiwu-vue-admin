@@ -7,9 +7,8 @@
         "providerId": "Model provider",
         "model": "Model",
         "reasoning": "Reasoning effort",
-        "approvalMode": "Approval mode",
+        "approvalMode": "Mode",
         "context": "Page context",
-        "planMode": "Plan mode",
         "pinned": "Pinned",
         "temporary": "Temporary conversation",
         "clientDraftId": "Draft delivery ID",
@@ -26,6 +25,10 @@
         "decision": "Decision",
         "note": "Note",
         "confirmationToken": "Confirmation"
+      },
+      "plan": {
+        "decision": "Choice",
+        "feedback": "Feedback"
       },
       "skill": {
         "scope": "Scope",

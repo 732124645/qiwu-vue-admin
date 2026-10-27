@@ -93,12 +93,7 @@
        ctx: AgentReviewContext,
        call: AgentReviewCall,
      ): Promise<AgentReviewVerdict | null> {
-       if (
-         call.tool !== 'crm.order.update' ||
-         call.policy !== 'review' ||
-         ctx.thread.mode !== 'auto_review'
-       )
-         return null
+       if (call.tool !== 'crm.order.update' || ctx.thread.mode !== 'auto_review') return null
        const amount = (call.args as { amount?: number }).amount
        if (amount === undefined || amount <= 10_000) return null
        return {
@@ -110,7 +105,7 @@
    }
    ```
 
-   第一个非 `null` 的结论生效，`escalate` 也结束链条。运行时只承认有资格的放行：`by: 'review'` 的 `approve` 只在工具此刻的策略是 `review`、会话此刻是“自动审查”模式时算数，`by: 'pre_approved'` 只认自动化的预先同意本身复核过的；其余的放行一律降为交给人，所以自写的审查者主要用来驳回和交给人。审查者看不到工具输出；参数是助手写的，可能受外部内容影响，不能当成用户的意思。需要调用模型时使用 `ctx.invokeModel()` 并透传它给出的 `signal` 和 `onUsage`，写法照 `apps/server/src/core/agent/runtime/auto-reviewer.ts`。理由显示在卡片上，写成词条：服务端片段 `apps/server/src/i18n/{zh-CN,en-US}/` 下项目自己的 `<domain>.<business>.json`（见[多语言词条](i18n.md)）。
+   第一个非 `null` 的结论生效，`escalate` 也结束链条。审查者只会收到策略为 `ask` 的写入（`human` 与须本人逐次确认的工具从不送审）；驳回与交给人都停下等人。运行时只承认有资格的放行：`by: 'review'` 的 `approve` 只在工具此刻的策略是 `ask`、会话此刻是“自动审查”模式时算数，`by: 'pre_approved'` 只认自动化的预先同意本身复核过的；其余的放行一律降为交给人，所以自写的审查者主要用来驳回和交给人。审查者看不到工具输出；参数是助手写的，可能受外部内容影响，不能当成用户的意思。需要调用模型时使用 `ctx.invokeModel()` 并透传它给出的 `signal` 和 `onUsage`，写法照 `apps/server/src/core/agent/runtime/auto-reviewer.ts`。理由显示在卡片上，写成词条：服务端片段 `apps/server/src/i18n/{zh-CN,en-US}/` 下项目自己的 `<domain>.<business>.json`（见[多语言词条](i18n.md)）。
 
 5. **注册。** 把类加进模块的 `providers`；模块文件是生成物时在 `<business>.agent.ts` 里单独建一个小模块，加进 `apps/server/src/modules/project.module.ts` 的 `imports`。不需要迁移和菜单。新的内置工具出现在“智能体设置 → 工具策略”里（来源“内置”），root 可以停用或改策略。
 
@@ -153,7 +148,7 @@ await ctx.invokeModel(usageTarget(model), (receipt) =>
 - 会改数据的内置工具声明成 `kind: 'read'`：不经确认直接执行。
 - 上下文贡献者在 `turnId` 为 `null` 时也写“最近使用”之类的记录：只看一眼 `/status` 就改了数据。
 - 把规则写进上下文贡献者的文字，指望模型遵守：它只是用户角色的背景。硬性规则写成审批审查者或在工具里校验。
-- 审查者不看 `call.policy` 与 `ctx.thread.mode` 就交给人：普通“询问”模式的卡片上也会出现“自动审查交给你确认”。
+- 审查者不看 `ctx.thread.mode` 就交给人：普通“每次询问”模式的卡片上也会出现“自动审查交给你确认”。
 - 审查者忽略 `ctx.signal`、长时间调用模型：本轮被停止或暂停后还在白等、白花 token。
 - 审查者在理由里复述参数里的长文字：理由会显示在卡片上，也会交给模型，写一句短的原因即可。
 

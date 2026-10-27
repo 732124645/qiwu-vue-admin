@@ -47,7 +47,7 @@ import {
   guideStorageKey,
   readGuide,
 } from '@/views/platform/agent/setting/setup-guide'
-import { me, mockApi, ok } from './mock-api'
+import { fail, me, mockApi, ok } from './mock-api'
 
 const AT = '2026-10-22T01:00:00.000Z'
 const SETTING = ['agent.setting.browse', 'agent.setting.modify']
@@ -216,6 +216,65 @@ describe('provider form', () => {
     expect(sent(calls, 'put', '/agent/providers/3')[1]).toMatchObject({ apiKey: 'sk-new' })
   })
 
+  it('loads models from the service: needs an address and a usable key, adds new ones as rows', async () => {
+    const calls = mockApi({
+      'GET /agent/providers': ok([PROVIDER]),
+      'PUT /agent/providers/3': ok(PROVIDER),
+      'POST /agent/providers/models': ok({
+        items: [{ id: 'deepseek-chat' }, { id: 'deepseek-reasoner', ownedBy: 'deepseek' }],
+      }),
+    })
+    await show(ProviderForm, { props: { id: 3 } })
+    const load = () => button(t('agent.admin.model.loadFromService'))!
+    expect(load().attributes('disabled')).toBeUndefined()
+    const address = w.find('input[placeholder="https://api.example.com/v1"]')
+    await address.setValue('https://elsewhere.example/v1')
+    await w.find('input[type="password"]').setValue('sk-typed')
+    await address.setValue(PROVIDER.baseUrl)
+    await w.find('input[type="password"]').setValue('')
+    await load().trigger('click')
+    await flushPromises()
+    expect(sent(calls, 'post', '/agent/providers/models')).toEqual([
+      { id: 3, baseUrl: PROVIDER.baseUrl },
+    ])
+    const pick = w
+      .findAllComponents(ElSelect)
+      .find((s) => s.find('input').attributes('aria-label') === t('agent.admin.model.pickLoaded'))!
+    pick.vm.$emit('update:modelValue', ['deepseek-chat', 'deepseek-reasoner'])
+    await flushPromises()
+    await button(t('agent.admin.model.addPicked'))!.trigger('click')
+    await button(t('crud.action.save'))!.trigger('click')
+    await flushPromises()
+    expect(sent(calls, 'put', '/agent/providers/3')[0]!.models).toMatchObject([
+      { id: 'deepseek-chat', label: 'Chat', fast: true },
+      { id: 'deepseek-reasoner', label: '', reasoning: false, fast: false, pricing: null },
+    ])
+  })
+
+  it('the load button needs only an address: a keyless local service can list its models', async () => {
+    const calls = mockApi({ 'POST /agent/providers/models': ok({ items: [{ id: 'qwen3' }] }) })
+    await show(ProviderForm)
+    const load = () => button(t('agent.admin.model.loadFromService'))!
+    expect(load().attributes('disabled')).toBeDefined()
+    await w.find('input[placeholder="https://api.example.com/v1"]').setValue('http://ollama/v1')
+    expect(load().attributes('disabled')).toBeUndefined()
+    await load().trigger('click')
+    await flushPromises()
+    expect(sent(calls, 'post', '/agent/providers/models')).toEqual([
+      { baseUrl: 'http://ollama/v1' },
+    ])
+  })
+
+  it('shows why loading the models failed (a bad address, a provider deleted meanwhile)', async () => {
+    mockApi({ 'POST /agent/providers/models': fail(400, 'A0400', 'Address is not valid') })
+    await show(ProviderForm)
+    await w.find('input[placeholder="https://api.example.com/v1"]').setValue('api.example.com')
+    await button(t('agent.admin.model.loadFromService'))!.trigger('click')
+    await flushPromises()
+    expect(ElMessage.error).toHaveBeenCalledWith('Address is not valid')
+    expect(button(t('agent.admin.model.loadFromService'))!.attributes('disabled')).toBeUndefined()
+  })
+
   it('checks every model row and needs at least one model', async () => {
     const calls = mockApi({ 'POST /agent/providers': ok({ ...PROVIDER, id: 9 }) })
     await show(ProviderForm)
@@ -279,7 +338,7 @@ describe('tool policies', () => {
       kind: 'write',
       source: 'builtin',
       perm: null,
-      policy: 'review',
+      policy: 'human',
       defaulted: false,
       enabled: true,
     },
@@ -296,15 +355,18 @@ describe('tool policies', () => {
       .map((o) => o.text())
   }
 
-  it('offers a write tool ask, review or deny, a read tool no review; reset goes back to the default', async () => {
+  it('offers a write tool ask, people only or deny, a read tool run, ask or off; reset goes back to the default', async () => {
     const calls = mockApi({
       'GET /agent/tools': ok(TOOLS),
       'PUT /agent/tools/demo.customer.update/policy': ok(null),
     })
     await show(ToolTab)
+    // the note on top: auto review covers every "needs confirmation" write
+    expect(w.text()).toContain(t('agent.admin.policy.note'))
+    expect(w.text()).toContain(t('agent.admin.policyHint.human'))
     expect(await options(1)).toEqual([
       t('agent.admin.policy.ask'),
-      t('agent.admin.policy.review'),
+      t('agent.admin.policy.human'),
       t('agent.admin.policy.deny'),
     ])
     expect(await options(0)).toEqual([
@@ -320,6 +382,22 @@ describe('tool policies', () => {
     await flushPromises()
     expect(sent(calls, 'put', '/agent/tools/demo.customer.update/policy')).toEqual([
       { policy: null },
+    ])
+  })
+
+  it('a tool only people may confirm offers people only or off; a built-in set to people only still offers ask', async () => {
+    mockApi({
+      'GET /agent/tools': ok([
+        { ...TOOLS[2]!, name: 'memory.remember', policy: 'deny', humanOnly: true },
+        TOOLS[2],
+      ]),
+    })
+    await show(ToolTab)
+    expect(await options(0)).toEqual([t('agent.admin.policy.human'), t('agent.admin.policy.deny')])
+    expect(await options(1)).toEqual([
+      t('agent.admin.policy.ask'),
+      t('agent.admin.policy.human'),
+      t('agent.admin.policy.deny'),
     ])
   })
 
@@ -381,7 +459,12 @@ describe('external mcp servers', () => {
       body()
         .findAll('.el-select-dropdown__item')
         .map((option) => option.text()),
-    ).toContain(t('agent.admin.policy.auto'))
+    ).toEqual([
+      t('agent.admin.policy.auto'),
+      t('agent.admin.policy.ask'),
+      t('agent.admin.policy.human'),
+      t('agent.admin.policy.deny'),
+    ])
     select.vm.$emit('change', 'auto')
     await flushPromises()
     expect(confirm).toHaveBeenCalledWith(
@@ -669,7 +752,6 @@ describe('root-only params', () => {
   })
   const PARAMS = [
     param(1, 'agent.paused', 'false'),
-    param(2, 'agent.trust_mode', 'true'),
     param(3, 'agent.instructions', ''),
     param(4, 'agent.limit.turn_steps', '20'),
     param(5, 'agent.limit.turn_seconds', '300'),

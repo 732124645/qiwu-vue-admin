@@ -18,6 +18,7 @@ import { ProviderRegistry } from '../provider/provider-registry.js'
 import { itemVo, ItemStore } from '../runtime/item-store.js'
 import { TurnQueue } from '../runtime/turn-queue.js'
 import { TurnRunner } from '../runtime/turn-runner.js'
+import { AgentToolPolicies } from '../tools/tool-policy.js'
 import { AgentBatchTargets } from './batch-targets.js'
 
 const notFound = () => new BizError(Err.NOT_FOUND)
@@ -77,6 +78,7 @@ export class AgentBatchService implements OnModuleInit {
     private readonly targets: AgentBatchTargets,
     private readonly i18n: I18nService,
     @Inject(TURN_CONTROL) private readonly control: TurnControl,
+    private readonly toolPolicies: AgentToolPolicies,
     @Optional() @Inject(SKILL_SOURCE) private readonly skills?: SkillSource,
   ) {}
 
@@ -129,7 +131,6 @@ export class AgentBatchService implements OnModuleInit {
             model: model.model.id,
             reasoning: null,
             approvalMode: 'ask',
-            planMode: false,
             pinned: false,
             temporary: false,
             readSeq: 0,
@@ -253,7 +254,9 @@ export class AgentBatchService implements OnModuleInit {
    * 一次确认或拒绝批次里所有等待中的审批：每个都经 `TurnControl.decideApproval`（同对话页的审批卡，
    * 只有本人；被拦下的与刚被别处处理掉的跳过）。只批量处理批量目标登记的工具、写的正是这一行自己那条
    * 记录的审批（{@link onOwnRecord}）：记录内容可能带着提示注入，让模型在 A 的行里去改 B，或者调用别的
-   * 写入工具，这样的审批留着等人逐条看，计入 `skipped`。返回实际处理与留下的个数。
+   * 写入工具，这样的审批留着等人逐条看，计入 `skipped`；出卡时或此刻策略不是 `ask` 的（如 `human`）也不随
+   * “全部同意”放行。
+   * 返回实际处理与留下的个数。
    */
   async decide(
     p: Principal,
@@ -270,11 +273,20 @@ export class AgentBatchService implements OnModuleInit {
       order: { id: 'ASC' },
       select: { id: true, threadId: true, payload: true },
     })
+    // 出卡之后 root 可能把工具改成 human 或停用：同意前按此刻生效的策略复核，不是 ask 的留给人逐条看
+    const now = decision === 'approve' ? await this.toolPolicies.policies() : null
     let decided = 0
     let skipped = 0
     for (const item of pending) {
+      const card = item.payload as {
+        tool?: string
+        perCallConfirmation?: boolean
+        human?: boolean
+      }
       if (
-        (item.payload as { perCallConfirmation?: boolean }).perCallConfirmation ||
+        card.perCallConfirmation ||
+        // 只能由人逐次确认的（human 策略）不能被一次“全部同意”代替；拒绝只会收紧，照常批量处理
+        (now && (card.human || now.get(card.tool ?? '') !== 'ask')) ||
         !onOwnRecord(item.payload, targetOf.get(Number(item.threadId)) ?? 0, tools)
       ) {
         skipped++

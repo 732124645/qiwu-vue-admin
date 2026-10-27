@@ -4,13 +4,23 @@ import type { z } from 'zod'
 import {
   AgentBuiltinTool,
   type AgentToolContext,
+  type AgentToolWait,
   SKILL_SOURCE,
   type SkillSource,
 } from '../agent-ports.js'
-import { ASK_TOOL, askInput, PLAN_TOOL, planInput, SKILL_TOOL, skillInput } from './turn-tools.js'
+import {
+  ASK_TOOL,
+  askInput,
+  PLAN_TOOL,
+  planInput,
+  PROPOSE_TOOL,
+  proposeInput,
+  SKILL_TOOL,
+  skillInput,
+} from './turn-tools.js'
 
 /**
- * 运行时自带的内置工具：计划清单、反问用户、加载技能（后者只在有技能来源时提供）。与别的模块的内置工具
+ * 运行时自带的内置工具：计划清单、提交方案（只在计划模式）、反问用户、加载技能（后者只在有技能来源时提供）。与别的模块的内置工具
  * 一样经 `@AgentBuiltinTool` 登记（see docs/agent.md）。
  */
 @Injectable()
@@ -33,6 +43,28 @@ export class AgentCoreTools {
     if (last) await ctx.items.replace(last.id, plan)
     else await ctx.items.add('plan', plan)
     return { ok: true, content: 'Plan updated.' }
+  }
+
+  /**
+   * 提交方案：只在计划模式下提供（子会话与自动化的会话没人批准，不提供）。方案卡出来后本轮停下等本人选择：
+   * 批准时由运行时切换模式并另开一轮执行，继续完善时本轮带着意见接着规划。模型自己无法借此离开计划模式。
+   */
+  @AgentBuiltinTool({
+    name: PROPOSE_TOOL,
+    title: 'Propose the plan',
+    description:
+      'Plan mode only: presents your finished plan to the user (title, short summary, numbered steps, the ' +
+      'data you expect to change, your assumptions) and waits. The user approves it, which starts the ' +
+      'execution, or asks you to refine it. Call it instead of asking whether to proceed.',
+    kind: 'read',
+    input: proposeInput,
+    available: (ctx) =>
+      ctx.thread.mode === 'plan' &&
+      ctx.thread.parentThreadId === null &&
+      ctx.thread.automationRunId === null,
+  })
+  propose(plan: z.output<typeof proposeInput>): AgentToolWait {
+    return { wait: 'question', questions: [], proposal: plan }
   }
 
   /** 反问用户：问题卡出来后本轮停下，回答作为这次调用的结果交给模型。 */

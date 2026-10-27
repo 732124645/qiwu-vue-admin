@@ -5,7 +5,6 @@ import type { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adap
 import {
   AGENT2_PARAMS,
   AGENT_LIMIT_PARAMS,
-  AGENT_TRUST_MODE_PARAM,
   type AgentFeedbackSave,
   type AgentDraftReceiptVo,
   type AgentMessageReceiptVo,
@@ -61,7 +60,7 @@ import { ProviderSettingsService } from '../provider/provider-settings.service.j
 import { AgentExtensions, runThread } from '../runtime/agent-extensions.js'
 import { parseReviewModel } from '../runtime/auto-reviewer.js'
 import { contextMessage } from '../runtime/turn-prompt.js'
-import { parseTrust, subagentCallOf } from '../runtime/turn-tools.js'
+import { parseAllow, subagentCallOf } from '../runtime/turn-tools.js'
 import {
   fulltextTerms,
   itemVo,
@@ -70,7 +69,6 @@ import {
   sharedTurn,
   threadMarkdown,
   threadVo,
-  trustModeOn,
   turnVo,
 } from './thread-vo.js'
 
@@ -177,11 +175,10 @@ export class AgentThreadService {
   }
 
   /**
-   * 平台此刻是否提供这个审批模式：“信任本会话”被平台参数关闭时不提供，“自动审查”在平台没有指定有效的
-   * 审查模型时不提供（与输入框选项里的判断相同）。
+   * 平台此刻是否提供这个模式：“自动审查”在平台没有指定有效的审查模型时不提供（与输入框选项里的判断相同），
+   * 其余总是提供。
    */
   private async modeOffered(mode: AgentThread['approvalMode']): Promise<boolean> {
-    if (mode === 'trust') return trustModeOn(await this.params.get(AGENT_TRUST_MODE_PARAM))
     if (mode === 'auto_review')
       return !!parseReviewModel(await this.params.get(AGENT2_PARAMS.reviewModel))
     return true
@@ -279,8 +276,8 @@ export class AgentThreadService {
 
   /**
    * 新建会话时带入配置方案：给了 `profileId` 用它，null 为不用方案，不给用本人的默认方案。请求里给了的字段
-   * 优先（审批模式也是：只有请求没给时才取方案的），方案的审批模式平台此刻不允许（如关掉了“信任本会话”）
-   * 就退回 `ask`；方案的模型已停用时退回平台默认模型，推理强度只给支持它的模型。工具清单与额外说明在运行时
+   * 优先（模式也是：只有请求没给时才取方案的），方案的模式平台此刻不提供（如不再指定审查模型）就退回
+   * `ask`；方案的模型已停用时退回平台默认模型，推理强度只给支持它的模型。工具清单与额外说明在运行时
    * 按方案生效。
    */
   private async withProfile(p: Principal, dto: AgentThreadCreate) {
@@ -349,7 +346,6 @@ export class AgentThreadService {
           model: choice?.model.id ?? null,
           reasoning: this.reasoningFor(choice, reasoning),
           approvalMode: mode,
-          planMode: dto.planMode,
           profileId: profile?.id ?? null,
           memoryEnabled: dto.memoryEnabled,
           pinned: false,
@@ -440,8 +436,8 @@ export class AgentThreadService {
 
   /**
    * 修改会话：改提供方或模型时对照启用的提供方校验（只改提供方取它的第一个模型）；推理强度只给支持的
-   * 模型，换成不支持的模型时清掉原值；从“信任本会话”换到别的模式时清掉已信任的工具与目标；可逐会话关掉
-   * 记忆、换用或去掉配置方案（别人的方案 404）。
+   * 模型，换成不支持的模型时清掉原值；换模式不动本会话已放行的工具；可逐会话关掉记忆、换用或去掉配置方案
+   * （别人的方案 404）。
    */
   async update(p: Principal, id: number, dto: AgentThreadUpdate): Promise<AgentThreadVo> {
     return this.txHost.withTransaction(async () => {
@@ -451,10 +447,6 @@ export class AgentThreadService {
       if (dto.title !== undefined) set.title = dto.title
       if (dto.status !== undefined) set.status = dto.status
       if (dto.approvalMode !== undefined) set.approvalMode = dto.approvalMode
-      // 离开“信任本会话”：信任期间记住的工具与目标作废，回到逐个确认
-      if (row.approvalMode === 'trust' && dto.approvalMode && dto.approvalMode !== 'trust')
-        set.trusted = null
-      if (dto.planMode !== undefined) set.planMode = dto.planMode
       if (dto.pinned !== undefined) set.pinned = dto.pinned
       if (dto.memoryEnabled !== undefined) set.memoryEnabled = dto.memoryEnabled
       // 换配置方案只换工具清单与额外说明（运行时生效）；模型与模式照旧可单独改
@@ -478,6 +470,21 @@ export class AgentThreadService {
               : null
       } else if (dto.reasoning === null) set.reasoning = null
       if (Object.keys(set).length) await this.repo(AgentThread).update(row.id, set)
+      const [vo] = await this.extras([await this.own(p, id, { token: true })])
+      return vo!
+    })
+  }
+
+  /**
+   * 撤销本会话对一个工具的放行（“本会话内不再询问”）：之后它的调用重新停下询问；运行中的轮次在下一次调用
+   * 时就按撤销处理（运行时每次重新读取）。别人的或跨租户的会话 404；没放行过的工具什么也不做。
+   */
+  async revokeTool(p: Principal, id: number, tool: string): Promise<AgentThreadVo> {
+    return this.txHost.withTransaction(async () => {
+      const row = await this.own(p, id, { lock: true })
+      const kept = (row.trusted ?? []).filter((e) => parseAllow(e).tool !== tool)
+      if (kept.length !== (row.trusted ?? []).length)
+        await this.repo(AgentThread).update(row.id, { trusted: kept.length ? kept : null })
       const [vo] = await this.extras([await this.own(p, id, { token: true })])
       return vo!
     })
@@ -621,7 +628,7 @@ export class AgentThreadService {
       // 事件数据与（预先同意的）技能绑定继续跑
       if (src.automationRunId !== null || src.parentThreadId !== null)
         throw new BizError(Err.CONFLICT)
-      // 分叉（含编辑后重发）照抄审批模式；此刻平台不再提供的模式不借分叉带过去，降为逐次询问
+      // 分叉（含编辑后重发）照抄模式（本会话的放行不带过去）；此刻平台不再提供的模式不借分叉带过去，降为逐次询问
       const approvalMode = (await this.modeOffered(src.approvalMode)) ? src.approvalMode : 'ask'
       const items = (
         await this.repo(AgentItem).find({
@@ -639,7 +646,6 @@ export class AgentThreadService {
           model: src.model,
           reasoning: src.reasoning,
           approvalMode,
-          planMode: src.planMode,
           profileId: src.profileId,
           memoryEnabled: src.memoryEnabled,
           pinned: false,
@@ -712,7 +718,7 @@ export class AgentThreadService {
   /**
    * 撤回最后一轮：它与它之后的条目一起软删。轮次正在运行时 409（先停止）；轮次停在等待、却还有工具调用在
    * 执行（在调用里等外部服务器的表单）时也 409：那次外部调用撤不回来，记录不能先删掉。只删对话记录：这一轮
-   * 里已经执行的写入不会回滚。这一轮记下的“本会话内信任”一并去掉。压缩摘要覆盖到了被撤回的条目时一并清掉
+   * 里已经执行的写入不会回滚。这一轮记下的“本会话内不再询问”一并去掉。压缩摘要覆盖到了被撤回的条目时一并清掉
    * （否则模型还会从摘要里看到撤回的内容），下一轮需要时再重新压缩。
    */
   async revert(p: Principal, id: number): Promise<null> {
@@ -740,7 +746,7 @@ export class AgentThreadService {
       })
       callIds = calls.map((c) => String((c.payload as { callId?: unknown }).callId))
       await this.dropSubagents(id, new Set(callIds))
-      const kept = (thread.trusted ?? []).filter((e) => parseTrust(e).turnId !== num(turn.id))
+      const kept = (thread.trusted ?? []).filter((e) => parseAllow(e).turnId !== num(turn.id))
       if (kept.length !== (thread.trusted ?? []).length)
         await this.repo(AgentThread).update(id, { trusted: kept.length ? kept : null })
       const first = await this.repo(AgentItem)
@@ -890,7 +896,8 @@ export class AgentThreadService {
     const detail = await this.detailOf(row)
     const owner = num(row.userId) === viewer.userId
     return {
-      thread: { ...detail.thread, unread: 0 },
+      // 本会话放行了哪些工具是本人的设置，分享出去的只读视图不带
+      thread: { ...detail.thread, unread: 0, allowedTools: [] },
       items: owner ? detail.items : sharedItems(detail.items),
       turn: owner || !detail.turn ? detail.turn : sharedTurn(detail.turn),
     }

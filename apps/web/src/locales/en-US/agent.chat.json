@@ -78,7 +78,7 @@
         "to": "New",
         "empty": "(empty)",
         "sources": "Sources",
-        "note": "Note (optional)",
+        "note": "Tell the assistant what to do instead (optional)",
         "status": {
           "running": "Running",
           "done": "Done",
@@ -88,24 +88,26 @@
           "expired": "Expired",
           "answered": "Answered"
         },
-        "keys": "With the card itself focused: Enter approves, Esc rejects",
+        "keys": "With the card itself focused: Enter allows once, Esc rejects",
         "action": {
-          "approve": "Approve",
-          "approve_session": "Approve for this conversation",
-          "reject": "Reject",
-          "cancel": "Cancel turn"
+          "approve": "Allow once",
+          "approve_session": "Don’t ask again for “{tool}” in this conversation",
+          "reject": "Reject"
         },
         "decision": {
           "approve": "Approved",
-          "approve_session": "Approved for this conversation",
+          "approve_session": "Allowed for this conversation",
           "reject": "Rejected",
           "cancel": "Cancelled"
         },
         "blocked": {
           "permission": "You lack the permission for this ({perm}). Ask an administrator to grant it, then try again.",
-          "mode": "This conversation is read only and cannot change data; switch the approval mode and ask again.",
+          "mode": "The conversation is read only or in plan mode and cannot change data; switch to \"Ask every time\" or \"Auto review\" and ask again.",
           "policy": "The platform does not allow the assistant to use this tool."
-        }
+        },
+        "noteKeys": "Enter rejects · Esc goes back",
+        "back": "Back",
+        "allowedBySession": "Ran because it is allowed for this conversation"
       },
       "question": {
         "title": "The assistant has a few questions",
@@ -135,7 +137,7 @@
         "suggestions": "Suggestions",
         "model": "Model",
         "reasoning": "Reasoning",
-        "approvalMode": "Approval mode",
+        "approvalMode": "Mode",
         "stop": "Stop",
         "send": "Send",
         "queue": "Queue for next turn",
@@ -145,8 +147,6 @@
         "attach": "Attachments",
         "prompts": "Prompt templates",
         "fast": "Fast",
-        "plan": "Plan mode",
-        "planHint": "Read only: lists a plan first and runs it once you confirm",
         "context": "Context {percent}%",
         "sendMode": "Sending while running",
         "steer": "Add to this turn",
@@ -154,7 +154,9 @@
         "reasoningDefault": "Model default: {value}",
         "contextEstimate": "Context estimate {percent}%",
         "queueExpired": "Queued message expired and was not automatically executed",
-        "keys": "Enter sends · Shift+Enter new line · $ skill · {'@'} mention · / command · Ctrl+R searches sent messages"
+        "keys": "Enter sends · Shift+Enter new line · Shift+Tab switches mode · $ skill · {'@'} mention · / command · Ctrl+R searches sent messages",
+        "modeNow": "Mode: {mode}",
+        "rejectHint": "Sending rejects the pending actions and tells the assistant this message"
       },
       "reasoning": {
         "low": "Low",
@@ -164,14 +166,20 @@
       },
       "mode": {
         "read_only": "Read only",
-        "ask": "Ask",
-        "trust": "Trust this conversation"
+        "plan": "Plan",
+        "ask": "Ask every time"
+      },
+      "modeHint": {
+        "read_only": "Only reads data, never changes it and never asks",
+        "plan": "Reads only and proposes a plan; approving it switches modes to run it",
+        "ask": "Reads run at once; asks you before every write",
+        "auto_review": "Writes go to the review model first; asks you only when unsure or risky"
       },
       "slash": {
         "new": "New conversation",
         "compact": "Compact earlier messages",
         "model": "Switch model",
-        "approvals": "Switch approval mode",
+        "approvals": "Switch mode",
         "skills": "Pick a skill",
         "mcp": "External MCP server settings",
         "status": "Usage and state of this turn",
@@ -258,9 +266,26 @@
         "working": "Writing a skill draft from this conversation…",
         "done": "Skill draft \"{name}\" created (disabled); check it, then enable it"
       },
-      "planRun": {
-        "action": "Run this plan",
-        "text": "Go ahead with the plan"
+      "planCard": {
+        "title": "Plan to run",
+        "changes": "Data it changes",
+        "assumptions": "Assumptions",
+        "keys": "Enter approves (while the card has focus)",
+        "feedback": "What should change (optional)",
+        "feedbackKeys": "Enter sends, Shift+Enter adds a line, Esc goes back",
+        "back": "Back",
+        "closed": "Closed",
+        "started": "Running the approved plan",
+        "action": {
+          "auto_review": "Approve, run with automatic review",
+          "ask": "Approve, confirm each change",
+          "refine": "Keep refining"
+        },
+        "choice": {
+          "auto_review": "Approved · automatic review",
+          "ask": "Approved · confirm each change",
+          "refine": "Sent back for changes"
+        }
       },
       "shortcut": {
         "title": "Keyboard shortcuts",
@@ -364,7 +389,11 @@
         "noMemory": "Temporary conversations never use memory",
         "temporaryHint": "A temporary conversation stays out of the list, is deleted when you leave it and never uses memory.",
         "noProfiles": "No profiles yet",
-        "profileLocked": "A started conversation keeps its profile; choose one in a new conversation"
+        "profileLocked": "A started conversation keeps its profile; choose one in a new conversation",
+        "allowed": "Allowed in this conversation",
+        "allowedEmpty": "No tools allowed yet. Pick \"Don’t ask again\" on a confirmation card to list one here.",
+        "revoke": "Stop allowing {tool}",
+        "revokeShort": "Revoke"
       },
       "focus": {
         "enter": "Focus mode",

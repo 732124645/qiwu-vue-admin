@@ -238,7 +238,7 @@ class TestBuiltins {
     else if (what === 'ext_deny') for (const t of extTools) t.policy = 'deny'
     else
       await ds.query(
-        `UPDATE agent_thread SET ${what === 'plan' ? 'plan_mode = 1' : "approval_mode = 'read_only'"} WHERE id = ?`,
+        `UPDATE agent_thread SET approval_mode = ${what === 'plan' ? "'plan'" : "'read_only'"} WHERE id = ?`,
         [ctx.thread.id],
       )
     return { ok: true, content: 'changed' }
@@ -546,7 +546,6 @@ describe('built-in tools', () => {
           thread: {
             id,
             mode: 'ask',
-            planMode: false,
             readOnly: false,
             memoryEnabled: false,
             profileId: 7,
@@ -710,7 +709,7 @@ describe('context contributors', () => {
 
 describe('approval reviewers', () => {
   it('approve runs the call and records the decided approval with auto; the reviewer sees no tool output', async () => {
-    await setPolicy('test.bnote.update', 'review')
+    await setPolicy('test.bnote.update', 'ask')
     verdicts.first = null
     verdicts.second = verdict('approve', 'looks right')
     script({ toolCalls: [read(1), update(1, 'New')] }, { text: 'Renamed.' })
@@ -735,7 +734,7 @@ describe('approval reviewers', () => {
       tool: 'test.bnote.update',
       title: 'Change a note',
       origin: 'local',
-      policy: 'review',
+      policy: 'ask',
       args: { id: 1, title: 'New' },
       changes: { target: 'bnote:1', fields: [{ field: 'title', from: 'Old', to: 'New' }] },
       sources: [],
@@ -743,14 +742,20 @@ describe('approval reviewers', () => {
     expect(JSON.stringify(reviewed)).not.toContain('NOTE-OUTPUT')
   })
 
-  it('an approval loses its right when the thread switches to plan mode during the review', async () => {
-    await setPolicy('test.bnote.update', 'review')
-    const cases: [AgentReviewVerdict['by'], Record<string, unknown>, number][] = [
-      ['review', { approval_mode: 'auto_review' }, 16],
+  it('an approval loses its right when the thread switches to plan mode or the tool to human during the review', async () => {
+    await setPolicy('test.bnote.update', 'ask')
+    const cases: [AgentReviewVerdict['by'], Record<string, unknown>, number, 'plan' | 'human'][] = [
+      ['review', { approval_mode: 'auto_review' }, 16, 'plan'],
+      ['review', { approval_mode: 'auto_review' }, 17, 'human'],
     ]
-    for (const [by, extra, n] of cases) {
+    for (const [by, extra, n, change] of cases) {
+      await setPolicy('test.bnote.update', 'ask')
       verdicts.first = async (ctx) => {
-        await ds.query('UPDATE agent_thread SET plan_mode = 1 WHERE id = ?', [ctx.thread.id])
+        if (change === 'plan')
+          await ds.query("UPDATE agent_thread SET approval_mode = 'plan' WHERE id = ?", [
+            ctx.thread.id,
+          ])
+        else await setPolicy('test.bnote.update', 'human')
         return verdict('approve', 'fine', by)
       }
       const { id, status } = await rename(n, extra)
@@ -766,10 +771,8 @@ describe('approval reviewers', () => {
 
   it('an approval without the right to decide waits for a person', async () => {
     const cases: [string | null, string, AgentReviewVerdict['by'], number][] = [
-      // a review approval under the ask policy
-      [null, 'auto_review', 'review', 12],
       // a review approval outside the auto-review mode
-      ['review', 'ask', 'review', 13],
+      ['ask', 'ask', 'review', 13],
       // a pre-approval in a thread no automation runs
       [null, 'ask', 'pre_approved', 14],
     ]
@@ -790,13 +793,21 @@ describe('approval reviewers', () => {
     expect(calls.update).toEqual([])
   })
 
-  it('reject tells the model with the reason and never runs the tool; the first decision wins', async () => {
+  it('reject stops for a person; rejected again the model gets the reason; the first decision wins', async () => {
     verdicts.first = verdict('reject', 'titles are frozen')
     verdicts.second = verdict('approve', 'never asked')
-    const { id, status } = await rename(2)
-    expect(status).toBe('completed')
+    const { id, status, turnId } = await rename(2)
+    expect(status).toBe('waiting')
     expect(calls.update).toEqual([])
     expect(reviewed.map((r) => r.who)).toEqual(['first'])
+    const [card] = await items(id, 'approval')
+    expect(card).toMatchObject({
+      status: 'pending',
+      payload: { auto: { by: 'review', verdict: 'reject', reason: 'titles are frozen' } },
+    })
+    await decide(card!.id, 'reject').expect(201)
+    expect(await settled(turnId, TERMINAL)).toBe('completed')
+    expect(calls.update).toEqual([])
     // the reason is another model's words: handed over as untrusted data
     const told = toolMsgs(1)[0]!.content
     expect(told).toMatch(/automatic review rejected this call/)
@@ -811,7 +822,7 @@ describe('approval reviewers', () => {
   })
 
   it('an escalate ends the chain: a later reviewer cannot approve the call', async () => {
-    await setPolicy('test.bnote.update', 'review')
+    await setPolicy('test.bnote.update', 'ask')
     verdicts.first = verdict('escalate', 'looks odd')
     verdicts.second = verdict('approve', 'never asked')
     const { id, status } = await rename(6, { approval_mode: 'auto_review' })
@@ -826,7 +837,7 @@ describe('approval reviewers', () => {
   })
 
   it('escalate, a malformed or no verdict leave the human card; a failing reviewer counts as none', async () => {
-    await setPolicy('test.bnote.update', 'review')
+    await setPolicy('test.bnote.update', 'ask')
     verdicts.first = 'throw'
     verdicts.second = verdict('escalate', 'a person should decide')
     const first = await rename(3, { approval_mode: 'auto_review' })
@@ -911,7 +922,7 @@ describe('approval reviewers', () => {
     })
 
   it('a pause during the review voids its approval: nothing is approved or run', async () => {
-    await setPolicy('test.bnote.update', 'review')
+    await setPolicy('test.bnote.update', 'ask')
     verdicts.first = async () => {
       await setParam(AGENT_PAUSED_PARAM, 'true')
       return verdict('approve', 'yes', 'review')
@@ -927,7 +938,7 @@ describe('approval reviewers', () => {
   })
 
   it('a stop during a slow review ends the run at once; the late approval runs nothing', async () => {
-    await setPolicy('test.bnote.update', 'review')
+    await setPolicy('test.bnote.update', 'ask')
     verdicts.first = () =>
       new Promise((r) => setTimeout(() => r(verdict('approve', 'late', 'review')), 3000))
     script({ toolCalls: [update(9, 'L')] }, { text: 'Done.' })
@@ -966,7 +977,7 @@ describe('approval reviewers', () => {
       )
       return verdict('approve', 'stale', 'review')
     }
-    await setPolicy('test.bnote.update', 'review')
+    await setPolicy('test.bnote.update', 'ask')
     script({ toolCalls: [update(10, 'S')] }, { text: 'Done.' })
     const id = await thread({ approval_mode: 'auto_review' })
     await start(id, 'rename note 10')
@@ -979,7 +990,7 @@ describe('approval reviewers', () => {
     await cancel(id)
   })
 
-  it('a trusted write built-in refuses while paused', async () => {
+  it('a write built-in allowed for the thread refuses while paused', async () => {
     script(
       { toolCalls: [memo('same')] },
       { text: 'Saved.' },
@@ -994,11 +1005,13 @@ describe('approval reviewers', () => {
       const t2 = await start(id, 'again')
       expect(await settled(t2, TERMINAL)).toBe('failed')
       expect(memos).toHaveLength(1)
-      const results = await items(id, 'tool_result')
-      expect(results.at(-1)!.payload).toMatchObject({
-        ok: false,
-        error: { code: Err.AGENT_PAUSED.code },
-      })
+      const [t] = await ds.query<{ error_code: string }[]>(
+        'SELECT error_code FROM agent_turn WHERE id = ?',
+        [t2],
+      )
+      expect(t!.error_code).toBe(Err.AGENT_PAUSED.code)
+      // nothing was approved for the second call
+      expect((await items(id, 'approval')).filter((a) => a.status === 'approved')).toHaveLength(1)
     } finally {
       await setParam(AGENT_PAUSED_PARAM, 'false')
     }

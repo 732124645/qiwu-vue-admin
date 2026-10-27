@@ -273,8 +273,8 @@ export class AgentMemoryExtractor {
   }
 
   /**
-   * 记号之后本人发出的消息文字：只取用户条目里真正发出（跑过）的；照抄前一条回答里后续建议发出的那种不算
-   * （建议是模型写的，可能被网页内容带偏）。`last` 是会话目前最新的条目序号（记号前移到这里）。
+   * 记号之后本人发出的消息文字：只取用户条目里真正发出（跑过）的；照抄前一条回答里后续建议发出的那种与
+   * 批准方案后运行时写的方案消息不算（都是模型写的，可能被网页内容带偏）。`last` 是会话目前最新的条目序号（记号前移到这里）。
    */
   private async userTexts(
     threadId: number,
@@ -294,7 +294,10 @@ export class AgentMemoryExtractor {
     })
     const texts: string[] = []
     for (const u of users) {
-      const text = String((u.payload as { text?: unknown } | null)?.text ?? '').trim()
+      const payload = u.payload as { text?: unknown; fromPlan?: unknown } | null
+      // 运行时写的“已批准方案”（模型写的方案原文）不是本人的话，不从里面提炼记忆
+      if (payload?.fromPlan) continue
+      const text = String(payload?.text ?? '').trim()
       if (!text) continue
       const before = await repo.findOne({
         where: { threadId, kind: 'assistant', status: 'done', seq: LessThan(u.seq) },

@@ -161,6 +161,7 @@
     "recovery_required": "上次操作可能已生效或产生费用，请先核对实际结果后解除暂停",
     "thread_busy": "此会话仍有任务运行或等待确认，请先停止当前任务再执行此操作",
     "recovery_busy": "仍有操作可能正在执行，请等待其结束并核对实际结果后再解除暂停",
-    "reasoning_off_rejected": "模型服务不接受“关闭思考”（reasoning_effort: none）。请换一个思考强度，或请平台管理员把该模型的默认思考改为“提供方默认”或改用 vLLM 开关"
+    "reasoning_off_rejected": "模型服务不接受“关闭思考”（reasoning_effort: none）。请换一个思考强度，或请平台管理员把该模型的默认思考改为“提供方默认”或改用 vLLM 开关",
+    "provider_key_rejected": "模型服务拒绝了这个密钥，请检查密钥与接口地址"
   }
 }

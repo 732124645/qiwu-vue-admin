@@ -1,7 +1,10 @@
-import { createHash } from 'node:crypto'
-import { AGENT_SKILL_NAME, type AgentToolPolicy, type McpToolKind } from '@qiwu/shared'
+import {
+  AGENT_SKILL_NAME,
+  type AgentApprovalMode,
+  type AgentToolPolicy,
+  type McpToolKind,
+} from '@qiwu/shared'
 import { z } from 'zod'
-import { canonicalJson } from '../../guard/idempotent.js'
 
 /** Where an offered tool runs: this system's tools, the web tools, an external server, the runtime itself. */
 export type ToolOrigin = 'local' | 'web' | 'mcp' | 'builtin'
@@ -15,8 +18,8 @@ export interface OfferedTool {
   origin: ToolOrigin
   kind: McpToolKind
   /**
-   * after the platform setting and the never-auto-write rule: `auto` runs at once, `ask` and `review` wait
-   * for the owner unless an approval reviewer decides
+   * after the platform setting and the never-auto-write rule: `auto` runs at once, `ask` waits for the owner
+   * unless an approval reviewer decides or the owner allowed the tool for the thread, `human` always waits
    */
   policy: Exclude<AgentToolPolicy, 'deny'>
   /** the tool's method can preview a write (local tools) */
@@ -24,7 +27,12 @@ export interface OfferedTool {
   perCallConfirmation?: true
 }
 
+/** 只读与计划模式都不提供写入工具。 */
+export const readOnlyMode = (mode: AgentApprovalMode): boolean =>
+  mode === 'read_only' || mode === 'plan'
+
 export const PLAN_TOOL = 'plan.update'
+export const PROPOSE_TOOL = 'plan.propose'
 export const ASK_TOOL = 'ask.user'
 export const SKILL_TOOL = 'skill.load'
 export const DELEGATE_TOOL = 'agent.delegate'
@@ -36,10 +44,17 @@ export const IMAGE_TOOL = 'image.generate'
 export const SUBAGENT_STEPS = 8
 
 /**
- * 子会话里不提供的工具：再分派、反问用户（子会话没人回答），以及写给本人看的产出（图表、报告、图片：子会话
+ * 子会话里不提供的工具：再分派、反问用户与提交方案（子会话没人回答），以及写给本人看的产出（图表、报告、图片：子会话
  * 不在列表里，图片还要花钱；产出由父会话来写）。
  */
-const SUBAGENT_DENIED = new Set([DELEGATE_TOOL, ASK_TOOL, CHART_TOOL, REPORT_TOOL, IMAGE_TOOL])
+const SUBAGENT_DENIED = new Set([
+  DELEGATE_TOOL,
+  ASK_TOOL,
+  PROPOSE_TOOL,
+  CHART_TOOL,
+  REPORT_TOOL,
+  IMAGE_TOOL,
+])
 
 /**
  * 子智能体的会话只留下这些工具（see docs/agent.md#子智能体）：只读且策略为 auto 的（不会停下等审批），
@@ -75,7 +90,20 @@ export const planInput = z.object({
       }),
     )
     .min(1)
-    .max(30),
+    .max(30)
+    // 同一时刻至多一步进行中：清单要反映真实进度，两步同时“进行中”多半是忘了把上一步标成完成
+    .refine((steps) => steps.filter((s) => s.status === 'doing').length <= 1, {
+      message: 'At most one step may be doing at a time; mark the finished step done first.',
+    }),
+})
+
+/** `plan.propose` 的方案：标题、概述、步骤、预计改动的数据与前提假设（都是模型自己写的文字）。 */
+export const proposeInput = z.object({
+  title: z.string().trim().min(1).max(120),
+  summary: z.string().trim().min(1).max(2000),
+  steps: z.array(z.string().trim().min(1).max(300)).min(1).max(30),
+  changes: z.string().trim().max(2000).optional(),
+  assumptions: z.array(z.string().trim().min(1).max(300)).max(10).optional(),
 })
 
 export const askInput = z.object({
@@ -102,38 +130,24 @@ export const askInput = z.object({
 
 export const skillInput = z.object({ name: z.string().regex(AGENT_SKILL_NAME) })
 
-/**
- * 审批“本会话内同意”记住的目标：预览给出的目标记录；没有预览时本系统与联网工具取参数里的 `id`，再没有就是
- * 完整参数的 SHA-256（只信任一模一样的调用，长参数也不会因截断而撞上别的调用）。外部工具（`external`）
- * 一律按完整参数的摘要：它的 `id` 是什么由外部服务器说了算，同一个 `id` 换了别的参数可能是完全不同的操作。
- */
-export function trustKey(
-  tool: string,
-  args: unknown,
-  previewTarget?: string,
-  external = false,
-): string {
-  const id =
-    args && typeof args === 'object' && 'id' in args ? (args as { id: unknown }).id : undefined
-  const digest = () => `sha256:${createHash('sha256').update(canonicalJson(args)).digest('hex')}`
-  const target =
-    previewTarget ??
-    (!external && (typeof id === 'number' || typeof id === 'string') ? `id:${id}` : digest())
-  return `${tool}|${target}`.slice(0, 500)
-}
+/** 会话里记下的一条放行：`<放行它的轮次 id>#<工具名>`，撤回那一轮时据此连同它记下的放行一起去掉。 */
+export const allowEntry = (turnId: number, tool: string): string =>
+  `${turnId}#${tool}`.slice(0, 300)
 
-/** 会话里记下的一条信任：`<记下它的轮次 id>#<信任键>`，撤回那一轮时据此连同它记下的信任一起去掉。 */
-export const trustEntry = (turnId: number, key: string): string => `${turnId}#${key}`
-
-/** 一条信任记录拆成记下它的轮次与信任键（没有轮次前缀的旧记录整条都是键）。 */
-export function parseTrust(entry: string): { turnId: number | null; key: string } {
+/** 一条放行记录拆成记下它的轮次与工具名（没有轮次前缀的整条都是工具名）。 */
+export function parseAllow(entry: string): { turnId: number | null; tool: string } {
   const at = entry.indexOf('#')
   const turnId = at > 0 ? Number(entry.slice(0, at)) : Number.NaN
   return Number.isSafeInteger(turnId)
-    ? { turnId, key: entry.slice(at + 1) }
-    : { turnId: null, key: entry }
+    ? { turnId, tool: entry.slice(at + 1) }
+    : { turnId: null, tool: entry }
 }
 
-/** 会话是否已信任这个键。 */
-export const isTrusted = (trusted: readonly string[] | null | undefined, key: string): boolean =>
-  (trusted ?? []).some((e) => parseTrust(e).key === key)
+/** 本会话内不再询问的工具名（去重，按放行先后）。 */
+export const allowedTools = (trusted: readonly string[] | null | undefined): string[] => [
+  ...new Set((trusted ?? []).map((e) => parseAllow(e).tool)),
+]
+
+/** 本会话是否已放行这个工具。 */
+export const isAllowed = (trusted: readonly string[] | null | undefined, tool: string): boolean =>
+  (trusted ?? []).some((e) => parseAllow(e).tool === tool)

@@ -16,6 +16,8 @@ import { agentCreditAmount, agentModelPricing, agentTokenUsage } from './agent-b
  * - `POST /api/agent/threads` `agentThreadCreate` → `AgentThreadVo`
  * - `PATCH /api/agent/threads/:id` `agentThreadUpdate` → `AgentThreadVo`; `DELETE /api/agent/threads/:id` → null
  * - `POST /api/agent/threads/:id/fork` `agentThreadFork` → `AgentThreadVo` (items up to `seq` copied)
+ * - `DELETE /api/agent/threads/:id/allowed-tools/:tool` → `AgentThreadVo` (the tool, URL-encoded, asks again
+ *   in this thread; see `allowedTools`)
  * - `GET /api/agent/threads/:id/items?afterSeq=<n>` → `AgentThreadDetailVo`
  * - `POST /api/agent/threads/:id/messages` `agentMessageSend` → `AgentTurnVo` (while a turn runs the text is
  *   queued after its current step and the running turn is returned)
@@ -36,7 +38,11 @@ import { agentCreditAmount, agentModelPricing, agentTokenUsage } from './agent-b
  * - `POST /api/agent/approvals/:itemId` `agentApprovalDecide` → null (only the thread's owner; 409 when the
  *   approval is no longer pending)
  * - `POST /api/agent/questions/:itemId` `agentQuestionAnswer` → null (the agent asked the owner with
- *   `ask.user`, or an external MCP server asked for input; only the owner; 409 when no longer pending)
+ *   `ask.user`, or an external MCP server asked for input; only the owner; 409 when no longer pending; 400 for
+ *   a plan card)
+ * - `POST /api/agent/plans/:itemId` `agentPlanDecide` → null (the owner's choice on a plan card of
+ *   `plan.propose`: approve and run in `auto_review` (400 when the platform offers no review) or `ask`, or
+ *   keep refining with optional feedback; only the owner; 409 when no longer pending)
  * Skills and instructions (`agent.chat.use` for the caller's own; tenant-wide ones need `agent.skill.*` /
  * `agent.instruction.modify`):
  * - `GET /api/agent/skills` → `AgentSkillVo[]` (platform, tenant and own, enabled or not for the managers)
@@ -50,7 +56,8 @@ import { agentCreditAmount, agentModelPricing, agentTokenUsage } from './agent-b
  * `agentBatchDecide` → `{ decided, skipped }` (every pending approval of the batch at once, except approvals
  * whose target is not the row's own record: those stay pending and must be decided one by one).
  * Platform settings (`agent.setting.browse` / `agent.setting.modify`, platform pages):
- * - `GET|POST /api/agent/providers`, `PUT|DELETE /api/agent/providers/:id` (`agentProviderSave`) → `AgentProviderVo`
+ * - `GET|POST /api/agent/providers`, `PUT|DELETE /api/agent/providers/:id` (`agentProviderSave`) → `AgentProviderVo`;
+ *   `POST /api/agent/providers/models` (`agentProviderModelsQuery`) → `AgentProviderModelsVo` (the upstream's model list)
  * - `GET|POST /api/agent/search-providers`, `PUT|DELETE /api/agent/search-providers/:id` (`agentSearchProviderSave`)
  * - `GET|POST /api/agent/mcp-servers`, `PUT|DELETE /api/agent/mcp-servers/:id` (`agentMcpServerSave`);
  *   `POST /api/agent/mcp-servers/:id/sync` → `AgentMcpServerVo`;
@@ -87,25 +94,26 @@ export const AGENT_LIMIT_PARAMS = {
   tenantDailyCredits: 'agent.limit.tenant_daily_credits',
   userConcurrentTurns: 'agent.limit.user_concurrent_turns',
 } as const
-/** `false` (default `true`): the "trust this thread" approval mode is not offered. */
-export const AGENT_TRUST_MODE_PARAM = 'agent.trust_mode'
 /** The platform instructions (text) put first into every system prompt. */
 export const AGENT_INSTRUCTIONS_PARAM = 'agent.instructions'
 
 /**
- * How a tool is offered to the agent: `auto` runs at once, `ask` stops the turn for the owner's decision,
- * `deny` keeps it away from the agent. A write tool is only ever `ask`, `review` or `deny`.
+ * How a tool is offered to the agent: `auto` runs at once, `deny` keeps it away from the agent. A read tool
+ * is `auto` (default), `ask` (an administrator's explicit choice, e.g. paid image generation: the owner
+ * confirms each call in every mode; never reviewed, may be allowed for the thread) or `deny`. A write tool is `ask` (needs a confirmation, which the review model may give
+ * in the auto-review mode; the default), `human` (only the owner confirms it, one call at a time: never
+ * reviewed, never allowed for the whole thread; the default of high-risk tools) or `deny`.
  */
-/** `review`: a write tool an administrator lets the review model approve in the auto-review mode */
-export const AGENT_TOOL_POLICIES = ['auto', 'ask', 'review', 'deny'] as const
+export const AGENT_TOOL_POLICIES = ['auto', 'ask', 'human', 'deny'] as const
 export type AgentToolPolicy = (typeof AGENT_TOOL_POLICIES)[number]
 
 /**
- * Per thread: `read_only` offers only read tools; `ask` (default) asks before each write; `trust` asks once
- * per tool and target in this thread (a write still never runs before a first confirmation).
+ * The thread's mode: `read_only` offers only read tools; `plan` too, and the agent ends with a plan card
+ * (`plan.propose`) the owner approves (switching to `ask` or `auto_review`) or sends back; `ask` (default) asks before each write; `auto_review` lets the review model decide each
+ * write of an `ask` tool first (when it is unsure or finds a risk, the owner decides). Read tools
+ * ask only when an administrator set them to `ask`.
  */
-/** `auto_review`: writes of tools with policy `review` go to the review model first; every other write still asks */
-export const AGENT_APPROVAL_MODES = ['read_only', 'ask', 'trust', 'auto_review'] as const
+export const AGENT_APPROVAL_MODES = ['read_only', 'plan', 'ask', 'auto_review'] as const
 export type AgentApprovalMode = (typeof AGENT_APPROVAL_MODES)[number]
 
 export const AGENT_THREAD_STATUSES = ['active', 'archived'] as const
@@ -184,8 +192,6 @@ export const agentOptionsVo = z.object({
   /** starter prompts for the empty state (platform defaults, then the tenant's) */
   starters: z.array(z.string()),
   prompts: z.array(z.object({ id: z.number().int(), name: z.string(), body: z.string() })),
-  /** "approve for this thread" is offered (system parameter agent.trust_mode) */
-  trustSession: z.boolean(),
   /** the external MCP servers the agent may use now (for `@` mentions) */
   servers: z.array(z.object({ name: z.string() })),
   /** the caller's tone preset */
@@ -213,7 +219,8 @@ export const agentThreadVo = z.object({
   approvalMode: z.enum(AGENT_APPROVAL_MODES),
   recoveryRequired: z.boolean().optional(),
   recoveryRevision: z.number().int().nonnegative().optional(),
-  planMode: z.boolean(),
+  /** tools the owner chose not to be asked about again in this thread (`approve_session`) */
+  allowedTools: z.array(z.string()),
   profileId: z.number().int().nullable(),
   memoryEnabled: z.boolean(),
   /** a subagent's thread (hidden from the list) */
@@ -252,7 +259,6 @@ export const agentThreadCreate = z
     reasoning: z.enum(AGENT_REASONING).optional(),
     /** left out: the profile's mode, else `ask` */
     approvalMode: z.enum(AGENT_APPROVAL_MODES).optional(),
-    planMode: z.boolean().default(false),
     /**
      * a profile's model, mode, tools and instructions apply (fields given here win); left out: the caller's
      * default profile; null: no profile at all
@@ -274,7 +280,6 @@ export const agentThreadUpdate = z
     model: z.string().max(128).optional(),
     reasoning: z.enum(AGENT_REASONING).nullable().optional(),
     approvalMode: z.enum(AGENT_APPROVAL_MODES).optional(),
-    planMode: z.boolean().optional(),
     pinned: z.boolean().optional(),
     memoryEnabled: z.boolean().optional(),
     profileId: z.number().int().positive().nullable().optional(),
@@ -306,13 +311,40 @@ export type AgentMessageSend = z.infer<typeof agentMessageSend>
 
 export const agentApprovalDecide = z
   .object({
-    /** `approve_session`: also approve this tool on this target for the rest of the thread; `cancel` stops the turn */
+    /**
+     * `approve_session`: also don't ask again for this tool in this thread (only when the card offers it,
+     * `sessionAllow`; else 400); `cancel` stops the turn
+     */
     decision: z.enum(['approve', 'approve_session', 'reject', 'cancel']),
     confirmationToken: z.string().uuid().optional(),
     note: z.string().trim().max(500).optional(),
   })
   .register(fieldDomains, { domain: 'agent.approval' })
 export type AgentApprovalDecide = z.infer<typeof agentApprovalDecide>
+
+/**
+ * The owner's choice on a plan card: approve and execute with the automatic review (`auto_review`) or with a
+ * confirmation per write (`ask`) — the thread switches to that mode and a new turn runs the plan — or keep
+ * refining it in plan mode (`refine`, the feedback becomes the next user message).
+ */
+export const AGENT_PLAN_DECISIONS = ['auto_review', 'ask', 'refine'] as const
+export const agentPlanDecide = z
+  .object({
+    decision: z.enum(AGENT_PLAN_DECISIONS),
+    feedback: z.string().trim().max(2000).optional(),
+  })
+  .register(fieldDomains, { domain: 'agent.plan' })
+export type AgentPlanDecide = z.infer<typeof agentPlanDecide>
+
+/** A plan the agent proposes in plan mode (`plan.propose`); every text is the agent's own. */
+export interface AgentPlanProposal {
+  title: string
+  summary: string
+  steps: string[]
+  /** the data it expects to change */
+  changes?: string
+  assumptions?: string[]
+}
 
 /** Answers to a `question` item, one entry per question (by header); `other` is the free-text choice. */
 export const agentQuestionAnswer = z
@@ -356,6 +388,8 @@ export interface AgentItemPayloads {
     attachments?: AgentAttachment[]
     /** sent while the turn ran: `steer` joined the running turn, `queue` waited for the next one */
     mode?: 'steer' | 'queue'
+    /** written by the runtime: the plan card (item id) whose approval started this turn; the text carries the plan */
+    fromPlan?: number
   }
   /** `citations`: the web sources behind the answer; `suggestions`: 0–3 follow-up prompts */
   assistant: { text: string; citations?: AgentSource[]; suggestions?: string[] }
@@ -406,18 +440,34 @@ export interface AgentItemPayloads {
     sources: AgentSource[]
     /** 每次都须单卡人工确认；token 只代表当前展示的预览版本。 */
     perCallConfirmation?: true
+    /** the tool's policy was `human` when the card was made: only the owner confirms it, one card at a time */
+    human?: true
     confirmationToken?: string
     decidedBy?: number
     decidedAt?: string
     note?: string
-    /** how it was decided: once, for the rest of this thread (same tool and target), rejected, cancelled */
+    /** how it was decided: once, for the rest of this thread (this tool), rejected, cancelled */
     decision?: 'approve' | 'approve_session' | 'reject' | 'cancel'
-    /** decided by the review model (auto-review mode) or by the automation's pre-approval, with its reason */
+    /** the card may offer "don't ask again for this tool in this conversation" (`approve_session`) */
+    sessionAllow?: boolean
+    /** ran without asking because the owner allowed this tool for the thread before */
+    allowedBy?: 'session'
+    /**
+     * decided by the review model (auto-review mode) or by the automation's pre-approval, with its reason; a
+     * pending card with verdict `reject` or `escalate` waits for the owner, who may still approve it
+     */
     auto?: {
       by: 'review' | 'pre_approved'
       verdict: 'approve' | 'reject' | 'escalate'
       reason: string
     }
+    /**
+     * the thread is in the auto-review mode but this call waits for the owner without a review, and why:
+     * the tool's policy is `human` (`policy`; `read` for a read tool set to `ask`, which is never reviewed), it needs the owner's own confirmation each time (`personal`),
+     * the thread is read-only or in plan mode (`mode`), the agent is paused (`paused`), or no review model is
+     * set (`no_model`)
+     */
+    unreviewed?: 'policy' | 'read' | 'personal' | 'mode' | 'paused' | 'no_model'
     /** why the agent cannot do it, when a permission or the thread's mode blocks the tool (recovery hint) */
     blocked?: { reason: 'permission' | 'mode' | 'policy'; perm?: string }
   }
@@ -442,6 +492,18 @@ export interface AgentItemPayloads {
      */
     form?: { title?: string; schema: Record<string, unknown> }
     answers?: { header: string; selected: string[]; other?: string }[]
+    /**
+     * a plan card instead (`plan.propose` in plan mode, `questions` empty): waits for the owner's choice
+     * (`agentPlanDecide`); the model cannot leave plan mode by itself
+     */
+    proposal?: AgentPlanProposal
+    /** the owner's choice on a plan card, once decided (a message sent while it waited counts as `refine`) */
+    choice?: {
+      decision: (typeof AGENT_PLAN_DECISIONS)[number]
+      decidedBy: number
+      decidedAt: string
+      feedback?: string
+    }
   }
   plan: { steps: { text: string; status: 'pending' | 'doing' | 'done' }[] }
   error: { code: string; message: string }
@@ -680,6 +742,27 @@ export const agentProviderVo = z.object({
 })
 export type AgentProviderVo = z.infer<typeof agentProviderVo>
 
+/**
+ * Load the models an OpenAI-compatible service offers (`GET {baseUrl}/models`). The key is the given
+ * `apiKey`, else the stored key of provider `id` only while `baseUrl` is still its stored address.
+ */
+export const agentProviderModelsQuery = z
+  .object({
+    id: z.number().int().positive().optional(),
+    baseUrl: agentProviderSave.shape.baseUrl,
+    apiKey: z.string().max(512).optional(),
+  })
+  .register(fieldDomains, { domain: 'agent.provider' })
+export type AgentProviderModelsQuery = z.infer<typeof agentProviderModelsQuery>
+
+/** at most this many models come back, sorted by id */
+export const AGENT_PROVIDER_MODELS_MAX = 500
+
+export const agentProviderModelsVo = z.object({
+  items: z.array(z.object({ id: z.string(), ownedBy: z.string().optional() })),
+})
+export type AgentProviderModelsVo = z.infer<typeof agentProviderModelsVo>
+
 export const agentSearchProviderSave = z
   .object({
     kind: z.enum(AGENT_SEARCH_KINDS),
@@ -763,6 +846,8 @@ export const agentToolVo = z.object({
   defaulted: z.boolean(),
   /** the platform switch (`cfg_mcp_tool.enabled`); off: the agent never gets the tool */
   enabled: z.boolean(),
+  /** a built-in tool only the owner confirms: its policy is only `human` or `deny` */
+  humanOnly: z.literal(true).optional(),
 })
 export type AgentToolVo = z.infer<typeof agentToolVo>
 
@@ -770,7 +855,10 @@ export type AgentToolVo = z.infer<typeof agentToolVo>
 export const agentToolEnabledUpdate = z.object({ enabled: z.boolean() })
 
 export const agentToolPolicyUpdate = z.object({
-  /** null: back to the kind's default (read `auto`, write `ask`); a write tool takes only `ask`, `review` or `deny` */
+  /**
+   * null: back to the default (read `auto`, write `ask`, a high-risk write `human`); a read tool takes only
+   * `auto`, `ask` or `deny`, a write tool only `ask`, `human` or `deny` (else 400)
+   */
   policy: z.enum(AGENT_TOOL_POLICIES).nullable(),
 })
 

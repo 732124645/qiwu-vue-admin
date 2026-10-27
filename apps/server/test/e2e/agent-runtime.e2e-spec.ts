@@ -2,8 +2,8 @@ import { TEST_AGENT_PRICING, clearAgentUsage } from '../setup/agent-pricing.js'
 // The agent's turn engine (see docs/agent.md) through its chat routes, multi-tenancy on, with a scripted
 // FakeChatModel standing in for the provider (`registry.connect`) and test tools registered on the shared
 // tool host. Turns run as queue jobs; every step is stored, so a turn resumes from its items. Covered: a
-// write tool stops for approval and runs only once approved (approve, approve_session, trust mode, reject,
-// cancel), only the owner decides (another user's or another tenant's item is 404), read-only mode and a
+// write tool stops for approval and runs only once approved (approve, approve_session allowing the tool for
+// the thread and its revoke, reject, cancel, a message while waiting rejecting the cards), only the owner decides (another user's or another tenant's item is 404), read-only mode and a
 // deny policy keep write tools away, a missing perm blocks a call with a recovery hint, web.fetch reads only
 // URLs from search results or the user, an injected page cannot get a write past the approval, limits and
 // the pause switch stop turns, a turn interrupted mid-call resumes without repeating it, steer and queue,
@@ -12,14 +12,7 @@ import { ConfigService } from '@nestjs/config'
 import type { NestExpressApplication } from '@nestjs/platform-express'
 import { Test } from '@nestjs/testing'
 import { getDataSourceToken } from '@nestjs/typeorm'
-import {
-  AGENT_LIMIT_PARAMS,
-  AGENT_PAUSED_PARAM,
-  AGENT_TRUST_MODE_PARAM,
-  agentPerms,
-  Err,
-  RT,
-} from '@qiwu/shared'
+import { AGENT_LIMIT_PARAMS, AGENT_PAUSED_PARAM, agentPerms, Err, RT } from '@qiwu/shared'
 import request from 'supertest'
 import type { DataSource } from 'typeorm'
 import { z } from 'zod'
@@ -37,7 +30,7 @@ import { FakeChatModel, type FakeTurn } from '../../src/core/agent/provider/fake
 import { ProviderRegistry } from '../../src/core/agent/provider/provider-registry.js'
 import { ItemStore, ItemWriter } from '../../src/core/agent/runtime/item-store.js'
 import { TurnQueue } from '../../src/core/agent/runtime/turn-queue.js'
-import { TurnRunner } from '../../src/core/agent/runtime/turn-runner.js'
+import { LeaseLost, TurnRunner } from '../../src/core/agent/runtime/turn-runner.js'
 import { SafeFetcher } from '../../src/core/agent/web/safe-fetcher.js'
 import { WebSearch } from '../../src/core/agent/web/web-search.js'
 import { EnvSchema } from '../../src/core/config/env.schema.js'
@@ -69,7 +62,7 @@ let roleId = 0
 let tenant: PeopledTenant
 let tenantUser = ''
 let fake = new FakeChatModel([])
-const calls = { read: 0, update: [] as unknown[], secret: 0, purge: 0 }
+const calls = { read: 0, update: [] as unknown[], secret: 0, purge: 0, archive: 0, peek: 0 }
 const threads: number[] = []
 
 const http = () => request(app.getHttpServer())
@@ -233,6 +226,38 @@ beforeAll(async () => {
     },
     () => calls.purge++,
   )
+  reg.add(
+    {
+      name: 'test.note.archive',
+      title: 'Archive a note',
+      description: 'Archives a note',
+      perm: agentPerms.chat.use,
+      kind: 'write',
+      input: z.object({ id: z.number().int() }),
+    },
+    () => {
+      calls.archive++
+      return { ok: true }
+    },
+  )
+  // a read tool root set to ask: it stops for the owner like a write
+  reg.add(
+    {
+      name: 'test.note.peek',
+      title: 'Peek at a note',
+      description: 'Reads a note (asks first)',
+      perm: null,
+      kind: 'read',
+      input: z.object({ id: z.number().int() }),
+    },
+    () => {
+      calls.peek++
+      return { ok: true }
+    },
+  )
+  await ds.query("INSERT INTO cfg_mcp_tool (name, enabled, agent_policy) VALUES (?, 1, 'ask')", [
+    'test.note.peek',
+  ])
   await ds.query("INSERT INTO cfg_mcp_tool (name, enabled, agent_policy) VALUES (?, 1, 'deny')", [
     'test.note.purge',
   ])
@@ -329,7 +354,6 @@ afterAll(async () => {
     await setParam(AGENT_LIMIT_PARAMS.turnCredits, '0')
     await setParam(AGENT_LIMIT_PARAMS.tenantDailyCredits, '0')
     await setParam(AGENT_LIMIT_PARAMS.userConcurrentTurns, '2')
-    await setParam(AGENT_TRUST_MODE_PARAM, 'true')
   }
   await tenant?.dispose()
   await app?.close()
@@ -340,6 +364,8 @@ beforeEach(() => {
   calls.update = []
   calls.secret = 0
   calls.purge = 0
+  calls.archive = 0
+  calls.peek = 0
 })
 
 describe('approvals', () => {
@@ -415,67 +441,261 @@ describe('approvals', () => {
     expect(calls.update).toEqual([])
   })
 
-  it('approve_session trusts the same tool and target for the thread, not another target', async () => {
+  it('approve_session allows the tool for the thread: another record runs, another tool still asks', async () => {
+    const archive = (id: number) => ({ name: 'test.note.archive', args: { id } })
     script(
       { toolCalls: [update(4, 'A')] },
-      { toolCalls: [update(4, 'B')] },
       { toolCalls: [update(5, 'C')] },
+      { toolCalls: [archive(5)] },
       { text: 'done' },
     )
     const id = await thread()
     const turnId = await start(id, 'rename notes')
     await settled(turnId)
     const [first] = await items(id, 'approval')
+    expect(first!.payload.sessionAllow).toBe(true)
     await decide(first!.id, 'approve_session').expect(201)
     expect(await settled(turnId)).toBe('waiting')
-    // note 4 twice without asking again, note 5 asks
+    // note 5 too without asking again (the card says why), the other tool asks
     expect(calls.update).toEqual([
       { id: 4, title: 'A' },
-      { id: 4, title: 'B' },
+      { id: 5, title: 'C' },
     ])
-    const open = (await items(id, 'approval')).filter((a) => a.status === 'pending')
-    expect(open.map((a) => a.payload.args)).toEqual([{ id: 5, title: 'C' }])
+    const cards = await items(id, 'approval')
+    expect(cards[1]).toMatchObject({
+      status: 'approved',
+      payload: { args: { id: 5, title: 'C' }, allowedBy: 'session', decision: 'approve' },
+    })
+    expect(cards[1]!.payload.decidedBy).toBeUndefined()
+    const open = cards.filter((a) => a.status === 'pending')
+    expect(open.map((a) => a.payload.tool)).toEqual(['test.note.archive'])
     await decide(open[0]!.id, 'reject').expect(201)
     expect(await settled(turnId, TERMINAL)).toBe('completed')
-    expect(calls.update).toHaveLength(2)
+    expect(calls.archive).toBe(0)
+    // the thread lists the allowed tool; the stored entry keeps the turn that recorded it
+    const page = await http().get('/api/agent/threads').set(bearer(owner)).expect(200)
+    const vo = (page.body.data.items as { id: number; allowedTools: string[] }[]).find(
+      (t) => t.id === id,
+    )
+    expect(vo!.allowedTools).toEqual(['test.note.update'])
+    const [row] = await ds.query<{ trusted: unknown }[]>(
+      'SELECT trusted FROM agent_thread WHERE id = ?',
+      [id],
+    )
+    const stored = typeof row!.trusted === 'string' ? JSON.parse(row!.trusted) : row!.trusted
+    expect(stored).toEqual([`${turnId}#test.note.update`])
+    // a mode switch keeps it
+    await http()
+      .patch(`/api/agent/threads/${id}`)
+      .set(bearer(owner))
+      .send({ approvalMode: 'read_only' })
+      .expect(200)
+    const kept = await http()
+      .patch(`/api/agent/threads/${id}`)
+      .set(bearer(owner))
+      .send({ approvalMode: 'ask' })
+      .expect(200)
+    expect(kept.body.data.allowedTools).toEqual(['test.note.update'])
   })
 
-  it('trust mode remembers a plain approval; the first write still asks', async () => {
-    script({ toolCalls: [update(6, 'A')] }, { toolCalls: [update(6, 'B')] }, { text: 'done' })
-    const id = await thread(ownerId, { approval_mode: 'trust' })
-    const turnId = await start(id, 'rename note 6 twice')
-    expect(await settled(turnId)).toBe('waiting')
-    expect(calls.update).toEqual([])
-    const [a] = await items(id, 'approval')
-    await decide(a!.id, 'approve').expect(201)
-    expect(await settled(turnId, TERMINAL)).toBe('completed')
-    expect(calls.update).toHaveLength(2)
-    expect(await items(id, 'approval')).toHaveLength(1)
+  it('only the owner revokes an allowed tool (404 for another user or tenant); then it asks again', async () => {
+    script({ toolCalls: [update(15, 'A')] }, { text: 'done' })
+    const id = await thread()
+    const t1 = await start(id, 'rename note 15')
+    await settled(t1)
+    await decide((await items(id, 'approval'))[0]!.id, 'approve_session').expect(201)
+    expect(await settled(t1, TERMINAL)).toBe('completed')
+    const revoke = (token: string, tool = 'test.note.update') =>
+      http()
+        .delete(`/api/agent/threads/${id}/allowed-tools/${encodeURIComponent(tool)}`)
+        .set(bearer(token))
+    expect((await revoke(otherUser)).status).toBe(404)
+    expect((await revoke(tenantUser)).status).toBe(404)
+    // an unknown tool changes nothing
+    expect((await revoke(owner, 'ext.srv.other')).body.data.allowedTools).toEqual([
+      'test.note.update',
+    ])
+    const done = await revoke(owner)
+    expect(done.status).toBe(200)
+    expect(done.body.data.allowedTools).toEqual([])
+    script({ toolCalls: [update(16, 'B')] }, { text: 'left it' })
+    const t2 = await start(id, 'rename note 16')
+    expect(await settled(t2)).toBe('waiting')
+    expect(calls.update).toEqual([{ id: 15, title: 'A' }])
+    const open = (await items(id, 'approval')).filter((x) => x.status === 'pending')
+    await decide(open[0]!.id, 'reject').expect(201)
+    expect(await settled(t2, TERMINAL)).toBe('completed')
   })
 
-  it('approve_session remembers nothing while agent.trust_mode is false', async () => {
-    await setParam(AGENT_TRUST_MODE_PARAM, ' FALSE ')
-    try {
-      script({ toolCalls: [update(12, 'A')] }, { toolCalls: [update(12, 'B')] }, { text: 'done' })
+  it.each(['steer', 'queue'])(
+    'a %s message while a card waits rejects it with the text as the note and the turn goes on',
+    async (mode) => {
+      script({ toolCalls: [update(12, 'A')] }, { text: 'Left it alone.' })
       const id = await thread()
-      const turnId = await start(id, 'rename note 12 twice')
-      await settled(turnId)
-      const [a] = await items(id, 'approval')
-      await decide(a!.id, 'approve_session').expect(201)
+      const turnId = await start(id, 'rename note 12')
       expect(await settled(turnId)).toBe('waiting')
-      // the same tool and target asks again
-      expect(calls.update).toEqual([{ id: 12, title: 'A' }])
-      const open = (await items(id, 'approval')).filter((x) => x.status === 'pending')
-      expect(open).toHaveLength(1)
-      const [t] = await ds.query<{ trusted: unknown }[]>(
-        'SELECT trusted FROM agent_thread WHERE id = ?',
-        [id],
-      )
-      expect(t!.trusted).toBeNull()
+      expect((await items(id, 'approval')).filter((a) => a.status === 'pending')).toHaveLength(1)
+      const res = await send(id, 'do not touch them', owner, { mode })
+      expect([res.status, res.body.data.id]).toEqual([201, turnId])
+      expect(await settled(turnId, TERMINAL)).toBe('completed')
+      expect(calls.update).toEqual([])
+      const cards = await items(id, 'approval')
+      expect(cards.map((c) => [c.status, c.payload.decision, c.payload.note])).toEqual([
+        ['rejected', 'reject', 'do not touch them'],
+      ])
+      expect(cards[0]!.payload.decidedBy).toBe(ownerId)
+      // the model got the rejection with the note and the message itself, in the same turn
+      expect(toolMsgs(1).map((m) => m.content)).toEqual([
+        expect.stringMatching(/rejected.*do not touch them/),
+      ])
+      expect(
+        fake.requests[1]!.messages.some(
+          (m) => m.role === 'user' && m.content === 'do not touch them',
+        ),
+      ).toBe(true)
+      expect(await items(id, 'user')).toHaveLength(2)
+    },
+  )
+
+  it('a message while a card waits also rejects the later calls of that step that would ask; no more cards appear', async () => {
+    const archive = { name: 'test.note.archive', args: { id: 13 } }
+    script(
+      {
+        toolCalls: [
+          update(12, 'A'),
+          { name: 'test.note.peek', args: { id: 12 } },
+          { name: 'test.note.read', args: { id: 12 } },
+          archive,
+        ],
+      },
+      { text: 'Left them alone.' },
+    )
+    const id = await thread()
+    const turnId = await start(id, 'rename note 12 and archive note 13')
+    expect(await settled(turnId)).toBe('waiting')
+    expect(await items(id, 'approval')).toHaveLength(1)
+    await send(id, 'stop, change nothing').expect(201)
+    expect(await settled(turnId, TERMINAL)).toBe('completed')
+    expect(calls).toMatchObject({ update: [], archive: 0, peek: 0 })
+    const cards = await items(id, 'approval')
+    expect(cards.map((c) => [c.payload.tool, c.status, c.payload.note])).toEqual([
+      ['test.note.update', 'rejected', 'stop, change nothing'],
+      ['test.note.peek', 'rejected', 'stop, change nothing'],
+      ['test.note.archive', 'rejected', 'stop, change nothing'],
+    ])
+    // the plain read of the same step still ran; every call that would ask came back rejected
+    expect(calls.read).toBe(1)
+    const told = toolMsgs(1).map((m) => m.content)
+    expect(told).toHaveLength(4)
+    expect(told.filter((t) => /rejected.*stop, change nothing/.test(t))).toHaveLength(3)
+  })
+
+  /** A turn whose first write the owner allows for the thread, the next write coming after `delayMs`. */
+  async function allowedThenSlow(first: number, next: number) {
+    script(
+      { toolCalls: [update(first, 'A')] },
+      { toolCalls: [update(next, 'B')], delayMs: 1500 },
+      { text: 'done' },
+    )
+    const id = await thread()
+    const turnId = await start(id, `rename notes ${first} and ${next}`)
+    expect(await settled(turnId)).toBe('waiting')
+    await decide((await items(id, 'approval'))[0]!.id, 'approve_session').expect(201)
+    await sleep(300)
+    return { id, turnId }
+  }
+
+  it('an allowed tool that root sets to human during the turn asks at its next call', async () => {
+    const { id, turnId } = await allowedThenSlow(20, 21)
+    await ds.query(
+      `INSERT INTO cfg_mcp_tool (name, enabled, agent_policy) VALUES ('test.note.update', 1, 'human') AS n
+        ON DUPLICATE KEY UPDATE agent_policy = n.agent_policy`,
+    )
+    try {
+      expect(await settled(turnId)).toBe('waiting')
+      expect(calls.update).toEqual([{ id: 20, title: 'A' }])
+      const open = (await items(id, 'approval')).filter((a) => a.status === 'pending')
+      expect(open.map((a) => a.payload.args)).toEqual([{ id: 21, title: 'B' }])
       await decide(open[0]!.id, 'reject').expect(201)
       expect(await settled(turnId, TERMINAL)).toBe('completed')
     } finally {
-      await setParam(AGENT_TRUST_MODE_PARAM, 'true')
+      await ds.query("DELETE FROM cfg_mcp_tool WHERE name = 'test.note.update'")
+    }
+  })
+
+  it('an allowed write does not run after the thread switches to read-only during the turn', async () => {
+    const { id, turnId } = await allowedThenSlow(24, 25)
+    await http()
+      .patch(`/api/agent/threads/${id}`)
+      .set(bearer(owner))
+      .send({ approvalMode: 'read_only' })
+      .expect(200)
+    expect(await settled(turnId)).toBe('waiting')
+    expect(calls.update).toEqual([{ id: 24, title: 'A' }])
+    await http().post(`/api/agent/threads/${id}/cancel`).set(bearer(owner)).expect(201)
+    expect(await settled(turnId, TERMINAL)).toBe('cancelled')
+    expect(calls.update).toHaveLength(1)
+  })
+
+  it('a call that ran by the allowance is checked again when its turn resumes: revoked meanwhile, it does not run', async () => {
+    script({ toolCalls: [update(22, 'A')] }, { toolCalls: [update(23, 'B')] }, { text: 'done' })
+    const id = await thread()
+    const turnId = await start(id, 'rename notes 22 and 23')
+    expect(await settled(turnId)).toBe('waiting')
+    const runner = app.get(TurnRunner) as unknown as {
+      execute(...a: [unknown, unknown, unknown, { id?: number }]): Promise<unknown>
+    }
+    const original = runner.execute
+    let cut = false
+    // the run stops right before the allowed call executes (a lost lock); the owner revokes meanwhile
+    const spy = vi.spyOn(runner, 'execute').mockImplementation(async function (...a) {
+      if (a[3]?.id === 23 && !cut) {
+        cut = true
+        await ds.query('UPDATE agent_thread SET trusted = NULL WHERE id = ?', [id])
+        throw new LeaseLost()
+      }
+      return original.apply(runner, a)
+    })
+    try {
+      await decide((await items(id, 'approval'))[0]!.id, 'approve_session').expect(201)
+      expect(await settled(turnId, TERMINAL)).toBe('completed')
+    } finally {
+      spy.mockRestore()
+    }
+    expect(cut).toBe(true)
+    expect(calls.update).toEqual([{ id: 22, title: 'A' }])
+    const cards = await items(id, 'approval')
+    expect(cards[1]).toMatchObject({ status: 'approved', payload: { allowedBy: 'session' } })
+    expect((await items(id, 'tool_result'))[1]!.payload.ok).toBe(false)
+  })
+
+  it('approve_session records nothing when root changed the tool after the card was shown', async () => {
+    script({ toolCalls: [update(26, 'A')] }, { toolCalls: [update(27, 'B')] }, { text: 'done' })
+    const id = await thread()
+    const turnId = await start(id, 'rename notes 26 and 27')
+    expect(await settled(turnId)).toBe('waiting')
+    const [card] = await items(id, 'approval')
+    expect(card!.payload.sessionAllow).toBe(true)
+    await ds.query(
+      `INSERT INTO cfg_mcp_tool (name, enabled, agent_policy) VALUES ('test.note.update', 1, 'human') AS n
+        ON DUPLICATE KEY UPDATE agent_policy = n.agent_policy`,
+    )
+    try {
+      // approved for this one call only
+      await decide(card!.id, 'approve_session').expect(201)
+      expect(await settled(turnId)).toBe('waiting')
+      expect(calls.update).toEqual([{ id: 26, title: 'A' }])
+      const [row] = await ds.query<{ trusted: unknown }[]>(
+        'SELECT trusted FROM agent_thread WHERE id = ?',
+        [id],
+      )
+      expect(row!.trusted).toBeNull()
+      const open = (await items(id, 'approval')).filter((a) => a.status === 'pending')
+      expect(open.map((a) => a.payload.args)).toEqual([{ id: 27, title: 'B' }])
+      await decide(open[0]!.id, 'reject').expect(201)
+      expect(await settled(turnId, TERMINAL)).toBe('completed')
+    } finally {
+      await ds.query("DELETE FROM cfg_mcp_tool WHERE name = 'test.note.update'")
     }
   })
 
@@ -521,10 +741,14 @@ describe('approvals', () => {
       .send({ decision: 'yes' })
       .expect(400)
     await send(id, '').expect(400)
+    const revoke = (token: string, tool: string) =>
+      http().delete(`/api/agent/threads/${id}/allowed-tools/${tool}`).set(bearer(token))
+    expect((await revoke(owner, 'a'.repeat(301))).status).toBe(400)
     const plain = await addUser(app, 1, `${PREFIX}plain`)
     try {
       const token = (await signIn(app, `${PREFIX}plain`)).accessToken
       expect((await send(id, 'hi', token)).status).toBe(403)
+      expect((await revoke(token, 'test.note.update')).status).toBe(403)
     } finally {
       await ds.query('DELETE FROM iam_user WHERE id = ?', [plain])
     }
@@ -578,7 +802,7 @@ describe('what the agent is offered', () => {
 
   it('plan mode is read-only too and says so in the prompt', async () => {
     script({ text: 'Plan: rename it.' })
-    const id = await thread(ownerId, { plan_mode: 1 })
+    const id = await thread(ownerId, { approval_mode: 'plan' })
     expect(await settled(await start(id, 'plan the rename'))).toBe('completed')
     expect(toolNames(0)).not.toContain('test.note.update')
     expect(fake.requests[0]!.messages[0]!.content).toContain('Plan mode')
@@ -1663,32 +1887,28 @@ describe('races, duplicates and slots', () => {
     }
   })
 
-  it('stored trust approves nothing while agent.trust_mode is false', async () => {
-    script({ toolCalls: [update(14, 'A')] }, { text: 'done' })
+  it('an allowance revoked while a turn runs asks again at the next call of that turn', async () => {
+    script(
+      { toolCalls: [update(14, 'A')] },
+      { toolCalls: [update(14, 'B')], delayMs: 1500 },
+      { text: 'left it' },
+    )
     const id = await thread()
     const t1 = await start(id, 'rename note 14')
     expect(await settled(t1)).toBe('waiting')
     await decide((await items(id, 'approval'))[0]!.id, 'approve_session').expect(201)
+    // revoked while the next step is still with the model: the list is read again at each call
+    await sleep(300)
+    await http()
+      .delete(`/api/agent/threads/${id}/allowed-tools/test.note.update`)
+      .set(bearer(owner))
+      .expect(200)
+    expect(await settled(t1)).toBe('waiting')
+    expect(calls.update).toEqual([{ id: 14, title: 'A' }])
+    const open = (await items(id, 'approval')).filter((x) => x.status === 'pending')
+    expect(open).toHaveLength(1)
+    await decide(open[0]!.id, 'reject').expect(201)
     expect(await settled(t1, TERMINAL)).toBe('completed')
-    const [row] = await ds.query<{ trusted: unknown }[]>(
-      'SELECT trusted FROM agent_thread WHERE id = ?',
-      [id],
-    )
-    const trusted = typeof row!.trusted === 'string' ? JSON.parse(row!.trusted) : row!.trusted
-    // recorded with the turn that recorded it
-    expect(trusted).toEqual([`${t1}#test.note.update|note:14`])
-    await setParam(AGENT_TRUST_MODE_PARAM, 'false')
-    try {
-      script({ toolCalls: [update(14, 'B')] }, { text: 'left it' })
-      const t2 = await start(id, 'rename note 14 again')
-      expect(await settled(t2)).toBe('waiting')
-      expect(calls.update).toEqual([{ id: 14, title: 'A' }])
-      const open = (await items(id, 'approval')).filter((x) => x.status === 'pending')
-      await decide(open[0]!.id, 'reject').expect(201)
-      expect(await settled(t2, TERMINAL)).toBe('completed')
-    } finally {
-      await setParam(AGENT_TRUST_MODE_PARAM, 'true')
-    }
   })
 
   it('a turn explicitly stopped before deleting its thread still gives its slot back', async () => {

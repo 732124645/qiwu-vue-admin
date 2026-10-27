@@ -4,7 +4,6 @@ import type { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adap
 import {
   AGENT_APPROVAL_MODES,
   AGENT_PAUSED_PARAM,
-  AGENT_TRUST_MODE_PARAM,
   AGENT2_PARAMS,
   AGENT_WEB_MODE_PARAM,
   type AgentOptionsVo,
@@ -36,7 +35,7 @@ import { AgentUsage, AgentUsageEntry } from '../entities/agent-usage.entity.js'
 import { paginate } from '../../db/page.js'
 import { ProviderSearchConfig } from '../provider/provider-registry.js'
 import { parseReviewModel } from '../runtime/auto-reviewer.js'
-import { num, trustModeOn } from './thread-vo.js'
+import { num } from './thread-vo.js'
 import { AgentThreadService } from './thread.service.js'
 
 /** 空状态里的开场建议条数（`agent.thread.starter.s1` …）。 */
@@ -100,7 +99,7 @@ export class AgentOptionsService {
 
   /**
    * 输入框需要的一切：启用的模型（含推理、视觉、快速标记）与默认值、可用技能（技能来源未装配时为空）、
-   * 审批模式（平台关闭“信任本会话”时去掉，`trustSession` 同一个判断）、能否联网搜索（有可用的搜索服务商
+   * 会话模式（没有指定审查模型时不含自动审查）、能否联网搜索（有可用的搜索服务商
    * 且 `agent.web.mode` 为 live）、是否急停、按来源页面选的开场建议、本人与本租户的提示词模板、智能体
    * 此刻能用的外部 MCP 服务器（只给名字）、本人的语气。
    */
@@ -109,7 +108,6 @@ export class AgentOptionsService {
     const first = providers[0]
     const webMode = (await this.params.get(AGENT_WEB_MODE_PARAM))?.trim() || 'live'
     const reviewOn = !!parseReviewModel(await this.params.get(AGENT2_PARAMS.reviewModel))
-    const trust = trustModeOn(await this.params.get(AGENT_TRUST_MODE_PARAM))
     const lang = currentLocale()
     // 外部工具来源只列启用服务器上启用、策略不是 deny 的工具：按服务器名去重
     const servers = this.external
@@ -125,9 +123,7 @@ export class AgentOptionsService {
       defaults: first ? { providerId: first.id, model: first.models[0]!.id } : null,
       skills: this.skills ? await this.skills.listFor(p) : [],
       // 自动审查要先由平台指定审查用的模型才提供
-      approvalModes: AGENT_APPROVAL_MODES.filter(
-        (m) => (trust || m !== 'trust') && (m !== 'auto_review' || reviewOn),
-      ),
+      approvalModes: AGENT_APPROVAL_MODES.filter((m) => m !== 'auto_review' || reviewOn),
       webSearch: webMode === 'live' && (await this.search.current()) !== null,
       paused: await this.on(AGENT_PAUSED_PARAM, false),
       starters: this.starters(lang, route),
@@ -136,7 +132,6 @@ export class AgentOptionsService {
         name: r.name,
         body: r.body,
       })),
-      trustSession: trust,
       servers,
       tone: tone?.tone ?? 'default',
     }

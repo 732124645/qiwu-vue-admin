@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, shallowRef } from 'vue'
+import { computed, ref, shallowRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   AGENT_REASONING,
@@ -16,8 +16,8 @@ import { useCrudForm } from '@/core/composables/use-crud'
 
 /**
  * 配置方案的新增 / 编辑表单（`openDialog(ProfileForm, { id, canTenant, options })`）：范围（新增时；全租户
- * 共用要 `agent.skill.modify`，由 `canTenant` 决定）、名称、模型（空为平台默认）、推理强度、审批模式（只列
- * 平台此刻提供的）、允许的工具（多选，空为不限）、额外说明、是否默认。
+ * 共用要 `agent.skill.modify`，由 `canTenant` 决定）、名称、模型（空为平台默认）、推理强度、会话模式（只列
+ * 平台此刻提供的；全租户共用的方案不能选自动审查）、允许的工具（多选，空为不限）、额外说明、是否默认。
  */
 defineOptions({ name: 'AgentProfileForm' })
 const {
@@ -82,6 +82,16 @@ const toolOptions = computed(() => {
       .map((name) => ({ name, title: name })),
   ]
 })
+/** 可选的会话模式：全租户共用的方案只能是只读、计划或每次询问（自动审查由各人自己选） */
+const modes = computed(() =>
+  (options?.approvalModes ?? ['ask']).filter(
+    (m) => model.scope !== 'tenant' || m !== 'auto_review',
+  ),
+)
+// 改成全租户共用后原来的自动审查不再可选，退回每次询问
+watch(modes, (list) => {
+  if (!list.includes(model.approvalMode)) model.approvalMode = 'ask'
+})
 const instructions = computed({
   get: () => model.instructions ?? '',
   set: (v: string) => (model.instructions = v.trim() ? v : null),
@@ -134,12 +144,7 @@ const instructions = computed({
     </el-form-item>
     <el-form-item :label="t('field.agent.profile.approvalMode')" prop="approvalMode">
       <el-select v-model="model.approvalMode" :aria-label="t('field.agent.profile.approvalMode')">
-        <el-option
-          v-for="m in options?.approvalModes ?? ['ask']"
-          :key="m"
-          :value="m"
-          :label="t(`agent.chat.mode.${m}`)"
-        />
+        <el-option v-for="m in modes" :key="m" :value="m" :label="t(`agent.chat.mode.${m}`)" />
       </el-select>
     </el-form-item>
     <el-form-item :label="t('field.agent.profile.tools')" prop="tools">
