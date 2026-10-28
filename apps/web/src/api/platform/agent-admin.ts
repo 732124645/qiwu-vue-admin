@@ -16,6 +16,8 @@ import type {
   AgentSkillSave,
   AgentSkillVo,
   AgentToolPolicy,
+  AgentToolRestrictionPolicy,
+  AgentToolRestrictionVo,
   AgentToolVo,
   AgentUsageQuery,
   AgentUsageEntriesQuery,
@@ -100,6 +102,18 @@ export const agentToolApi = {
   /** 内置工具的启停（本系统其他工具在 MCP 工具页） */
   setEnabled: (name: string, enabled: boolean) =>
     api.put(`/agent/tools/${encodeURIComponent(name)}/enabled`, { enabled }),
+}
+
+/**
+ * /api/agent/tool-restrictions：本租户对工具的收紧（只能收紧为仅人工确认或停用，`null` 去掉收紧）。
+ * 外部工具名为 `mcp:<id>`；返回这个工具此刻的一行（平台策略、本租户收紧与生效值）。
+ */
+export const agentToolRestrictionApi = {
+  list: () => api.get<AgentToolRestrictionVo[]>('/agent/tool-restrictions'),
+  set: (name: string, policy: AgentToolRestrictionPolicy | null) =>
+    api.put<AgentToolRestrictionVo>(`/agent/tool-restrictions/${encodeURIComponent(name)}`, {
+      policy,
+    }),
 }
 
 /** /api/agent/skills：本人、本租户与平台技能（技能管理页），含 SKILL.md 导入导出。 */

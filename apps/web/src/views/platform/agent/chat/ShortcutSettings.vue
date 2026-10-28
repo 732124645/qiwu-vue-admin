@@ -86,7 +86,13 @@ function reset() {
         :data-action="a"
         @click="record(a)"
       >
-        {{ recording === a ? t('agent.chat.shortcut.press') : comboLabel(model[a]) }}
+        {{
+          recording === a
+            ? t('agent.chat.shortcut.press')
+            : model[a]
+              ? comboLabel(model[a])
+              : t('agent.chat.shortcut.unset')
+        }}
       </el-button>
       <p v-if="problem[a]" role="alert" class="agent-shortcuts__problem">{{ problem[a] }}</p>
     </div>

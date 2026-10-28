@@ -20,8 +20,9 @@ import { show, type ChatRow } from './thread-state'
  * 对话里的一行：用户气泡（附件、排队标记）、助手回答（Markdown 安全子集、编号来源、后续建议）、
  * 可折叠的“思考”、压缩分隔线、工具调用与结果合成的折叠卡（轮次结束仍没有结果的显示“已停止”）、审批卡、
  * 反问卡、方案卡（计划模式的 `plan.propose`）、计划清单、图表 / 图片 / 报告 / 子任务卡片（OutputCard）、错误提示（显示翻译后的说明，不显示错误码）。
- * 消息上的操作只有一行，悬停或焦点在这条消息里时才显示：用户消息复制、编辑最后一条重发、分叉；回答复制、
- * 分叉，其余（查看源码、下载、展开阅读、点赞 / 点踩，可附说明）收在“更多”里，展开后接在同一行。批准方案后
+ * 消息上的操作只有一行，悬停或焦点在这条消息里时才显示：用户消息复制、从这里重新编辑（原地回退到这条并把它
+ * 放回输入框）、分叉；回答复制、分叉，最后一条回答还有“重新生成”，其余（查看源码、下载、展开阅读、点赞 / 点踩，
+ * 可附说明）收在“更多”里，展开后接在同一行。回退与重新生成由页面先确认再执行。批准方案后
  * 运行时写的那条执行消息只显示一行“按已批准的方案执行”，原文可展开查看。
  */
 defineOptions({ name: 'AgentChatItem' })
@@ -29,6 +30,7 @@ const {
   row,
   canFork = false,
   canEdit = false,
+  canRegenerate = false,
   last = false,
   readonly = false,
   canInspect = true,
@@ -36,8 +38,10 @@ const {
 } = defineProps<{
   row: ChatRow
   canFork?: boolean
-  /** 最后一条用户消息：可编辑后重发 */
+  /** 本人的用户消息且此刻可以回退：提供“从这里重新编辑” */
   canEdit?: boolean
+  /** 最后一条回答且此刻可以回退：提供“重新生成” */
+  canRegenerate?: boolean
   /** 最后一行：显示后续建议 */
   last?: boolean
   /** 分享的只读快照 */
@@ -49,7 +53,8 @@ const {
 }>()
 const emit = defineEmits<{
   fork: [seq: number]
-  edit: [seq: number, text: string]
+  edit: [seq: number]
+  regenerate: []
   suggest: [text: string]
   changed: []
   planDecided: [decision: AgentPlanDecide['decision']]
@@ -228,7 +233,7 @@ async function rate(itemId: number, value: 1 | -1) {
           v-if="canEdit && !readonly"
           icon="lucide:pencil"
           :label="t('agent.chat.action.edit')"
-          @click="emit('edit', row.item.seq, row.item.payload.text)"
+          @click="emit('edit', row.item.seq)"
         />
         <IconButton
           v-if="canFork && !readonly"
@@ -276,6 +281,12 @@ async function rate(itemId: number, value: 1 | -1) {
               icon="lucide:copy"
               :label="t('agent.chat.action.copy')"
               @click="copy(row.item.payload.text)"
+            />
+            <IconButton
+              v-if="canRegenerate && !readonly"
+              icon="lucide:refresh-cw"
+              :label="t('agent.chat.action.regenerate')"
+              @click="emit('regenerate')"
             />
             <IconButton
               v-if="canFork && !readonly"

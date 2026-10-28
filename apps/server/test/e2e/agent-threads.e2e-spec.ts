@@ -1,6 +1,6 @@
 // Agent thread management (see docs/agent.md): the chat page's options, the owner-only thread routes
 // (list with views and full-text search over message text, create, update, delete, items, fork, read,
-// revert, export, status, read-all), read-only sharing within the tenant (tool details hidden from every
+// revert, rewind and its preview, export, status, read-all), read-only sharing within the tenant (tool details hidden from every
 // viewer but the owner), answer feedback (one per user and answer), prompt templates (own and tenant-wide)
 // and usage. Another user's thread and another tenant's are 404. Turns and items are written as rows
 // here (the runtime that writes them is not needed for these routes). Multi-tenancy on.
@@ -8,14 +8,20 @@ import { ConfigService } from '@nestjs/config'
 import type { NestExpressApplication } from '@nestjs/platform-express'
 import { Test } from '@nestjs/testing'
 import { getDataSourceToken } from '@nestjs/typeorm'
-import { agentPerms, Err } from '@qiwu/shared'
+import { AGENT_LIMIT_PARAMS, agentPerms, Err, RT } from '@qiwu/shared'
 import request from 'supertest'
 import type { DataSource } from 'typeorm'
+import { z } from 'zod'
 import { AppModule } from '../../src/app.module.js'
 import { setupApp } from '../../src/app.setup.js'
 import { AgentModule } from '../../src/core/agent/agent.module.js'
+import { historyMessages, type PromptItem } from '../../src/core/agent/runtime/turn-prompt.js'
+import { TurnQueue } from '../../src/core/agent/runtime/turn-queue.js'
 import { EnvSchema } from '../../src/core/config/env.schema.js'
+import { McpRegistry } from '../../src/core/mcp/mcp-registry.js'
+import { RealtimeService } from '../../src/core/realtime/realtime.service.js'
 import { REDIS, type Redis } from '../../src/core/redis/redis.module.js'
+import { ParamService } from '../../src/core/settings/param.service.js'
 import { findId, insertRow } from '../../src/db/seeds/upsert.js'
 import { bearer, signIn } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
@@ -752,6 +758,369 @@ describe('threads', () => {
     expect(await summaryOf(earlier.id)).toMatchObject({ summary: 'S', summary_seq: 4 })
   })
 
+  describe('rewind', () => {
+    const rewind = (id: number, seq: number, lastSeq: number, token = tok.a) =>
+      http().post(`/api/agent/threads/${id}/rewind`).set(bearer(token)).send({ seq, lastSeq })
+    const preview = (id: number, seq: number, token = tok.a) =>
+      http().get(`/api/agent/threads/${id}/rewind-preview?seq=${seq}`).set(bearer(token))
+    const live = async (id: number) =>
+      (
+        await ds.query<{ seq: number }[]>(
+          'SELECT seq FROM agent_item WHERE thread_id = ? AND deleted_at IS NULL ORDER BY seq',
+          [id],
+        )
+      ).map((r) => Number(r.seq))
+    const DELETED = {
+      agent_turn: 'SELECT deleted_at FROM agent_turn WHERE id = ?',
+      agent_feedback: 'SELECT deleted_at FROM agent_feedback WHERE id = ?',
+      agent_thread: 'SELECT deleted_at FROM agent_thread WHERE id = ?',
+    }
+    const deleted = async (table: keyof typeof DELETED, id: number) =>
+      (await ds.query<{ deleted_at: Date | null }[]>(DELETED[table], [id]))[0]!.deleted_at !== null
+    const feedback = async (threadId: number, itemId: number) => {
+      const { insertId } = await ds.query<{ insertId: number }>(
+        'INSERT INTO agent_feedback (tenant_id, thread_id, item_id, user_id, rating) VALUES (1, ?, ?, ?, 1)',
+        [threadId, itemId, ids.a],
+      )
+      return Number(insertId)
+    }
+
+    it('removes a middle message and everything after it in place; stale views, repeats and others are refused', async () => {
+      const { id, turn, answer } = await conversation(tok.a, ids.a)
+      const second = await addTurn(id, ids.a, 'completed')
+      await addItem(id, 5, 'user', { text: 'second' }, { turnId: second, text: 'second' })
+      const answer2 = await addItem(id, 6, 'assistant', { text: 'two' }, { turnId: second })
+      const third = await addTurn(id, ids.a, 'completed')
+      await addItem(id, 7, 'user', { text: 'third' }, { turnId: third, text: 'third' })
+      const answer3 = await addItem(id, 8, 'assistant', { text: 'three' }, { turnId: third })
+      const kept = await feedback(id, answer)
+      const gone = [await feedback(id, answer2), await feedback(id, answer3)]
+      await ds.query(
+        "UPDATE agent_thread SET trusted = ?, summary = 'S', summary_seq = 6 WHERE id = ?",
+        [JSON.stringify([`${turn}#t.a.keep`, `${second}#t.a.drop`]), id],
+      )
+      // another tab produced item 8 this page has not seen
+      expect((await rewind(id, 5, 7)).body.code).toBe(Err.AGENT_THREAD_STALE.code)
+      expect((await rewind(id, 5, 8, tok.b)).status).toBe(404)
+      // only a user message is an anchor
+      expect((await rewind(id, 2, 8)).status).toBe(404)
+      expect(await live(id)).toEqual([1, 2, 3, 4, 5, 6, 7, 8])
+      const events = vi.spyOn(app.get(RealtimeService), 'toUser')
+      try {
+        expect((await rewind(id, 5, 8)).status).toBe(200)
+        expect(events).toHaveBeenCalledWith(ids.a, {
+          type: RT.agentEvent,
+          payload: { threadId: id, type: 'rewound', fromSeq: 5 },
+        })
+      } finally {
+        events.mockRestore()
+      }
+      expect(await live(id)).toEqual([1, 2, 3, 4])
+      expect([await deleted('agent_turn', second), await deleted('agent_turn', third)]).toEqual([
+        true,
+        true,
+      ])
+      expect(await deleted('agent_turn', turn)).toBe(false)
+      expect(await Promise.all(gone.map((f) => deleted('agent_feedback', f)))).toEqual([true, true])
+      expect(await deleted('agent_feedback', kept)).toBe(false)
+      const [row] = await ds.query<
+        { trusted: unknown; summary: string | null; summary_seq: number }[]
+      >('SELECT trusted, summary, summary_seq FROM agent_thread WHERE id = ?', [id])
+      const trusted = typeof row!.trusted === 'string' ? JSON.parse(row!.trusted) : row!.trusted
+      expect(trusted).toEqual([`${turn}#t.a.keep`])
+      expect(row).toMatchObject({ summary: null, summary_seq: 0 })
+      // a double click finds its anchor gone and removes nothing more
+      expect((await rewind(id, 5, 8)).status).toBe(404)
+      expect(await live(id)).toEqual([1, 2, 3, 4])
+      const d = (await http().get(`/api/agent/threads/${id}/items`).set(bearer(tok.a))).body.data
+      expect(d.turn.id).toBe(turn)
+    })
+
+    it('from a message steered into a waiting turn keeps that turn truncated and cancels it; its open cards expire, allowances granted after the anchor go and the queue moves on', async () => {
+      const { id } = await conversation(tok.a, ids.a)
+      const next = await addTurn(id, ids.a, 'waiting')
+      await addItem(id, 5, 'user', { text: 'second' }, { turnId: next, text: 'second' })
+      const call = await addItem(
+        id,
+        6,
+        'tool_call',
+        {
+          callId: 'w1',
+          tool: 'demo.book.create',
+          title: 'Create',
+          source: 'local',
+          kind: 'write',
+          args: {},
+        },
+        { turnId: next, status: 'pending' },
+      )
+      const card = await addItem(
+        id,
+        7,
+        'approval',
+        { callId: 'w1', tool: 'demo.book.create', title: 'Create', args: {}, sources: [] },
+        { turnId: next, status: 'pending' },
+      )
+      await addItem(
+        id,
+        8,
+        'user',
+        { text: 'steer', mode: 'steer' },
+        { turnId: next, text: 'steer' },
+      )
+      // a later card of the same turn the owner allowed for the thread
+      await addItem(
+        id,
+        9,
+        'approval',
+        {
+          callId: 'w2',
+          tool: 't.a.late',
+          title: 'Late',
+          args: {},
+          sources: [],
+          decision: 'approve_session',
+        },
+        { turnId: next, status: 'approved' },
+      )
+      await addItem(id, 10, 'user', { text: 'queued', mode: 'queue' }, { status: 'pending' })
+      await ds.query('UPDATE agent_thread SET trusted = ? WHERE id = ?', [
+        JSON.stringify([`${next}#t.a.early`, `${next}#t.a.late`]),
+        id,
+      ])
+      const startNext = vi.spyOn(app.get(TurnQueue), 'startNext').mockResolvedValue()
+      try {
+        // a queued message has not been sent yet: it is no anchor and truncates nothing
+        expect((await rewind(id, 10, 10)).status).toBe(404)
+        expect(startNext).not.toHaveBeenCalled()
+        expect((await rewind(id, 8, 10)).status).toBe(200)
+        // the cancelled turn no longer holds the thread: messages queued before the anchor start now
+        expect(startNext).toHaveBeenCalledWith(id, ids.a)
+      } finally {
+        startNext.mockRestore()
+      }
+      expect(await live(id)).toEqual([1, 2, 3, 4, 5, 6, 7])
+      const [row] = await ds.query<{ trusted: unknown }[]>(
+        'SELECT trusted FROM agent_thread WHERE id = ?',
+        [id],
+      )
+      const trusted = typeof row!.trusted === 'string' ? JSON.parse(row!.trusted) : row!.trusted
+      expect(trusted).toEqual([`${next}#t.a.early`])
+      const [t] = await ds.query<{ status: string; deleted_at: Date | null }[]>(
+        'SELECT status, deleted_at FROM agent_turn WHERE id = ?',
+        [next],
+      )
+      expect(t).toMatchObject({ status: 'cancelled', deleted_at: null })
+      const statuses = await ds.query<{ id: number; status: string }[]>(
+        'SELECT id, status FROM agent_item WHERE id IN (?) ORDER BY id',
+        [[call, card]],
+      )
+      expect(statuses.map((r) => r.status)).toEqual(['expired', 'expired'])
+    })
+
+    it('from a message steered between a call and its result keeps the executed result, drops the one the steer rejected', async () => {
+      const { id } = await conversation(tok.a, ids.a)
+      const next = await addTurn(id, ids.a, 'completed')
+      const call = (callId: string, tool: string, title: string) => ({
+        callId,
+        tool,
+        title: 'Book',
+        source: 'local',
+        kind: 'write',
+        args: { title },
+      })
+      await addItem(id, 5, 'user', { text: 'second' }, { turnId: next, text: 'second' })
+      await addItem(id, 6, 'tool_call', call('s1', 'demo.book.create', 'Kept'), {
+        turnId: next,
+        status: 'done',
+      })
+      // a second write planned in the same step never ran: the steer rejected it with its own words
+      await addItem(id, 7, 'tool_call', call('s2', 'demo.book.update', 'Planned'), {
+        turnId: next,
+        status: 'rejected',
+      })
+      await addItem(
+        id,
+        8,
+        'user',
+        { text: 'voided words', mode: 'steer' },
+        { turnId: next, text: 'voided words' },
+      )
+      await addItem(
+        id,
+        9,
+        'tool_result',
+        { callId: 's1', ok: true, preview: 'BOOK-7', untrusted: false },
+        { turnId: next },
+      )
+      const voided =
+        'The user rejected this call: voided words. Do not retry it unless the user asks.'
+      await addItem(
+        id,
+        10,
+        'tool_result',
+        {
+          callId: 's2',
+          ok: false,
+          preview: voided,
+          untrusted: false,
+          error: { code: 'rejected', message: voided },
+        },
+        { turnId: next },
+      )
+      await addItem(id, 11, 'assistant', { text: 'created' }, { turnId: next, status: 'done' })
+      expect((await rewind(id, 8, 11)).status).toBe(200)
+      expect(await live(id)).toEqual([1, 2, 3, 4, 5, 6, 7, 9])
+      const rows = await ds.query<
+        { seq: number; kind: string; status: string | null; payload: unknown }[]
+      >(
+        'SELECT seq, kind, status, payload FROM agent_item WHERE thread_id = ? AND deleted_at IS NULL ORDER BY seq',
+        [id],
+      )
+      const items: PromptItem[] = rows.map((r) => ({
+        seq: Number(r.seq),
+        kind: r.kind,
+        status: r.status,
+        payload: typeof r.payload === 'string' ? JSON.parse(r.payload) : r.payload,
+      }))
+      const out = historyMessages(items)
+      expect(JSON.stringify(out)).not.toContain('voided words')
+      expect(out.slice(-2)).toEqual([
+        {
+          role: 'assistant',
+          content: null,
+          toolCalls: [{ id: 's1', name: 'demo.book.create', arguments: '{"title":"Kept"}' }],
+        },
+        { role: 'tool', toolCallId: 's1', content: 'BOOK-7' },
+      ])
+    })
+
+    it('403 without agent.chat.use; 400 for a missing or negative seq or lastSeq', async () => {
+      const { id } = await conversation(tok.a, ids.a)
+      expect((await rewind(id, 1, 4, tok.none)).status).toBe(403)
+      expect((await preview(id, 1, tok.none)).status).toBe(403)
+      for (const body of [
+        { lastSeq: 4 },
+        { seq: 1 },
+        { seq: -1, lastSeq: 4 },
+        { seq: 1, lastSeq: -1 },
+      ])
+        expect(
+          (await http().post(`/api/agent/threads/${id}/rewind`).set(bearer(tok.a)).send(body))
+            .status,
+        ).toBe(400)
+      for (const q of ['', '?seq=-1', '?seq=x'])
+        expect(
+          (await http().get(`/api/agent/threads/${id}/rewind-preview${q}`).set(bearer(tok.a)))
+            .status,
+        ).toBe(400)
+      expect(await live(id)).toEqual([1, 2, 3, 4])
+    })
+
+    it('refuses hidden threads, a pending recovery and a running turn or call', async () => {
+      for (const hide of [
+        'UPDATE agent_thread SET automation_run_id = 1 WHERE id = ?',
+        'UPDATE agent_thread SET parent_thread_id = 1 WHERE id = ?',
+        'UPDATE agent_thread SET batch_id = 1 WHERE id = ?',
+      ]) {
+        const { id } = await conversation(tok.a, ids.a)
+        await ds.query(hide, [id])
+        expect((await rewind(id, 1, 4)).status).toBe(409)
+        expect(
+          (await http().post(`/api/agent/threads/${id}/revert`).set(bearer(tok.a))).status,
+        ).toBe(409)
+        expect(await live(id)).toEqual([1, 2, 3, 4])
+      }
+      const risky = await conversation(tok.a, ids.a)
+      await ds.query('UPDATE agent_thread SET recovery_required = 1 WHERE id = ?', [risky.id])
+      expect((await rewind(risky.id, 1, 4)).body.code).toBe(Err.AGENT_RECOVERY_REQUIRED.code)
+
+      const { id, turn } = await conversation(tok.a, ids.a)
+      await ds.query("UPDATE agent_turn SET status = 'running' WHERE id = ?", [turn])
+      expect((await rewind(id, 1, 4)).body.code).toBe(Err.AGENT_THREAD_BUSY.code)
+      expect(
+        (await http().post(`/api/agent/threads/${id}/revert`).set(bearer(tok.a))).body.code,
+      ).toBe(Err.AGENT_THREAD_BUSY.code)
+      await ds.query("UPDATE agent_turn SET status = 'waiting' WHERE id = ?", [turn])
+      await ds.query("UPDATE agent_item SET status = 'running' WHERE thread_id = ? AND seq = 2", [
+        id,
+      ])
+      expect((await rewind(id, 1, 4)).body.code).toBe(Err.AGENT_THREAD_BUSY.code)
+      expect(await live(id)).toEqual([1, 2, 3, 4])
+    })
+
+    it('previews the writes that stay: done and unknown ones, a subagent’s included, never their arguments', async () => {
+      const { id } = await conversation(tok.a, ids.a)
+      const next = await addTurn(id, ids.a, 'completed')
+      await addItem(id, 5, 'user', { text: 'second' }, { turnId: next, text: 'second' })
+      const write = (callId: string, tool: string, kind = 'write', internal?: object) => ({
+        callId,
+        tool,
+        title: `${tool} title`,
+        source: 'local',
+        kind,
+        args: { secret: 'hunter2' },
+        ...(internal && { internal }),
+      })
+      await addItem(
+        id,
+        6,
+        'tool_call',
+        write('u1', 'demo.book.update', 'write', { uncertain: true }),
+        {
+          turnId: next,
+          status: 'failed',
+        },
+      )
+      await addItem(id, 7, 'tool_call', write('r1', 'demo.book.remove'), {
+        turnId: next,
+        status: 'failed',
+      })
+      await addItem(id, 8, 'tool_call', write('g1', 'demo.book.get', 'read'), {
+        turnId: next,
+        status: 'done',
+      })
+      await addItem(id, 9, 'tool_call', write('i1', 'image.generate', 'read'), {
+        turnId: next,
+        status: 'done',
+      })
+      await addItem(id, 10, 'tool_call', write('d1', 'agent.delegate', 'read'), {
+        turnId: next,
+        status: 'done',
+      })
+      const kid = await newThread(tok.a)
+      await ds.query(
+        "UPDATE agent_thread SET parent_thread_id = ?, target_ref = 'subagent:d1' WHERE id = ?",
+        [id, kid],
+      )
+      const kidTurn = await addTurn(kid, ids.a, 'completed')
+      await addItem(kid, 1, 'user', { text: 'task' }, { turnId: kidTurn })
+      await addItem(kid, 2, 'tool_call', write('k1', 'demo.book.create'), {
+        turnId: kidTurn,
+        status: 'done',
+      })
+      const res = await preview(id, 5)
+      expect(res.status).toBe(200)
+      expect(res.body.data.writes).toEqual([
+        { seq: 6, tool: 'demo.book.update', title: 'demo.book.update title', outcome: 'unknown' },
+        { seq: 9, tool: 'image.generate', title: 'image.generate title', outcome: 'done' },
+        { seq: 10, tool: 'demo.book.create', title: 'demo.book.create title', outcome: 'done' },
+      ])
+      expect(JSON.stringify(res.body.data)).not.toContain('hunter2')
+      expect((await preview(id, 1)).body.data.writes.map((w: { seq: number }) => w.seq)).toEqual([
+        2, 6, 9, 10,
+      ])
+      expect((await preview(id, 2)).status).toBe(404)
+      expect((await preview(id, 5, tok.b)).status).toBe(404)
+      // a queued message is no anchor here either
+      await addItem(id, 11, 'user', { text: 'queued', mode: 'queue' }, { status: 'pending' })
+      expect((await preview(id, 11)).status).toBe(404)
+      // the rewind removes the subagent thread with the call that spawned it
+      expect((await rewind(id, 5, 11)).status).toBe(200)
+      expect(await deleted('agent_thread', kid)).toBe(true)
+    })
+  })
+
   it('exports Markdown with messages, tool titles and masked arguments, never tool output', async () => {
     const { id } = await conversation(tok.a, ids.a)
     const res = await http().get(`/api/agent/threads/${id}/export`).set(bearer(tok.a))
@@ -802,6 +1171,106 @@ describe('threads', () => {
     )
   })
 
+  it('status: mode, the allowances still in force, which tools ask or are unavailable and why, the turn limit and the reported context', async () => {
+    const reg = app.get(McpRegistry)
+    const tool = (name: string, kind: 'read' | 'write', perm: string | null) =>
+      reg.add({ name, title: name, description: name, perm, kind, input: z.object({}) }, () => ({
+        ok: true,
+      }))
+    tool('test.thst.update', 'write', agentPerms.chat.use)
+    tool('test.thst.read', 'read', null)
+    tool('test.thst.secret', 'write', 'iam.user.modify')
+    const { id, turn, answer } = await conversation(tok.a, ids.a)
+    await ds.query('UPDATE agent_thread SET trusted = ? WHERE id = ?', [
+      JSON.stringify([`${turn}#test.thst.update`]),
+      id,
+    ])
+    // the conversation's latest step reported 321 input tokens
+    await ds.query(
+      "UPDATE agent_item SET payload = JSON_SET(payload, '$.internal', JSON_OBJECT('promptTokens', 321)) WHERE id = ?",
+      [answer],
+    )
+    // a later background call of the thread (a memory extraction) does not count
+    await insertRow(ds.manager, 'agent_usage_entry', {
+      tenant_id: 1,
+      status: 'complete',
+      user_id: ids.a,
+      provider_id: providerId,
+      provider_name: `${PREFIX}p`,
+      model: 'chat-1',
+      thread_id: id,
+      turn_id: null,
+      kind: 'chat',
+      usage_json: { promptTokens: 999, completionTokens: 9 },
+      usage_reported: 1,
+    })
+    const status = async (token = tok.a) => {
+      const res = await http().get(`/api/agent/threads/${id}/status`).set(bearer(token))
+      expect(res.status).toBe(200)
+      return res.body.data
+    }
+    const named = (rows: { name: string }[], name: string) => rows.find((r) => r.name === name)
+    const setTurnLimit = async (value: string) => {
+      await ds.query('UPDATE cfg_param SET param_value = ? WHERE param_key = ?', [
+        value,
+        AGENT_LIMIT_PARAMS.turnCredits,
+      ])
+      await app.get(ParamService).invalidate(AGENT_LIMIT_PARAMS.turnCredits)
+    }
+    const [limit] = await ds.query<{ v: string }[]>(
+      'SELECT param_value AS v FROM cfg_param WHERE param_key = ?',
+      [AGENT_LIMIT_PARAMS.turnCredits],
+    )
+    await setTurnLimit('0')
+    try {
+      let s = await status()
+      expect(s).toMatchObject({
+        mode: 'ask',
+        profile: null,
+        contextReported: 321,
+        allowedTools: ['test.thst.update'],
+        turnLimit: null,
+      })
+      expect(named(s.tools.asks, 'test.thst.update')).toEqual({
+        name: 'test.thst.update',
+        title: 'test.thst.update',
+        why: 'ask',
+      })
+      expect(named(s.tools.asks, 'test.thst.read')).toBeUndefined()
+      expect(named(s.tools.unavailable, 'test.thst.secret')).toMatchObject({ reason: 'permission' })
+      // the tenant tightens: the allowance stops counting, the write asks for the tenant's reason
+      await insertRow(ds.manager, 'agent_tool_restriction', {
+        tenant_id: 1,
+        tool: 'test.thst.update',
+        policy: 'human',
+      })
+      await insertRow(ds.manager, 'agent_tool_restriction', {
+        tenant_id: 1,
+        tool: 'test.thst.read',
+        policy: 'deny',
+      })
+      await setTurnLimit('5')
+      s = await status()
+      expect(s.allowedTools).toEqual([])
+      expect(s.turnLimit).toBe('5.000000')
+      expect(named(s.tools.asks, 'test.thst.update')).toMatchObject({ why: 'tenant' })
+      expect(named(s.tools.unavailable, 'test.thst.read')).toMatchObject({ reason: 'tenant' })
+      // read-only: the write is unavailable by mode
+      await ds.query("UPDATE agent_thread SET approval_mode = 'read_only' WHERE id = ?", [id])
+      s = await status()
+      expect(s.mode).toBe('read_only')
+      expect(named(s.tools.unavailable, 'test.thst.update')).toMatchObject({ reason: 'mode' })
+      // another user's thread is 404; nothing was written
+      expect((await http().get(`/api/agent/threads/${id}/status`).set(bearer(tok.b))).status).toBe(
+        404,
+      )
+    } finally {
+      await ds.query("DELETE FROM agent_tool_restriction WHERE tool LIKE 'test.thst.%'")
+      await ds.query('DELETE FROM agent_usage_entry WHERE thread_id = ?', [id])
+      await setTurnLimit(limit!.v)
+    }
+  })
+
   it('deletes a thread with its items; then 404; 404 for another user', async () => {
     const { id } = await conversation(tok.a, ids.a)
     expect((await http().delete(`/api/agent/threads/${id}`).set(bearer(tok.b))).status).toBe(404)
@@ -828,6 +1297,8 @@ describe('threads', () => {
       () => http().post(`/api/agent/threads/${id}/fork`).set(o).send({ seq: 1 }),
       () => http().post(`/api/agent/threads/${id}/read`).set(o).send({ seq: 1 }),
       () => http().post(`/api/agent/threads/${id}/revert`).set(o),
+      () => http().post(`/api/agent/threads/${id}/rewind`).set(o).send({ seq: 1, lastSeq: 4 }),
+      () => http().get(`/api/agent/threads/${id}/rewind-preview?seq=1`).set(o),
       () => http().get(`/api/agent/threads/${id}/export`).set(o),
       () => http().get(`/api/agent/threads/${id}/status`).set(o),
       () => http().post(`/api/agent/threads/${id}/share`).set(o),

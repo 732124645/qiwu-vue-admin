@@ -7,8 +7,14 @@ import { AuditWriter } from '../../audit/audit-writer.js'
 import type { Principal } from '../../auth/principal.js'
 import { tenantIdIfAny } from '../../context/tenant.js'
 import { argsJson } from '../../mcp/tool-host.js'
-import type { ElicitHandler, ExternalToolDescriptor, ExternalToolSource } from '../agent-ports.js'
+import type {
+  ElicitHandler,
+  ExternalToolDescriptor,
+  ExternalToolOffer,
+  ExternalToolSource,
+} from '../agent-ports.js'
 import { AgentMcpServer, AgentMcpTool } from '../entities/agent-mcp.entity.js'
+import { externalKey, tenantRestrictions, tighten } from '../tools/tool-policy.js'
 import { wrapUntrusted } from '../web/web-tools.js'
 import { McpConnectFailure, McpConnector } from './mcp-connector.js'
 import { MCP_DESCRIPTION_MAX, AgentMcpServerService } from './mcp-server.service.js'
@@ -59,9 +65,12 @@ export class AgentExternalTools implements ExternalToolSource {
     private readonly audit: AuditWriter,
   ) {}
 
-  /** 当前可用的外部工具与它们对应的服务器、工具行（平台表，所有租户共用）。 */
+  /**
+   * 平台此刻提供的外部工具与它们对应的服务器、工具行（平台表，所有租户共用），策略叠加当前租户按工具行 id
+   * 的收紧（取更严的一方，可能叠成 deny）。须在单一租户里调用。
+   */
   private async entries(): Promise<
-    { d: ExternalToolDescriptor; server: AgentMcpServer; tool: AgentMcpTool }[]
+    { d: ExternalToolOffer; server: AgentMcpServer; tool: AgentMcpTool }[]
   > {
     const servers = await this.ds
       .getRepository(AgentMcpServer)
@@ -70,7 +79,8 @@ export class AgentExternalTools implements ExternalToolSource {
     const tools = await this.ds
       .getRepository(AgentMcpTool)
       .find({ where: { enabled: true }, order: { id: 'ASC' } })
-    const out: { d: ExternalToolDescriptor; server: AgentMcpServer; tool: AgentMcpTool }[] = []
+    const restricted = await tenantRestrictions(this.ds.manager)
+    const out: { d: ExternalToolOffer; server: AgentMcpServer; tool: AgentMcpTool }[] = []
     const taken = new Set<string>()
     for (const server of servers) {
       const s = part(server.name, `s${server.id}`)
@@ -80,6 +90,7 @@ export class AgentExternalTools implements ExternalToolSource {
         // 规整后撞名：加上工具 id 区分（id 不变，名字稳定）
         if (taken.has(name)) name = `${name}-${tool.id}`
         taken.add(name)
+        const tenant = restricted.get(externalKey(Number(tool.id)))
         out.push({
           server,
           tool,
@@ -88,9 +99,14 @@ export class AgentExternalTools implements ExternalToolSource {
             title: (tool.title ?? tool.name).slice(0, 200),
             description: (tool.description ?? '').slice(0, MCP_DESCRIPTION_MAX),
             parameters: tool.inputSchema ?? { type: 'object' },
-            // 只有 auto 按只读执行；ask 与 human 都按写入等人（ask 在自动审查模式下可先送审）
-            policy: tool.policy,
+            // 平台设成 auto 的按读取，ask 与 human 都按写入等人（ask 在自动审查模式下可先送审）。本租户收紧成
+            // human 的读取仍是读取：类型按平台策略定，生效策略另记，与本系统工具一样分开
+            kind: tool.policy === 'auto' ? 'read' : 'write',
+            policy: tighten(tool.policy, tenant),
             serverName: server.name,
+            ...(tenant && { restricted: tenant }),
+            id: Number(tool.id),
+            platformPolicy: tool.policy,
           },
         })
       }
@@ -98,8 +114,18 @@ export class AgentExternalTools implements ExternalToolSource {
     return out
   }
 
-  /** 当前可用的外部工具（服务器与工具都已启用、策略不是 deny）。 */
+  /** 当前可用的外部工具（服务器与工具都已启用、叠加本租户收紧后的策略不是 deny）。 */
   async list(_p: Principal): Promise<ExternalToolDescriptor[]> {
+    const out: ExternalToolDescriptor[] = []
+    for (const { d } of await this.entries()) {
+      const { id: _, platformPolicy: __, ...descriptor } = d
+      if (d.policy !== 'deny') out.push(descriptor)
+    }
+    return out
+  }
+
+  /** 平台此刻提供的全部外部工具，含被本租户停用的（只读库，不连外部服务器）。 */
+  async offered(_p: Principal): Promise<ExternalToolOffer[]> {
     return (await this.entries()).map((e) => e.d)
   }
 
@@ -115,7 +141,7 @@ export class AgentExternalTools implements ExternalToolSource {
     ctx: { signal: AbortSignal; onElicit: ElicitHandler },
   ): Promise<{ ok: boolean; text: string }> {
     const started = Date.now()
-    const entry = (await this.entries()).find((e) => e.d.name === name)
+    const entry = (await this.entries()).find((e) => e.d.name === name && e.d.policy !== 'deny')
     if (!entry) return { ok: false, text: `Unknown or disabled tool: ${name.slice(0, 120)}` }
     const json = argsJson(args ?? {})
     if (json === null || !args || typeof args !== 'object' || Array.isArray(args)) {

@@ -604,7 +604,7 @@ describe('built-in tools', () => {
     expect(toolNames(0)).toEqual(expect.arrayContaining(['test.peek', 'plan.update']))
     expect(toolNames(0)).not.toContain('test.memo.save')
     expect((await items(id2, 'approval'))[0]).toMatchObject({
-      payload: { blocked: { reason: 'policy' } },
+      payload: { blocked: { reason: 'list' } },
     })
 
     await setPolicy('test.memo.save', 'deny')

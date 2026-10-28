@@ -91,7 +91,8 @@ export function userContent(
 }
 
 /**
- * 条目 → 发给模型的历史消息：排队未开始的用户消息、中断的回答、审批 / 提问 / 计划等界面条目不发；
+ * 条目 → 发给模型的历史消息：从没运行过的用户消息（排队未开始的、被核对闸门作废的，见 {@link unsent}）、
+ * 中断的回答、审批 / 提问 / 计划等界面条目不发；
  * 工具调用挂到它所属的那条回答上（没有文字的步骤补一条空回答）；工具结果用完整内容。工具调用与其结果
  * 之间插进来的用户追加消息（steer）挪到这一组结果之后，保证调用与结果紧挨着（接口要求）。
  * 被压缩截断的孤立调用或结果丢弃。`attached` 按条目顺序号给出本轮用户消息的附件内容（见 {@link userContent}）。
@@ -121,7 +122,7 @@ export function historyMessages(
   for (const i of items) {
     switch (i.kind) {
       case 'user': {
-        if (i.status === 'pending') break
+        if (unsent(i)) break
         const u = p<'user'>(i)
         const msg: ChatMessage = {
           role: 'user',
@@ -279,11 +280,18 @@ export function contextMessage(part: AgentContextPart): ChatMessage {
   }
 }
 
-/** 最新一条已发出的用户消息的文字（排队未开始的不算）；没有时 null。 */
+/**
+ * 从没运行过的用户消息：还在排队（pending），或排队时会话进入待核对状态而作废（expired）。它们不是本人此刻
+ * 的请求，不能交给模型或自动审查：作废的意图在本人核对之后也不能借历史复活。
+ */
+export const unsent = (i: Pick<PromptItem, 'status'>): boolean =>
+  i.status === 'pending' || i.status === 'expired'
+
+/** 最新一条已发出的用户消息的文字（从没运行过的不算）；没有时 null。 */
 export function latestUserText(items: readonly PromptItem[]): string | null {
   for (let k = items.length - 1; k >= 0; k--) {
     const i = items[k]!
-    if (i.kind === 'user' && i.status !== 'pending') return p<'user'>(i).text
+    if (i.kind === 'user' && !unsent(i)) return p<'user'>(i).text
   }
   return null
 }
@@ -342,7 +350,8 @@ export function transcript(items: readonly PromptItem[], max = 60_000): string {
   const plain = (text: string) =>
     text.length <= max ? text : `${text.slice(0, Math.max(0, max - 32))}\n[... truncated]`
   for (const i of items) {
-    if (i.kind === 'user' && i.status !== 'pending') lines.push(plain(`User: ${p<'user'>(i).text}`))
+    // 从没运行过的消息（排队或已作废）不进摘要：作废的意图不能借压缩复活。
+    if (i.kind === 'user' && !unsent(i)) lines.push(plain(`User: ${p<'user'>(i).text}`))
     else if (i.kind === 'assistant' && i.status === 'done')
       lines.push(plain(`Assistant: ${p<'assistant'>(i).text}`))
     else if (i.kind === 'tool_call') lines.push(`Tool used: ${p<'tool_call'>(i).title}`)

@@ -34,6 +34,10 @@ import {
   type AgentThreadQuery,
   agentThreadQuery,
   agentThreadRead,
+  agentRewindPreviewQuery,
+  agentRewindPreviewVo,
+  type AgentThreadRewind,
+  agentThreadRewind,
   type AgentThreadUpdate,
   agentThreadUpdate,
   agentThreadVo,
@@ -214,11 +218,39 @@ export class AgentThreadController {
   @ActionLog({ domain: 'agent.thread', verb: 'withdraw' })
   @ApiOperation({
     summary:
-      'Remove the latest turn and its items (409 while it runs); writes it already made are not undone',
+      'Rewind to the first message of the latest turn (409 while it runs); writes it already made are not undone',
   })
   @ApiEnvelope()
   revert(@Param('id', ParseIntPipe) id: number) {
     return this.threads.revert(me(), id)
+  }
+
+  @Get(':id/rewind-preview')
+  @ApiOperation({
+    summary:
+      'The writes a rewind to the user message seq leaves in place (done or of unknown outcome, subagents included); no arguments',
+  })
+  @ApiEnvelope(agentRewindPreviewVo)
+  rewindPreview(
+    @Param('id', ParseIntPipe) id: number,
+    @Query({ schema: agentRewindPreviewQuery }) { seq }: { seq: number },
+  ) {
+    return this.threads.rewindPreview(me(), id, seq)
+  }
+
+  @Post(':id/rewind')
+  @HttpCode(200)
+  @ActionLog({ domain: 'agent.thread', verb: 'withdraw' })
+  @ApiOperation({
+    summary:
+      'Remove the own user message seq and everything after it in place (409 while a turn runs, for hidden threads, or when lastSeq is behind); writes stay',
+  })
+  @ApiEnvelope()
+  rewind(
+    @Param('id', ParseIntPipe) id: number,
+    @Body({ schema: agentThreadRewind }) dto: AgentThreadRewind,
+  ) {
+    return this.threads.rewind(me(), id, dto.seq, dto.lastSeq)
   }
 
   @Get(':id/export')

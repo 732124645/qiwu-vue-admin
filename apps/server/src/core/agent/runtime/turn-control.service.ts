@@ -6,6 +6,7 @@ import {
   type AgentApprovalDecide,
   type AgentItemPayloads,
   type AgentAttachment,
+  type AgentCancelVo,
   type AgentMessageSend,
   type AgentPlanDecide,
   type AgentPlanProposal,
@@ -96,8 +97,10 @@ export class TurnControlService implements TurnControl {
 
   /**
    * 发一条消息：没有进行中的轮次就开新一轮并入队（急停时拒绝，本人同时运行的轮次有上限）；有就按
-   * `mode` 追加到当前轮（下一步起模型就能看到）或排队到下一轮。本轮正停在审批卡上时，发消息等于“拒绝并
-   * 附这条说明”（见 {@link rejectWaiting}）。会话的第一轮开始时，本人的其他临时会话被删掉（“开始新对话”）。
+   * `mode` 插话到当前轮（当前这个工具调用之后模型就能看到，同一步里还没执行、要问人或会写入的调用按这句话
+   * 拒绝，见 TurnRunner.closePlanned）或排队到下一轮。本轮正停在审批卡上时，插话等于“拒绝并附这条说明”
+   * （见 {@link rejectWaiting}），排队则只排队、卡片照旧等人。会话的第一轮开始时，本人的其他临时会话被删掉
+   * （“开始新对话”）。
    */
   async send(p: Principal, threadId: number, msg: AgentMessageSend): Promise<{ turnId: number }> {
     // 进入其他租户的平台人员不经智能体操作那个租户：轮次以会话所有人的身份在会话的租户里执行
@@ -155,13 +158,18 @@ export class TurnControlService implements TurnControl {
         const turns = w.m.getRepository(AgentTurn)
         const active = await turns.findOne({ where: { threadId, status: ACTIVE_TURN } })
         if (active) {
-          const rejected = await this.rejectWaiting(w, p, thread, active, msg.text)
+          // 排队的消息只等下一轮，不替本人处理正在等的卡片
+          const rejected =
+            msg.mode === 'queue' ? null : await this.rejectWaiting(w, p, thread, active, msg.text)
+          // 插话也记下技能：回退后回填输入框时原样带回（运行时只按每轮第一条消息加载技能）
+          const steer = {
+            text: msg.text,
+            ...(msg.skill && { skill: msg.skill }),
+            ...files,
+            mode: 'steer' as const,
+          }
           if (rejected) {
-            const item = await w.append(threadId, Number(active.id), 'user', {
-              text: msg.text,
-              ...files,
-              mode: 'steer',
-            })
+            const item = await w.append(threadId, Number(active.id), 'user', steer)
             const res = await record(item, Number(active.id), false, false)
             return { ...res, resume: rejected === 'resume' }
           }
@@ -174,12 +182,7 @@ export class TurnControlService implements TurnControl {
               { text: msg.text, ...(msg.skill && { skill: msg.skill }), ...files, mode: 'queue' },
               'pending',
             )
-          else
-            item = await w.append(threadId, Number(active.id), 'user', {
-              text: msg.text,
-              ...files,
-              mode: 'steer',
-            })
+          else item = await w.append(threadId, Number(active.id), 'user', steer)
           return record(item, Number(active.id), false, false)
         }
         // 上限：并发数是软限制（两个同时到的请求都可能通过），够用；续跑与排队的开始在 TurnQueue 里按用户串行
@@ -220,11 +223,11 @@ export class TurnControlService implements TurnControl {
   }
 
   /**
-   * 本轮停在审批卡上时用户又发了消息（追加或排队都一样）：把这一轮所有待定的审批卡——包括须本人逐次确认
-   * 的——记为本人拒绝，备注就是这条消息；同一步里还没轮到出卡、要问人的调用（它们是在这句纠正之前计划的）也
-   * 各记一张已拒绝的卡，不再一张张弹出来。调用方再把消息并入本轮。模型看到每个写入都被拒绝与这条消息，
-   * 按新的说法继续。批量任务开的会话照旧（卡片由批量确认处理），没有待定审批卡时什么也不做
-   * （null）。还有待回答的提问时不替用户作答，等它答完再续跑（`rejected`），否则立即续跑（`resume`）。
+   * 本轮停在审批卡上时用户插了话：按 TurnRunner.closePlanned（运行中插话共用的规则）把待定的卡片记为本人
+   * 拒绝、备注就是这条消息，同一步里还没出卡、要问人的调用也各记一张已拒绝的卡，不再一张张弹出来；调用方再
+   * 把消息并入本轮。模型看到每个写入都被拒绝与这条消息，按新的说法继续。批量任务开的会话照旧（卡片由批量
+   * 确认处理），没有待定审批卡或方案卡时什么也不做（null）。还有待回答的提问时不替用户作答，等它答完再续跑
+   * （`rejected`），否则立即续跑（`resume`）。
    */
   private async rejectWaiting(
     w: ItemWriter,
@@ -235,73 +238,12 @@ export class TurnControlService implements TurnControl {
   ): Promise<'resume' | 'rejected' | null> {
     if (turn.status !== 'waiting' || thread.batchId !== null) return null
     const items = w.m.getRepository(AgentItem)
-    const cards = await items.findBy({ turnId: turn.id, kind: 'approval', status: 'pending' })
+    const cards = await items.existsBy({ turnId: turn.id, kind: 'approval', status: 'pending' })
     const proposals = (
       await items.findBy({ turnId: turn.id, kind: 'question', status: 'pending' })
-    ).filter((q) => (q.payload as QuestionPayload).proposal)
-    if (!cards.length && !proposals.length) return null
-    // 等方案卡时发消息等于“继续完善”并以这条消息为意见：模式不变，消息由调用方并入本轮
-    for (const q of proposals)
-      await w.update(
-        q,
-        {
-          status: 'answered',
-          payload: {
-            ...(q.payload as QuestionPayload),
-            choice: {
-              decision: 'refine',
-              decidedBy: p.userId,
-              decidedAt: new Date().toISOString(),
-              feedback: text.slice(0, 2000),
-            },
-          },
-        },
-        'pending',
-      )
-    const decision = {
-      decision: 'reject' as const,
-      decidedBy: p.userId,
-      decidedAt: new Date().toISOString(),
-      note: text.slice(0, 500),
-    }
-    for (const c of cards)
-      await w.update(
-        c,
-        {
-          status: 'rejected',
-          payload: { ...(c.payload as AgentItemPayloads['approval']), ...decision },
-        },
-        'pending',
-      )
-    // 同一步里还没处理到、会停下问人的调用（写入，或 root 设成 ask 的读取）：没有结果、也还没有审批卡的
-    // （只有当前这一步会有未处理的调用）
-    const handled = new Set(
-      (await items.find({ where: { turnId: turn.id, kind: In(['approval', 'tool_result']) } })).map(
-        (i) => (i.payload as { callId?: string }).callId,
-      ),
-    )
-    const later = await items.find({
-      where: { turnId: turn.id, kind: 'tool_call', status: 'pending' },
-      order: { seq: 'ASC' },
-    })
-    for (const c of later) {
-      const call = c.payload as AgentItemPayloads['tool_call']
-      if (handled.has(call.callId) || (await this.runner.runsWithoutAsking(call))) continue
-      await w.append(
-        Number(thread.id),
-        Number(turn.id),
-        'approval',
-        {
-          callId: call.callId,
-          tool: call.tool,
-          title: call.title,
-          args: call.args,
-          sources: [],
-          ...decision,
-        },
-        'rejected',
-      )
-    }
+    ).some((q) => (q.payload as QuestionPayload).proposal)
+    if (!cards && !proposals) return null
+    await this.runner.closePlanned(w, p, turn, text)
     const asking = await items.existsBy({ turnId: turn.id, kind: 'question', status: 'pending' })
     return asking ? 'rejected' : 'resume'
   }
@@ -355,19 +297,50 @@ export class TurnControlService implements TurnControl {
     return files.map((f) => f.meta)
   }
 
-  /** 中断进行中的轮次：状态置为 cancelled（运行中的模型流随后被中止），未决的审批与提问作废。 */
-  async cancel(p: Principal, threadId: number): Promise<void> {
-    const ended = await this.store.tx(async (w) => {
-      await this.own(w, p, threadId)
+  /**
+   * 本人停止：进行中的轮次置为 cancelled（运行中的模型流随后被中止），未决的审批与提问作废；本会话还在排队的
+   * 消息一并撤下（软删）并原样返回，由页面放回输入框。停止就是停下来，排队的消息不会接着开始；自动化、急停与
+   * 核对闸门等其他停止途径不经这里，排队消息照旧。自动化、子智能体与批量的隐藏会话只中断轮次、不撤排队消息：
+   * 它们的消息是分派的任务，撤掉会让运行或批次永远停在未结束。
+   */
+  async cancel(p: Principal, threadId: number): Promise<AgentCancelVo> {
+    const { ended, queued } = await this.store.tx(async (w) => {
+      const thread = await this.own(w, p, threadId)
+      const items = w.m.getRepository(AgentItem)
+      const ordinary =
+        thread.automationRunId === null && thread.parentThreadId === null && thread.batchId === null
+      const waiting = ordinary
+        ? await items.find({
+            where: { threadId, kind: 'user', turnId: IsNull(), status: 'pending' },
+            order: { seq: 'ASC' },
+          })
+        : []
+      if (waiting.length) await items.softDelete({ id: In(waiting.map((i) => i.id)) })
+      const queued = waiting.map((i) => {
+        const u = i.payload as AgentItemPayloads['user']
+        return {
+          text: u.text,
+          ...(u.skill && { skill: u.skill }),
+          attachments: (u.attachments ?? []).map(({ fileId, name, mime, size }) => ({
+            fileId,
+            name,
+            mime,
+            size,
+          })),
+        }
+      })
       const turn = await w.m
         .getRepository(AgentTurn)
         .findOne({ where: { threadId, status: ACTIVE_TURN } })
-      if (!turn) return false
+      if (!turn) return { ended: false, queued }
       await w.patchTurn(turn, { status: 'cancelled', endedAt: new Date() })
       await this.runner.expireOpen(w.m, turn, (i, s) => w.update(i, { status: s }))
-      return true
+      return { ended: true, queued }
     })
+    // 普通会话的排队消息已撤下：这里只让出名额（补开本人其他会话等名额的轮次），本会话不会开出新的一轮；
+    // 隐藏会话保留了分派的消息，照常开出下一条
     if (ended) await this.queue.startNext(threadId, p.userId)
+    return { queued }
   }
 
   /**

@@ -17,7 +17,8 @@
         "params": "使用规则与额度",
         "prompts": "提示词模板",
         "instructions": "说明",
-        "diagnostics": "诊断"
+        "diagnostics": "诊断",
+        "restrictions": "工具限制"
       },
       "scope": {
         "platform": "平台",
@@ -142,7 +143,8 @@
         },
         "sources": {
           "local": "本系统",
-          "web": "联网"
+          "web": "联网",
+          "mcp": "外部 MCP"
         }
       },
       "param": {
@@ -350,6 +352,15 @@
         "view": "查看",
         "unpriced": "以下模型未配置费率：{models}。未计价的调用不计入积分额度。",
         "setPricing": "去配置费率"
+      },
+      "restriction": {
+        "note": "本租户可以在平台策略之上把工具收紧为“仅人工确认”或“停用”，不能放宽：实际生效的是平台与本租户中更严的一方。这里的限制只作用于站内智能助手，不影响通过个人访问令牌接入的 MCP 客户端。",
+        "platform": "平台策略",
+        "tenant": "本租户限制",
+        "effective": "实际生效",
+        "none": "不限制",
+        "filter": "按标题或工具名筛选",
+        "set": "设置 {name} 的本租户限制"
       }
     }
   }

@@ -21,14 +21,21 @@ import { agentCreditAmount, agentModelPricing, agentTokenUsage } from './agent-b
  * - `DELETE /api/agent/threads/:id/allowed-tools/:tool` → `AgentThreadVo` (the tool, URL-encoded, asks again
  *   in this thread; see `allowedTools`)
  * - `GET /api/agent/threads/:id/items?afterSeq=<n>` → `AgentThreadDetailVo`
- * - `POST /api/agent/threads/:id/messages` `agentMessageSend` → `AgentTurnVo` (while a turn runs the text is
- *   queued after its current step and the running turn is returned)
- * - `POST /api/agent/threads/:id/cancel` → null; `POST /api/agent/threads/:id/compact` → null
+ * - `POST /api/agent/threads/:id/messages` `agentMessageSend` → `AgentTurnVo` (while a turn runs, `steer`
+ *   reaches it after the current tool call and closes the calls of that step that would still ask or write;
+ *   `queue` waits for the next turn without touching waiting cards; the running turn is returned)
+ * - `POST /api/agent/threads/:id/cancel` → `AgentCancelVo` (stops the turn and withdraws the queued messages,
+ *   returned so the page can put them back in the composer); `POST /api/agent/threads/:id/compact` → null
  * - `POST /api/agent/threads/:id/read` `agentThreadRead` → null (marks items up to `seq` read);
  *   `POST /api/agent/threads/read-all` → null (every own thread read)
- * - `POST /api/agent/threads/:id/revert` → null (removes the latest turn and its items; writes it made stay)
+ * - `GET /api/agent/threads/:id/rewind-preview?seq=<n>` → `AgentRewindPreviewVo` (the writes a rewind to the
+ *   user message `seq` would leave in place: done or of unknown outcome, subagents' included)
+ * - `POST /api/agent/threads/:id/rewind` `agentThreadRewind` → null (removes the user message `seq` and
+ *   everything after it in place; 409 while a turn runs, for hidden threads, or when `lastSeq` is behind)
+ * - `POST /api/agent/threads/:id/revert` → null (rewinds to the first message of the latest turn; writes stay)
  * - `GET /api/agent/threads/:id/export` → `{ name, text }` (Markdown)
- * - `GET /api/agent/threads/:id/status` → `AgentStatusVo` (context use, this turn's and today's usage, limits)
+ * - `GET /api/agent/threads/:id/status` → `AgentStatusVo` (mode, context use, this turn's and today's usage,
+ *   limits, the tools still allowed for the thread, which tools ask and which are unavailable, and why)
  * - `POST /api/agent/threads/:id/share` → `{ token }`; `DELETE /api/agent/threads/:id/share` → null;
  *   `GET /api/agent/shared/:token` → `AgentThreadDetailVo` (same tenant only, read-only; tool results are
  *   shown only when the viewer may call that tool)
@@ -69,6 +76,11 @@ import { agentCreditAmount, agentModelPricing, agentTokenUsage } from './agent-b
  *   ; `GET /api/agent/platform-skills/:id/export` → `{ name, text }`; `POST /api/agent/platform-skills/import`
  *   `agentSkillImport` (scope ignored) → `AgentSkillVo`
  * Usage (`agent.usage.browse`): `GET /api/agent/usage?<agentUsageQuery>` → `AgentUsageRowVo[]`.
+ * Tenant tool restrictions (`agent.restriction.browse` / `agent.restriction.modify`, open to tenant
+ * administrators; a tenant only tightens the platform policy, the stricter one applies):
+ * - `GET /api/agent/tool-restrictions` → `AgentToolRestrictionVo[]`
+ * - `PUT /api/agent/tool-restrictions/:name` `agentToolRestrictionUpdate` → `AgentToolRestrictionVo` (404 for
+ *   an unknown tool; an external tool is named `mcp:<id>`)
  */
 
 export const agentPerms = {
@@ -82,6 +94,7 @@ export const agentPerms = {
   },
   instruction: { modify: 'agent.instruction.modify' },
   setting: { browse: 'agent.setting.browse', modify: 'agent.setting.modify' },
+  restriction: { browse: 'agent.restriction.browse', modify: 'agent.restriction.modify' },
   usage: { browse: 'agent.usage.browse' },
 } as const
 
@@ -108,6 +121,26 @@ export const AGENT_INSTRUCTIONS_PARAM = 'agent.instructions'
  */
 export const AGENT_TOOL_POLICIES = ['auto', 'ask', 'human', 'deny'] as const
 export type AgentToolPolicy = (typeof AGENT_TOOL_POLICIES)[number]
+
+/** What a tenant may tighten a tool to (it never loosens the platform policy; the stricter one applies). */
+export const AGENT_TOOL_RESTRICTIONS = ['human', 'deny'] as const
+export type AgentToolRestrictionPolicy = (typeof AGENT_TOOL_RESTRICTIONS)[number]
+
+/**
+ * Why a call waits for the owner: the owner confirms it personally each time (`personal`), the tenant set it
+ * to `human` (`tenant`), the platform did (`human`, also the default of high-risk writes), a read tool set to
+ * `ask` (`read`), a write that needs a confirmation (`ask`).
+ */
+export const AGENT_ASK_REASONS = ['personal', 'tenant', 'human', 'read', 'ask'] as const
+export type AgentAskReason = (typeof AGENT_ASK_REASONS)[number]
+
+/**
+ * Why a tool is not offered to the agent: the platform denied or switched it off (`policy`), the tenant did
+ * (`tenant`), the skill's or profile's tool list leaves it out (`list`), the thread is read-only or in plan
+ * mode (`mode`), the owner lacks its permission (`permission`).
+ */
+export const AGENT_BLOCK_REASONS = ['policy', 'tenant', 'list', 'mode', 'permission'] as const
+export type AgentBlockReason = (typeof AGENT_BLOCK_REASONS)[number]
 
 /**
  * The thread's mode: `read_only` offers only read tools; `plan` too, and the agent ends with a plan card
@@ -294,6 +327,25 @@ export const agentThreadFork = z.object({
   clientDraftId: z.uuid().optional(),
 })
 export const agentThreadRead = z.object({ seq: z.number().int().min(0) })
+/** `seq`: the own user message to rewind to; `lastSeq`: the last item the page has seen (stale guard) */
+export const agentThreadRewind = z.object({
+  seq: z.number().int().min(0),
+  lastSeq: z.number().int().min(0),
+})
+export type AgentThreadRewind = z.infer<typeof agentThreadRewind>
+export const agentRewindPreviewQuery = z.object({ seq: z.coerce.number().int().min(0) })
+/** A write a rewind leaves in place: it ran (`done`) or its outcome is unknown; arguments never included. */
+export const agentRewindPreviewVo = z.object({
+  writes: z.array(
+    z.object({
+      seq: z.number().int(),
+      tool: z.string(),
+      title: z.string(),
+      outcome: z.enum(['done', 'unknown']),
+    }),
+  ),
+})
+export type AgentRewindPreviewVo = z.infer<typeof agentRewindPreviewVo>
 /** `route`: the page the chat was opened from, for starters that fit it */
 export const agentOptionsQuery = z.object({ route: z.string().max(200).optional() })
 
@@ -305,7 +357,10 @@ export const agentMessageSend = z
     skill: z.string().regex(AGENT_SKILL_NAME).optional(),
     /** files already uploaded to the storage module (the caller must be able to read them) */
     fileIds: z.array(z.number().int().positive()).max(10).optional(),
-    /** while a turn runs: `steer` (default) joins it after the current step, `queue` waits for the next turn */
+    /**
+     * while a turn runs: `steer` (default) joins it after the current tool call (its not yet started calls that
+     * would ask or write are rejected with the text as the note), `queue` waits for the next turn
+     */
     mode: z.enum(['steer', 'queue']).default('steer'),
   })
   .register(fieldDomains, { domain: 'agent.message' })
@@ -375,6 +430,24 @@ export interface AgentAttachment {
   mime: string
   size: number
 }
+export const agentAttachmentVo = z.object({
+  fileId: z.number().int(),
+  name: z.string(),
+  mime: z.string(),
+  size: z.number().int(),
+})
+
+/** What a stop withdrew from the queue: the page puts it back in the composer; nothing of it starts. */
+export const agentCancelVo = z.object({
+  queued: z.array(
+    z.object({
+      text: z.string(),
+      skill: z.string().optional(),
+      attachments: z.array(agentAttachmentVo),
+    }),
+  ),
+})
+export type AgentCancelVo = z.infer<typeof agentCancelVo>
 
 /** A web source the agent read this turn (listed on approval cards). */
 export const agentSource = z.object({ title: z.string(), url: z.string() })
@@ -465,13 +538,15 @@ export interface AgentItemPayloads {
     }
     /**
      * the thread is in the auto-review mode but this call waits for the owner without a review, and why:
-     * the tool's policy is `human` (`policy`; `read` for a read tool set to `ask`, which is never reviewed), it needs the owner's own confirmation each time (`personal`),
+     * the tool's policy is `human` (`policy`; `tenant` when the tenant set it; `read` for a read tool set to `ask`, which is never reviewed), it needs the owner's own confirmation each time (`personal`),
      * the thread is read-only or in plan mode (`mode`), the agent is paused (`paused`), or no review model is
      * set (`no_model`)
      */
-    unreviewed?: 'policy' | 'read' | 'personal' | 'mode' | 'paused' | 'no_model'
-    /** why the agent cannot do it, when a permission or the thread's mode blocks the tool (recovery hint) */
-    blocked?: { reason: 'permission' | 'mode' | 'policy'; perm?: string }
+    unreviewed?: 'policy' | 'tenant' | 'read' | 'personal' | 'mode' | 'paused' | 'no_model'
+    /** why the card waits for a person at all (every mode); see `AGENT_ASK_REASONS` */
+    why?: AgentAskReason
+    /** why the agent cannot do it (recovery hint); see `AGENT_BLOCK_REASONS` */
+    blocked?: { reason: AgentBlockReason; perm?: string }
   }
   /**
    * the agent (built-in `ask.user`) or an external MCP server (elicitation) asks the owner; the turn waits
@@ -592,7 +667,8 @@ export interface AgentThreadDetailVo {
 
 /**
  * `agent:event` payload, to the thread owner's sockets only: an item was added or changed (full item), text
- * was streamed into an assistant item (`delta` appended to its text), or the turn's status changed.
+ * was streamed into an assistant item (`delta` appended to its text), the turn's status changed, or the
+ * thread was rewound (`rewound`: items from `fromSeq` on are gone; reload the thread).
  */
 export type AgentEvent =
   | { threadId: number; type: 'item'; item: AgentItemVo }
@@ -606,6 +682,7 @@ export type AgentEvent =
       offset?: number
     }
   | { threadId: number; type: 'turn'; turn: AgentTurnVo }
+  | { threadId: number; type: 'rewound'; fromSeq: number }
 
 // ---- skills & instructions ----
 
@@ -870,6 +947,27 @@ export type AgentMyToolVo = z.infer<typeof agentMyToolVo>
 /** Switches a built-in tool on or off for the agent (this system's other tools: the MCP tool page). */
 export const agentToolEnabledUpdate = z.object({ enabled: z.boolean() })
 
+/**
+ * A tool as the tenant restriction page lists it: every tool the platform offers (this system's tools enabled
+ * and not denied, the enabled external MCP tools, named `mcp:<id>`), its platform policy, the tenant's
+ * restriction (null: none) and the policy that applies (the stricter one).
+ */
+export const agentToolRestrictionVo = z.object({
+  name: z.string(),
+  title: z.string(),
+  kind: z.enum(MCP_TOOL_KINDS),
+  origin: z.enum(['local', 'web', 'builtin', 'mcp']),
+  platformPolicy: z.enum(AGENT_TOOL_POLICIES),
+  tenantPolicy: z.enum(AGENT_TOOL_RESTRICTIONS).nullable(),
+  effective: z.enum(AGENT_TOOL_POLICIES),
+})
+export type AgentToolRestrictionVo = z.infer<typeof agentToolRestrictionVo>
+
+/** null removes the tenant's restriction; a tenant only tightens (`human` or `deny`), anything else is 400. */
+export const agentToolRestrictionUpdate = z.object({
+  policy: z.enum(AGENT_TOOL_RESTRICTIONS).nullable(),
+})
+
 export const agentToolPolicyUpdate = z.object({
   /**
    * null: back to the default (read `auto`, write `ask`, a high-risk write `human`); a read tool takes only
@@ -933,9 +1031,30 @@ export type AgentUsageEntryVo = z.infer<typeof agentUsageEntryVo>
 export const agentStatusVo = z.object({
   threadId: z.number().int(),
   model: z.string().nullable(),
-  /** tokens the next model call would send, and the model's window */
+  mode: z.enum(AGENT_APPROVAL_MODES),
+  /** the profile the thread runs with (null: none, or no longer usable) */
+  profile: z.object({ id: z.number().int(), name: z.string() }).nullable(),
+  /** estimated tokens the next model call would send, and the model's window */
   contextUsed: z.number().int(),
   contextWindow: z.number().int(),
+  /**
+   * prompt tokens the provider reported for the conversation's latest model step (background calls such as
+   * memory extraction or review do not count; null: none or unreported)
+   */
+  contextReported: z.number().int().nullable(),
+  /** the tools allowed for the thread that the current policy still lets run without asking */
+  allowedTools: z.array(z.string()),
+  /** the credit limit of one turn (null: unlimited) */
+  turnLimit: agentCreditAmount.nullable(),
+  /** the tools the next turn offers that wait for a person and why, and the tools it does not offer and why */
+  tools: z.object({
+    asks: z.array(
+      z.object({ name: z.string(), title: z.string(), why: z.enum(AGENT_ASK_REASONS) }),
+    ),
+    unavailable: z.array(
+      z.object({ name: z.string(), title: z.string(), reason: z.enum(AGENT_BLOCK_REASONS) }),
+    ),
+  }),
   turn: agentTurnVo.nullable(),
   today: z.object({
     userTokens: z.number().int().nullable(),

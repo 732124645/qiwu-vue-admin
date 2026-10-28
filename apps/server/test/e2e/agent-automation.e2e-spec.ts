@@ -899,6 +899,40 @@ describe('write modes', () => {
     expect(ok.body.data.stalePreApproved).toEqual([])
   })
 
+  it('a tenant restriction ends a pre-approval, and taking it away again does not revive it', async () => {
+    const u = await user([...RUNNER])
+    const a = await created(u.token, {
+      writeMode: 'pre_approved',
+      preApproved: [W],
+      currentPassword: TENANT_PASSWORD,
+      prompt: `Fix it #call:${W}`,
+    })
+    const listed = async () =>
+      (await http().get(URL).set(bearer(u.token))).body.data.find(
+        (x: { id: number }) => x.id === a.id,
+      ) as { preApproved: string[]; stalePreApproved: string[] }
+    const offered = async () =>
+      (
+        (await http().get('/api/agent/automation-tools').set(bearer(u.token))).body.data as {
+          name: string
+        }[]
+      ).map((t) => t.name)
+    expect((await listed()).preApproved).toEqual([W])
+    await addRow(app, 1, 'agent_tool_restriction', { tool: W, policy: 'human' })
+    try {
+      expect(await offered()).not.toContain(W)
+      expect(await listed()).toMatchObject({ preApproved: [], stalePreApproved: [W] })
+      await ds.query(
+        'UPDATE agent_tool_restriction SET deleted_at = NOW(3) WHERE tenant_id = 1 AND tool = ?',
+        [W],
+      )
+      expect(await offered()).toContain(W)
+      expect(await listed()).toMatchObject({ preApproved: [], stalePreApproved: [W] })
+    } finally {
+      await ds.query('DELETE FROM agent_tool_restriction WHERE tenant_id = 1 AND tool = ?', [W])
+    }
+  })
+
   it("another reviewer's pre_approved verdict counts only when the automation's own pre-approval confirms it", async () => {
     const a = await created(owner.token, {
       writeMode: 'pre_approved',

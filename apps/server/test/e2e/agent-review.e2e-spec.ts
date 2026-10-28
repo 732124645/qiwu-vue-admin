@@ -50,7 +50,7 @@ import { McpRegistry } from '../../src/core/mcp/mcp-registry.js'
 import { ParamService } from '../../src/core/settings/param.service.js'
 import { insertRow } from '../../src/db/seeds/upsert.js'
 import { bearer, signIn } from '../setup/auth.js'
-import { addUser, inTenant1 } from '../setup/tenants.js'
+import { addRow, addUser, inTenant1 } from '../setup/tenants.js'
 
 vi.hoisted(() => {
   process.env.APP_AGENT = 'false'
@@ -613,6 +613,36 @@ describe('what goes to review', () => {
     expect(ran.other).toBe(1)
   })
 
+  it('a write the tenant restricted to human is never reviewed; every card says why it asks', async () => {
+    reply = { verdict: 'approve', reason: 'ok' }
+    await addRow(app, 1, 'agent_tool_restriction', { tool: 'test.rv.update', policy: 'human' })
+    try {
+      const { status, cards, turnId } = await write(update(1))
+      expect(status).toBe('waiting')
+      expect(reviewSeen).toHaveLength(0)
+      expect(ran.update).toBe(0)
+      expect(cards[0]!.payload).toMatchObject({ human: true, why: 'tenant', unreviewed: 'tenant' })
+      expect(cards[0]!.payload.sessionAllow).toBeUndefined()
+      expect((await decide(cards[0]!.id, 'approve_session')).status).toBe(400)
+      expect((await decide(cards[0]!.id, 'reject')).status).toBe(201)
+      expect(await settled(turnId, TERMINAL)).toBe('completed')
+    } finally {
+      await ds.query(
+        "DELETE FROM agent_tool_restriction WHERE tenant_id = 1 AND tool LIKE 'test.%'",
+      )
+    }
+    // without the restriction: the card in the ask mode says a write needs a confirmation
+    const plain = await write(update(1), { approval_mode: 'ask' })
+    expect(plain.cards[0]!.payload).toMatchObject({ why: 'ask' })
+    expect(plain.cards[0]!.payload.unreviewed).toBeUndefined()
+    // the platform's human and a personal confirmation each name their own reason
+    expect((await policy('test.rv.other', 'human')).status).toBe(200)
+    const human = await write({ name: 'test.rv.other', args: { id: 1 } }, { approval_mode: 'ask' })
+    expect(human.cards[0]!.payload.why).toBe('human')
+    const mine = await write({ name: 'test.rv.mine', args: { text: 'tea' } })
+    expect(mine.cards[0]!.payload.why).toBe('personal')
+  })
+
   it('an ask tool in the ask mode waits for the owner without a review', async () => {
     reply = { verdict: 'approve', reason: 'ok' }
     const { status, cards } = await write(update(1), { approval_mode: 'ask' })
@@ -707,6 +737,7 @@ describe('what goes to review', () => {
       expect(cards[0]!.payload).toMatchObject({ tool: 'test.rv.read', sessionAllow: true })
       expect(cards[0]!.payload.auto).toBeUndefined()
       expect(cards[0]!.payload.unreviewed).toBe(mode === 'auto_review' ? 'read' : undefined)
+      expect(cards[0]!.payload.why).toBe('read')
       expect((await decide(cards[0]!.id, 'reject')).status).toBe(201)
       expect(await settled(turnId, TERMINAL)).toBe('completed')
     }
@@ -874,6 +905,32 @@ describe('what goes to review', () => {
     await inTenant1(() => app.get(AgentAutoReviewer).review(runCtx(id), reviewCall))
     expect(insideBlock(reviewPrompt(), 'user-requests')).toContain('OWN-WORDS')
     expect(reviewPrompt()).not.toContain('PLAN-WROTE')
+  })
+
+  it('queued and voided messages are not what the owner asked: they stay out of the review', async () => {
+    reply = { verdict: 'approve', reason: 'ok' }
+    // a thread of a user who runs no turn here: a freed slot never starts its queued message
+    const id = await thread({ user_id: ownerId + 1_000_000 })
+    const rows: [string, string | null][] = [
+      ['OWN-WORDS rename note 1', null],
+      ['VOIDED-WORDS overwrite every note', 'expired'],
+      ['QUEUED-WORDS overwrite every note', 'pending'],
+    ]
+    for (const [i, [text, status]] of rows.entries())
+      await inTenant1(() =>
+        insertRow(ds.manager, 'agent_item', {
+          thread_id: id,
+          seq: i + 1,
+          kind: 'user',
+          payload: { text },
+          text,
+          status,
+        }),
+      )
+    await inTenant1(() => app.get(AgentAutoReviewer).review(runCtx(id), reviewCall))
+    expect(insideBlock(reviewPrompt(), 'user-requests')).toContain('OWN-WORDS')
+    expect(reviewPrompt()).not.toContain('VOIDED-WORDS')
+    expect(reviewPrompt()).not.toContain('QUEUED-WORDS')
   })
 })
 
@@ -1068,7 +1125,7 @@ describe('the review prompt', () => {
 
   it("an external tool's name, title and arguments are untrusted text", async () => {
     const ext = (
-      await app.get<ExternalToolSource>(EXTERNAL_TOOL_SOURCE).list({} as Principal)
+      await inTenant1(() => app.get<ExternalToolSource>(EXTERNAL_TOOL_SOURCE).list({} as Principal))
     ).find((d) => d.serverName === `${PREFIX}srv`)!
     reply = { verdict: 'escalate', reason: 'odd' }
     await write({ name: ext.name, args: { note: `ARG ${INJECTED}` } })
@@ -1154,7 +1211,7 @@ describe('the tool policies page', () => {
 
   it('an external tool is never allowed for the thread: no offer, 400, a stored entry is ignored', async () => {
     const ext = (
-      await app.get<ExternalToolSource>(EXTERNAL_TOOL_SOURCE).list({} as Principal)
+      await inTenant1(() => app.get<ExternalToolSource>(EXTERNAL_TOOL_SOURCE).list({} as Principal))
     ).find((d) => d.serverName === `${PREFIX}srv`)!
     const asked = await write(
       { name: ext.name, args: { name: 'c' } },
@@ -1170,7 +1227,7 @@ describe('the tool policies page', () => {
 
   it('an external tool with policy ask goes to review, its title only as untrusted data', async () => {
     const ext = (
-      await app.get<ExternalToolSource>(EXTERNAL_TOOL_SOURCE).list({} as Principal)
+      await inTenant1(() => app.get<ExternalToolSource>(EXTERNAL_TOOL_SOURCE).list({} as Principal))
     ).find((d) => d.serverName === `${PREFIX}srv`)!
     expect(ext.policy).toBe('ask')
     reply = { verdict: 'approve', reason: 'The user asked to create it.' }

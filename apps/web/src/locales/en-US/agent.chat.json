@@ -103,11 +103,21 @@
         "blocked": {
           "permission": "You lack the permission for this ({perm}). Ask an administrator to grant it, then try again.",
           "mode": "The conversation is read only or in plan mode and cannot change data; switch to \"Ask every time\" or \"Auto review\" and ask again.",
-          "policy": "The platform does not allow the assistant to use this tool."
+          "policy": "The platform does not allow the assistant to use this tool.",
+          "tenant": "Your tenant does not allow the assistant to use this tool.",
+          "list": "The tool list of the current skill or profile leaves this tool out."
         },
         "noteKeys": "Enter rejects · Esc goes back",
         "back": "Back",
-        "allowedBySession": "Ran because it is allowed for this conversation"
+        "allowedBySession": "Ran because it is allowed for this conversation",
+        "whyTitle": "Why you are asked:",
+        "why": {
+          "personal": "You confirm this action in person every time.",
+          "tenant": "Your tenant administrator set this tool to \"People only\".",
+          "human": "The platform set this tool to \"People only\" (the default for high-risk actions).",
+          "read": "An administrator set this read tool to ask every time.",
+          "ask": "This call changes data and needs a confirmation first."
+        }
       },
       "question": {
         "title": "The assistant has a few questions",
@@ -133,30 +143,32 @@
       "composer": {
         "label": "Message",
         "placeholder": "Type a message, / for commands",
-        "queuePlaceholder": "This turn is still running; a message sent now follows its current step",
+        "queuePlaceholder": "A turn is running: Enter adds this to it after the current tool step",
         "suggestions": "Suggestions",
         "model": "Model",
         "reasoning": "Reasoning",
         "approvalMode": "Mode",
         "stop": "Stop",
+        "stopButton": "the Stop button",
         "send": "Send",
         "queue": "Queue for next turn",
-        "queueHint": "A turn is running: what you send now is handled after its current step.",
+        "queueHint": "A turn is running: Enter adds your message to it after the current tool step; “Queue for next turn” waits until it ends; {stop} stops it and keeps your draft.",
         "noVision": "This model cannot read images: remove the image attachments or pick a model that can.",
         "promptPlaceholder": "Type to filter prompt templates; Enter inserts, Esc cancels",
         "attach": "Attachments",
         "prompts": "Prompt templates",
         "fast": "Fast",
         "context": "Context {percent}%",
-        "sendMode": "Sending while running",
-        "steer": "Add to this turn",
         "historyPlaceholder": "Type to search your sent messages, Enter fills in, Esc cancels",
         "reasoningDefault": "Model default: {value}",
         "contextEstimate": "Context estimate {percent}%",
         "queueExpired": "Queued message expired and was not automatically executed",
-        "keys": "Enter sends · Shift+Enter new line · Shift+Tab switches mode · $ skill · {'@'} mention · / command · Ctrl+R searches sent messages",
+        "keys": "Enter sends (adds to a running turn) · {queue} queues for the next turn · Shift+Enter new line · Shift+Tab switches mode · $ skill · {'@'} mention · / command · Ctrl+R searches sent messages",
+        "keysNoQueue": "Enter sends (adds to a running turn) · Shift+Enter new line · Shift+Tab switches mode · $ skill · {'@'} mention · / command · Ctrl+R searches sent messages",
         "modeNow": "Mode: {mode}",
-        "rejectHint": "Sending rejects the pending actions and tells the assistant this message"
+        "rejectHint": "Enter rejects the pending actions and tells the assistant this message",
+        "waitingHint": "This turn waits for you: Enter rejects the pending actions and tells the assistant your message; “Queue for next turn” only queues and the cards keep waiting; {stop} stops the whole turn and the open cards expire.",
+        "restoredQueued": "Stopped; the queued messages ({n}) are back in the message box"
       },
       "reasoning": {
         "low": "Low",
@@ -207,15 +219,33 @@
         "unpricedHint": "Unpriced calls: {n}",
         "unreportedHint": "Calls without reported usage: {n}",
         "legacyHint": "Includes legacy records without usage details",
-        "unlimited": "Unlimited"
+        "unlimited": "Unlimited",
+        "mode": "Mode",
+        "model": "Model",
+        "profile": "Profile",
+        "contextReported": "Context (last step, reported)",
+        "contextEstimated": "Context (estimated)",
+        "turnLimit": "Credit limit per turn",
+        "allowed": "Allowed in this conversation",
+        "allowedValue": "{n}: {names}",
+        "allowedNone": "None",
+        "asks": "Tools that ask you ({n})",
+        "unavailable": "Unavailable tools ({n})",
+        "unavailableWhy": {
+          "policy": "switched off by the platform",
+          "tenant": "switched off by your tenant",
+          "list": "not in the skill's or profile's tool list",
+          "mode": "the mode does not change data",
+          "permission": "you lack its permission"
+        }
       },
       "action": {
         "copy": "Copy",
         "copied": "Copied",
         "copyFailed": "Copy failed; select the text and copy it yourself",
-        "edit": "Edit and resend",
-        "editing": "Editing the last message: sending forks a new conversation",
-        "more": "More actions"
+        "edit": "Edit from here",
+        "more": "More actions",
+        "regenerate": "Regenerate"
       },
       "feedback": {
         "up": "Helpful",
@@ -236,9 +266,26 @@
         "manual": "Earlier messages were summarized"
       },
       "revert": {
-        "title": "Revert last turn",
-        "action": "Revert",
-        "confirm": "Revert the last question and answer? Changes the assistant already made in that turn stay."
+        "title": "Revert last turn"
+      },
+      "rewind": {
+        "confirm": {
+          "edit": "This message and everything after it are removed from this conversation; its text, attachments and skill go back into the message box to edit and send again.",
+          "regenerate": "The last turn is removed from this conversation and the same message is sent again.",
+          "revert": "The last question and its answer are removed from this conversation."
+        },
+        "continue": {
+          "edit": "Remove and edit",
+          "regenerate": "Regenerate",
+          "revert": "Revert"
+        },
+        "writes": "These writes are not undone:",
+        "outcome": {
+          "done": "done",
+          "unknown": "outcome unknown"
+        },
+        "notUndone": "Saved memories, mode changes and credits already used are not undone either.",
+        "stale": "This conversation changed in another window; it was reloaded, please try again."
       },
       "export": "Export Markdown",
       "share": {
@@ -290,13 +337,15 @@
       "shortcut": {
         "title": "Keyboard shortcuts",
         "press": "Press the new keys…",
+        "unset": "Not set",
         "reset": "Restore defaults",
-        "stopHint": "Stop works in the empty message box while a turn runs; the others anywhere on this page. Saved in this browser only.",
+        "stopHint": "Stop and Queue for next turn work in the message box while a turn runs (stopping keeps your draft); the others anywhere on this page. Saved in this browser only.",
         "action": {
           "newChat": "New conversation",
           "focusComposer": "Focus the message box",
           "stop": "Stop the turn",
-          "togglePlan": "Toggle plan mode"
+          "togglePlan": "Toggle plan mode",
+          "queue": "Queue for next turn"
         },
         "conflict": {
           "reserved": "{key} is already used by the page",
@@ -408,6 +457,16 @@
         "expandList": "Expand the conversation list",
         "crumbs": "Location",
         "backToChat": "Back to the conversation"
+      },
+      "statusLine": {
+        "label": "Conversation status",
+        "context": "Context {percent}%",
+        "contextApprox": "Context ~{percent}%",
+        "turn": "Turn {credits} credits",
+        "turnOf": "Turn {credits} / {limit} credits",
+        "today": "Today {credits} credits",
+        "allowed": "{n} tools allowed",
+        "allowedHint": "See or revoke the tools allowed in this conversation"
       }
     }
   }

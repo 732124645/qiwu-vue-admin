@@ -2,6 +2,7 @@ import type { AGENT_MCP_AUTH_KINDS, AgentToolPolicy } from '@qiwu/shared'
 import { Column, Entity } from 'typeorm'
 import { BaseEntity } from '../../db/base.entity.js'
 import type { Sealed } from '../../crypto/secret-box.js'
+import { TenantColumn } from '../../db/tenant-filter.js'
 
 /** `agent_mcp_server`：外部 MCP 服务器（平台表）；鉴权信息加密存储、只写不读，返回内容一律不可信 */
 @Entity('agent_mcp_server')
@@ -77,4 +78,19 @@ export class AgentMcpTool extends BaseEntity {
   /** 审批策略（auto、ask、deny） */
   @Column({ type: 'varchar', length: 8, default: 'ask' })
   policy: AgentToolPolicy
+}
+
+/** `agent_tool_restriction`：租户对工具的收紧（只能收紧为仅人工确认或停用，生效值取平台与租户中更严的一方） */
+@Entity('agent_tool_restriction')
+export class AgentToolRestriction extends BaseEntity {
+  /** 工具名；外部 MCP 工具为 `mcp:<agent_mcp_tool.id>`（面向模型的名字不稳定） */
+  @Column({ length: 160 })
+  tool: string
+
+  /** 收紧后的策略 */
+  @Column({ length: 8 })
+  policy: 'human' | 'deny'
+
+  @TenantColumn()
+  tenantId: number
 }

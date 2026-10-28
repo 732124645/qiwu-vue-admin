@@ -7,7 +7,7 @@
 import { agentAutomationPerms, agentPerms } from '@qiwu/shared'
 import type { EntityManager } from 'typeorm'
 import { upsertTemplates } from '../messaging/templates.js'
-import { upsert } from '../upsert.js'
+import { findRow, upsert } from '../upsert.js'
 
 interface PageSeed {
   /** `agent-<page>`; the view is `platform/agent/<page>/index` */
@@ -18,7 +18,7 @@ interface PageSeed {
   actions: [perms: string, name: string][]
 }
 
-const { chat, batch, skill, instruction, setting, usage } = agentPerms
+const { chat, batch, skill, instruction, setting, usage, restriction } = agentPerms
 
 const PAGES: PageSeed[] = [
   {
@@ -39,6 +39,8 @@ const PAGES: PageSeed[] = [
       [skill.modify, 'menu.action.modify'],
       [skill.remove, 'menu.action.remove'],
       [instruction.modify, 'menu.action.instructionModify'],
+      [restriction.browse, 'menu.action.restrictionBrowse'],
+      [restriction.modify, 'menu.action.restrictionModify'],
     ],
   },
   {
@@ -105,13 +107,23 @@ export async function seedAgent(q: EntityManager): Promise<string[]> {
         sort_no: (i + 1) * 10,
       },
     )
-    for (const [j, [perms, name]] of p.actions.entries())
-      await upsert(
+    for (const [j, [perms, name]] of p.actions.entries()) {
+      const fresh = !(await findRow(q, 'iam_menu', { kind: 'action', perms }))
+      const actionId = await upsert(
         q,
         'iam_menu',
         { kind: 'action', perms },
         { parent_id: pageId, name, sort_no: (j + 1) * 10 },
       )
+      // 套餐按菜单 id 保存：新版本第一次建出的动作行补进已经含有这一页的套餐（只在新建时补一次，之后 root
+      // 从套餐里去掉的不会被再次加回）
+      if (fresh)
+        await q.query(
+          `INSERT IGNORE INTO iam_tenant_package_menus (package_id, menu_id)
+            SELECT package_id, ? FROM iam_tenant_package_menus WHERE menu_id = ? AND deleted_at IS NULL`,
+          [actionId, pageId],
+        )
+    }
     if (p.page === 'chat') chatId = pageId
   }
   // 批次审批页（visible 0，从示例客户列表的“让智能体补齐”打开，`?id=<批次>`）：批量执行的权限挂在它下面，

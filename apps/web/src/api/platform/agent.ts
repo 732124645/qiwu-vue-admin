@@ -1,5 +1,6 @@
 import type {
   AgentApprovalDecide,
+  AgentCancelVo,
   AgentDraftReceiptVo,
   AgentMessageReceiptVo,
   AgentFeedbackSave,
@@ -8,6 +9,7 @@ import type {
   AgentOptionsVo,
   AgentPlanDecide,
   AgentQuestionAnswer,
+  AgentRewindPreviewVo,
   AgentSkillVo,
   AgentStatusVo,
   AgentThreadCreate,
@@ -66,10 +68,11 @@ export const agentApi = {
       params: afterSeq == null ? undefined : { afterSeq },
       signal,
     }),
-  /** 发送消息；本轮还在运行时按 `mode` 追加到当前步骤后（steer）或排到下一轮（queue） */
+  /** 发送消息；本轮还在运行时按 `mode` 插话（当前工具步骤之后送达本轮，steer）或排到下一轮（queue） */
   send: (id: number, dto: Partial<AgentMessageSend> & { text: string }) =>
     api.post<AgentTurnVo>(`/agent/threads/${id}/messages`, dto),
-  cancel: (id: number) => api.post(`/agent/threads/${id}/cancel`),
+  /** 停止本轮；撤下的排队消息原样返回，页面放回输入框 */
+  cancel: (id: number) => api.post<AgentCancelVo | null>(`/agent/threads/${id}/cancel`),
   compact: (id: number) => api.post(`/agent/threads/${id}/compact`),
   /** 标记到第 `seq` 条为止已读 */
   read: (id: number, seq: number) => api.post(`/agent/threads/${id}/read`, { seq }),
@@ -77,8 +80,12 @@ export const agentApi = {
   readAll: () => api.post('/agent/threads/read-all'),
   /** 由模型根据会话写一个个人技能草稿（停用状态，待本人检查后启用） */
   skillFromThread: (id: number) => api.post<AgentSkillVo>(`/agent/skills/from-thread/${id}`, {}),
-  /** 撤回最后一轮及其条目（已执行的写入不回滚） */
-  revert: (id: number) => api.post(`/agent/threads/${id}/revert`),
+  /** 回退到用户消息 `seq` 会留下（不撤销）的写入：已执行或结果不明 */
+  rewindPreview: (id: number, seq: number) =>
+    api.get<AgentRewindPreviewVo>(`/agent/threads/${id}/rewind-preview`, { params: { seq } }),
+  /** 原地删除用户消息 `seq` 及其后的内容；`lastSeq` 是本页见过的最大序号，落后时服务器 409 */
+  rewind: (id: number, seq: number, lastSeq: number) =>
+    api.post(`/agent/threads/${id}/rewind`, { seq, lastSeq }),
   exportMarkdown: (id: number) =>
     api.get<{ name: string; text: string }>(`/agent/threads/${id}/export`),
   /** 上下文用量、本轮与今日用量和限额 */

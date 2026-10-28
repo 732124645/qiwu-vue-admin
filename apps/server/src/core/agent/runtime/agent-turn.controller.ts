@@ -4,6 +4,7 @@ import { InjectDataSource } from '@nestjs/typeorm'
 import {
   type AgentApprovalDecide,
   agentApprovalDecide,
+  agentCancelVo,
   type AgentMessageSend,
   agentMessageSend,
   agentPerms,
@@ -61,11 +62,15 @@ export class AgentTurnController {
   @Post('threads/:id/cancel')
   @RequirePerm(agentPerms.chat.use)
   @ActionLog({ domain: 'agent.thread', verb: 'cancel' })
-  @ApiOperation({ summary: 'Stop the running turn; its open approvals and questions expire' })
-  @ApiEnvelope()
-  async cancel(@Param('id', ParseIntPipe) id: number) {
-    await this.control.cancel(me(), id)
-    return null
+  // 撤下的排队消息原文随响应返回：日志里遮蔽
+  @Sensitive('text')
+  @ApiOperation({
+    summary:
+      'Stop the running turn (its open approvals and questions expire) and withdraw the queued messages; they are returned, never started',
+  })
+  @ApiEnvelope(agentCancelVo, 201)
+  cancel(@Param('id', ParseIntPipe) id: number) {
+    return this.control.cancel(me(), id)
   }
 
   @Post('threads/:id/compact')

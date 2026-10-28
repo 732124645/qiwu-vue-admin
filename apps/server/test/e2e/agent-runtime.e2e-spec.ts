@@ -62,7 +62,15 @@ let roleId = 0
 let tenant: PeopledTenant
 let tenantUser = ''
 let fake = new FakeChatModel([])
-const calls = { read: 0, update: [] as unknown[], secret: 0, purge: 0, archive: 0, peek: 0 }
+const calls = {
+  read: 0,
+  update: [] as unknown[],
+  secret: 0,
+  purge: 0,
+  archive: 0,
+  peek: 0,
+  slow: 0,
+}
 const threads: number[] = []
 
 const http = () => request(app.getHttpServer())
@@ -255,6 +263,22 @@ beforeAll(async () => {
       return { ok: true }
     },
   )
+  // a plain read that takes a while: a message sent meanwhile arrives while it runs
+  reg.add(
+    {
+      name: 'test.note.slow',
+      title: 'Read a note slowly',
+      description: 'Reads a note slowly',
+      perm: null,
+      kind: 'read',
+      input: z.object({ id: z.number().int() }),
+    },
+    async () => {
+      calls.slow++
+      await sleep(1200)
+      return { ok: true }
+    },
+  )
   await ds.query("INSERT INTO cfg_mcp_tool (name, enabled, agent_policy) VALUES (?, 1, 'ask')", [
     'test.note.peek',
   ])
@@ -366,6 +390,7 @@ beforeEach(() => {
   calls.purge = 0
   calls.archive = 0
   calls.peek = 0
+  calls.slow = 0
 })
 
 describe('approvals', () => {
@@ -527,35 +552,176 @@ describe('approvals', () => {
     expect(await settled(t2, TERMINAL)).toBe('completed')
   })
 
-  it.each(['steer', 'queue'])(
-    'a %s message while a card waits rejects it with the text as the note and the turn goes on',
-    async (mode) => {
-      script({ toolCalls: [update(12, 'A')] }, { text: 'Left it alone.' })
+  it('a steer message while a card waits rejects it with the text as the note and the turn goes on', async () => {
+    script({ toolCalls: [update(12, 'A')] }, { text: 'Left it alone.' })
+    const id = await thread()
+    const turnId = await start(id, 'rename note 12')
+    expect(await settled(turnId)).toBe('waiting')
+    expect((await items(id, 'approval')).filter((a) => a.status === 'pending')).toHaveLength(1)
+    const res = await send(id, 'do not touch them', owner, { mode: 'steer' })
+    expect([res.status, res.body.data.id]).toEqual([201, turnId])
+    expect(await settled(turnId, TERMINAL)).toBe('completed')
+    expect(calls.update).toEqual([])
+    const cards = await items(id, 'approval')
+    expect(cards.map((c) => [c.status, c.payload.decision, c.payload.note])).toEqual([
+      ['rejected', 'reject', 'do not touch them'],
+    ])
+    expect(cards[0]!.payload.decidedBy).toBe(ownerId)
+    // the model got the rejection with the note and the message itself, in the same turn
+    expect(toolMsgs(1).map((m) => m.content)).toEqual([
+      expect.stringMatching(/rejected.*do not touch them/),
+    ])
+    expect(
+      fake.requests[1]!.messages.some(
+        (m) => m.role === 'user' && m.content === 'do not touch them',
+      ),
+    ).toBe(true)
+    expect(await items(id, 'user')).toHaveLength(2)
+  })
+
+  it('a queued message while a card waits only queues: the card keeps waiting for the owner', async () => {
+    script({ toolCalls: [update(12, 'A')] })
+    const id = await thread()
+    const turnId = await start(id, 'rename note 12')
+    expect(await settled(turnId)).toBe('waiting')
+    const res = await send(id, 'then read note 1', owner, { mode: 'queue' })
+    expect([res.status, res.body.data.id]).toEqual([201, turnId])
+    await sleep(300)
+    expect((await turnOf(turnId)).status).toBe('waiting')
+    expect((await items(id, 'approval')).map((a) => [a.status, a.payload.note])).toEqual([
+      ['pending', undefined],
+    ])
+    expect((await items(id, 'user')).at(-1)).toMatchObject({
+      turn_id: null,
+      status: 'pending',
+      payload: { text: 'then read note 1', mode: 'queue' },
+    })
+    expect(fake.requests).toHaveLength(1)
+    await http().post(`/api/agent/threads/${id}/cancel`).set(bearer(owner)).expect(201)
+  })
+
+  it('a steer while a call runs closes the later calls of that step that would ask or write; a plain read still runs', async () => {
+    script(
+      {
+        toolCalls: [
+          { name: 'test.note.slow', args: { id: 12 } },
+          update(12, 'A'),
+          { name: 'test.note.peek', args: { id: 12 } },
+          { name: 'test.note.read', args: { id: 12 } },
+          { name: 'test.note.archive', args: { id: 13 } },
+        ],
+      },
+      { text: 'Left them alone.' },
+    )
+    const id = await thread()
+    const turnId = await start(id, 'rename note 12 and archive note 13')
+    await vi.waitFor(() => expect(calls.slow).toBe(1), { timeout: 10_000, interval: 20 })
+    const res = await send(id, 'stop, change nothing')
+    expect([res.status, res.body.data.id]).toEqual([201, turnId])
+    // no card ever waits: the turn goes on with the message after the running call
+    expect(await settled(turnId, TERMINAL)).toBe('completed')
+    expect(calls).toMatchObject({ update: [], archive: 0, peek: 0, read: 1, slow: 1 })
+    const cards = await items(id, 'approval')
+    expect(
+      cards.map((c) => [c.payload.tool, c.status, c.payload.decision, c.payload.note]),
+    ).toEqual([
+      ['test.note.update', 'rejected', 'reject', 'stop, change nothing'],
+      ['test.note.peek', 'rejected', 'reject', 'stop, change nothing'],
+      ['test.note.archive', 'rejected', 'reject', 'stop, change nothing'],
+    ])
+    expect(cards.every((c) => c.payload.decidedBy === ownerId)).toBe(true)
+    const told = toolMsgs(1).map((m) => m.content)
+    expect(told).toHaveLength(5)
+    expect(told.filter((t) => /rejected.*stop, change nothing/.test(t))).toHaveLength(3)
+    // the message follows the results of that step
+    expect(fake.requests[1]!.messages.at(-1)).toMatchObject({
+      role: 'user',
+      content: 'stop, change nothing',
+    })
+  })
+
+  it('a steer sent while the model streams a step with tool calls comes after that step’s results', async () => {
+    script(
+      { toolCalls: [{ name: 'test.note.read', args: { id: 1 } }], delayMs: 1500 },
+      { text: 'done' },
+    )
+    const id = await thread()
+    const turnId = await start(id, 'A')
+    await sleep(300)
+    await send(id, 'B').expect(201)
+    expect(await settled(turnId, TERMINAL)).toBe('completed')
+    expect(calls.read).toBe(1)
+    expect(
+      fake.requests[1]!.messages.slice(1).map((m) =>
+        m.role === 'user' ? `user:${String(m.content)}` : m.role,
+      ),
+    ).toEqual(['user:A', 'assistant', 'tool', 'user:B'])
+  })
+
+  it('stop withdraws the queued messages and returns them for the composer; none of them starts', async () => {
+    script({ text: 'first', delayMs: 1500 }, { text: 'never' })
+    const id = await thread()
+    const turnId = await start(id, 'A')
+    await sleep(300)
+    await send(id, 'C', owner, { mode: 'queue', skill: 'note-skill' }).expect(201)
+    await send(id, 'D', owner, { mode: 'queue' }).expect(201)
+    const res = await http().post(`/api/agent/threads/${id}/cancel`).set(bearer(owner)).expect(201)
+    expect(res.body.data).toEqual({
+      queued: [
+        { text: 'C', skill: 'note-skill', attachments: [] },
+        { text: 'D', attachments: [] },
+      ],
+    })
+    expect(await settled(turnId, TERMINAL)).toBe('cancelled')
+    await sleep(500)
+    expect((await items(id, 'user')).map((u) => u.payload.text)).toEqual(['A'])
+    expect(await ds.query('SELECT id FROM agent_turn WHERE thread_id = ?', [id])).toHaveLength(1)
+    expect(fake.requests).toHaveLength(1)
+  })
+
+  it('stop leaves the queued messages of automation, subagent and batch threads: they are dispatched work', async () => {
+    const store = app.get(ItemStore)
+    for (const hide of [
+      'UPDATE agent_thread SET automation_run_id = 1 WHERE id = ?',
+      'UPDATE agent_thread SET parent_thread_id = 1 WHERE id = ?',
+      'UPDATE agent_thread SET batch_id = 1 WHERE id = ?',
+    ]) {
       const id = await thread()
-      const turnId = await start(id, 'rename note 12')
-      expect(await settled(turnId)).toBe('waiting')
-      expect((await items(id, 'approval')).filter((a) => a.status === 'pending')).toHaveLength(1)
-      const res = await send(id, 'do not touch them', owner, { mode })
-      expect([res.status, res.body.data.id]).toEqual([201, turnId])
-      expect(await settled(turnId, TERMINAL)).toBe('completed')
-      expect(calls.update).toEqual([])
-      const cards = await items(id, 'approval')
-      expect(cards.map((c) => [c.status, c.payload.decision, c.payload.note])).toEqual([
-        ['rejected', 'reject', 'do not touch them'],
+      await inTenant1(() => store.append(id, null, 'user', { text: 'dispatched' }, 'pending'))
+      await ds.query(hide, [id])
+      const res = await http()
+        .post(`/api/agent/threads/${id}/cancel`)
+        .set(bearer(owner))
+        .expect(201)
+      expect(res.body.data).toEqual({ queued: [] })
+      expect((await items(id, 'user')).map((u) => [u.payload.text, u.status])).toEqual([
+        ['dispatched', 'pending'],
       ])
-      expect(cards[0]!.payload.decidedBy).toBe(ownerId)
-      // the model got the rejection with the note and the message itself, in the same turn
-      expect(toolMsgs(1).map((m) => m.content)).toEqual([
-        expect.stringMatching(/rejected.*do not touch them/),
-      ])
-      expect(
-        fake.requests[1]!.messages.some(
-          (m) => m.role === 'user' && m.content === 'do not touch them',
-        ),
-      ).toBe(true)
-      expect(await items(id, 'user')).toHaveLength(2)
-    },
-  )
+    }
+  })
+
+  it('stop during a batch turn starts the queued message next: it is dispatched work, not a draft', async () => {
+    script({ text: 'first', delayMs: 1500 })
+    const id = await thread()
+    const turnId = await start(id, 'A')
+    await sleep(300)
+    await send(id, 'C', owner, { mode: 'queue' }).expect(201)
+    await ds.query('UPDATE agent_thread SET batch_id = 1 WHERE id = ?', [id])
+    const res = await http().post(`/api/agent/threads/${id}/cancel`).set(bearer(owner)).expect(201)
+    expect(res.body.data).toEqual({ queued: [] })
+    expect(await settled(turnId, TERMINAL)).toBe('cancelled')
+    const turns = await ds.query<{ id: number }[]>(
+      'SELECT id FROM agent_turn WHERE thread_id = ? ORDER BY id',
+      [id],
+    )
+    expect(turns).toHaveLength(2)
+    // the fixture batch has no batch row; only the opening of the next turn matters here
+    await settled(Number(turns[1]!.id), TERMINAL)
+    expect((await items(id, 'user')).map((u) => [u.payload.text, u.turn_id])).toEqual([
+      ['A', turnId],
+      ['C', Number(turns[1]!.id)],
+    ])
+  })
 
   it('a message while a card waits also rejects the later calls of that step that would ask; no more cards appear', async () => {
     const archive = { name: 'test.note.archive', args: { id: 13 } }
@@ -621,6 +787,20 @@ describe('approvals', () => {
     } finally {
       await ds.query("DELETE FROM cfg_mcp_tool WHERE name = 'test.note.update'")
     }
+  })
+
+  it('a steer sent before an allowed write is decided rejects it with the note; nothing is approved and the write never runs', async () => {
+    const { id, turnId } = await allowedThenSlow(28, 29)
+    await send(id, 'leave note 29').expect(201)
+    expect(await settled(turnId, TERMINAL)).toBe('completed')
+    expect(calls.update).toEqual([{ id: 28, title: 'A' }])
+    const cards = await items(id, 'approval')
+    expect(cards.map((c) => [c.status, c.payload.note])).toEqual([
+      ['approved', undefined],
+      ['rejected', 'leave note 29'],
+    ])
+    expect(cards[1]!.payload.allowedBy).toBeUndefined()
+    expect(cards[1]!.payload.decidedBy).toBe(ownerId)
   })
 
   it('an allowed write does not run after the thread switches to read-only during the turn', async () => {
@@ -825,16 +1005,231 @@ describe('what the agent is offered', () => {
   })
 
   it('$skill loads the skill up front and limits the tools to its list', async () => {
-    script({ text: 'ok' })
+    script({ toolCalls: [update(9, 'X')] }, { text: 'ok' })
     const id = await thread()
     expect(await settled(await start(id, 'check note 1', { skill: 'note-skill' }))).toBe(
       'completed',
     )
     expect(toolNames(0)).toContain('test.note.read')
     expect(toolNames(0)).not.toContain('test.note.update')
+    // a call of a tool outside the list is blocked for that reason
+    expect((await items(id, 'approval'))[0]!.payload.blocked).toEqual({ reason: 'list' })
+    expect(calls.update).toEqual([])
     expect(toolNames(0)).toEqual(expect.arrayContaining(['plan.update', 'ask.user', 'skill.load']))
     expect(fake.requests[0]!.messages[0]!.content).toContain(SKILL_BODY)
     expect((await send(id, 'again', owner, { skill: 'nope' })).status).toBe(404)
+  })
+})
+
+describe('tenant restrictions', () => {
+  const restrict = (tool: string, policy: 'human' | 'deny', tid = 1) =>
+    addRow(app, tid, 'agent_tool_restriction', { tool, policy })
+  afterEach(async () => {
+    await ds.query("DELETE FROM agent_tool_restriction WHERE tool LIKE 'test.%'")
+  })
+
+  it("a tenant's human asks with that reason and no allowance; its deny removes the tool and blocks by tenant; another tenant's rows change nothing", async () => {
+    await restrict('test.note.update', 'human')
+    await restrict('test.note.archive', 'deny')
+    await restrict('test.note.read', 'deny', tenant.id)
+    script(
+      { toolCalls: [update(40, 'A')] },
+      { toolCalls: [{ name: 'test.note.archive', args: { id: 40 } }] },
+      { text: 'done' },
+    )
+    const id = await thread()
+    const turnId = await start(id, 'rename and archive note 40')
+    expect(await settled(turnId)).toBe('waiting')
+    expect(toolNames(0)).toEqual(expect.arrayContaining(['test.note.update', 'test.note.read']))
+    expect(toolNames(0)).not.toContain('test.note.archive')
+    const [card] = await items(id, 'approval')
+    expect(card!.payload).toMatchObject({ human: true, why: 'tenant' })
+    expect(card!.payload.sessionAllow).toBeUndefined()
+    expect((await decide(card!.id, 'approve_session')).status).toBe(400)
+    await decide(card!.id, 'approve').expect(201)
+    expect(await settled(turnId, TERMINAL)).toBe('completed')
+    expect(calls).toMatchObject({ update: [{ id: 40, title: 'A' }], archive: 0 })
+    expect((await items(id, 'approval'))[1]!.payload.blocked).toEqual({ reason: 'tenant' })
+    expect((await turnOf(turnId)).status).toBe('completed')
+  })
+
+  it('a read tool the tenant set to human asks at every call; a message while it waits rejects the later read too', async () => {
+    await restrict('test.note.read', 'human')
+    const read = (n: number) => ({ name: 'test.note.read', args: { id: n } })
+    script({ toolCalls: [read(41), read(42)] }, { text: 'Left them.' })
+    const id = await thread()
+    const turnId = await start(id, 'read notes 41 and 42')
+    expect(await settled(turnId)).toBe('waiting')
+    const [card] = await items(id, 'approval')
+    expect(card!.payload).toMatchObject({ tool: 'test.note.read', human: true, why: 'tenant' })
+    expect(card!.payload.sessionAllow).toBeUndefined()
+    await send(id, 'do not read them').expect(201)
+    expect(await settled(turnId, TERMINAL)).toBe('completed')
+    // the second read would ask too, so it is rejected with the first instead of running
+    expect(calls.read).toBe(0)
+    expect((await items(id, 'approval')).map((c) => [c.payload.args, c.status])).toEqual([
+      [{ id: 41 }, 'rejected'],
+      [{ id: 42 }, 'rejected'],
+    ])
+  })
+
+  it('a restriction added during the turn holds at the next call of an allowed tool and when the turn resumes', async () => {
+    script(
+      { toolCalls: [update(44, 'A')] },
+      { toolCalls: [update(45, 'B')], delayMs: 1500 },
+      { text: 'done' },
+    )
+    const id = await thread()
+    const turnId = await start(id, 'rename notes 44 and 45')
+    expect(await settled(turnId)).toBe('waiting')
+    await decide((await items(id, 'approval'))[0]!.id, 'approve_session').expect(201)
+    await sleep(300)
+    await restrict('test.note.update', 'human')
+    expect(await settled(turnId)).toBe('waiting')
+    expect(calls.update).toEqual([{ id: 44, title: 'A' }])
+    const open = (await items(id, 'approval')).filter((a) => a.status === 'pending')
+    expect(open.map((a) => a.payload.args)).toEqual([{ id: 45, title: 'B' }])
+    // denied while the card waits: approving it no longer runs the write
+    await ds.query("DELETE FROM agent_tool_restriction WHERE tool LIKE 'test.%'")
+    await restrict('test.note.update', 'deny')
+    await decide(open[0]!.id, 'approve').expect(201)
+    expect(await settled(turnId, TERMINAL)).toBe('completed')
+    expect(calls.update).toHaveLength(1)
+    expect((await items(id, 'approval')).at(-1)!.payload.blocked).toEqual({ reason: 'tenant' })
+  })
+
+  it('a read tool that runs without asking: a deny added during the turn blocks its next call, a human makes it ask', async () => {
+    const read = (n: number) => ({ name: 'test.note.read', args: { id: n } })
+    script(
+      { toolCalls: [read(46)] },
+      { toolCalls: [read(47)], delayMs: 1500 },
+      { toolCalls: [read(48)], delayMs: 1500 },
+      { text: 'done' },
+    )
+    const id = await thread()
+    const turnId = await start(id, 'read notes 46 to 48')
+    await sleep(300)
+    expect(calls.read).toBe(1)
+    await restrict('test.note.read', 'deny')
+    for (const until = Date.now() + 5000; !(await items(id, 'approval')).length; await sleep(40))
+      if (Date.now() > until) throw new Error('the second read was not blocked')
+    expect((await items(id, 'approval')).map((a) => a.payload.blocked)).toEqual([
+      { reason: 'tenant' },
+    ])
+    await ds.query("DELETE FROM agent_tool_restriction WHERE tool LIKE 'test.%'")
+    await restrict('test.note.read', 'human')
+    expect(await settled(turnId)).toBe('waiting')
+    expect(calls.read).toBe(1)
+    const open = (await items(id, 'approval')).filter((a) => a.status === 'pending')
+    expect(open.map((a) => [a.payload.args, a.payload.why, a.payload.human])).toEqual([
+      [{ id: 48 }, 'tenant', true],
+    ])
+    expect(open[0]!.payload.sessionAllow).toBeUndefined()
+    await decide(open[0]!.id, 'reject').expect(201)
+    expect(await settled(turnId, TERMINAL)).toBe('completed')
+    expect(calls.read).toBe(1)
+  })
+
+  it('a read restricted right after its last check does not run once the owner has steered: it is rejected with the message', async () => {
+    const runner = app.get(TurnRunner) as unknown as {
+      policyNow(ctx: unknown, def: { name: string }): Promise<string>
+    }
+    const original = runner.policyNow.bind(runner)
+    let restricted = false
+    // the restriction lands between the read's last policy check and its execution
+    const spy = vi.spyOn(runner, 'policyNow').mockImplementation(async (ctx, def) => {
+      const now = await original(ctx, def)
+      if (def.name === 'test.note.read' && !restricted) {
+        restricted = true
+        await restrict('test.note.read', 'human')
+      }
+      return now
+    })
+    try {
+      script(
+        {
+          toolCalls: [
+            { name: 'test.note.slow', args: { id: 49 } },
+            { name: 'test.note.read', args: { id: 49 } },
+          ],
+        },
+        { text: 'Left it.' },
+      )
+      const id = await thread()
+      const turnId = await start(id, 'read note 49')
+      await vi.waitFor(() => expect(calls.slow).toBe(1), { timeout: 10_000, interval: 20 })
+      await send(id, 'do not read it').expect(201)
+      expect(await settled(turnId, TERMINAL)).toBe('completed')
+      expect(restricted).toBe(true)
+      expect(calls).toMatchObject({ slow: 1, read: 0 })
+      expect(
+        (await items(id, 'approval')).map((c) => [c.payload.tool, c.status, c.payload.note]),
+      ).toEqual([['test.note.read', 'rejected', 'do not read it']])
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('an external read the tenant restricts during the turn is closed by a steer; an unrestricted one still runs', async () => {
+    const ext = app.get<ExternalToolSource>(EXTERNAL_TOOL_SOURCE)
+    const tool = (name: string): ExternalToolDescriptor => ({
+      name,
+      title: name,
+      description: 'An external read',
+      parameters: { type: 'object', properties: {} },
+      policy: 'auto',
+      kind: 'read',
+      serverName: 'srv',
+    })
+    let tightened = false
+    const list = vi
+      .spyOn(ext, 'list')
+      .mockImplementation(async () => [
+        tightened
+          ? { ...tool('ext.srv.tight'), policy: 'human', restricted: 'human' }
+          : tool('ext.srv.tight'),
+        tool('ext.srv.open'),
+      ])
+    const ran: string[] = []
+    const call = vi.spyOn(ext, 'call').mockImplementation(async (_p, name) => {
+      ran.push(name)
+      return { ok: true, text: 'ok' }
+    })
+    try {
+      script(
+        {
+          toolCalls: [
+            { name: 'test.note.slow', args: { id: 50 } },
+            { name: 'ext.srv.tight' },
+            { name: 'ext.srv.open' },
+          ],
+        },
+        { text: 'Left it.' },
+      )
+      const id = await thread()
+      const turnId = await start(id, 'look both up')
+      await vi.waitFor(() => expect(calls.slow).toBe(1), { timeout: 10_000, interval: 20 })
+      tightened = true
+      await send(id, 'only the open one').expect(201)
+      expect(await settled(turnId, TERMINAL)).toBe('completed')
+      expect(ran).toEqual(['ext.srv.open'])
+      expect(
+        (await items(id, 'approval')).map((c) => [c.payload.tool, c.status, c.payload.note]),
+      ).toEqual([['ext.srv.tight', 'rejected', 'only the open one']])
+    } finally {
+      list.mockRestore()
+      call.mockRestore()
+    }
+  })
+})
+
+describe('status', () => {
+  it("reports the input tokens of the conversation's latest step", async () => {
+    script({ text: 'hi', usage: { usageReported: true, promptTokens: 77, completionTokens: 2 } })
+    const id = await thread()
+    expect(await settled(await start(id, 'hello'))).toBe('completed')
+    const res = await http().get(`/api/agent/threads/${id}/status`).set(bearer(owner)).expect(200)
+    expect(res.body.data.contextReported).toBe(77)
   })
 })
 
@@ -1218,9 +1613,14 @@ describe('resume, steer, queue', () => {
     const id = await thread()
     const turnId = await start(id, 'A')
     await sleep(300)
-    const steer = await send(id, 'B', owner, { mode: 'steer' })
+    const steer = await send(id, 'B', owner, { mode: 'steer', skill: 'note-skill' })
     const queued = await send(id, 'C', owner, { mode: 'queue' })
     expect([steer.body.data.id, queued.body.data.id]).toEqual([turnId, turnId])
+    // the steer keeps its skill, so a rewind can put it back into the composer as it was
+    expect((await items(id, 'user')).find((u) => u.payload.text === 'B')!.payload).toMatchObject({
+      mode: 'steer',
+      skill: 'note-skill',
+    })
     expect(await settled(turnId, TERMINAL)).toBe('completed')
     // the queued message starts its own turn once this one has ended (asynchronously, after the slot frees)
     const next = await vi.waitFor(
@@ -1301,7 +1701,8 @@ describe('questions, plans, compaction, the answer', () => {
     expect((await items(id, 'assistant'))[0]!.payload).toEqual({
       text: 'Hello there',
       suggestions: ['Show note 1', 'Rename it'],
-      internal: { reasoning: 'thinking it over', reasoningModel: 'm1' },
+      // and the input tokens the provider reported for that step
+      internal: { reasoning: 'thinking it over', reasoningModel: 'm1', promptTokens: 10 },
     })
     const [t] = await ds.query<{ title: string }[]>('SELECT title FROM agent_thread WHERE id = ?', [
       id,
@@ -1354,6 +1755,34 @@ describe('questions, plans, compaction, the answer', () => {
     await http().post(`/api/agent/threads/${id}/compact`).set(bearer(owner)).expect(201)
     expect(fake.requests).toHaveLength(before)
     expect(await items(id, 'compaction')).toHaveLength(2)
+  })
+
+  it('a manual /compact drops its summary when a rewind lands while the model writes it', async () => {
+    script({ text: 'one' }, { text: 'two' })
+    const id = await thread()
+    expect(await settled(await start(id, 'first'), TERMINAL)).toBe('completed')
+    expect(await settled(await start(id, 'second'), TERMINAL)).toBe('completed')
+    const all = await items(id)
+    const anchor = all.find((i) => i.kind === 'user' && i.payload.text === 'second')!
+    script({ text: 'SUMMARY-STALE', delayMs: 1500 })
+    const compacting = http()
+      .post(`/api/agent/threads/${id}/compact`)
+      .set(bearer(owner))
+      .then((r) => r)
+    await vi.waitFor(() => expect(fake.requests).toHaveLength(1), { timeout: 5000, interval: 20 })
+    await http()
+      .post(`/api/agent/threads/${id}/rewind`)
+      .set(bearer(owner))
+      .send({ seq: anchor.seq, lastSeq: all.at(-1)!.seq })
+      .expect(200)
+    expect((await compacting).status).toBe(201)
+    // the summary may hold the removed messages: it is not kept
+    const [t] = await ds.query<{ summary: string | null; summary_seq: number }[]>(
+      'SELECT summary, summary_seq FROM agent_thread WHERE id = ?',
+      [id],
+    )
+    expect(t).toMatchObject({ summary: null, summary_seq: 0 })
+    expect(await items(id, 'compaction')).toEqual([])
   })
 
   it('compacts completed steps inside the first long turn, keeps its exact goal and does not replay tools', async () => {
@@ -1505,6 +1934,7 @@ describe('reasoning, recovery, slots and the turn clock', () => {
     expect(call!.payload.internal).toEqual({
       reasoning: 'think about note 1',
       reasoningModel: 'm1',
+      promptTokens: 10,
     })
   })
 

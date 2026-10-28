@@ -7,9 +7,12 @@ import {
   AGENT_LIMIT_PARAMS,
   AGENT_WEB_DOMAINS_PARAM,
   AGENT_WEB_MODE_PARAM,
+  type AgentAskReason,
+  type AgentBlockReason,
   type AgentItemPayloads,
   type AgentSource,
   type AgentToolPolicy,
+  type AgentToolRestrictionPolicy,
   agentPerms,
   DEFAULT_LOCALE,
   Err,
@@ -60,6 +63,7 @@ import {
   type AttachmentSource,
   EXTERNAL_TOOL_SOURCE,
   type ElicitHandler,
+  type ExternalToolDescriptor,
   type ExternalToolSource,
   INSTRUCTION_SOURCE,
   type InstructionSource,
@@ -83,7 +87,7 @@ import { ProviderRegistry, type ResolvedModel, usageTarget } from '../provider/p
 import { estimateInputTokens, estimatedUsage, estimateOutputTokens } from '../provider/usage.js'
 import { creditLimitReached } from './billing.js'
 import { parseReviewModel } from './auto-reviewer.js'
-import { AgentToolPolicies, effectivePolicy } from '../tools/tool-policy.js'
+import { AgentToolPolicies, type ToolPolicyLayers } from '../tools/tool-policy.js'
 import { TurnUrls } from '../web/turn-urls.js'
 import { WEB_TOOLS, WebTools, wrapUntrusted } from '../web/web-tools.js'
 import {
@@ -91,6 +95,7 @@ import {
   copiesSuggestion,
   type ItemInternal,
   ItemStore,
+  type ItemWriter,
   StaleItem,
   ThreadGone,
 } from './item-store.js'
@@ -199,11 +204,8 @@ interface RunCtx {
   lang: string
   model: ResolvedModel
   tools: Map<string, OfferedTool>
-  /** the tools the owner may reach before mode and policy (to tell why a call is blocked) */
-  usable: Set<string>
-  /** tools the platform switched off, and every system tool's effective policy */
-  disabled: Set<string>
-  policies: Map<string, AgentToolPolicy>
+  /** the known tools this run does not offer, and why (to tell why a call is blocked) */
+  unavailable: Map<string, ToolGap>
   servers: Map<string, string>
   readOnly: boolean
   skill: { name: string; body: string; tools: string[] | null } | null
@@ -240,8 +242,205 @@ function builtinPolicy(
 ): AgentToolPolicy {
   const row = switches.find((s) => s.name === meta.name)
   if (row && !row.enabled) return 'deny'
-  const policy = policies.get(meta.name) ?? effectivePolicy(meta.kind, row?.agentPolicy ?? null)
+  // 策略表（已叠加本租户的收紧）里没有的内置工具按停用：不能绕过租户层退回类型默认
+  const policy = policies.get(meta.name) ?? 'deny'
   return meta.humanOnly && policy !== 'deny' ? 'human' : policy
+}
+
+/** 一个已知工具这次不提供的原因（`permission` 时带缺的权限点）。 */
+export interface ToolGap {
+  title: string
+  reason: AgentBlockReason
+  perm?: string
+}
+
+/** 拼装一次运行的工具所需的输入（都已读好，拼装本身不查库、不写库、不连外部服务器）。 */
+export interface ToolSurfaceInput {
+  /** 全部本系统工具（说明缺权限、平台停用用） */
+  registry: readonly RegisteredTool[]
+  /** 发起人此刻能触达的本系统工具（平台启用、有权限点与套餐功能） */
+  usable: readonly RegisteredTool[]
+  switches: readonly Pick<McpToolSwitch, 'name' | 'enabled' | 'agentPolicy'>[]
+  /** 本系统工具的策略分层（平台、本租户、生效值） */
+  layers: ReadonlyMap<string, ToolPolicyLayers>
+  /** 联网工具：`agent.web.mode` 为 live；有没有搜索服务商 */
+  web: { live: boolean; searchable: boolean }
+  /** 平台提供的外部工具（含被本租户停用的，`policy` 为叠加后的值） */
+  external: readonly ExternalToolDescriptor[]
+  builtins: readonly { meta: AgentBuiltinToolMeta; parameters: Record<string, unknown> }[]
+  readOnly: boolean
+  /** `$技能` 与配置方案的工具清单（给了就只留清单里的） */
+  lists: readonly (readonly string[])[]
+}
+
+/** 一次运行提供的工具、内置工具的生效策略、外部工具的服务器名，以及没提供的已知工具与原因。 */
+export interface ToolSurface {
+  tools: Map<string, OfferedTool>
+  builtins: Map<string, AgentToolPolicy>
+  servers: Map<string, string>
+  unavailable: Map<string, ToolGap>
+}
+
+/**
+ * 一个要问人的工具为什么要问：须本人逐次确认（`personal`）、本租户设成仅人工确认（`tenant`）、平台设成
+ * human（`human`，含高风险写入的默认）、读取工具设成 ask（`read`）、写入需确认（`ask`）。
+ */
+export function askWhy(t: {
+  kind: McpToolKind
+  policy: AgentToolPolicy
+  personal?: boolean
+  tenant?: AgentToolRestrictionPolicy | null
+}): AgentAskReason {
+  if (t.personal) return 'personal'
+  if (t.tenant === 'human') return 'tenant'
+  if (t.policy === 'human') return 'human'
+  return t.kind === 'read' ? 'read' : 'ask'
+}
+
+/**
+ * 拼装一次运行提供给模型的工具（纯函数：运行循环与 /status 共用同一套规则）。本系统工具：发起人能触达的，
+ * 生效策略为 deny 的不提供，须本人逐次确认的除 deny 外一律按 human，只读与计划模式下去掉写入；联网工具：
+ * `agent.web.mode` 为 live（搜索还要有搜索服务商）；外部工具：策略来自来源（只读模式只留读取，读取的类型按平台策略）；`$技能`
+ * 或配置方案给了工具清单时只留清单里的；内置工具与本系统工具同样受平台开关与策略约束，写入类只读模式下
+ * 不提供、也须在清单里（只读的内置工具总在）。没提供的已知工具记下原因：平台停用或 deny（`policy`）、本租户
+ * 停用（`tenant`）、缺权限（`permission`）、会话模式（`mode`）、不在清单里（`list`）。
+ */
+export function assembleTools(input: ToolSurfaceInput): ToolSurface {
+  const { layers, readOnly } = input
+  // 只给要问人的工具记原因
+  const whyOf = (t: Parameters<typeof askWhy>[0]) => (t.policy === 'auto' ? {} : { why: askWhy(t) })
+  const tools = new Map<string, OfferedTool>()
+  const unavailable = new Map<string, ToolGap>()
+  const gap = (name: string, title: string, reason: AgentBlockReason, perm?: string | null) =>
+    unavailable.set(name, { title, reason, ...(perm && { perm }) })
+  // 生效为 deny 时是谁停的：平台层也是 deny 的算平台，否则是本租户收紧的
+  const denied = (l: ToolPolicyLayers | undefined): AgentBlockReason =>
+    l && l.platform !== 'deny' && l.tenant === 'deny' ? 'tenant' : 'policy'
+  const disabled = new Set(input.switches.filter((s) => !s.enabled).map((s) => s.name))
+  const usable = new Set(input.usable.map((t) => t.name))
+  for (const t of input.registry) {
+    if (!usable.has(t.name)) {
+      if (disabled.has(t.name)) gap(t.name, t.title, 'policy')
+      else gap(t.name, t.title, 'permission', t.perm)
+      continue
+    }
+    const l = layers.get(t.name)
+    // 策略表里没有的按 deny（不绕过租户层退回类型默认）
+    const configured = l?.policy ?? 'deny'
+    // 须本人逐次确认的工具：除 deny 外一律只能由人确认（不送审、不能本会话放行）
+    const policy = t.perCallConfirmation && configured !== 'deny' ? 'human' : configured
+    if (policy === 'deny') gap(t.name, t.title, denied(l))
+    else if (readOnly && t.kind === 'write') gap(t.name, t.title, 'mode')
+    else
+      tools.set(t.name, {
+        name: t.name,
+        title: t.title,
+        description: t.description,
+        parameters: t.inputSchema,
+        origin: 'local',
+        kind: t.kind,
+        policy,
+        preview: t.runPreview !== undefined,
+        ...(t.perCallConfirmation && { perCallConfirmation: true }),
+        ...whyOf({ ...t, policy, personal: t.perCallConfirmation, tenant: l?.tenant }),
+      })
+  }
+  for (const d of WEB_TOOLS) {
+    const l = layers.get(d.name)
+    const policy = l?.policy ?? 'deny'
+    if (policy === 'deny') {
+      gap(d.name, d.title, denied(l))
+      continue
+    }
+    if (!input.web.live || (d.name === 'web.search' && !input.web.searchable)) {
+      gap(d.name, d.title, 'policy')
+      continue
+    }
+    const { $schema: _, ...parameters } = z.toJSONSchema(d.input, { io: 'input' }) as Record<
+      string,
+      unknown
+    >
+    tools.set(d.name, {
+      name: d.name,
+      title: d.title,
+      description: d.description,
+      parameters,
+      origin: 'web',
+      kind: 'read',
+      policy,
+      preview: false,
+      ...whyOf({ kind: 'read', policy, tenant: l?.tenant }),
+    })
+  }
+  const servers = new Map<string, string>()
+  for (const d of input.external) {
+    if (d.policy === 'deny') {
+      // 平台停用或 deny 的外部工具不在来源里：这里的 deny 只能是本租户收紧的
+      gap(d.name, d.title, d.restricted === 'deny' ? 'tenant' : 'policy')
+      continue
+    }
+    const kind = d.kind ?? (d.policy === 'auto' ? 'read' : 'write')
+    if (readOnly && kind === 'write') {
+      gap(d.name, d.title, 'mode')
+      continue
+    }
+    servers.set(d.name, d.serverName)
+    tools.set(d.name, {
+      name: d.name,
+      title: d.title,
+      description: d.description,
+      parameters: d.parameters,
+      origin: 'mcp',
+      kind,
+      policy: d.policy,
+      preview: false,
+      ...whyOf({ kind, policy: d.policy, tenant: d.restricted }),
+    })
+  }
+  // `$技能` 与会话所用配置方案的工具清单同一条规则：给了清单就只留清单里的，两者都给时都要列着
+  const listed = (name: string) => input.lists.every((l) => l.includes(name))
+  for (const [name, t] of tools)
+    if (!listed(name)) {
+      tools.delete(name)
+      gap(name, t.title, 'list')
+    }
+  const builtins = new Map<string, AgentToolPolicy>()
+  const policies = new Map([...layers].map(([name, l]) => [name, l.policy]))
+  for (const b of input.builtins) {
+    const policy = builtinPolicy(b.meta, policies, input.switches)
+    builtins.set(b.meta.name, policy)
+    const l = layers.get(b.meta.name)
+    if (policy === 'deny') {
+      // 平台开关停用的算平台
+      gap(b.meta.name, b.meta.title, disabled.has(b.meta.name) ? 'policy' : denied(l))
+      continue
+    }
+    if (b.meta.kind === 'write' && readOnly) {
+      gap(b.meta.name, b.meta.title, 'mode')
+      continue
+    }
+    if (b.meta.kind === 'write' && !listed(b.meta.name)) {
+      gap(b.meta.name, b.meta.title, 'list')
+      continue
+    }
+    tools.set(b.meta.name, {
+      name: b.meta.name,
+      title: b.meta.title,
+      description: b.meta.description,
+      parameters: b.parameters,
+      origin: 'builtin',
+      kind: b.meta.kind,
+      policy,
+      preview: false,
+      ...whyOf({
+        kind: b.meta.kind,
+        policy,
+        personal: b.meta.humanOnly === true,
+        tenant: l?.tenant,
+      }),
+    })
+  }
+  return { tools, builtins, servers, unavailable }
 }
 
 /** 外部 MCP 工具在模型面前的名字前缀（`ext.<服务器>.<工具>`）。 */
@@ -593,10 +792,8 @@ export class TurnRunner {
   }
 
   /**
-   * 本次运行提供给模型的工具：本系统工具（发起人能触达的，按审批策略去掉 deny、只读与计划模式下去掉
-   * 写入）、联网工具（`agent.web.mode` 为 live；搜索还要配置了搜索服务商）、外部工具（策略来自来源，
-   * 只读模式只留管理员设为 auto 的）、内置工具；`$技能` 或配置方案给了工具清单时只留清单里的（只读的内置
-   * 工具总在）。
+   * 一次运行的设置与提供给模型的工具（规则见 {@link assembleTools}）：子智能体的会话总是只读（见
+   * keepForSubagent）。
    */
   private async context(
     turn: AgentTurn,
@@ -613,77 +810,7 @@ export class TurnRunner {
     )
     const items = await this.turnItems(turn)
     const first = items.find((i) => i.kind === 'user')
-    // 子智能体的会话总是只读（见 keepForSubagent）
     const child = thread.parentThreadId !== null
-    const readOnly = readOnlyMode(thread.approvalMode) || child
-    const switches = await this.ds.getRepository(McpToolSwitch).find()
-    const disabled = new Set(switches.filter((s) => !s.enabled).map((s) => s.name))
-    // 生效策略（写入工具即使被设成 auto 也需确认，读取工具只有 auto）；没有记录的按类型默认
-    const policies = await this.toolPolicies.policies()
-    const policyOf = (name: string, kind: McpToolKind) =>
-      policies.get(name) ?? effectivePolicy(kind, null)
-    const tools = new Map<string, OfferedTool>()
-    const usable = await this.host.list(p)
-    for (const t of usable) {
-      const configured = policyOf(t.name, t.kind)
-      // 须本人逐次确认的工具：除 deny 外一律只能由人确认（不送审、不能本会话放行）
-      const policy = t.perCallConfirmation && configured !== 'deny' ? 'human' : configured
-      if (policy === 'deny' || (readOnly && t.kind === 'write')) continue
-      tools.set(t.name, {
-        name: t.name,
-        title: t.title,
-        description: t.description,
-        parameters: t.inputSchema,
-        origin: 'local',
-        kind: t.kind,
-        policy,
-        preview: t.runPreview !== undefined,
-        ...(t.perCallConfirmation && { perCallConfirmation: true }),
-      })
-    }
-    if ((await this.params.get(AGENT_WEB_MODE_PARAM))?.trim() === 'live') {
-      const searchable = (await this.providers.resolveSearch()) !== null
-      for (const d of WEB_TOOLS) {
-        const policy = policyOf(d.name, 'read')
-        if (policy === 'deny' || (d.name === 'web.search' && !searchable)) continue
-        const { $schema: _, ...parameters } = z.toJSONSchema(d.input, { io: 'input' }) as Record<
-          string,
-          unknown
-        >
-        tools.set(d.name, {
-          name: d.name,
-          title: d.title,
-          description: d.description,
-          parameters,
-          origin: 'web',
-          kind: 'read',
-          policy,
-          preview: false,
-        })
-      }
-    }
-    const servers = new Map<string, string>()
-    for (const d of (await this.external?.list(p)) ?? []) {
-      if (d.policy === 'deny' || (readOnly && d.policy !== 'auto')) continue
-      servers.set(d.name, d.serverName)
-      tools.set(d.name, {
-        name: d.name,
-        title: d.title,
-        description: d.description,
-        parameters: d.parameters,
-        origin: 'mcp',
-        kind: d.policy === 'auto' ? 'read' : 'write',
-        policy: d.policy,
-        preview: false,
-      })
-    }
-    // `$技能` 与会话所用配置方案的工具清单同一条规则：给了清单就只留清单里的，两者都给时都要列着；方案已删
-    // 或本人已不能用时不限制（退回默认行为）
-    const profile =
-      thread.profileId === null ? null : await this.profiles?.find(p, Number(thread.profileId))
-    const lists = [skill?.tools, profile?.tools].filter((l): l is string[] => !!l)
-    const listed = (name: string) => lists.every((l) => l.includes(name))
-    for (const name of tools.keys()) if (!listed(name)) tools.delete(name)
     const lang = p.locale ?? DEFAULT_LOCALE
     const view: AgentRunContext = {
       principal: p,
@@ -692,25 +819,8 @@ export class TurnRunner {
       lang,
       signal,
     }
-    // 内置工具：与本系统工具同样受平台开关与策略约束（停用的、deny 的不提供）；写入类与其他写入工具一样
-    // 经审批，只读与计划模式下不提供，`$技能` 或配置方案给了工具清单时也须在清单里（只读的内置工具总在）
-    const builtins = new Map<string, AgentToolPolicy>()
-    for (const b of await this.ext.availableBuiltins(view)) {
-      const policy = builtinPolicy(b.meta, policies, switches)
-      builtins.set(b.meta.name, policy)
-      if (policy === 'deny') continue
-      if (b.meta.kind === 'write' && (readOnly || !listed(b.meta.name))) continue
-      tools.set(b.meta.name, {
-        name: b.meta.name,
-        title: b.meta.title,
-        description: b.meta.description,
-        parameters: b.parameters,
-        origin: 'builtin',
-        kind: b.meta.kind,
-        policy,
-        preview: false,
-      })
-    }
+    const { readOnly, surface } = await this.toolSurface(thread, p, skill, view)
+    const { tools, builtins, servers, unavailable } = surface
     if (child) keepForSubagent(tools, first ? pl<'user'>(first).internal?.tools : undefined)
     return {
       turn,
@@ -719,9 +829,7 @@ export class TurnRunner {
       lang,
       model,
       tools,
-      usable: new Set(usable.map((t) => t.name)),
-      disabled,
-      policies,
+      unavailable,
       servers,
       readOnly,
       skill,
@@ -734,6 +842,39 @@ export class TurnRunner {
       view,
       builtins,
     }
+  }
+
+  /**
+   * 会话此刻会提供哪些工具、为什么有的要问人、有的不提供：读好 {@link assembleTools} 的输入再拼装。只读库与
+   * 平台设置，不写库，也不连外部 MCP 服务器；须在会话所属租户里调用（策略叠加的是当前租户的收紧）。运行循环
+   * 与 /status 共用。方案已删或本人已不能用时不按方案的清单限制（退回默认行为）。
+   */
+  async toolSurface(
+    thread: AgentThread,
+    p: Principal,
+    skill: { tools: string[] | null } | null,
+    view: AgentRunContext,
+  ): Promise<{ readOnly: boolean; surface: ToolSurface }> {
+    const readOnly = readOnlyMode(thread.approvalMode) || thread.parentThreadId !== null
+    const profile =
+      thread.profileId === null ? null : await this.profiles?.find(p, Number(thread.profileId))
+    const live = (await this.params.get(AGENT_WEB_MODE_PARAM))?.trim() === 'live'
+    const surface = assembleTools({
+      registry: this.registry.list(),
+      usable: await this.host.list(p),
+      switches: await this.ds.getRepository(McpToolSwitch).find(),
+      layers: await this.toolPolicies.layers(),
+      web: { live, searchable: live && (await this.providers.resolveSearch()) !== null },
+      // 可用的外部工具，加上被本租户停用的（只用来说明原因）
+      external: [
+        ...((await this.external?.list(p)) ?? []),
+        ...((await this.external?.offered?.(p)) ?? []).filter((d) => d.policy === 'deny'),
+      ],
+      builtins: await this.ext.availableBuiltins(view),
+      readOnly,
+      lists: [skill?.tools, profile?.tools].filter((l): l is string[] => !!l),
+    })
+    return { readOnly, surface }
   }
 
   /** 本轮的条目，按顺序号。 */
@@ -1005,9 +1146,19 @@ export class TurnRunner {
       await this.store.update(reasoning, { payload: { text: thought }, status: 'done' })
     // 这一步的推理文字跟着这一步存（见 ItemInternal.reasoning）；被截断或过滤的回答在末尾注明
     // 推理文字只回给产出它的同一个模型（会话中途换了模型，别家的推理不该发过去）
-    const kept = thought
-      ? { reasoning: thought.slice(0, 100_000), reasoningModel: ctx.model.model.id }
-      : null
+    // 提供方报告的这一步输入 token 也跟着存：/status 据此给出主循环最近一步的上下文（记忆提炼、审查等
+    // 后台调用同样记在用量表里、带着会话 id，不能拿用量表的最新一行代替）
+    const prompt = usage?.usageReported ? usage.promptTokens : null
+    const kept: ItemInternal | null =
+      thought || typeof prompt === 'number'
+        ? {
+            ...(thought && {
+              reasoning: thought.slice(0, 100_000),
+              reasoningModel: ctx.model.model.id,
+            }),
+            ...(typeof prompt === 'number' && { promptTokens: prompt }),
+          }
+        : null
     const cutNote =
       finish === 'length' || finish === 'content_filter'
         ? String(this.i18n.translate(`agent.runtime.truncated.${finish}`, { lang: ctx.lang }))
@@ -1082,6 +1233,13 @@ export class TurnRunner {
           'pending',
         )
       }
+      // 模型流式输出期间本人插的话（这一步的请求里没有）挪到这些调用之后：模型看到的先后是“调用 → 结果 →
+      // 插话”，而不是读过插话之后仍发出了这些调用；它们随后按插话收起（见 steered）
+      const late = await w.m.getRepository(AgentItem).find({
+        where: { turnId: ctx.turn.id, kind: 'user', seq: MoreThan(ctx.sentSeq) },
+        order: { seq: 'ASC' },
+      })
+      for (const u of late) await w.move(u, turnId)
     })
     await this.progressed(turnId)
   }
@@ -1243,7 +1401,7 @@ export class TurnRunner {
       return this.finish(ctx, call, this.answerOutcome(question))
     }
     const approval = of('approval')
-    const def = ctx.tools.get(c.tool)
+    let def = ctx.tools.get(c.tool)
     if (approval) {
       if (approval.status === 'pending') return 'wait'
       if (approval.status !== 'approved')
@@ -1284,6 +1442,20 @@ export class TurnRunner {
           this.fail(Err.VALIDATION_FAILED, ctx.lang, z.prettifyError(parsed.error)),
         )
     }
+    // 运行开始时是 `auto` 的工具：按此刻的生效策略再核对一次（平台或本租户在运行中收紧的，下一次调用就生效）
+    if (def.policy === 'auto') {
+      const now = await this.policyNow(ctx, def)
+      if (now === 'deny')
+        return this.block(
+          ctx,
+          call,
+          (await this.restrictionNow(ctx, def)) === 'deny' ? 'tenant' : 'policy',
+        )
+      if (now !== 'auto') {
+        const tenant = await this.restrictionNow(ctx, def)
+        def = { ...def, policy: now, why: askWhy({ kind: def.kind, policy: now, tenant }) }
+      }
+    }
     // 只有 `auto` 直接执行；`ask` 与 `human` 先经人（`ask` 也可经本会话的放行或审批审查者）
     if (def.policy !== 'auto') {
       const preview =
@@ -1301,11 +1473,15 @@ export class TurnRunner {
         ...(sessionAllow && { sessionAllow: true }),
         // 只能由人逐次确认（human 策略、humanOnly 内置工具）：记在卡片上，批量“全部同意”据此留给人逐条看
         ...(def.policy === 'human' && { human: true as const }),
+        // 为什么要问人（每种模式都给，由页面翻译）
+        ...(def.why && { why: def.why }),
       }
       // 本人已在本会话放行这个工具：不再问人，也不送审；照样记一张已同意的卡片（写明是因为放行），对话里
       // 看得出它为什么没问就执行了
       if (sessionAllow && (await this.allowedNow(ctx, def))) {
-        await this.autoDecide(ctx, { ...card, allowedBy: 'session' })
+        // 本人此前插了话：这个调用已按插话拒绝，交给上面的已有审批分支收尾
+        if (!(await this.autoDecide(ctx, { ...card, allowedBy: 'session' })))
+          return this.resolveCall(ctx, call)
         ctx.signal.throwIfAborted()
         return this.execute(ctx, call, def, c.args)
       }
@@ -1332,19 +1508,20 @@ export class TurnRunner {
       }
       const v = await this.reviewed(ctx, def, card)
       if (v?.verdict === 'approve') {
-        await this.autoDecide(ctx, { ...card, auto: v })
+        // 审查期间（审查模型在锁外）本人插了话：放行不生效，按插话拒绝
+        if (!(await this.autoDecide(ctx, { ...card, auto: v }))) return this.resolveCall(ctx, call)
         // 记卡期间被中断（停止、急停、丢锁）：不再执行
         ctx.signal.throwIfAborted()
         return this.execute(ctx, call, def, c.args)
       }
       // 审查者驳回或拿不准：不替人做决定，卡片带上结论与理由停下等人（人仍可同意或拒绝）
       const unreviewed = v ? undefined : await this.unreviewed(ctx, def)
-      await this.pause(ctx, 'approval', {
+      const paused = await this.pause(ctx, 'approval', {
         ...card,
         ...(v && { auto: v }),
         ...(unreviewed && { unreviewed }),
       })
-      return 'wait'
+      return paused ? 'wait' : this.resolveCall(ctx, call)
     }
     return this.execute(ctx, call, def, c.args)
   }
@@ -1444,6 +1621,8 @@ export class TurnRunner {
       (def.origin === 'builtin' && this.ext.builtin(def.name)?.meta.humanOnly)
     )
       return 'personal'
+    // 本租户此刻把它收紧成仅人工确认（读取工具也按这条说明，不再说“读取工具不送审”）
+    if ((await this.restrictionNow(ctx, def)) === 'human') return 'tenant'
     if (def.kind === 'read') return 'read'
     if (ctx.readOnly) return 'mode'
     if (await this.paused()) return 'paused'
@@ -1511,18 +1690,24 @@ export class TurnRunner {
 
   /**
    * 一个已记下、还没处理的调用此刻会不会不问人就执行（策略为 `auto` 的读取）：发消息拒绝等卡时，同一步里
-   * 其余要问人的调用（写入、root 设成 ask 的读取）一起拒绝。外部工具记成读取说明它当时就是 `auto`。
+   * 其余要问人的调用（写入、root 设成 ask 的读取）一起拒绝。外部读取工具按此刻叠加本租户收紧后的策略判断。
    */
-  async runsWithoutAsking(call: { tool: string; kind: McpToolKind; source: string }) {
+  async runsWithoutAsking(
+    p: Principal,
+    call: { tool: string; kind: McpToolKind; source: string },
+  ): Promise<boolean> {
     if (call.kind === 'write') return false
-    if (call.source === 'mcp') return true
+    // 外部工具看此刻的生效策略（本租户可能已把这个读取收紧成仅人工确认或停用）
+    if (call.source === 'mcp')
+      return (await this.external?.list(p))?.find((d) => d.name === call.tool)?.policy === 'auto'
     const builtin = this.ext.builtin(call.tool)
     const policies = await this.toolPolicies.policies()
     if (builtin) {
       const row = await this.ds.getRepository(McpToolSwitch).findOneBy({ name: call.tool })
       return builtinPolicy(builtin.meta, policies, row ? [row] : []) === 'auto'
     }
-    return (policies.get(call.tool) ?? 'auto') === 'auto'
+    // 策略表里没有的工具不当作 auto：宁可按要问人处理（拒绝），不放它不问就执行
+    return policies.get(call.tool) === 'auto'
   }
 
   /**
@@ -1549,18 +1734,154 @@ export class TurnRunner {
     }
     if (def.origin === 'mcp')
       return (await this.external?.list(ctx.p))?.find((d) => d.name === def.name)?.policy ?? 'deny'
-    return (await this.toolPolicies.policies()).get(def.name) ?? effectivePolicy(def.kind, null)
+    // 策略表里没有的按 deny：不绕过租户层退回类型默认
+    return (await this.toolPolicies.policies()).get(def.name) ?? 'deny'
+  }
+
+  /** 本租户此刻对这个工具的收紧（外部工具按工具行 id；没有为 null）。 */
+  private async restrictionNow(
+    ctx: RunCtx,
+    def: OfferedTool,
+  ): Promise<AgentToolRestrictionPolicy | null> {
+    if (def.origin === 'mcp') {
+      // list() 不含本租户停用的工具：读含它们的来源，运行中被本租户停用的才报“租户”而不是平台策略
+      const tools = this.external?.offered
+        ? await this.external.offered(ctx.p)
+        : await this.external?.list(ctx.p)
+      return tools?.find((d) => d.name === def.name)?.restricted ?? null
+    }
+    return (await this.toolPolicies.layers()).get(def.name)?.tenant ?? null
+  }
+
+  /**
+   * 本人发话纠正时收起这一轮还没执行的计划（等卡时发消息与运行中插话共用同一条规则）：待定的方案卡记为
+   * “继续完善”并以这段话为意见；待定的审批卡（包括须本人逐次确认的）记为本人拒绝，备注取这段话的前 500 字；
+   * 还没有结果、也还没有审批卡、此刻会问人或会写入的调用（它们是在这句纠正之前计划的）各补一张已拒绝的卡。
+   * 不问人就执行的调用（策略为 `auto` 的读取）照常执行。从不记“同意”，也不消费逐次确认的凭据。调用方须已
+   * 锁住会话行。返回新补的拒绝卡。
+   */
+  async closePlanned(
+    w: ItemWriter,
+    owner: Principal,
+    turn: AgentTurn,
+    text: string,
+  ): Promise<AgentItem[]> {
+    const ownerId = owner.userId
+    const items = w.m.getRepository(AgentItem)
+    const proposals = (
+      await items.findBy({ turnId: turn.id, kind: 'question', status: 'pending' })
+    ).filter((q) => pl<'question'>(q).proposal)
+    for (const q of proposals)
+      await w.update(
+        q,
+        {
+          status: 'answered',
+          payload: {
+            ...pl<'question'>(q),
+            choice: {
+              decision: 'refine',
+              decidedBy: ownerId,
+              decidedAt: new Date().toISOString(),
+              feedback: text.slice(0, 2000),
+            },
+          },
+        },
+        'pending',
+      )
+    const decision = {
+      decision: 'reject' as const,
+      decidedBy: ownerId,
+      decidedAt: new Date().toISOString(),
+      note: text.slice(0, 500),
+    }
+    for (const c of await items.findBy({ turnId: turn.id, kind: 'approval', status: 'pending' }))
+      await w.update(
+        c,
+        { status: 'rejected', payload: { ...pl<'approval'>(c), ...decision } },
+        'pending',
+      )
+    // 只有当前这一步会有未处理的调用：没有结果、也还没有审批卡的
+    const handled = new Set(
+      (await items.find({ where: { turnId: turn.id, kind: In(['approval', 'tool_result']) } })).map(
+        (i) => (i.payload as { callId?: string }).callId,
+      ),
+    )
+    const later = await items.find({
+      where: { turnId: turn.id, kind: 'tool_call', status: 'pending' },
+      order: { seq: 'ASC' },
+    })
+    const added: AgentItem[] = []
+    for (const c of later) {
+      const call = pl<'tool_call'>(c)
+      if (handled.has(call.callId) || (await this.runsWithoutAsking(owner, call))) continue
+      added.push(
+        await w.append(
+          Number(turn.threadId),
+          Number(turn.id),
+          'approval',
+          {
+            callId: call.callId,
+            tool: call.tool,
+            title: call.title,
+            args: call.args,
+            sources: [],
+            ...decision,
+          },
+          'rejected',
+        ),
+      )
+    }
+    return added
+  }
+
+  /**
+   * 运行中本人插了话、模型还没看到（本轮的 steer 消息，顺序号在当前这一步第一个调用之后）：按
+   * {@link closePlanned} 收起这一步余下的计划，新补的卡片并进 ctx.items。在执行、出卡、自动放行这几个不可回头
+   * 的点，于会话行锁里调用（发消息也拿同一把锁），所以插话要么在这里被看到，要么晚于这次执行。每次都从库里
+   * 读：续跑或丢锁接手后本次运行不知道模型此前看过什么。批量任务开的会话照旧（卡片由批量确认处理）。
+   * 返回 `callId` 这个调用是否因此被拒绝。
+   */
+  private async steered(
+    w: ItemWriter,
+    ctx: RunCtx,
+    thread: AgentThread | null,
+    callId: string,
+  ): Promise<boolean> {
+    if (!thread || thread.batchId !== null) return false
+    const rows = await w.m.getRepository(AgentItem).find({
+      where: { turnId: ctx.turn.id, kind: In(['user', 'tool_call', 'tool_result']) },
+      order: { seq: 'ASC' },
+    })
+    const answered = new Set(
+      rows.filter((i) => i.kind === 'tool_result').map((i) => pl<'tool_result'>(i).callId),
+    )
+    const first = rows.find(
+      (i) => i.kind === 'tool_call' && !answered.has(pl<'tool_call'>(i).callId),
+    )
+    const steer =
+      first &&
+      rows.find(
+        (i) =>
+          i.kind === 'user' &&
+          i.status === null &&
+          pl<'user'>(i).mode === 'steer' &&
+          i.seq > first.seq,
+      )
+    if (!steer) return false
+    const added = await this.closePlanned(w, ctx.p, ctx.turn, pl<'user'>(steer).text)
+    ctx.items.push(...added)
+    return added.some((a) => pl<'approval'>(a).callId === callId)
   }
 
   /**
    * 不经人就同意的调用（审批审查者放行，载荷带 `auto` 与理由；或本会话放行，载荷带 `allowedBy`）：照样记
    * 一张已同意的审批卡留作记录，与人的决定同一形状。在会话行锁里再确认一次：轮次已被中断时直接停；期间
    * 急停了的按急停停下（放行作废）；这个调用已经有审批卡（另一次运行抢先处理了它，这次运行已是过期的）时
-   * 不写、按丢锁重新入队。
+   * 不写、按丢锁重新入队；本人在此之前插了话（{@link steered}）时不放行，返回 null，调用已按插话拒绝。
    */
-  private async autoDecide(ctx: RunCtx, card: Pl<'approval'>): Promise<AgentItem> {
+  private async autoDecide(ctx: RunCtx, card: Pl<'approval'>): Promise<AgentItem | null> {
     const item = await this.store.tx(async (w) => {
-      await w.thread(Number(ctx.thread.id))
+      const thread = await w.thread(Number(ctx.thread.id))
       const now = await w.m.getRepository(AgentTurn).findOneBy({ id: ctx.turn.id })
       if (now?.status !== 'running') throw new TurnStop(null)
       if (await this.paused()) throw new TurnStop(Err.AGENT_PAUSED)
@@ -1576,6 +1897,7 @@ export class TurnRunner {
         })
         .getExists()
       if (carded) throw new LeaseLost()
+      if (await this.steered(w, ctx, thread, card.callId)) return null
       return w.append(
         Number(ctx.thread.id),
         Number(ctx.turn.id),
@@ -1584,7 +1906,7 @@ export class TurnRunner {
         'approved',
       )
     })
-    ctx.items.push(item)
+    if (item) ctx.items.push(item)
     return item
   }
 
@@ -1644,7 +1966,7 @@ export class TurnRunner {
    * 模型调用了没提供给它的工具：说明被什么挡住（缺权限点、会话模式、平台策略或技能限定），记一张没有
    * 按钮的审批卡（恢复提示），并把拒绝作为结果告诉模型；根本不存在的工具只回“没有这个工具”。
    */
-  private async block(ctx: RunCtx, call: AgentItem): Promise<'done'> {
+  private async block(ctx: RunCtx, call: AgentItem, reason?: AgentBlockReason): Promise<'done'> {
     const c = pl<'tool_call'>(call)
     const local = this.registry.get(c.tool)
     // 本次运行提供的内置工具（不提供的——如没有技能来源时的 skill.load——当作不存在）
@@ -1657,20 +1979,14 @@ export class TurnRunner {
       c.tool.startsWith('ext.')
     if (!known)
       return this.finish(ctx, call, this.fail(Err.NOT_FOUND, ctx.lang, `no tool named ${c.tool}`))
-    let blocked: NonNullable<AgentItemPayloads['approval']['blocked']>
-    // 内置工具：平台停用或 deny 的按策略；只读模式下的写入按模式；其余（技能清单没列）按策略
-    if (builtin)
-      blocked =
-        ctx.readOnly && builtin.meta.kind === 'write' && ctx.builtins.get(c.tool) !== 'deny'
-          ? { reason: 'mode' }
-          : { reason: 'policy' }
-    else if (local && !ctx.usable.has(c.tool))
-      blocked = ctx.disabled.has(c.tool)
-        ? { reason: 'policy' }
-        : { reason: 'permission', ...(local.perm && { perm: local.perm }) }
-    else if (local && ctx.readOnly && local.kind === 'write' && ctx.policies.get(c.tool) !== 'deny')
-      blocked = { reason: 'mode' }
-    else blocked = { reason: 'policy' }
+    // 原因来自拼装工具时记下的（与 /status 同一套规则）；没记下的（平台停用的外部工具、子智能体收掉的）按策略
+    // 运行中才被收紧成 deny 的由调用方给出原因
+    const gap: Pick<ToolGap, 'reason' | 'perm'> | undefined = reason
+      ? { reason }
+      : ctx.unavailable.get(c.tool)
+    const blocked: NonNullable<AgentItemPayloads['approval']['blocked']> = gap
+      ? { reason: gap.reason, ...(gap.perm && { perm: gap.perm }) }
+      : { reason: 'policy' }
     ctx.items.push(
       await this.store.append(
         Number(ctx.thread.id),
@@ -1696,17 +2012,19 @@ export class TurnRunner {
 
   /**
    * 记一张等人的卡片（审批或提问）并把轮次置为 waiting，两件事同一个事务：确认请求不会看到“卡片在、
-   * 轮次却不在等”的中间状态。轮次已被中断时直接停。
+   * 轮次却不在等”的中间状态。轮次已被中断时直接停。本人在此之前插了话、这个调用因此被拒绝时不出卡
+   * （{@link steered}），返回 null。
    */
   private async pause(
     ctx: RunCtx,
     kind: 'approval' | 'question',
     payload: Pl<'approval'> | Pl<'question'>,
-  ): Promise<AgentItem> {
+  ): Promise<AgentItem | null> {
     const item = await this.store.tx(async (w) => {
-      await w.thread(Number(ctx.thread.id))
+      const thread = await w.thread(Number(ctx.thread.id))
       const now = await w.m.getRepository(AgentTurn).findOneBy({ id: ctx.turn.id })
       if (now?.status !== 'running' && now?.status !== 'waiting') throw new TurnStop(null)
+      if (await this.steered(w, ctx, thread, payload.callId)) return null
       const added = await w.append(
         Number(ctx.thread.id),
         Number(ctx.turn.id),
@@ -1717,6 +2035,7 @@ export class TurnRunner {
       await w.patchTurn(ctx.turn, { status: 'waiting' })
       return added
     })
+    if (!item) return null
     await this.notice(ctx.thread, AGENT_NOTICE.waiting, Number(ctx.turn.id))
     // 等审批、等反问回答的一轮不占并发名额：补开等名额的轮次与批量的下一行。在调用里等外部服务器表单的
     // 仍占着（任务还在执行）
@@ -1750,9 +2069,11 @@ export class TurnRunner {
   ): Promise<'done' | 'wait'> {
     if (def.origin === 'builtin' && def.kind === 'read' && def.name !== IMAGE_TOOL)
       return this.readBuiltin(ctx, call, def, args)
-    await this.store.tx(async (w) => {
+    const closed = await this.store.tx(async (w) => {
       const thread = await w.thread(Number(ctx.thread.id))
       if (!thread) throw new ThreadGone()
+      // 本人插了话：这个调用（不问人就执行的读取除外）与同一步余下的计划按插话拒绝，不再执行
+      if (await this.steered(w, ctx, thread, pl<'tool_call'>(call).callId)) return true
       if (def.kind === 'write' || def.name === IMAGE_TOOL) {
         if (thread.recoveryRequired) throw new TurnStop(Err.AGENT_RECOVERY_REQUIRED)
         if (thread.automationRunId !== null) {
@@ -1765,7 +2086,9 @@ export class TurnRunner {
       }
       ctx.signal.throwIfAborted()
       await w.update(call, { status: 'running' })
+      return false
     })
+    if (closed) return this.resolveCall(ctx, call)
     let out: Outcome
     let entered = false
     try {
@@ -2045,6 +2368,8 @@ export class TurnRunner {
         questions: [],
         form: { title: req.message.slice(0, 500), schema: req.schema },
       })
+      // 执行中的调用不会被插话收起；拿不到卡片时按取消回给服务器
+      if (!item) return { action: 'cancel' }
       const until = Date.now() + ELICIT_WAIT_MS
       ctx.clock.pause()
       try {
@@ -2092,13 +2417,13 @@ export class TurnRunner {
       if ('wait' in r) {
         // 方案卡只认运行时自己的 plan.propose：别的内置工具不能借它让本人“批准”并切换模式
         const proposal = def.name === PROPOSE_TOOL ? r.proposal : undefined
-        await this.pause(ctx, 'question', {
+        const paused = await this.pause(ctx, 'question', {
           callId: pl<'tool_call'>(call).callId,
           from: 'agent',
           questions: proposal ? [] : r.questions,
           ...(proposal && { proposal }),
         })
-        return 'wait'
+        return paused ? 'wait' : this.resolveCall(ctx, call)
       }
       out = r
     } catch (e) {
@@ -2588,14 +2913,23 @@ export class TurnRunner {
     )
     if (turn) await this.store.tx((w) => w.patchTurn(turn, {}))
     const summary = res.text.trim().slice(0, 50_000)
-    await this.store.tx(async (w) => {
-      await w.thread(Number(thread.id))
+    const kept = await this.store.tx(async (w) => {
+      // 模型在锁外写摘要期间会话可能被回退：摘要的起点变了或 upTo 那条已删，这份摘要可能带回已删的内容，丢掉
+      const now = await w.thread(Number(thread.id))
+      if (
+        !now ||
+        now.summarySeq !== thread.summarySeq ||
+        !(await w.m.getRepository(AgentItem).existsBy({ threadId: thread.id, seq: upTo }))
+      )
+        return false
       await w.m.getRepository(AgentThread).update({ id: thread.id }, { summary, summarySeq: upTo })
       await w.append(Number(thread.id), turn ? Number(turn.id) : null, 'compaction', {
         upToSeq: upTo,
         auto,
       })
+      return true
     })
+    if (!kept) return
     thread.summary = summary
     thread.summarySeq = upTo
   }

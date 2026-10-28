@@ -16,8 +16,8 @@ type Decision = AgentApprovalDecide['decision']
  * 内不再问，可在会话设置里撤销）、“拒绝”（先展开说明框“告诉助手怎么做”，再提交）。取消本轮交给输入框的停止键。
  * 卡片本身获得焦点时 Enter 允许这一次、Esc 展开拒绝说明（焦点在按钮、链接或说明框上时不拦截，免得 Tab 到
  * “拒绝”按 Enter 却成了确认）；说明框里 Enter 提交拒绝、Esc 收起。请求进行中按钮都不可再点，防止重复提交；
- * 决定后显示结果，因本会话放行而自动执行的卡片注明这一点。被权限、会话模式或平台策略拦下时不给按钮，只说明
- * 怎样才能做。服务端仍校验只有本人能决定（已决定的返回 409）。经过自动审查的卡片显示审查结论与理由；审查
+ * 决定后显示结果，因本会话放行而自动执行的卡片注明这一点。被权限、会话模式、平台或租户策略、技能或方案的工具清单
+ * 拦下时不给按钮，只说明怎样才能做。服务端仍校验只有本人能决定（已决定的返回 409）。经过自动审查的卡片显示审查结论与理由；审查
  * 建议拒绝的卡片仍待本人决定；自动审查模式下没有送审的卡片说明原因。
  */
 defineOptions({ name: 'AgentApprovalCard' })
@@ -67,6 +67,19 @@ const reviewTitle = computed(() =>
 const unreviewedText = computed(() => {
   const key = `agent.review.card.unreviewed.${item.payload.unreviewed}`
   return te(key) ? t(key) : t('agent.review.card.unreviewed.other')
+})
+/**
+ * 为什么要问你（各模式都给）：本人逐次确认、租户或平台设为仅人工确认、读取设为需确认、写入需确认。
+ * 只说原因的类别，不带平台或其他租户的配置细节；本页不认识的原因码不显示。被拦下的卡片不需要；
+ * 服务端在决定怎么处理前就给每张卡带上原因，所以本会话已放行、审查模型放行和自动化预先放行的卡片
+ * 也带着它，但这些从没问过人，同样不显示。
+ */
+const whyText = computed(() => {
+  const { why, allowedBy, auto } = item.payload
+  if (!why || blocked.value || allowedBy) return null
+  if (auto && (auto.by === 'pre_approved' || auto.verdict === 'approve')) return null
+  const key = `agent.chat.approval.why.${why}`
+  return te(key) ? t(key) : null
 })
 
 /** 提交决定；失败时恢复可点，成功后交给页面补齐最新状态。只有拒绝带说明。 */
@@ -182,6 +195,10 @@ function onNoteKey(e: KeyboardEvent) {
         </li>
       </ul>
     </div>
+    <p v-if="whyText" class="agent-approval__why">
+      <strong>{{ t('agent.chat.approval.whyTitle') }}</strong>
+      <span>{{ whyText }}</span>
+    </p>
     <p
       v-if="review"
       class="agent-approval__review"
@@ -273,6 +290,17 @@ function onNoteKey(e: KeyboardEvent) {
 </template>
 
 <style scoped>
+.agent-approval__why {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  font-size: 13px;
+  color: var(--qw-text-2);
+}
+.agent-approval__why strong {
+  font-weight: 600;
+}
 .agent-approval__review {
   display: flex;
   flex-wrap: wrap;

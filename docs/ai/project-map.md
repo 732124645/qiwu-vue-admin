@@ -113,6 +113,7 @@
 | `agent_search_provider` | `AgentSearchProvider` | 平台 | 是 | core/agent/provider/provider.entity.ts |
 | `agent_skill` | `AgentSkill` | 租户 | 是 | core/agent/entities/agent-skill.entity.ts |
 | `agent_thread` | `AgentThread` | 租户 | 是 | core/agent/entities/agent-thread.entity.ts |
+| `agent_tool_restriction` | `AgentToolRestriction` | 租户 | 是 | core/agent/entities/agent-mcp.entity.ts |
 | `agent_turn` | `AgentTurn` | 租户 | 是 | core/agent/entities/agent-thread.entity.ts |
 | `agent_usage` | `AgentUsage` | 租户 | 是 | core/agent/entities/agent-usage.entity.ts |
 | `agent_usage_entry` | `AgentUsageEntry` | 租户 | 是 | core/agent/entities/agent-usage.entity.ts |
@@ -279,10 +280,14 @@
 |  | POST | `/api/agent/threads/read-all` | agent.chat.use |  |
 |  | POST | `/api/agent/threads/:id/read` | agent.chat.use |  |
 |  | POST | `/api/agent/threads/:id/revert` | agent.chat.use |  |
+|  | GET | `/api/agent/threads/:id/rewind-preview` | agent.chat.use |  |
+|  | POST | `/api/agent/threads/:id/rewind` | agent.chat.use |  |
 |  | GET | `/api/agent/threads/:id/export` | agent.chat.use |  |
 |  | GET | `/api/agent/threads/:id/status` | agent.chat.use |  |
 |  | POST | `/api/agent/threads/:id/share` | agent.chat.use |  |
 |  | DELETE | `/api/agent/threads/:id/share` | agent.chat.use |  |
+| `AgentToolRestrictionController`（core/agent/tools/tool-policy.ts） | GET | `/api/agent/tool-restrictions` | agent.restriction.browse |  |
+|  | PUT | `/api/agent/tool-restrictions/:name` | agent.restriction.modify |  |
 | `AgentToolPolicyController`（core/agent/tools/tool-policy.ts） | GET | `/api/agent/tools` | agent.setting.browse | PlatformOnly |
 |  | PUT | `/api/agent/tools/:name/policy` | agent.setting.modify | PlatformOnly(root) |
 |  | PUT | `/api/agent/tools/:name/enabled` | agent.setting.modify | PlatformOnly(root) |
@@ -792,7 +797,7 @@
 | --- | --- | --- |
 | `actionLogPerms` | audit.actionLog.browse, audit.actionLog.view, audit.actionLog.export, audit.actionLog.remove | shared:platform/audit/action-log.schema.ts |
 | `agentAutomationPerms` | agent.automation.use, agent.automation.share | shared:platform/agent/agent.schema.ts |
-| `agentPerms` | agent.chat.use, agent.batch.run, agent.skill.browse, agent.skill.create, agent.skill.modify, agent.skill.remove, agent.instruction.modify, agent.setting.browse, agent.setting.modify, agent.usage.browse | shared:platform/agent/agent.schema.ts |
+| `agentPerms` | agent.chat.use, agent.batch.run, agent.skill.browse, agent.skill.create, agent.skill.modify, agent.skill.remove, agent.instruction.modify, agent.setting.browse, agent.setting.modify, agent.restriction.browse, agent.restriction.modify, agent.usage.browse | shared:platform/agent/agent.schema.ts |
 | `appVersionPerms` | settings.appVersion.browse, settings.appVersion.view, settings.appVersion.create, settings.appVersion.modify, settings.appVersion.remove | shared:platform/settings/app-version.schema.ts |
 | `bookPerms` | demo.book.browse, demo.book.view, demo.book.create, demo.book.modify, demo.book.remove, demo.book.export, demo.book.import | shared:demo/book.schema.ts |
 | `bulletinPerms` | messaging.bulletin.browse, messaging.bulletin.view, messaging.bulletin.create, messaging.bulletin.modify, messaging.bulletin.remove, messaging.bulletin.publish | shared:platform/messaging/bulletin.schema.ts |

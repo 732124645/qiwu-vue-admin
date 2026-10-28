@@ -103,11 +103,21 @@
         "blocked": {
           "permission": "你没有执行这项操作的权限（{perm}），请联系管理员授权后再试。",
           "mode": "当前为只读或计划模式，不能修改数据；切换到“每次询问”或“自动审查”后重新提问。",
-          "policy": "平台不允许智能助手使用这个工具。"
+          "policy": "平台不允许智能助手使用这个工具。",
+          "tenant": "本租户不允许智能助手使用这个工具。",
+          "list": "当前技能或配置方案的工具清单里没有这个工具。"
         },
         "noteKeys": "Enter 拒绝 · Esc 返回",
         "back": "返回",
-        "allowedBySession": "已按本会话放行执行"
+        "allowedBySession": "已按本会话放行执行",
+        "whyTitle": "为什么要问你：",
+        "why": {
+          "personal": "这个操作每次都要你本人确认。",
+          "tenant": "本租户管理员把这个工具设为“仅人工确认”。",
+          "human": "平台把这个工具设为“仅人工确认”（高风险操作默认如此）。",
+          "read": "管理员把这个读取工具设为每次需确认。",
+          "ask": "这是一次写入，执行前需要确认。"
+        }
       },
       "question": {
         "title": "智能助手想确认几个问题",
@@ -133,30 +143,32 @@
       "composer": {
         "label": "输入消息",
         "placeholder": "输入消息，/ 查看命令",
-        "queuePlaceholder": "本轮还在运行，现在发送的消息会排在当前步骤之后",
+        "queuePlaceholder": "本轮运行中：Enter 插话，当前工具步骤结束后送达本轮",
         "suggestions": "补全建议",
         "model": "模型",
         "reasoning": "推理强度",
         "approvalMode": "会话模式",
         "stop": "停止",
+        "stopButton": "点“停止”按钮",
         "send": "发送",
         "queue": "排到下一轮",
-        "queueHint": "本轮运行中：发送的消息会在当前步骤之后处理。",
+        "queueHint": "本轮运行中：Enter 插话（当前工具步骤结束后送达本轮）；“排到下一轮”等本轮结束再处理；{stop} 停止本轮，草稿保留。",
         "noVision": "当前模型不能看图片，请移除图片附件或换一个支持图片的模型。",
         "promptPlaceholder": "输入名称筛选提示词模板，Enter 插入，Esc 取消",
         "attach": "附件",
         "prompts": "提示词模板",
         "fast": "快速",
         "context": "上下文 {percent}%",
-        "sendMode": "运行中发送方式",
-        "steer": "追加到本轮",
         "historyPlaceholder": "输入文字搜索发过的消息，Enter 填入，Esc 取消",
         "reasoningDefault": "模型默认：{value}",
         "contextEstimate": "上下文估算 {percent}%",
         "queueExpired": "排队消息已作废，未自动执行",
-        "keys": "Enter 发送 · Shift+Enter 换行 · Shift+Tab 切换模式 · $ 技能 · {'@'} 提及 · / 命令 · Ctrl+R 搜索发过的消息",
+        "keys": "Enter 发送（运行中为插话）· {queue} 排到下一轮 · Shift+Enter 换行 · Shift+Tab 切换模式 · $ 技能 · {'@'} 提及 · / 命令 · Ctrl+R 搜索发过的消息",
+        "keysNoQueue": "Enter 发送（运行中为插话）· Shift+Enter 换行 · Shift+Tab 切换模式 · $ 技能 · {'@'} 提及 · / 命令 · Ctrl+R 搜索发过的消息",
         "modeNow": "已切换到：{mode}",
-        "rejectHint": "发送后将拒绝待确认的操作，并把这句话告诉助手"
+        "rejectHint": "按 Enter 将拒绝待确认的操作，并把这句话告诉助手",
+        "waitingHint": "本轮在等你确认：Enter 拒绝待确认的操作并把这句话告诉助手；“排到下一轮”只排队，卡片继续等待；{stop} 停止整轮，待确认的卡片作废。",
+        "restoredQueued": "已停止；撤下的排队消息（{n} 条）已放回输入框"
       },
       "reasoning": {
         "low": "低",
@@ -207,15 +219,33 @@
         "unpricedHint": "未计价调用：{n}",
         "unreportedHint": "未报告用量调用：{n}",
         "legacyHint": "包含缺少历史明细的旧记录",
-        "unlimited": "不限额"
+        "unlimited": "不限额",
+        "mode": "会话模式",
+        "model": "模型",
+        "profile": "配置方案",
+        "contextReported": "上下文（上一步实际）",
+        "contextEstimated": "上下文（估算）",
+        "turnLimit": "每轮积分上限",
+        "allowed": "本会话已放行",
+        "allowedValue": "{n} 个：{names}",
+        "allowedNone": "无",
+        "asks": "需要你确认的工具（{n}）",
+        "unavailable": "不可用的工具（{n}）",
+        "unavailableWhy": {
+          "policy": "平台已停用",
+          "tenant": "本租户已停用",
+          "list": "不在技能或配置方案的工具清单里",
+          "mode": "当前模式不能修改数据",
+          "permission": "你没有它的权限"
+        }
       },
       "action": {
         "copy": "复制",
         "copied": "已复制",
         "copyFailed": "复制失败，请手动选择文字复制",
-        "edit": "编辑后重发",
-        "editing": "正在编辑上一条消息：发送后会分叉出新会话",
-        "more": "更多操作"
+        "edit": "从这里重新编辑",
+        "more": "更多操作",
+        "regenerate": "重新生成"
       },
       "feedback": {
         "up": "有帮助",
@@ -236,9 +266,26 @@
         "manual": "较早的对话已压缩为摘要"
       },
       "revert": {
-        "title": "撤回最后一轮",
-        "action": "撤回",
-        "confirm": "撤回最后一轮的提问与回答？智能助手在这一轮里已经执行的修改不会回滚。"
+        "title": "撤回最后一轮"
+      },
+      "rewind": {
+        "confirm": {
+          "edit": "这条消息及其后的全部内容会从本会话中删除，原文、附件和技能放回输入框，修改后再发送。",
+          "regenerate": "最后一轮会从本会话中删除，再用同样的消息重新生成。",
+          "revert": "最后一轮的提问与回答会从本会话中删除。"
+        },
+        "continue": {
+          "edit": "删除并编辑",
+          "regenerate": "重新生成",
+          "revert": "撤回"
+        },
+        "writes": "以下写入不会撤销：",
+        "outcome": {
+          "done": "已执行",
+          "unknown": "结果不明"
+        },
+        "notUndone": "已保存的记忆、会话模式的切换和已用的积分也不会撤销。",
+        "stale": "这个会话在别的窗口里有了新内容，已重新载入，请再操作一次。"
       },
       "export": "导出 Markdown",
       "share": {
@@ -290,13 +337,15 @@
       "shortcut": {
         "title": "快捷键",
         "press": "请按下新的组合键…",
+        "unset": "未设置",
         "reset": "恢复默认",
-        "stopHint": "停止本轮只在本轮运行中、输入框为空时生效；其他快捷键在本页任意位置生效。设置只保存在本浏览器。",
+        "stopHint": "停止本轮与排到下一轮在本轮运行中、焦点在输入框时生效，停止时草稿保留；其他快捷键在本页任意位置生效。设置只保存在本浏览器。",
         "action": {
           "newChat": "新会话",
           "focusComposer": "聚焦输入框",
           "stop": "停止本轮",
-          "togglePlan": "切换计划模式"
+          "togglePlan": "切换计划模式",
+          "queue": "排到下一轮"
         },
         "conflict": {
           "reserved": "{key} 已被页面占用",
@@ -408,6 +457,16 @@
         "expandList": "展开会话列表",
         "crumbs": "当前位置",
         "backToChat": "返回对话"
+      },
+      "statusLine": {
+        "label": "会话状态",
+        "context": "上下文 {percent}%",
+        "contextApprox": "上下文约 {percent}%",
+        "turn": "本轮 {credits} 积分",
+        "turnOf": "本轮 {credits} / {limit} 积分",
+        "today": "今日 {credits} 积分",
+        "allowed": "已放行 {n} 个工具",
+        "allowedHint": "查看或撤销本会话已放行的工具"
       }
     }
   }

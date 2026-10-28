@@ -212,7 +212,7 @@ describe('items', () => {
     for (const x of [thought, divider, answer, queued]) x!.unmount()
   })
 
-  it('copies a message, rates an answer once with an optional comment, offers edit only when allowed', async () => {
+  it('copies a message, rates an answer once with an optional comment, offers edit and regenerate only when allowed', async () => {
     const writeText = vi.fn<(text: string) => Promise<void>>().mockResolvedValue(undefined)
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
     vi.spyOn(ElMessage, 'success').mockReturnValue(undefined as never)
@@ -250,14 +250,26 @@ describe('items', () => {
     expect(w.find('button[aria-label="Helpful"]').attributes('disabled')).toBeDefined()
     expect(w.find('button[aria-label="Not helpful"]').attributes('aria-pressed')).toBe('true')
 
+    // edit from here on any user message the page allows; regenerate only on the answer it names
     const [user] = chatRows([item(1, 'user', { text: 'hi' })])
     const plain = mount(ChatItem, { props: { row: user! }, global })
-    expect(plain.find('button[aria-label="Edit and resend"]').exists()).toBe(false)
+    expect(plain.find('button[aria-label="Edit from here"]').exists()).toBe(false)
     plain.unmount()
     const editable = mount(ChatItem, { props: { row: user!, canEdit: true }, global })
-    await editable.find('button[aria-label="Edit and resend"]').trigger('click')
-    expect(editable.emitted('edit')).toEqual([[1, 'hi']])
+    await editable.find('button[aria-label="Edit from here"]').trigger('click')
+    expect(editable.emitted('edit')).toEqual([[1]])
     editable.unmount()
+    expect(w.find('button[aria-label="Regenerate"]').exists()).toBe(false)
+    const last = mount(ChatItem, { props: { row: answer!, canRegenerate: true }, global })
+    await last.find('button[aria-label="Regenerate"]').trigger('click')
+    expect(last.emitted('regenerate')).toEqual([[]])
+    last.unmount()
+    const viewed = mount(ChatItem, {
+      props: { row: answer!, canRegenerate: true, readonly: true },
+      global,
+    })
+    expect(viewed.find('button[aria-label="Regenerate"]').exists()).toBe(false)
+    viewed.unmount()
     // the shared read-only view: no actions that change anything
     const shared = mount(ChatItem, {
       props: { row: answer!, canFork: true, readonly: true },
@@ -582,6 +594,88 @@ describe('approval card', () => {
     expect(w.find('.agent-approval__review').text()).toContain(
       'not sent to automatic review and needs your confirmation',
     )
+  })
+  it("says why the card asks in every mode, and a tenant's people-only restriction without review", () => {
+    const whys = {
+      personal: 'You confirm this action in person every time.',
+      tenant: 'Your tenant administrator set this tool to "People only".',
+      human: 'The platform set this tool to "People only"',
+      read: 'An administrator set this read tool to ask every time.',
+      ask: 'This call changes data and needs a confirmation first.',
+    } as const
+    for (const [why, text] of Object.entries(whys)) {
+      w = mount(ApprovalCard, {
+        props: { item: approval('pending', { why: why as keyof typeof whys }) },
+        global,
+      })
+      const line = w.find('.agent-approval__why')
+      expect(line.text()).toContain('Why you are asked:')
+      expect(line.text()).toContain(text)
+      w.unmount()
+    }
+    // no reason, or one this page does not know: no line rather than a bare code
+    w = mount(ApprovalCard, {
+      props: { item: approval('pending', { why: 'later' as 'ask' }) },
+      global,
+    })
+    expect(w.find('.agent-approval__why').exists()).toBe(false)
+    w.unmount()
+    w = mount(ApprovalCard, {
+      props: { item: approval('pending', { why: 'tenant', unreviewed: 'tenant' }) },
+      global,
+    })
+    expect(w.find('.agent-approval__review').text()).toContain(
+      'Your tenant set this tool to "People only"',
+    )
+  })
+
+  it('does not say why you are asked on a card that never waited for you', () => {
+    const decidedBy = {
+      session: { allowedBy: 'session', decision: 'approve_session' },
+      review: {
+        decision: 'approve',
+        auto: { by: 'review', verdict: 'approve', reason: 'Asked for.' },
+      },
+      preApproved: {
+        decision: 'approve',
+        auto: { by: 'pre_approved', verdict: 'approve', reason: 'Listed.' },
+      },
+    } as const
+    for (const payload of Object.values(decidedBy)) {
+      w = mount(ApprovalCard, {
+        props: { item: approval('approved', { why: 'ask', ...payload }) },
+        global,
+      })
+      expect(w.find('.agent-approval__why').exists()).toBe(false)
+      w.unmount()
+    }
+    // the review handed it to you or advised against it: you are still asked
+    w = mount(ApprovalCard, {
+      props: {
+        item: approval('pending', {
+          why: 'ask',
+          auto: { by: 'review', verdict: 'escalate', reason: 'Unclear.' },
+        }),
+      },
+      global,
+    })
+    expect(w.find('.agent-approval__why').exists()).toBe(true)
+  })
+
+  it('tells a tool the tenant or the tool list keeps away from one the platform does', () => {
+    const blockedText = (reason: 'policy' | 'tenant' | 'list') => {
+      w?.unmount()
+      w = mount(ApprovalCard, {
+        props: { item: approval('pending', { why: 'ask', blocked: { reason } }) },
+        global,
+      })
+      expect(w.find('.agent-approval__why').exists()).toBe(false)
+      expect(button('Allow once')).toBeUndefined()
+      return w.find('.el-alert').text()
+    }
+    expect(blockedText('policy')).toContain('The platform does not allow')
+    expect(blockedText('tenant')).toContain('Your tenant does not allow')
+    expect(blockedText('list')).toContain('tool list of the current skill or profile')
   })
 })
 

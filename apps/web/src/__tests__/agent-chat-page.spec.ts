@@ -1,7 +1,9 @@
 // The assistant's chat page: the thread list (groups, search, rename, archive, delete after confirming,
 // load more), opening a thread and its live events (items added or replaced, streamed text, the turn),
 // catching up with afterSeq after a reconnect or a delta for an unknown item, sending (a new thread with
-// the context the entry button brought, queued while a turn runs), stop, fork, the composer's slash
+// the context the entry button brought; while a turn runs Enter joins it and the queue button waits for the
+// next one), stop (the draft and the withdrawn queued messages stay), in-place rewind (edit from any own
+// message, regenerate, revert, with the writes that stay listed), fork, the composer's slash
 // commands and `$skill` completion, the notices when nothing is configured or the agent is paused, and the
 // global entry button that carries the page and its published selection.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -10,7 +12,13 @@ import { defineComponent, h, ref } from 'vue'
 import { createMemoryHistory, createRouter, type Router } from 'vue-router'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import ElementPlus, { ElDropdown, ElMessage, ElMessageBox } from 'element-plus'
-import type { AgentItemVo, AgentOptionsVo, AgentThreadVo, AgentTurnVo } from '@qiwu/shared'
+import type {
+  AgentItemVo,
+  AgentOptionsVo,
+  AgentStatusVo,
+  AgentThreadVo,
+  AgentTurnVo,
+} from '@qiwu/shared'
 import { i18n, setLocale } from '@/core/i18n'
 import { vPerm } from '@/core/permission'
 import { accessToken, ApiError } from '@/core/request/http'
@@ -147,11 +155,21 @@ const BASE: Record<string, Route> = {
     items: ITEMS,
     turn: turn({ status: 'running' }),
   }),
-  'GET /agent/threads/7/status': ok({
+  'GET /agent/threads/7/status': ok(statusOf()),
+}
+/** `/status` of thread 7: nothing reported yet, no turn limit, nothing allowed, no tool asks */
+function statusOf(p: Partial<AgentStatusVo> = {}): AgentStatusVo {
+  return {
     threadId: 7,
     model: 'm1',
+    mode: 'ask',
+    profile: null,
     contextUsed: 12000,
     contextWindow: 64000,
+    contextReported: null,
+    allowedTools: [],
+    turnLimit: null,
+    tools: { asks: [], unavailable: [] },
     turn: turn({ status: 'running' }),
     today: {
       userTokens: 5000,
@@ -163,7 +181,8 @@ const BASE: Record<string, Route> = {
       userUnpricedCalls: 1,
       tenantUnpricedCalls: 2,
     },
-  }),
+    ...p,
+  }
 }
 type Call = { method?: string; url?: string; params?: unknown; data?: unknown }
 const sent = (calls: Call[], method: string, url: string) =>
@@ -402,7 +421,7 @@ describe('conversation', () => {
     expect(w.find('.agent-chat__title').text()).toBe('Thread 7')
   })
 
-  it('sends in a new thread with the brought context, then queues while the turn runs, and stops', async () => {
+  it('sends in a new thread with the brought context; while the turn runs Enter joins it, the button queues; stops', async () => {
     pendingContext.value = {
       route: '/demo/customers',
       title: 'Customers',
@@ -457,14 +476,9 @@ describe('conversation', () => {
     expect(w.find('.agent-chat__context').exists()).toBe(false)
     expect(threadButton('Fill them').exists()).toBe(true)
 
-    // running: the text is queued after the current step
-    expect(w.text()).toContain('what you send now is handled after its current step')
-    // while running the text joins the turn by default, or waits for the next one
-    await w
-      .findAll('.el-radio-button')
-      .find((b) => b.text() === 'Queue for next turn')!
-      .find('input')
-      .setValue(true)
+    // running: Enter joins this turn after its current tool step, the button keeps it for the next turn
+    expect(w.text()).toContain('Enter adds your message to it after the current tool step')
+    expect(w.findAll('.agent-composer .el-radio-button')).toHaveLength(0)
     await type('Then the phone')
     await key('Enter')
     release()
@@ -472,6 +486,25 @@ describe('conversation', () => {
     expect(body(sent(calls, 'post', '/agent/threads/9/messages')[1])).toEqual({
       clientMessageId: expect.any(String),
       text: 'Then the phone',
+      mode: 'steer',
+    })
+    await type('And the address')
+    await button('Queue for next turn')!.trigger('click')
+    release()
+    await flushPromises()
+    expect(body(sent(calls, 'post', '/agent/threads/9/messages')[2])).toEqual({
+      clientMessageId: expect.any(String),
+      text: 'And the address',
+      mode: 'queue',
+    })
+    expect(textarea().element.value).toBe('')
+    // the queue shortcut (Alt+Enter by default) queues too
+    await type('And the city')
+    await key('Enter', { altKey: true })
+    release()
+    await flushPromises()
+    expect(body(sent(calls, 'post', '/agent/threads/9/messages')[3])).toMatchObject({
+      text: 'And the city',
       mode: 'queue',
     })
     await button('Stop')!.trigger('click')
@@ -803,7 +836,7 @@ describe('composer', () => {
     expect(status).toContain('Your credits today1.5 / Unlimited')
     expect(status).toContain('Turn credits0.123456')
     expect(status).toContain('Tenant credits today2.75 / 10')
-    expect(status).toContain('Context estimate 19%12000 / 64000')
+    expect(status).toContain('Context (estimated)12000 / 64000')
 
     await type('/compact')
     await key('Enter')
@@ -960,39 +993,357 @@ describe('thread views and conversation actions', () => {
     expect(w.find('.agent-chat__title').text()).toBe('New conversation')
   })
 
-  it('edits the last message: forks before it and sends the new text there', async () => {
+  /** a thread of two rounds; the first message carries a skill and an attachment */
+  const ROUNDS = [
+    item(1, 1, 'user', {
+      text: 'Who is Acme?',
+      skill: 'report',
+      attachments: [{ fileId: 9, name: 'card.png', mime: 'image/png', size: 10 }],
+    }),
+    item(2, 2, 'assistant', { text: 'Acme is a maker of anvils.' }, 'done'),
+    { ...item(3, 3, 'user', { text: 'And their phone?' }), turnId: 2 } as AgentItemVo,
+    { ...item(4, 4, 'assistant', { text: 'It is 555.' }, 'done'), turnId: 2 } as AgentItemVo,
+  ]
+  /** the full thread on open, what is left after a rewind on every catch-up */
+  const rewindRoutes = (left: AgentItemVo[] = []): Record<string, Route> => ({
+    ...BASE,
+    'GET /agent/threads/7/items': (c) =>
+      (c.params as { afterSeq?: number } | undefined)?.afterSeq == null
+        ? ok({ thread: thread(7), items: ROUNDS, turn: turn() })
+        : ok({ thread: thread(7), items: left, turn: left.length ? turn() : null }),
+    'GET /agent/threads/7/rewind-preview': ok({
+      writes: [
+        { seq: 5, tool: 'demo.customer.update', title: 'Update customer', outcome: 'done' },
+        { seq: 6, tool: 'mcp.crm.write', title: 'Remote write', outcome: 'unknown' },
+      ],
+    }),
+    'POST /agent/threads/7/rewind': ok(null),
+  })
+  /** the text of a dialog message built with render functions */
+  const vnodeText = (n: unknown): string => {
+    if (typeof n === 'string') return n
+    if (Array.isArray(n)) return n.map(vnodeText).join('\n')
+    const children = (n as { children?: unknown } | null)?.children
+    return children == null ? '' : vnodeText(children)
+  }
+
+  it('edits from any own message in place: lists the writes that stay, rewinds and refills the composer', async () => {
+    const confirm = vi.spyOn(ElMessageBox, 'confirm').mockResolvedValue('confirm' as never)
+    const calls = mockApi(rewindRoutes())
+    await show()
+    await open()
+    const edits = w.findAll('.agent-msg--user button[aria-label="Edit from here"]')
+    expect(edits).toHaveLength(2)
+    await edits[0]!.trigger('click')
+    await flushPromises()
+    expect(sent(calls, 'get', '/agent/threads/7/rewind-preview')[0]!.params).toEqual({ seq: 1 })
+    const [message, title] = confirm.mock.calls[0]!
+    expect(title).toBe('Edit from here')
+    const text = vnodeText(message)
+    expect(text).toContain('This message and everything after it are removed')
+    expect(text).toContain('These writes are not undone')
+    expect(text).toContain(`${i18n.global.t('agent.tools.demo_customer_update.title')} · done`)
+    expect(text).toContain('Remote write · outcome unknown')
+    expect(text).toContain('Saved memories, mode changes and credits already used')
+    // the highest seq this page holds guards against a round another window added
+    expect(body(sent(calls, 'post', '/agent/threads/7/rewind')[0])).toEqual({ seq: 1, lastSeq: 4 })
+    expect(w.findAll('.agent-msg')).toHaveLength(0)
+    expect(sent(calls, 'get', '/agent/threads/7/items').at(-1)!.params).toEqual({ afterSeq: 0 })
+    // text, skill and attachment back in the composer; nothing is sent
+    expect(textarea().element.value).toBe('$report Who is Acme?')
+    expect(w.findComponent(FileUpload).props('modelValue')).toMatchObject([
+      { id: 9, originalName: 'card.png', mime: 'image/png', size: 10 },
+    ])
+    expect(sent(calls, 'post', '/agent/threads/7/messages')).toHaveLength(0)
+    expect(sent(calls, 'post', '/agent/threads/7/fork')).toHaveLength(0)
+  })
+
+  it('cancelling the dialog keeps everything; no rewind from an expired queued message or while a turn runs', async () => {
+    const confirm = vi.spyOn(ElMessageBox, 'confirm').mockRejectedValue('cancel')
+    const expired = {
+      ...item(5, 5, 'user', { text: 'Too late', mode: 'queue' }, 'expired'),
+      turnId: null,
+    } as AgentItemVo
     const calls = mockApi({
-      ...BASE,
-      'GET /agent/threads/7/items': ok({ thread: thread(7), items: ITEMS, turn: turn() }),
-      'POST /agent/threads/7/fork': ok(thread(11, { title: 'Edited' })),
-      'GET /agent/threads/11/items': ok({
-        thread: thread(11, { title: 'Edited' }),
-        items: [],
-        turn: null,
+      ...rewindRoutes(),
+      'GET /agent/threads/7/items': ok({
+        thread: thread(7),
+        items: [...ROUNDS, expired],
+        turn: turn(),
       }),
-      'POST /agent/threads/11/messages': ok(turn({ id: 6, threadId: 11 })),
     })
     await show()
     await open()
-    await w.find('button[aria-label="Edit and resend"]').trigger('click')
+    await w.findAll('.agent-msg--user button[aria-label="Edit from here"]')[1]!.trigger('click')
     await flushPromises()
-    expect(textarea().element.value).toBe('Who is Acme?')
-    expect(w.find('.agent-chat__context').text()).toContain('Editing the last message')
-    await type('Who is Acme Ltd?')
-    await key('Enter')
-    expect(body(sent(calls, 'post', '/agent/threads/7/fork')[0])).toEqual({
-      seq: 0,
-      clientDraftId: expect.any(String),
-    })
-    expect(body(sent(calls, 'post', '/agent/threads/11/messages')[0])).toEqual({
-      clientMessageId: expect.any(String),
-      text: 'Who is Acme Ltd?',
-    })
-    expect(sent(calls, 'post', '/agent/threads/7/messages')).toHaveLength(0)
-    expect(w.find('.agent-chat__title').text()).toBe('Edited')
+    expect(confirm).toHaveBeenCalledTimes(1)
+    expect(sent(calls, 'post', '/agent/threads/7/rewind')).toHaveLength(0)
+    expect(w.findAll('.agent-msg')).toHaveLength(5)
+    expect(w.findAll('button[aria-label="Edit from here"]')).toHaveLength(2)
+    expect(textarea().element.value).toBe('')
+    push({ threadId: 7, type: 'turn', turn: turn({ id: 2, status: 'running' }) })
+    await flushPromises()
+    expect(w.find('button[aria-label="Edit from here"]').exists()).toBe(false)
+    expect(w.find('button[aria-label="Regenerate"]').exists()).toBe(false)
   })
 
-  it('reverts the last turn after a confirmation that says writes stay, exports Markdown, shares and stops sharing', async () => {
+  it('edits from a message while the turn waits on a card; after the rewind the turn shows stopped', async () => {
+    vi.spyOn(ElMessageBox, 'confirm').mockResolvedValue('confirm' as never)
+    const card = {
+      ...item(
+        5,
+        5,
+        'approval',
+        { callId: 'c', tool: 't', title: 'Update', args: {}, sources: [] },
+        'pending',
+      ),
+      turnId: 2,
+    } as AgentItemVo
+    const steer = {
+      ...item(6, 6, 'user', { text: 'Use the office number', mode: 'steer' }),
+      turnId: 2,
+    } as AgentItemVo
+    const left = [...ROUNDS, { ...card, status: 'expired' } as AgentItemVo]
+    const calls = mockApi({
+      ...rewindRoutes(),
+      'GET /agent/threads/7/items': (c) =>
+        (c.params as { afterSeq?: number } | undefined)?.afterSeq == null
+          ? ok({
+              thread: thread(7),
+              items: [...ROUNDS, card, steer],
+              turn: turn({ id: 2, status: 'waiting' }),
+            })
+          : ok({ thread: thread(7), items: left, turn: turn({ id: 2, status: 'cancelled' }) }),
+    })
+    await show()
+    await open()
+    expect(w.find('.agent-chat__turn').text()).toBe('Waiting for you')
+    const edits = w.findAll('.agent-msg--user button[aria-label="Edit from here"]')
+    expect(edits).toHaveLength(3)
+    await edits[2]!.trigger('click')
+    await flushPromises()
+    expect(body(sent(calls, 'post', '/agent/threads/7/rewind')[0])).toEqual({ seq: 6, lastSeq: 6 })
+    expect(w.find('.agent-chat__turn').text()).toBe('Stopped')
+    expect(textarea().element.value).toBe('Use the office number')
+  })
+
+  it('regenerating while a card waits puts the message queued for the next turn back into the composer', async () => {
+    const confirm = vi.spyOn(ElMessageBox, 'confirm')
+    const card = {
+      ...item(
+        5,
+        5,
+        'approval',
+        { callId: 'c', tool: 't', title: 'Update', args: {}, sources: [] },
+        'pending',
+      ),
+      turnId: 2,
+    } as AgentItemVo
+    const queued = {
+      ...item(6, 6, 'user', { text: 'Also change the phone', mode: 'queue' }, 'pending'),
+      turnId: null,
+    } as AgentItemVo
+    const calls = mockApi({
+      ...rewindRoutes(),
+      'GET /agent/threads/7/items': (c) =>
+        (c.params as { afterSeq?: number } | undefined)?.afterSeq == null
+          ? ok({
+              thread: thread(7),
+              items: [...ROUNDS, card, queued],
+              turn: turn({ id: 2, status: 'waiting' }),
+            })
+          : ok({ thread: thread(7), items: [], turn: turn({ id: 1 }) }),
+      'GET /agent/threads/7/rewind-preview': ok({ writes: [] }),
+      'POST /agent/threads/7/messages': ok(turn({ id: 3 })),
+    })
+    await show()
+    await open()
+    await w.find('button[aria-label="Regenerate"]').trigger('click')
+    await flushPromises()
+    expect(confirm).not.toHaveBeenCalled()
+    expect(body(sent(calls, 'post', '/agent/threads/7/rewind')[0])).toEqual({ seq: 3, lastSeq: 6 })
+    expect(sent(calls, 'post', '/agent/threads/7/messages').map(body)).toEqual([
+      expect.objectContaining({ text: 'And their phone?' }),
+    ])
+    expect(textarea().element.value).toBe('Also change the phone')
+  })
+
+  it('reloads and says so when another window changed the thread, and when it is gone', async () => {
+    vi.spyOn(ElMessageBox, 'confirm').mockResolvedValue('confirm' as never)
+    const routes = rewindRoutes()
+    routes['POST /agent/threads/7/rewind'] = fail(409, 'B8018')
+    const calls = mockApi(routes)
+    await show()
+    await open()
+    await w.findAll('button[aria-label="Edit from here"]')[1]!.trigger('click')
+    await flushPromises()
+    expect(ElMessage.warning).toHaveBeenCalledWith(i18n.global.t('agent.chat.rewind.stale'))
+    expect(sent(calls, 'get', '/agent/threads/7/items').map((c) => c.params)).toEqual([
+      undefined,
+      undefined,
+    ])
+    expect(textarea().element.value).toBe('')
+    expect(w.findAll('.agent-msg')).toHaveLength(4)
+
+    routes['GET /agent/threads/7/rewind-preview'] = fail(404, 'A0440')
+    await w.findAll('button[aria-label="Edit from here"]')[1]!.trigger('click')
+    await flushPromises()
+    expect(sent(calls, 'get', '/agent/threads/7/items')).toHaveLength(3)
+    expect(sent(calls, 'post', '/agent/threads/7/rewind')).toHaveLength(1)
+  })
+
+  it('offers no rewind in automation, subtask and batch threads', async () => {
+    const kinds = [{ automationRunId: 3 }, { batchId: 4 }]
+    for (const hidden of kinds) {
+      mockApi({
+        ...rewindRoutes(),
+        'GET /agent/threads/7/items': ok({
+          thread: thread(7, hidden),
+          items: ROUNDS,
+          turn: turn(),
+        }),
+      })
+      await show('/?thread=7')
+      expect(w.findAll('.agent-msg')).toHaveLength(4)
+      expect(w.find('button[aria-label="Edit from here"]').exists()).toBe(false)
+      expect(w.find('button[aria-label="Regenerate"]').exists()).toBe(false)
+      if (hidden !== kinds.at(-1)) w.unmount()
+    }
+  })
+
+  it('offers no rewind while a recovery is required or a sent message is unconfirmed', async () => {
+    const edit = () => w.find('button[aria-label="Edit from here"]')
+    const regenerate = () => w.find('button[aria-label="Regenerate"]')
+    mockApi({
+      ...rewindRoutes(),
+      'GET /agent/threads/7/items': ok({
+        thread: thread(7, { recoveryRequired: true }),
+        items: ROUNDS,
+        turn: turn(),
+      }),
+    })
+    await show('/?thread=7')
+    expect(w.findAll('.agent-msg')).toHaveLength(4)
+    expect([edit().exists(), regenerate().exists()]).toEqual([false, false])
+    w.unmount()
+
+    mockApi({ ...rewindRoutes(), 'POST /agent/threads/7/messages': fail(503, 'A0500') })
+    vi.spyOn(agentApi, 'messageReceipt').mockRejectedValue(
+      new ApiError(503, 'A0500', 'Unavailable'),
+    )
+    await show('/?thread=7')
+    expect([edit().exists(), regenerate().exists()]).toEqual([true, true])
+    await type('Did this arrive?')
+    await key('Enter')
+    expect(w.find('.agent-chat__delivery').exists()).toBe(true)
+    expect([edit().exists(), regenerate().exists()]).toEqual([false, false])
+  })
+
+  it('offers regenerate only on a finished answer after the last delivered message, never after a plan message', async () => {
+    const cases: AgentItemVo[][] = [
+      // the last message has no answer yet: the earlier answer belongs to another turn
+      [ROUNDS[0]!, ROUNDS[1]!, ROUNDS[2]!],
+      // an answer still marked running
+      [ROUNDS[0]!, item(2, 2, 'assistant', { text: 'Acme is' }, 'running')],
+      // the turn starts from the message an approved plan wrote
+      [
+        ROUNDS[0]!,
+        ROUNDS[1]!,
+        { ...item(3, 3, 'user', { text: 'The approved plan', fromPlan: 1 }), turnId: 2 },
+        { ...item(4, 4, 'assistant', { text: 'Done.' }, 'done'), turnId: 2 },
+      ] as AgentItemVo[],
+    ]
+    for (const items of cases) {
+      mockApi({
+        ...rewindRoutes(),
+        'GET /agent/threads/7/items': ok({ thread: thread(7), items, turn: turn() }),
+      })
+      await show('/?thread=7')
+      expect(w.find('button[aria-label="Edit from here"]').exists()).toBe(true)
+      expect(w.find('button[aria-label="Regenerate"]').exists()).toBe(false)
+      w.unmount()
+    }
+  })
+
+  it('reverts and regenerates the whole last turn when a steer joined it', async () => {
+    const confirm = vi.spyOn(ElMessageBox, 'confirm').mockResolvedValue('confirm' as never)
+    const steered = [
+      ...ROUNDS,
+      { ...item(5, 5, 'user', { text: 'Use the office line', mode: 'steer' }), turnId: 2 },
+      { ...item(6, 6, 'assistant', { text: 'Office: 556.' }, 'done'), turnId: 2 },
+    ] as AgentItemVo[]
+    const routes = rewindRoutes([ROUNDS[0]!, ROUNDS[1]!])
+    routes['GET /agent/threads/7/items'] = (c) =>
+      (c.params as { afterSeq?: number } | undefined)?.afterSeq == null
+        ? ok({ thread: thread(7), items: steered, turn: turn({ id: 2 }) })
+        : ok({ thread: thread(7), items: [], turn: turn() })
+    routes['POST /agent/threads/7/messages'] = ok(turn({ id: 3 }))
+    const calls = mockApi(routes)
+    await show()
+    await open()
+    await w.find('button[aria-label="Regenerate"]').trigger('click')
+    await flushPromises()
+    // from the turn's first question, not from the steer: the whole turn goes, as the dialog says
+    expect(sent(calls, 'get', '/agent/threads/7/rewind-preview')[0]!.params).toEqual({ seq: 3 })
+    expect(body(sent(calls, 'post', '/agent/threads/7/rewind')[0])).toEqual({ seq: 3, lastSeq: 6 })
+    expect(body(sent(calls, 'post', '/agent/threads/7/messages')[0])).toMatchObject({
+      text: 'And their phone?',
+    })
+    expect(confirm).toHaveBeenCalledTimes(1)
+
+    await open()
+    await threadMenu('revert')
+    expect(sent(calls, 'get', '/agent/threads/7/rewind-preview')[1]!.params).toEqual({ seq: 3 })
+    expect(body(sent(calls, 'post', '/agent/threads/7/rewind')[1])).toEqual({ seq: 3, lastSeq: 6 })
+  })
+
+  it('puts the message back when the conversation was switched while the rewind was in flight', async () => {
+    vi.spyOn(ElMessageBox, 'confirm').mockResolvedValue('confirm' as never)
+    let release!: (value: ReturnType<typeof ok>) => void
+    const rewound = new Promise<ReturnType<typeof ok>>((resolve) => (release = resolve))
+    const routes = rewindRoutes()
+    routes['POST /agent/threads/7/rewind'] = () => rewound
+    routes['GET /agent/threads/8/items'] = ok({ thread: thread(8), items: [], turn: null })
+    const calls = mockApi(routes)
+    await show()
+    await open()
+    await w.findAll('button[aria-label="Edit from here"]')[0]!.trigger('click')
+    await flushPromises()
+    await open('Old one')
+    release(ok(null))
+    await flushPromises()
+    // the server already removed it: the shared composer keeps it, the other thread is left alone
+    expect(textarea().element.value).toBe('$report Who is Acme?')
+    expect(sent(calls, 'get', '/agent/threads/7/items')).toHaveLength(1)
+    expect(sent(calls, 'post', '/agent/threads/7/messages')).toHaveLength(0)
+  })
+
+  it('removes the rewound items another window reported and catches up', async () => {
+    const routes = rewindRoutes([ROUNDS[0]!, ROUNDS[1]!])
+    const calls = mockApi({
+      ...routes,
+      'GET /agent/threads/7/items': (c) =>
+        (c.params as { afterSeq?: number } | undefined)?.afterSeq == null
+          ? ok({ thread: thread(7), items: ROUNDS, turn: turn({ id: 2, status: 'failed' }) })
+          : ok({ thread: thread(7), items: [], turn: turn({ id: 1 }) }),
+    })
+    await show()
+    await open()
+    expect(w.find('.agent-chat__turn').text()).toBe('Failed')
+    push({ threadId: 7, type: 'rewound', fromSeq: 3 })
+    await flushPromises()
+    expect(w.findAll('.agent-msg')).toHaveLength(2)
+    expect(w.text()).not.toContain('And their phone?')
+    // the removed turn gives way to the earlier one the server now reports as the latest
+    expect(w.find('.agent-chat__turn').text()).toBe('Completed')
+    expect(sent(calls, 'get', '/agent/threads/7/items').at(-1)!.params).toEqual({ afterSeq: 2 })
+    // another thread's rewind does not touch this one
+    push({ threadId: 8, type: 'rewound', fromSeq: 1 })
+    await flushPromises()
+    expect(w.findAll('.agent-msg')).toHaveLength(2)
+  })
+
+  it('reverts the last turn through the same rewind (writes listed), exports Markdown, shares and stops sharing', async () => {
     const writeText = vi.fn<(text: string) => Promise<void>>().mockResolvedValue(undefined)
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
     const confirm = vi.spyOn(ElMessageBox, 'confirm').mockResolvedValue('confirm' as never)
@@ -1001,9 +1352,7 @@ describe('thread views and conversation actions', () => {
     const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
     vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
     const calls = mockApi({
-      ...BASE,
-      'GET /agent/threads/7/items': ok({ thread: thread(7), items: ITEMS, turn: turn() }),
-      'POST /agent/threads/7/revert': ok(null),
+      ...rewindRoutes([ROUNDS[0]!, ROUNDS[1]!]),
       'GET /agent/threads/7/export': ok({ name: 'acme.md', text: '# Acme' }),
       'POST /agent/threads/7/share': ok({ token: 'tok-1' }),
       'DELETE /agent/threads/7/share': ok(null),
@@ -1011,9 +1360,17 @@ describe('thread views and conversation actions', () => {
     await show()
     await open()
     await threadMenu('revert')
-    expect(confirm.mock.calls[0]![0]).toContain('already made in that turn stay')
-    expect(sent(calls, 'post', '/agent/threads/7/revert')).toHaveLength(1)
-    expect(sent(calls, 'get', '/agent/threads/7/items')).toHaveLength(2)
+    expect(sent(calls, 'get', '/agent/threads/7/rewind-preview')[0]!.params).toEqual({ seq: 3 })
+    expect(confirm.mock.calls[0]![1]).toBe('Revert last turn')
+    expect(vnodeText(confirm.mock.calls[0]![0])).toContain(
+      'The last question and its answer are removed',
+    )
+    expect(vnodeText(confirm.mock.calls[0]![0])).toContain('Remote write · outcome unknown')
+    expect(body(sent(calls, 'post', '/agent/threads/7/rewind')[0])).toEqual({ seq: 3, lastSeq: 4 })
+    expect(sent(calls, 'post', '/agent/threads/7/revert')).toHaveLength(0)
+    expect(w.findAll('.agent-msg')).toHaveLength(2)
+    // withdrawing does not refill the composer
+    expect(textarea().element.value).toBe('')
 
     await threadMenu('export')
     expect(await (blob.mock.calls[0]![0] as Blob).text()).toBe('# Acme')
@@ -1188,20 +1545,104 @@ describe('composer extras', () => {
     expect(textarea().element.value).toBe('')
   })
 
-  it('shows the context use, stops a running turn with Esc on an empty composer, leaves Ctrl+F to the browser', async () => {
+  it('shows the context use, stops a running turn with Esc keeping the draft, leaves Ctrl+F to the browser', async () => {
     const calls = mockApi({ ...BASE, 'POST /agent/threads/7/cancel': ok(null) })
     await show()
     await open()
     const meter = w.find('meter')
     expect(meter.attributes()).toMatchObject({ max: '64000', value: '12000' })
     expect(w.find('.agent-composer__context').text()).toContain('Context estimate 19%')
+    // Esc closes the completion first, then stops the turn; the draft stays
+    await type('/sta')
+    expect(suggestions()).toEqual(['/status'])
+    await key('Escape')
+    expect(suggestions()).toEqual([])
+    expect(sent(calls, 'post', '/agent/threads/7/cancel')).toHaveLength(0)
+    await type('Half-written draft')
     await key('Escape')
     expect(sent(calls, 'post', '/agent/threads/7/cancel')).toHaveLength(1)
+    expect(textarea().element.value).toBe('Half-written draft')
     for (const mod of [{ ctrlKey: true }, { metaKey: true }]) {
       const find = new KeyboardEvent('keydown', { key: 'f', cancelable: true, ...mod })
       window.dispatchEvent(find)
       expect(find.defaultPrevented).toBe(false)
     }
+  })
+  it('puts the queued messages a stop withdrew back after the draft, with their attachments and skill', async () => {
+    const queued = {
+      ...item(3, 3, 'user', { text: 'Queued one', mode: 'queue' }, 'pending'),
+      turnId: null,
+    } as AgentItemVo
+    let stopped = false
+    const calls = mockApi({
+      ...BASE,
+      // after the stop the server has deleted the queued message and ended the turn
+      'GET /agent/threads/7/items': () =>
+        ok({
+          thread: thread(7),
+          items: stopped ? ITEMS : [...ITEMS, queued],
+          turn: turn({ status: stopped ? 'cancelled' : 'running' }),
+        }),
+      'POST /agent/threads/7/cancel': () => (
+        (stopped = true),
+        ok({
+          queued: [
+            {
+              text: 'Queued one',
+              skill: 'fill-customer',
+              attachments: [{ fileId: 5, name: 'list.pdf', mime: 'application/pdf', size: 3 }],
+            },
+            { text: 'Second', attachments: [] },
+          ],
+        })
+      ),
+    })
+    await show()
+    await open()
+    expect(w.text()).toContain('Queued for the next turn')
+    await type('My draft')
+    await button('Stop')!.trigger('click')
+    await flushPromises()
+    expect(sent(calls, 'post', '/agent/threads/7/cancel')).toHaveLength(1)
+    expect(textarea().element.value).toBe('$fill-customer My draft\n\nQueued one\n\nSecond')
+    expect(w.findComponent(FileUpload).props('modelValue')).toMatchObject([
+      { id: 5, originalName: 'list.pdf', mime: 'application/pdf', size: 3 },
+    ])
+    expect(ElMessage.info).toHaveBeenCalledWith(
+      i18n.global.t('agent.chat.composer.restoredQueued', { n: 2 }),
+    )
+    expect(w.text()).not.toContain('Queued for the next turn')
+    expect(sent(calls, 'post', '/agent/threads/7/messages')).toHaveLength(0)
+  })
+
+  it('a withdrawn message adds no second skill to a draft that has one, and no file twice', async () => {
+    const file = { fileId: 5, name: 'list.pdf', mime: 'application/pdf', size: 3 }
+    let stopped = false
+    mockApi({
+      ...BASE,
+      'GET /agent/threads/7/items': () =>
+        ok({
+          thread: thread(7),
+          items: ITEMS,
+          turn: turn({ status: stopped ? 'cancelled' : 'running' }),
+        }),
+      'POST /agent/threads/7/cancel': () => (
+        (stopped = true),
+        ok({
+          queued: [
+            { text: 'Queued one', skill: 'fill-customer', attachments: [file] },
+            { text: 'Second', attachments: [file] },
+          ],
+        })
+      ),
+    })
+    await show()
+    await open()
+    await type('$report My draft')
+    await button('Stop')!.trigger('click')
+    await flushPromises()
+    expect(textarea().element.value).toBe('$report My draft\n\nQueued one\n\nSecond')
+    expect(w.findComponent(FileUpload).props('modelValue')).toHaveLength(1)
   })
 })
 
@@ -1245,7 +1686,7 @@ describe('live list, trust, plans and mentions', () => {
     expect(w.find('.agent-threads__unread').exists()).toBe(false)
   })
 
-  it('marks the log busy while a turn waits on a card; typing then warns that sending rejects it', async () => {
+  it('marks the log busy while a turn waits on a card; Enter rejects it, the queue button leaves it waiting', async () => {
     const approval = item(
       5,
       3,
@@ -1253,13 +1694,14 @@ describe('live list, trust, plans and mentions', () => {
       { callId: 'c', tool: 't', title: 'Update', args: {}, sources: [] },
       'pending',
     )
-    mockApi({
+    const calls = mockApi({
       ...BASE,
       'GET /agent/threads/7/items': ok({
         thread: thread(7),
         items: [...ITEMS, approval],
         turn: turn({ status: 'waiting' }),
       }),
+      'POST /agent/threads/7/messages': ok(turn({ status: 'waiting' })),
     })
     await show()
     await open()
@@ -1271,6 +1713,23 @@ describe('live list, trust, plans and mentions', () => {
     expect(hint().exists()).toBe(false)
     await type('Use the other Acme')
     expect(hint().text()).toBe(i18n.global.t('agent.chat.composer.rejectHint'))
+    expect(w.text()).toContain('stops the whole turn and the open cards expire')
+    // the queue button only queues: the card keeps waiting
+    await button('Queue for next turn')!.trigger('click')
+    await flushPromises()
+    expect(body(sent(calls, 'post', '/agent/threads/7/messages')[0])).toMatchObject({
+      text: 'Use the other Acme',
+      mode: 'queue',
+    })
+    expect(calls.some((c) => c.url?.startsWith('/agent/approvals'))).toBe(false)
+    expect(button('Allow once')).toBeDefined()
+    // Enter is the steer the server takes as the note rejecting the waiting cards
+    await type('No, the Berlin one')
+    await key('Enter')
+    expect(body(sent(calls, 'post', '/agent/threads/7/messages')[1])).toMatchObject({
+      text: 'No, the Berlin one',
+      mode: 'steer',
+    })
     push({ threadId: 7, type: 'turn', turn: turn({ status: 'completed' }) })
     await flushPromises()
     expect(w.find('[role="log"]').attributes('aria-busy')).toBe('false')
@@ -1665,10 +2124,9 @@ describe('work panel scope', () => {
         return ok({ thread: thread(8), items: [second], turn: turn() })
       },
       'GET /agent/threads/8/status': ok({
+        ...statusOf(),
         threadId: 8,
-        model: 'm1',
         contextUsed: 0,
-        contextWindow: 64000,
         turn: null,
         today: {
           userTokens: null,
@@ -1721,6 +2179,24 @@ describe('work panel scope', () => {
 })
 
 describe('embedded chat and subtasks', () => {
+  it('names the Stop button in the running hint when the embedded panel keeps Esc for closing', async () => {
+    mockApi({
+      ...BASE,
+      'GET /agent/threads/7/items': ok({
+        thread: thread(7),
+        items: ITEMS,
+        turn: turn({ status: 'running' }),
+      }),
+    })
+    await show()
+    await open()
+    const hint = () => w.find('.agent-card__meta').text()
+    expect(hint()).toContain('Esc stops it')
+    await w.setProps({ embedded: true })
+    expect(hint()).toContain('; the Stop button stops it')
+    expect(hint()).not.toContain('Stop stops')
+  })
+
   it('preserves chosen model and approval mode when draft options arrive late', async () => {
     const selected = { model: 'm2', approvalMode: 'plan' as const }
     const created = thread(9, selected)
@@ -2073,7 +2549,7 @@ describe('durable delivery and recovery', () => {
     expect(next.clientMessageId).not.toBe(id)
   })
 
-  it('a late receipt preserves later text, model and queue selection without creating another intent', async () => {
+  it('a late receipt preserves later text and model without creating another intent', async () => {
     const { calls, lookup, id } = await uncertainSend()
     let release!: (value: ReturnType<typeof received>) => void
     const response = new Promise<ReturnType<typeof received>>((resolve) => (release = resolve))
@@ -2086,12 +2562,10 @@ describe('durable delivery and recovery', () => {
     const composer = w.findComponent({ name: 'AgentComposer' })
     composer.vm.$emit('update:settings', { ...composer.props('settings'), model: 'm2' })
     await flushPromises()
-    await w.find('input[value="queue"]').setValue(true)
     release(received(id))
     await flushPromises()
     expect(textarea().element.value).toBe('A later private draft')
     expect(composer.props('settings').model).toBe('m2')
-    expect((w.find('input[value="queue"]').element as HTMLInputElement).checked).toBe(true)
     expect(sent(calls, 'post', '/agent/threads/7/messages')).toHaveLength(1)
   })
 
@@ -2256,76 +2730,91 @@ it('drops late child responses even when the transport ignores cancellation', as
   expect(w.text()).toContain('Current child output')
 })
 
-describe('editing identities and full conversation snapshots', () => {
-  it('uses a distinct draft identity for each edit after creating and successfully sending a conversation', async () => {
-    const detail = (id: number, text: string) => ({
-      thread: thread(id),
-      items: [
-        item(id * 10, 1, 'user', { text }),
-        item(id * 10 + 1, 2, 'assistant', { text: 'Done' }, 'done'),
-      ],
-      turn: turn({ threadId: id }),
-    })
+describe('regenerate identities and full conversation snapshots', () => {
+  it('regenerates the last answer in place: no dialog without writes, the same message under a new identity each time', async () => {
+    const confirm = vi.spyOn(ElMessageBox, 'confirm')
+    const asked = {
+      ...item(1, 1, 'user', {
+        text: '$report Who is Acme?',
+        skill: 'report',
+        attachments: [{ fileId: 9, name: 'card.png', mime: 'image/png', size: 10 }],
+      }),
+    } as AgentItemVo
+    let round = 0
+    const roundItems = () => [
+      { ...asked, id: 10 * round + 1, seq: 2 * round + 1, turnId: round + 1 },
+      {
+        ...item(10 * round + 2, 2 * round + 2, 'assistant', { text: `Answer ${round}` }, 'done'),
+        turnId: round + 1,
+      },
+    ]
     const calls = mockApi({
       ...BASE,
-      'POST /agent/threads': ok(thread(9)),
-      'POST /agent/threads/9/messages': ok(turn({ threadId: 9 })),
-      'GET /agent/threads/9/items': ok(detail(9, 'Original')),
-      'POST /agent/threads/9/fork': ok(thread(10)),
-      'GET /agent/threads/10/items': ok(detail(10, 'First edit')),
-      'POST /agent/threads/10/messages': ok(turn({ threadId: 10 })),
-      'POST /agent/threads/10/fork': ok(thread(11)),
-      'GET /agent/threads/11/items': ok(detail(11, 'Second edit')),
-      'POST /agent/threads/11/messages': ok(turn({ threadId: 11 })),
+      'GET /agent/threads/7/items': () =>
+        ok({ thread: thread(7), items: roundItems(), turn: turn() }),
+      'GET /agent/threads/7/rewind-preview': ok({ writes: [] }),
+      'POST /agent/threads/7/rewind': ok(null),
+      'POST /agent/threads/7/messages': () => {
+        round++
+        return ok(turn({ id: round + 1 }))
+      },
     })
-    await show()
-    await type('Original')
-    await key('Enter')
-    for (const text of ['First edit', 'Second edit']) {
-      await w.find('button[aria-label="Edit and resend"]').trigger('click')
-      await flushPromises()
-      await type(text)
-      await key('Enter')
-      expect(textarea().element.value).toBe('')
-    }
-    const identities = [
-      body(sent(calls, 'post', '/agent/threads')[0]),
-      body(sent(calls, 'post', '/agent/threads/9/fork')[0]),
-      body(sent(calls, 'post', '/agent/threads/10/fork')[0]),
-    ] as { clientDraftId: string }[]
-    expect(identities.map((request) => request.clientDraftId)).toEqual([
-      expect.any(String),
-      expect.any(String),
-      expect.any(String),
-    ])
-    expect(new Set(identities.map((request) => request.clientDraftId)).size).toBe(3)
-    expect(sent(calls, 'post', '/agent/threads/11/messages')).toHaveLength(1)
-  })
-
-  it('keeps the fork identity when explicitly retrying the same edit after an unknown acknowledgement', async () => {
-    mockApi({
-      ...BASE,
-      'GET /agent/threads/7/items': ok({ thread: thread(7), items: ITEMS, turn: turn() }),
-      'GET /agent/threads/11/items': ok({ thread: thread(11), items: [], turn: null }),
-      'POST /agent/threads/11/messages': ok(turn({ threadId: 11 })),
-    })
-    const fork = vi
-      .spyOn(agentApi, 'fork')
-      .mockRejectedValueOnce(new ApiError(503, 'A0500', 'Unavailable'))
-      .mockResolvedValue(thread(11))
-    vi.spyOn(agentApi, 'draftReceipt').mockRejectedValue(new ApiError(404, 'A0440', 'Not found'))
     await show()
     await open()
-    await w.find('button[aria-label="Edit and resend"]').trigger('click')
+    await type('An unrelated draft')
+    for (const n of [1, 2]) {
+      await w.find('button[aria-label="Regenerate"]').trigger('click')
+      await flushPromises()
+      expect(w.text()).toContain(`Answer ${n}`)
+    }
+    expect(confirm).not.toHaveBeenCalled()
+    expect(sent(calls, 'post', '/agent/threads/7/rewind').map(body)).toEqual([
+      { seq: 1, lastSeq: 2 },
+      { seq: 3, lastSeq: 4 },
+    ])
+    const resent = sent(calls, 'post', '/agent/threads/7/messages').map(body) as {
+      clientMessageId: string
+    }[]
+    expect(resent).toEqual([
+      {
+        clientMessageId: expect.any(String),
+        text: '$report Who is Acme?',
+        skill: 'report',
+        fileIds: [9],
+      },
+      expect.objectContaining({ text: '$report Who is Acme?' }),
+    ])
+    expect(resent[0]!.clientMessageId).not.toBe(resent[1]!.clientMessageId)
+    // in place: no fork, and the draft being written stays
+    expect(calls.some((c) => c.url?.endsWith('/fork'))).toBe(false)
+    expect(textarea().element.value).toBe('An unrelated draft')
+  })
+
+  it('asks before regenerating when the last turn wrote, and puts the message back when resending fails', async () => {
+    const confirm = vi.spyOn(ElMessageBox, 'confirm').mockResolvedValue('confirm' as never)
+    const calls = mockApi({
+      ...BASE,
+      'GET /agent/threads/7/items': (c) =>
+        (c.params as { afterSeq?: number } | undefined)?.afterSeq == null
+          ? ok({
+              thread: thread(7),
+              items: [ITEMS[0], item(2, 2, 'assistant', { text: 'Done' }, 'done')],
+              turn: turn(),
+            })
+          : ok({ thread: thread(7), items: [], turn: null }),
+      'GET /agent/threads/7/rewind-preview': ok({
+        writes: [{ seq: 2, tool: 'mcp.crm.write', title: 'Remote write', outcome: 'done' }],
+      }),
+      'POST /agent/threads/7/rewind': ok(null),
+      'POST /agent/threads/7/messages': fail(422, 'B8003'),
+    })
+    await show()
+    await open()
+    await w.find('button[aria-label="Regenerate"]').trigger('click')
     await flushPromises()
-    await type('Same edited intent')
-    await key('Enter')
-    expect(fork).toHaveBeenCalledTimes(1)
-    expect(textarea().element.value).toBe('Same edited intent')
-    await key('Enter')
-    expect(fork).toHaveBeenCalledTimes(2)
-    expect(fork.mock.calls[1]).toEqual(fork.mock.calls[0])
-    expect(textarea().element.value).toBe('')
+    expect(confirm.mock.calls[0]![1]).toBe('Regenerate')
+    expect(sent(calls, 'post', '/agent/threads/7/messages')).toHaveLength(1)
+    expect(textarea().element.value).toBe('Who is Acme?')
   })
 
   it('keeps newer committed text and turn state when reopening the current conversation returns an older snapshot', async () => {
@@ -2476,5 +2965,195 @@ describe('editing identities and full conversation snapshots', () => {
     expect(textarea().element.value).toBe('A later unsent draft')
     expect(sent(calls, 'post', '/agent/threads/7/messages')).toHaveLength(1)
     expect(sent(calls, 'post', '/agent/threads/8/messages')).toHaveLength(0)
+  })
+})
+
+describe('status line and /status', () => {
+  const line = () => w.find('.agent-chat__statusline')
+  const parts = () =>
+    line()
+      .findAll('.agent-chat__statusline-part')
+      .map((p) => p.text())
+  const statusCalls = (calls: Call[]) => sent(calls, 'get', '/agent/threads/7/status').length
+
+  it("shows the mode, the estimated context, the live turn credits and today's credits; unknown parts stay hidden", async () => {
+    mockApi({ ...BASE, 'GET /agent/threads/7/status': fail(500, 'B0001') })
+    await show()
+    // a new draft: only the mode is known
+    expect(parts()).toEqual(['Ask every time'])
+    await open()
+    // no status: the running turn's credits, but no context, today or allowed count
+    expect(parts()).toEqual(['Ask every time', 'Turn 0.123456 credits'])
+    w.unmount()
+
+    mockApi(BASE)
+    await show()
+    await open()
+    // a labelled group, not a live region: it refreshes every few seconds while a turn runs
+    expect(line().attributes()).toMatchObject({ role: 'group', 'aria-label': expect.any(String) })
+    expect(parts()).toEqual([
+      'Ask every time',
+      'Context ~19%',
+      'Turn 0.123456 credits',
+      'Today 1.5 credits',
+    ])
+    expect(line().find('button').exists()).toBe(false)
+    push({ threadId: 7, type: 'turn', turn: turn({ status: 'running', credits: '0.5' }) })
+    await flushPromises()
+    expect(line().text()).toContain('Turn 0.5 credits')
+  })
+
+  it('uses the reported context and the turn limit; the allowed count opens the allowed list', async () => {
+    mockApi({
+      ...BASE,
+      'GET /agent/threads/7/items': ok({
+        thread: thread(7, { allowedTools: ['demo.customer.update'] }),
+        items: ITEMS,
+        turn: turn({ status: 'running' }),
+      }),
+      'GET /agent/threads/7/status': ok(
+        statusOf({
+          contextReported: 16000,
+          turnLimit: '2',
+          allowedTools: ['demo.customer.update'],
+        }),
+      ),
+    })
+    await show()
+    await open()
+    expect(line().text()).toContain('Context 25%')
+    expect(line().text()).not.toContain('~')
+    // one context figure only: the composer's estimate meter gives way to the reported value
+    expect(w.find('.agent-composer__context').exists()).toBe(false)
+    expect(line().text()).toContain('Turn 0.123456 / 2 credits')
+    const allowed = line().find('button')
+    expect(allowed.text()).toBe('1 tools allowed')
+    await allowed.trigger('click')
+    await wait(10)
+    expect(w.findAll('.agent-settings__allowed li')).toHaveLength(1)
+  })
+
+  it('reloads the status at most every 10 seconds while a turn runs, at once when it ends or the mode changes', async () => {
+    let clock = 1_000_000
+    vi.spyOn(Date, 'now').mockImplementation(() => clock)
+    const calls = mockApi({
+      ...BASE,
+      'PATCH /agent/threads/7': (c) =>
+        ok(thread(7, JSON.parse(String(c.data)) as Partial<AgentThreadVo>)),
+    })
+    await show()
+    await open()
+    expect(statusCalls(calls)).toBe(1)
+    push({ threadId: 7, type: 'turn', turn: turn({ status: 'running', steps: 4 }) })
+    await flushPromises()
+    clock += 9_000
+    push({ threadId: 7, type: 'turn', turn: turn({ status: 'running', steps: 5 }) })
+    await flushPromises()
+    expect(statusCalls(calls)).toBe(1)
+    clock += 1_000
+    push({ threadId: 7, type: 'turn', turn: turn({ status: 'running', steps: 6 }) })
+    await flushPromises()
+    expect(statusCalls(calls)).toBe(2)
+    push({ threadId: 7, type: 'turn', turn: turn({ status: 'completed', steps: 6 }) })
+    await flushPromises()
+    expect(statusCalls(calls)).toBe(3)
+    // the mode saved on the thread: the tools that ask change with it
+    w.findComponent({ name: 'AgentComposer' }).vm.$emit('update:settings', {
+      providerId: 1,
+      model: 'm1',
+      reasoning: null,
+      approvalMode: 'read_only',
+    })
+    await flushPromises()
+    expect(sent(calls, 'patch', '/agent/threads/7')).toHaveLength(1)
+    expect(statusCalls(calls)).toBe(4)
+  })
+
+  it('a slower earlier status reply never replaces a newer one', async () => {
+    let release!: (reply: ReturnType<typeof ok>) => void
+    let n = 0
+    mockApi({
+      ...BASE,
+      'GET /agent/threads/7/status': () =>
+        ++n === 1
+          ? new Promise((resolve) => (release = resolve))
+          : ok(statusOf({ today: { ...statusOf().today, userCredits: '9' } })),
+    })
+    await show()
+    await open()
+    push({ threadId: 7, type: 'turn', turn: turn({ status: 'completed' }) })
+    await flushPromises()
+    expect(n).toBe(2)
+    expect(line().text()).toContain('Today 9 credits')
+    release(ok(statusOf()))
+    await flushPromises()
+    expect(line().text()).toContain('Today 9 credits')
+  })
+
+  it("another thread's status never shows while the opened thread's own is on its way", async () => {
+    mockApi({
+      ...BASE,
+      'GET /agent/threads/8/items': ok({
+        thread: thread(8, { title: 'Old one', lastActiveAt: OLD }),
+        items: [],
+        turn: null,
+      }),
+      'GET /agent/threads/8/status': () => new Promise(() => undefined),
+    })
+    await show()
+    await open()
+    expect(line().text()).toContain('Today 1.5 credits')
+    await open('Old one')
+    expect(parts()).toEqual(['Ask every time'])
+  })
+
+  it('/status lists the mode, profile, allowed tools and which tools ask or are unavailable, and why', async () => {
+    mockApi({
+      ...BASE,
+      'GET /agent/threads/7/status': ok(
+        statusOf({
+          profile: { id: 2, name: 'Sales' },
+          contextReported: 16000,
+          turnLimit: '2',
+          allowedTools: ['demo.customer.update'],
+          tools: {
+            asks: [
+              { name: 'demo.customer.remove', title: 'Remove a customer', why: 'tenant' },
+              { name: 'image.generate', title: 'Generate an image', why: 'read' },
+            ],
+            unavailable: [
+              { name: 'web.fetch', title: 'Fetch a page', reason: 'tenant' },
+              { name: 'demo.order.create', title: 'Create an order', reason: 'list' },
+              { name: 'demo.order.update', title: 'Update an order', reason: 'mode' },
+              { name: 'demo.order.remove', title: 'Remove an order', reason: 'permission' },
+            ],
+          },
+        }),
+      ),
+    })
+    await show()
+    await open()
+    await type('/status')
+    await key('Enter')
+    const card = w.find('.agent-chat__status')
+    expect(card.text()).toContain('ModeAsk every time')
+    expect(card.text()).toContain('ProfileSales')
+    expect(card.text()).toContain('Context (last step, reported)16000 / 64000')
+    expect(card.text()).toContain('Credit limit per turn2')
+    expect(card.text()).toContain(
+      `Allowed in this conversation1: ${i18n.global.t('agent.tools.demo_customer_update.title')}`,
+    )
+    const [asks, unavailable] = card.findAll('details')
+    expect(asks!.find('summary').text()).toBe('Tools that ask you (2)')
+    expect(asks!.attributes('open')).toBeDefined()
+    expect(asks!.text()).toContain('Your tenant administrator set this tool to "People only".')
+    expect(asks!.text()).toContain('An administrator set this read tool to ask every time.')
+    // a long list starts collapsed with its count
+    expect(unavailable!.find('summary').text()).toBe('Unavailable tools (4)')
+    expect(unavailable!.attributes('open')).toBeUndefined()
+    expect(unavailable!.text()).toContain('switched off by your tenant')
+    expect(unavailable!.text()).toContain("not in the skill's or profile's tool list")
+    expect(unavailable!.text()).toContain('the mode does not change data')
+    expect(unavailable!.text()).toContain('you lack its permission')
   })
 })

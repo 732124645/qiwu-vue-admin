@@ -8,23 +8,30 @@ import {
   agentToolEnabledUpdate,
   type AgentToolPolicy,
   agentToolPolicyUpdate,
+  agentToolRestrictionUpdate,
+  type AgentToolRestrictionPolicy,
+  type AgentToolRestrictionVo,
+  agentToolRestrictionVo,
   type AgentToolVo,
   agentToolVo,
   Err,
   type MCP_TOOL_KINDS,
 } from '@qiwu/shared'
+import type { EntityManager } from 'typeorm'
 import { z } from 'zod'
 import { ActionLog } from '../../audit/action-log.js'
 import { RequirePerm } from '../../auth/decorators.js'
 import { PlatformOnly } from '../../auth/platform-only.js'
 import type { Principal } from '../../auth/principal.js'
 import { clsGet } from '../../context/cls.js'
+import { tenantId } from '../../context/tenant.js'
 import { ApiEnvelope } from '../../http/api-envelope.decorator.js'
 import { BizError } from '../../http/biz-error.js'
 import { McpRegistry } from '../../mcp/mcp-registry.js'
 import { McpToolSwitch } from '../../mcp/mcp.entity.js'
 import { ToolHost } from '../../mcp/tool-host.js'
 import { EXTERNAL_TOOL_SOURCE, type ExternalToolSource } from '../agent-ports.js'
+import { AgentMcpTool, AgentToolRestriction } from '../entities/agent-mcp.entity.js'
 import { AgentExtensions } from '../runtime/agent-extensions.js'
 import { WEB_TOOLS } from '../web/web-tools.js'
 import { AgentRootOnly } from './root-only.js'
@@ -52,6 +59,43 @@ export const effectivePolicy = (
   if (stored === 'deny') return 'deny'
   if (kind !== 'write') return stored === 'ask' ? 'ask' : 'auto'
   return stored === 'ask' || stored === 'human' ? stored : defaultPolicy(kind, highRisk)
+}
+
+/** 策略从宽到严。 */
+const STRICTNESS: readonly AgentToolPolicy[] = ['auto', 'ask', 'human', 'deny']
+
+/**
+ * 平台策略叠加租户收紧后的生效策略：取两者中更严的一方。租户行只能收紧（不会放宽平台的 deny / human），平台
+ * 之后放宽了也放不宽租户行。读取工具被租户设成 human 时生效值就是 human（每次都由人确认，不能本会话放行）。
+ */
+export const tighten = (
+  platform: AgentToolPolicy,
+  tenant: AgentToolRestrictionPolicy | null | undefined,
+): AgentToolPolicy =>
+  tenant && STRICTNESS.indexOf(tenant) > STRICTNESS.indexOf(platform) ? tenant : platform
+
+/** 外部 MCP 工具在租户收紧表里的键：面向模型的名字不稳定（改名、撞名、重建服务器），按工具行 id。 */
+export const externalKey = (toolId: number): string => `mcp:${toolId}`
+
+/**
+ * 当前租户对工具的收紧，按工具名（外部工具为 {@link externalKey}）。显式按 `tenantId()` 取：不在单一租户里
+ * （`allTenants` 或没有租户上下文）时抛出，不会把各租户的行混在一起，也不会悄悄当作“没有收紧”。
+ */
+export async function tenantRestrictions(
+  m: EntityManager,
+): Promise<Map<string, AgentToolRestrictionPolicy>> {
+  const rows = await m.getRepository(AgentToolRestriction).find({
+    where: { tenantId: tenantId() },
+    select: { id: true, tool: true, policy: true },
+  })
+  return new Map(rows.map((r) => [r.tool, r.policy]))
+}
+
+/** 一个工具此刻的策略：平台层、本租户的收紧（没有为 null）与两者叠加后的生效值。 */
+export interface ToolPolicyLayers {
+  platform: AgentToolPolicy
+  tenant: AgentToolRestrictionPolicy | null
+  policy: AgentToolPolicy
 }
 
 type Source = 'local' | 'web' | 'builtin'
@@ -142,15 +186,29 @@ export class AgentToolPolicies {
       .sort((a, b) => a.name.localeCompare(b.name))
   }
 
-  /** 运行时用：全部本系统工具此刻生效的策略，按工具名（humanOnly 内置工具除 deny 外按 human，与列表一致）。 */
-  async policies(): Promise<Map<string, AgentToolPolicy>> {
+  /**
+   * 全部本系统工具此刻的策略分层，按工具名：平台层（humanOnly 内置工具除 deny 外按 human，与平台页一致）、
+   * 当前租户的收紧与叠加后的生效值。须在单一租户里调用（见 {@link tenantRestrictions}）。
+   */
+  async layers(): Promise<Map<string, ToolPolicyLayers>> {
     const stored = await this.stored()
+    const tenant = await tenantRestrictions(this.txHost.tx)
     return new Map(
       this.known().map((t) => {
-        const policy = effectivePolicy(t.kind, stored.get(t.name) ?? null, t.highRisk)
-        return [t.name, t.humanOnly && policy !== 'deny' ? 'human' : policy]
+        const raw = effectivePolicy(t.kind, stored.get(t.name) ?? null, t.highRisk)
+        const platform = t.humanOnly && raw !== 'deny' ? 'human' : raw
+        const restricted = tenant.get(t.name) ?? null
+        return [t.name, { platform, tenant: restricted, policy: tighten(platform, restricted) }]
       }),
     )
+  }
+
+  /**
+   * 运行时用：全部本系统工具此刻生效的策略，按工具名（平台策略叠加当前租户的收紧，取更严的一方）。平台页的
+   * {@link list} 只看平台层，不经这里。
+   */
+  async policies(): Promise<Map<string, AgentToolPolicy>> {
+    return new Map([...(await this.layers())].map(([name, l]) => [name, l.policy]))
   }
 
   /**
@@ -160,16 +218,21 @@ export class AgentToolPolicies {
    */
   async pickable(p: Principal): Promise<AgentMyToolVo[]> {
     const reachable = new Set((await this.host.list(p)).map((t) => t.name))
+    // 生效策略（含本租户的收紧）为 deny 的不列：运行时不会提供它们
+    const policies = await this.policies()
     const own = (await this.list())
       .filter(
-        (t) => t.policy !== 'deny' && t.enabled && (t.source !== 'local' || reachable.has(t.name)),
+        (t) =>
+          policies.get(t.name) !== 'deny' &&
+          t.enabled &&
+          (t.source !== 'local' || reachable.has(t.name)),
       )
       .map((t) => ({ name: t.name, title: t.title, kind: t.kind, origin: t.source }))
-    // 外部工具的来源已去掉停用的服务器、停用的与 deny 的工具；类型与运行时一致：只有 auto 的按只读执行
+    // 外部工具的来源已去掉停用的服务器、停用的与 deny 的工具；类型与运行时一致：按平台策略，auto 的是读取
     const external = (await this.external.list(p)).map((d) => ({
       name: d.name,
       title: d.title,
-      kind: d.policy === 'auto' ? ('read' as const) : ('write' as const),
+      kind: d.kind ?? (d.policy === 'auto' ? ('read' as const) : ('write' as const)),
       origin: 'mcp' as const,
     }))
     return [...own, ...external]
@@ -197,6 +260,105 @@ export class AgentToolPolicies {
   }
 
   /**
+   * 本租户收紧页的工具列表：平台此刻提供的每个工具（本系统工具中平台启用且不是 deny 的，与已启用的外部工具，
+   * 外部工具按 `mcp:<id>` 命名），带平台策略、本租户的收紧与生效值。
+   */
+  async restrictions(p: Principal): Promise<AgentToolRestrictionVo[]> {
+    const out: AgentToolRestrictionVo[] = []
+    for (const { offered, ...vo } of await this.restrictable(p)) if (offered) out.push(vo)
+    return out
+  }
+
+  /**
+   * 能收紧的全部工具：本系统工具（平台停用或 deny 的也在，`offered` 为假：租户的收紧照样存下，平台之后放开时
+   * 仍然有效）与平台此刻提供的外部工具。
+   */
+  private async restrictable(
+    p: Principal,
+  ): Promise<(AgentToolRestrictionVo & { offered: boolean })[]> {
+    const layers = await this.layers()
+    const enabled = new Map((await this.rows()).map((r) => [r.name, r.enabled]))
+    const own = this.known().map((t) => {
+      const l = layers.get(t.name)!
+      const on = enabled.get(t.name) ?? true
+      // 平台停用的按 deny 显示（运行时就是这样对待它的）
+      const platform = on ? l.platform : 'deny'
+      return {
+        name: t.name,
+        title: t.title,
+        kind: t.kind,
+        origin: t.source,
+        platformPolicy: platform,
+        tenantPolicy: l.tenant,
+        effective: tighten(platform, l.tenant),
+        offered: platform !== 'deny',
+      }
+    })
+    const external = ((await this.external.offered?.(p)) ?? []).map((d) => ({
+      name: externalKey(d.id),
+      title: d.title,
+      kind: d.platformPolicy === 'auto' ? ('read' as const) : ('write' as const),
+      origin: 'mcp' as const,
+      platformPolicy: d.platformPolicy,
+      tenantPolicy: d.restricted ?? null,
+      effective: d.policy,
+      offered: true,
+    }))
+    return [...own, ...external].sort((a, b) => a.name.localeCompare(b.name))
+  }
+
+  /**
+   * 设本租户对一个工具的收紧（`human` 或 `deny`；null 去掉收紧）；未知工具 404。只存租户自己的一行，生效值
+   * 总取平台与租户中更严的一方，所以这里无论平台此刻是什么都不会放宽。返回这个工具此刻的一行。
+   */
+  async restrict(
+    p: Principal,
+    name: string,
+    policy: AgentToolRestrictionPolicy | null,
+    by: number,
+  ): Promise<AgentToolRestrictionVo> {
+    // 外部工具按工具行 id：行须还在（停用或平台 deny 的也可以收紧，平台之后放开时仍然有效）
+    const ext = /^mcp:([1-9]\d{0,18})$/.exec(name)
+    const known = ext
+      ? await this.txHost.tx.getRepository(AgentMcpTool).existsBy({ id: Number(ext[1]) })
+      : this.known().some((t) => t.name === name)
+    if (!known) throw new BizError(Err.NOT_FOUND)
+    const tid = tenantId()
+    if (policy === null)
+      await this.txHost.tx.query(
+        `UPDATE agent_tool_restriction SET deleted_at = CURRENT_TIMESTAMP(3), updated_by = ?
+          WHERE tenant_id = ? AND tool = ? AND deleted_at IS NULL`,
+        [by, tid, name],
+      )
+    // 一个租户一个工具一行（唯一键 tenant_id + tool + alive）：没有活行时新建，有则改
+    else
+      await this.txHost.tx.query(
+        `INSERT INTO agent_tool_restriction (tenant_id, tool, policy, created_by, updated_by)
+          VALUES (?, ?, ?, ?, ?) AS n
+          ON DUPLICATE KEY UPDATE policy = n.policy, updated_by = n.updated_by`,
+        [tid, name, policy, by, by],
+      )
+    const row = (await this.restrictable(p)).find((r) => r.name === name)
+    // 外部工具的服务器或工具已停用、平台已 deny：不在平台提供的列表里，按存下的收紧回一行
+    if (!row) {
+      const tool = ext
+        ? await this.txHost.tx.getRepository(AgentMcpTool).findOneBy({ id: Number(ext[1]) })
+        : null
+      return {
+        name,
+        title: tool?.title ?? tool?.name ?? name,
+        kind: tool?.policy === 'auto' ? 'read' : 'write',
+        origin: 'mcp',
+        platformPolicy: 'deny',
+        tenantPolicy: policy,
+        effective: 'deny',
+      }
+    }
+    const { offered: _, ...vo } = row
+    return vo
+  }
+
+  /**
    * 启用或停用一个内置工具（停用后运行时按 deny，模型拿不到它）；未知工具 404，不是内置工具的回 400
    * （本系统其他工具的启停在 MCP 工具页，同时管着外部 MCP 访问）。
    */
@@ -210,6 +372,46 @@ export class AgentToolPolicies {
       [name, enabled ? 1 : 0, by, by],
     )
     return null
+  }
+}
+
+/**
+ * 本租户的工具收紧（租户管理员经套餐拿到权限；不是平台页）：只能把工具收紧为仅人工确认或停用，生效值总取
+ * 平台与租户中更严的一方。面向个人访问令牌的 MCP 端点不读智能体策略，这里的收紧只作用于站内智能体。
+ */
+@ApiTags('agent')
+@Controller('agent/tool-restrictions')
+export class AgentToolRestrictionController {
+  constructor(private readonly policies: AgentToolPolicies) {}
+
+  @Get()
+  @RequirePerm(agentPerms.restriction.browse)
+  @ApiOperation({
+    summary:
+      "Every tool the platform offers to the agent with the platform policy, this tenant's restriction and the effective policy",
+  })
+  @ApiEnvelope(z.array(agentToolRestrictionVo))
+  list() {
+    const p = clsGet('principal')
+    if (!p) throw new BizError(Err.UNAUTHENTICATED)
+    return this.policies.restrictions(p)
+  }
+
+  @Put(':name')
+  @RequirePerm(agentPerms.restriction.modify)
+  @ActionLog({ domain: 'agent.restriction', verb: 'modify', bizId: (req) => req.params.name })
+  @ApiOperation({
+    summary:
+      'Tighten a tool for this tenant to human or deny (null removes the restriction); the stricter of platform and tenant applies; 404 for an unknown tool',
+  })
+  @ApiEnvelope(agentToolRestrictionVo)
+  restrict(
+    @Param('name') name: string,
+    @Body({ schema: agentToolRestrictionUpdate }) dto: z.infer<typeof agentToolRestrictionUpdate>,
+  ) {
+    const p = clsGet('principal')
+    if (!p) throw new BizError(Err.UNAUTHENTICATED)
+    return this.policies.restrict(p, name, dto.policy, p.userId)
   }
 }
 

@@ -546,6 +546,31 @@ it('stops a recovered uncertain write, retains the evidence and expires previous
   } finally {
     connect.mockRestore()
   }
+  // after the owner checked the result, the voided intent never reaches the model as a request
+  const token = (await signIn(app)).accessToken
+  await request(app.getHttpServer())
+    .post(`/api/agent/threads/${thread.id}/recovery/acknowledge`)
+    .set(bearer(token))
+    .send({ revision: 1 })
+    .expect(200)
+  const next = await tenant(() =>
+    store.tx(async (w) => {
+      const t = await w.createTurn(Number(thread.id), ownerId)
+      await w.append(Number(thread.id), Number(t.id), 'user', { text: 'What changed?' })
+      return t
+    }),
+  )
+  const after = new FakeChatModel([{ text: 'Nothing pending.' }])
+  const reconnect = vi.spyOn(app.get(ProviderRegistry), 'connect').mockReturnValue(after)
+  try {
+    await tenant(() => app.get(TurnRunner).run(Number(next.id)))
+    expect(after.requests).toHaveLength(1)
+    const sent = JSON.stringify(after.requests[0]!.messages)
+    expect(sent).toContain('What changed?')
+    expect(sent).not.toContain('Do the next write.')
+  } finally {
+    reconnect.mockRestore()
+  }
 })
 
 it('keeps permanent draft tombstones and never purges unchecked temporary evidence', async () => {

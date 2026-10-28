@@ -105,7 +105,7 @@
    }
    ```
 
-   第一个非 `null` 的结论生效，`escalate` 也结束链条。审查者只会收到策略为 `ask` 的写入（`human` 与须本人逐次确认的工具从不送审）；驳回与交给人都停下等人。运行时只承认有资格的放行：`by: 'review'` 的 `approve` 只在工具此刻的策略是 `ask`、会话此刻是“自动审查”模式时算数，`by: 'pre_approved'` 只认自动化的预先同意本身复核过的；其余的放行一律降为交给人，所以自写的审查者主要用来驳回和交给人。审查者看不到工具输出；参数是助手写的，可能受外部内容影响，不能当成用户的意思。需要调用模型时使用 `ctx.invokeModel()` 并透传它给出的 `signal` 和 `onUsage`，写法照 `apps/server/src/core/agent/runtime/auto-reviewer.ts`。理由显示在卡片上，写成词条：服务端片段 `apps/server/src/i18n/{zh-CN,en-US}/` 下项目自己的 `<domain>.<business>.json`（见[多语言词条](i18n.md)）。
+   第一个非 `null` 的结论生效，`escalate` 也结束链条。审查者只会收到生效策略为 `ask` 的写入（平台或本租户设为 `human` 的与须本人逐次确认的工具从不送审）；驳回与交给人都停下等人。运行时只承认有资格的放行：`by: 'review'` 的 `approve` 只在工具此刻的策略是 `ask`、会话此刻是“自动审查”模式时算数，`by: 'pre_approved'` 只认自动化的预先同意本身复核过的；其余的放行一律降为交给人，所以自写的审查者主要用来驳回和交给人。审查者看不到工具输出；参数是助手写的，可能受外部内容影响，不能当成用户的意思。需要调用模型时使用 `ctx.invokeModel()` 并透传它给出的 `signal` 和 `onUsage`，写法照 `apps/server/src/core/agent/runtime/auto-reviewer.ts`。理由显示在卡片上，写成词条：服务端片段 `apps/server/src/i18n/{zh-CN,en-US}/` 下项目自己的 `<domain>.<business>.json`（见[多语言词条](i18n.md)）。
 
 5. **注册。** 把类加进模块的 `providers`；模块文件是生成物时在 `<business>.agent.ts` 里单独建一个小模块，加进 `apps/server/src/modules/project.module.ts` 的 `imports`。不需要迁移和菜单。新的内置工具出现在“智能体设置 → 工具策略”里（来源“内置”），root 可以停用或改策略。
 

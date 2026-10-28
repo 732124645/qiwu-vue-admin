@@ -1,6 +1,7 @@
 import {
   AGENT_SKILL_NAME,
   type AgentApprovalMode,
+  type AgentAskReason,
   type AgentToolPolicy,
   type McpToolKind,
 } from '@qiwu/shared'
@@ -25,6 +26,8 @@ export interface OfferedTool {
   /** the tool's method can preview a write (local tools) */
   preview: boolean
   perCallConfirmation?: true
+  /** why a call of it waits for a person (not for `auto`) */
+  why?: AgentAskReason
 }
 
 /** 只读与计划模式都不提供写入工具。 */

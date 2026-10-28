@@ -112,7 +112,9 @@
     "retry": "重试任务",
     "use": "使用",
     "batchRun": "批量执行",
-    "instructionModify": "修改租户说明"
+    "instructionModify": "修改租户说明",
+    "restrictionBrowse": "浏览工具限制",
+    "restrictionModify": "修改工具限制"
   },
   "oa": {
     "title": "OA 办公",

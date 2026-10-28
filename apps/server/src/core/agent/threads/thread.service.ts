@@ -6,10 +6,12 @@ import {
   AGENT2_PARAMS,
   AGENT_LIMIT_PARAMS,
   type AgentFeedbackSave,
+  type AgentItemPayloads,
   type AgentDraftReceiptVo,
   type AgentMessageReceiptVo,
   type AgentModelVo,
   type AgentProviderVo,
+  type AgentRewindPreviewVo,
   type AgentStatusVo,
   type AgentThreadCreate,
   type AgentThreadDetailVo,
@@ -19,13 +21,16 @@ import {
   DEFAULT_LOCALE,
   Err,
   type Page,
+  RT,
 } from '@qiwu/shared'
 import { I18nService } from 'nestjs-i18n'
 import {
   In,
   IsNull,
+  LessThan,
   LessThanOrEqual,
   MoreThan,
+  MoreThanOrEqual,
   type EntityManager,
   type ObjectLiteral,
   type Repository,
@@ -36,6 +41,7 @@ import { contains, paginate } from '../../db/page.js'
 import { BizError } from '../../http/biz-error.js'
 import { canonicalJson } from '../../guard/idempotent.js'
 import { currentLocale } from '../../i18n/locale.js'
+import { RealtimeService } from '../../realtime/realtime.service.js'
 import { ParamService } from '../../settings/param.service.js'
 import {
   AGENT_IMAGE_STORE,
@@ -53,14 +59,20 @@ import {
 } from '../entities/agent-thread.entity.js'
 import { UsageBook } from '../runtime/usage-book.js'
 import { TurnRunner } from '../runtime/turn-runner.js'
-import { ACTIVE_TURN } from '../runtime/turn-queue.js'
+import { ACTIVE_TURN, TurnQueue } from '../runtime/turn-queue.js'
 import { REDIS, type Redis } from '../../redis/redis.module.js'
 import { copyMemoryMark } from '../memory/memory-extract.js'
 import { ProviderSettingsService } from '../provider/provider-settings.service.js'
 import { AgentExtensions, runThread } from '../runtime/agent-extensions.js'
 import { parseReviewModel } from '../runtime/auto-reviewer.js'
 import { contextMessage } from '../runtime/turn-prompt.js'
-import { parseAllow, subagentCallOf } from '../runtime/turn-tools.js'
+import {
+  IMAGE_TOOL,
+  allowEntry,
+  allowedTools,
+  parseAllow,
+  subagentCallOf,
+} from '../runtime/turn-tools.js'
 import {
   fulltextTerms,
   itemVo,
@@ -113,7 +125,9 @@ export class AgentThreadService {
     private readonly ext: AgentExtensions,
     private readonly usage: UsageBook,
     private readonly runner: TurnRunner,
+    private readonly queue: TurnQueue,
     @Inject(REDIS) private readonly redis: Redis,
+    private readonly realtime: RealtimeService,
     @Optional() @Inject(PROFILE_SOURCE) private readonly profiles?: ProfileSource,
     @Optional() @Inject(AGENT_IMAGE_STORE) private readonly images?: AgentImageStore,
   ) {}
@@ -716,55 +730,223 @@ export class AgentThreadService {
   }
 
   /**
-   * 撤回最后一轮：它与它之后的条目一起软删。轮次正在运行时 409（先停止）；轮次停在等待、却还有工具调用在
-   * 执行（在调用里等外部服务器的表单）时也 409：那次外部调用撤不回来，记录不能先删掉。只删对话记录：这一轮
-   * 里已经执行的写入不会回滚。这一轮记下的“本会话内不再询问”一并去掉。压缩摘要覆盖到了被撤回的条目时一并清掉
-   * （否则模型还会从摘要里看到撤回的内容），下一轮需要时再重新压缩。
+   * 原地回退到本人的一条用户消息：这条消息与它之后的条目（排队的也算）一起软删，页面把原文回填输入框重发；
+   * 例外是调用在锚点之前、结果在之后的工具结果（锚点是一步执行中插进来的话）：已执行的随保留的调用留下，
+   * 被拒绝、从没执行的照删。
+   * 第一条条目在它之后的轮次整轮删掉；它落在某一轮中间（运行中插的话）时那一轮截短保留，正在等人的改为已取消、
+   * 未决的卡片作废。被删轮次记下的“本会话内不再询问”、覆盖到被删条目的压缩摘要、被删回答的反馈、被删调用分派
+   * 的子会话与生成的图片一并去掉。只删对话记录：已经执行的写入、已用的积分、已提炼的记忆都不撤销（确认前先看
+   * {@link rewindPreview}）。在会话行锁与最新一轮的行锁里判断（与运行时同一顺序）：最新一轮正在运行或还有调用
+   * 在执行时 409（先停止）；有待核对的结果时 409；自动化、子智能体与批量的隐藏会话 409（它们只跑分派的那一轮，
+   * 回退会让运行或批次永远停在未结束）；库里有页面没见过的条目（`lastSeq` 落后，另一个标签页刚产生的）时 409，
+   * 连点的第二次因此删不到更多。`seq` 不是本会话的用户消息时 404。提交后推送 `rewound` 事件给本人。
    */
+  async rewind(p: Principal, id: number, seq: number, lastSeq: number): Promise<null> {
+    return this.rewound(p, id, () => Promise.resolve(seq), lastSeq)
+  }
+
+  /** 撤回最后一轮：回退到最新一轮的第一条用户消息（{@link rewind} 同一套规则；没有轮次时什么也不做）。 */
   async revert(p: Principal, id: number): Promise<null> {
+    return this.rewound(p, id, async (latest) => {
+      if (!latest) return null
+      const first = await this.repo(AgentItem).findOne({
+        where: { turnId: latest.id, kind: 'user' },
+        order: { seq: 'ASC' },
+        select: { id: true, seq: true },
+      })
+      return first?.seq ?? null
+    })
+  }
+
+  /** {@link rewind} 与 {@link revert} 的主体：`pick` 在锁住最新一轮之后给出锚点（null 为无事可做）。 */
+  private async rewound(
+    p: Principal,
+    id: number,
+    pick: (latest: AgentTurn | null) => Promise<number | null>,
+    lastSeq?: number,
+  ): Promise<null> {
     let callIds: string[] = []
+    let from: number | null = null
+    let ended = false
     await this.txHost.withTransaction(async () => {
       const thread = await this.own(p, id, { lock: true })
+      if (
+        thread.automationRunId !== null ||
+        thread.parentThreadId !== null ||
+        thread.batchId !== null
+      )
+        throw new BizError(Err.CONFLICT)
+      // 待核对的结果不能借回退把证据藏掉
       if (thread.recoveryRequired) throw new BizError(Err.AGENT_RECOVERY_REQUIRED)
-      const turn = await this.repo(AgentTurn).findOne({
+      const latest = await this.repo(AgentTurn).findOne({
         where: { threadId: id },
         order: { id: 'DESC' },
         lock: { mode: 'pessimistic_write' },
       })
-      if (!turn) return
-      if (turn.status === 'running') throw new BizError(Err.CONFLICT)
-      const inCall = await this.repo(AgentItem).existsBy({
-        turnId: turn.id,
-        kind: 'tool_call',
-        status: 'running',
+      // 正在执行的调用（包括等外部服务器表单的）撤不回来，记录不能先删掉
+      if (
+        latest &&
+        (latest.status === 'running' ||
+          (await this.repo(AgentItem).existsBy({
+            turnId: latest.id,
+            kind: 'tool_call',
+            status: 'running',
+          })))
+      )
+        throw new BizError(Err.AGENT_THREAD_BUSY)
+      const seq = await pick(latest)
+      if (seq === null) return
+      // 只能从已经送达的消息回退：还在排队的消息没开始，撤掉它用停止或直接删除，不能借它截断进行中的轮次
+      if (
+        !(await this.repo(AgentItem).existsBy({
+          threadId: id,
+          seq,
+          kind: 'user',
+          status: IsNull(),
+        }))
+      )
+        throw new NotFoundException()
+      if (lastSeq !== undefined) {
+        const max = await this.repo(AgentItem)
+          .createQueryBuilder('i')
+          .select('MAX(i.seq)', 'seq')
+          .where('i.threadId = :id', { id })
+          .getRawOne<{ seq: number | null }>()
+        if (num(max?.seq ?? 0) > lastSeq) throw new BizError(Err.AGENT_THREAD_STALE)
+      }
+      // 每一轮的条目范围：整轮在锚点之后的删掉，跨过锚点的截短保留
+      const ranges = await this.repo(AgentItem)
+        .createQueryBuilder('i')
+        .select('i.turnId', 'turnId')
+        .addSelect('MIN(i.seq)', 'lo')
+        .addSelect('MAX(i.seq)', 'hi')
+        .where('i.threadId = :id AND i.turnId IS NOT NULL', { id })
+        .groupBy('i.turnId')
+        .getRawMany<{ turnId: string; lo: number; hi: number }>()
+      const removed = ranges.filter((r) => num(r.lo) >= seq).map((r) => num(r.turnId))
+      const cut = ranges
+        .filter((r) => num(r.lo) < seq && num(r.hi) >= seq)
+        .map((r) => num(r.turnId))
+      const after = await this.repo(AgentItem).find({
+        where: { threadId: id, seq: MoreThanOrEqual(seq) },
+        select: { id: true, turnId: true, kind: true, payload: true },
       })
-      if (inCall) throw new BizError(Err.CONFLICT)
-      // 这一轮分派出的子会话随这一轮一起撤回
-      const calls = await this.repo(AgentItem).find({
-        where: { turnId: turn.id, kind: 'tool_call' },
-        select: { id: true, payload: true },
-      })
-      callIds = calls.map((c) => String((c.payload as { callId?: unknown }).callId))
+      const callOf = (i: AgentItem) => String((i.payload as { callId?: unknown }).callId)
+      // 锚点是一步中间插进来的话时，调用可能在锚点之前、结果在之后：这一步的写入已经执行且不会撤销，
+      // 保留的调用要配上它的结果，模型才看得到执行结果（不会当成没做而重做）。被拒绝的（多半是这句插话
+      // 收起的计划，拒绝理由就是插话原文）从没执行，结果照删：否则作废的话借它回到模型上下文；没有结果的
+      // 调用不进模型历史
+      const before = cut.length
+        ? new Set(
+            (
+              await this.repo(AgentItem).find({
+                where: { threadId: id, turnId: In(cut), kind: 'tool_call', seq: LessThan(seq) },
+                select: { id: true, payload: true },
+              })
+            ).map(callOf),
+          )
+        : new Set<string>()
+      const executed = (i: AgentItem) =>
+        (i.payload as { error?: { code?: unknown } }).error?.code !== 'rejected'
+      const gone = after.filter(
+        (i) => !(i.kind === 'tool_result' && before.has(callOf(i)) && executed(i)),
+      )
+      callIds = gone.filter((i) => i.kind === 'tool_call').map(callOf)
       await this.dropSubagents(id, new Set(callIds))
-      const kept = (thread.trusted ?? []).filter((e) => parseAllow(e).turnId !== num(turn.id))
+      // 去掉被删轮次记下的放行，以及截短的轮次里由被删的审批卡（锚点之后）记下的放行：放行随批准它的卡片一起撤回
+      const dropped = new Set(removed)
+      const granted = new Set(
+        gone
+          .filter(
+            (i) =>
+              i.kind === 'approval' &&
+              (i.payload as { decision?: unknown }).decision === 'approve_session',
+          )
+          .map((i) => allowEntry(num(i.turnId), String((i.payload as { tool?: unknown }).tool))),
+      )
+      const kept = (thread.trusted ?? []).filter(
+        (e) => !dropped.has(parseAllow(e).turnId ?? -1) && !granted.has(e),
+      )
       if (kept.length !== (thread.trusted ?? []).length)
         await this.repo(AgentThread).update(id, { trusted: kept.length ? kept : null })
-      const first = await this.repo(AgentItem)
-        .createQueryBuilder('i')
-        .select('MIN(i.seq)', 'seq')
-        .where('i.turnId = :turnId', { turnId: turn.id })
-        .getRawOne<{ seq: number | null }>()
-      // 从这一轮的第一条起全部删掉：其后的条目（排队等下一轮的消息等）也属于被撤回的部分
-      if (first?.seq !== null && first?.seq !== undefined) {
-        await this.repo(AgentItem).softDelete({ threadId: id, seq: MoreThan(num(first.seq) - 1) })
-        if (thread.summary !== null && thread.summarySeq >= num(first.seq))
-          await this.repo(AgentThread).update(id, { summary: null, summarySeq: 0 })
+      if (gone.length)
+        await this.repo(AgentFeedback).softDelete({ itemId: In(gone.map((i) => num(i.id))) })
+      if (gone.length) await this.repo(AgentItem).softDelete({ id: In(gone.map((i) => num(i.id))) })
+      // 摘要覆盖到了被删的条目：清掉（否则模型还会从摘要里看到），下一轮需要时再重新压缩
+      if (thread.summary !== null && thread.summarySeq >= seq)
+        await this.repo(AgentThread).update(id, { summary: null, summarySeq: 0 })
+      if (removed.length) await this.repo(AgentTurn).softDelete({ id: In(removed) })
+      for (const turnId of cut) {
+        const turn = await this.repo(AgentTurn).findOneBy({ id: turnId })
+        if (turn?.status !== 'waiting') continue
+        await this.repo(AgentTurn).update(turnId, { status: 'cancelled', endedAt: new Date() })
+        ended = true
+        await this.runner.expireOpen(this.txHost.tx, turn, (i, status) =>
+          this.repo(AgentItem).update({ id: i.id }, { status, revision: () => 'revision + 1' }),
+        )
       }
-      await this.repo(AgentTurn).softDelete({ id: num(turn.id) })
+      from = seq
     })
-    // 这一轮生成的图片随这一轮一起撤回
+    // 被删调用生成的图片随之删掉；推送让别的标签页与面板去掉已删的条目
     await this.dropImages(id, callIds)
+    if (from !== null)
+      this.realtime.toUser(p.userId, {
+        type: RT.agentEvent,
+        payload: { threadId: id, type: 'rewound', fromSeq: from },
+      })
+    // 截短的轮次由等待改为取消：像停止后一样开出锚点之前排队的消息（并让出名额），否则它们要等下一条消息那轮结束
+    if (ended) await this.queue.startNext(id, p.userId)
     return null
+  }
+
+  /**
+   * 回退到 `seq` 前的确认内容：会被删掉、但不会撤销的写入（写入类调用与生成图片），已执行的（`done`）与结果
+   * 不明的（`unknown`，核对闸门记下的）；被删调用分派出的子会话里的也算，序号记为分派它的那个调用的。被拒绝、
+   * 被拦或执行前就失败的不列。不带参数。`seq` 不是本会话的用户消息时 404。
+   */
+  async rewindPreview(p: Principal, id: number, seq: number): Promise<AgentRewindPreviewVo> {
+    await this.own(p, id)
+    // 与回退同一判定：只有已经送达的用户消息是锚点，排队或作废的不是
+    if (
+      !(await this.repo(AgentItem).existsBy({ threadId: id, seq, kind: 'user', status: IsNull() }))
+    )
+      throw new NotFoundException()
+    type Call = AgentItemPayloads['tool_call'] & { internal?: { uncertain?: boolean } }
+    const outcome = (c: AgentItem): 'done' | 'unknown' | null => {
+      const call = c.payload as Call
+      if (call.kind !== 'write' && call.tool !== IMAGE_TOOL) return null
+      if (call.internal?.uncertain) return 'unknown'
+      return c.status === 'done' ? 'done' : null
+    }
+    const writes: AgentRewindPreviewVo['writes'] = []
+    const add = (c: AgentItem, at: number) => {
+      const o = outcome(c)
+      const call = c.payload as Call
+      if (o) writes.push({ seq: at, tool: call.tool, title: call.title, outcome: o })
+    }
+    const calls = await this.repo(AgentItem).find({
+      where: { threadId: id, kind: 'tool_call', seq: MoreThanOrEqual(seq) },
+      order: { seq: 'ASC' },
+    })
+    const at = new Map<string, number>()
+    for (const c of calls) {
+      at.set((c.payload as Call).callId, c.seq)
+      add(c, c.seq)
+    }
+    const kids = await this.repo(AgentThread).find({
+      where: { parentThreadId: id },
+      select: { id: true, targetRef: true },
+    })
+    for (const k of kids) {
+      const parentSeq = at.get(subagentCallOf(k.targetRef) ?? '')
+      if (parentSeq === undefined) continue
+      const own = await this.repo(AgentItem).find({
+        where: { threadId: num(k.id), kind: 'tool_call' },
+        order: { seq: 'ASC' },
+      })
+      for (const c of own) add(c, parentSeq)
+    }
+    return { writes: writes.sort((a, b) => a.seq - b.seq) }
   }
 
   /** 导出为 Markdown（文件名取标题）；工具参数按操作日志规则遮蔽，工具结果内容不导出。 */
@@ -815,9 +997,53 @@ export class AgentThreadService {
       u.promptTokens === null || u.completionTokens === null
         ? null
         : u.promptTokens + u.completionTokens
+    // 主循环最近一步由提供方报告的输入 token（存在那一步的条目上；没有或没报告为 null），与估算并列。不取
+    // 用量表：记忆提炼、审查、压缩等后台调用也带着会话 id 记在那里，提示词与会话上下文无关
+    const last = await this.repo(AgentItem)
+      .createQueryBuilder('i')
+      .select("JSON_EXTRACT(i.payload, '$.internal.promptTokens')", 'n')
+      .where('i.threadId = :id AND i.kind IN (:...kinds)', {
+        id,
+        kinds: ['assistant', 'tool_call'],
+      })
+      .andWhere("JSON_EXTRACT(i.payload, '$.internal.promptTokens') IS NOT NULL")
+      .orderBy('i.seq', 'DESC')
+      .limit(1)
+      .getRawOne<{ n: number | string }>()
+    const reported = last ? Number(last.n) : undefined
+    // 本会话放行里此刻仍然有效的（被平台或本租户收紧成 human、deny 或停用的不算）
+    const allowed: string[] = []
+    for (const tool of allowedTools(row.trusted))
+      if (await this.runner.sessionAllowableNow(tool)) allowed.push(tool)
+    const profile =
+      row.profileId === null ? null : await this.profiles?.find(p, Number(row.profileId))
+    // 与运行循环同一套拼装（只读，不连外部服务器）；没有轮次，内置工具的可用性按会话判断
+    const { surface } = await this.runner.toolSurface(row, p, null, {
+      principal: p,
+      thread: runThread(row),
+      turnId: 0,
+      lang: p.locale ?? DEFAULT_LOCALE,
+      signal: new AbortController().signal,
+    })
+    const turnLimit = await this.usage.limit(AGENT_LIMIT_PARAMS.turnCredits)
     return {
       threadId: id,
       model: row.model ?? model?.id ?? null,
+      mode: row.approvalMode,
+      profile: profile ? { id: profile.id, name: profile.name } : null,
+      contextReported: reported !== undefined && Number.isFinite(reported) ? reported : null,
+      allowedTools: allowed,
+      turnLimit: Number(turnLimit) === 0 ? null : turnLimit,
+      tools: {
+        asks: [...surface.tools.values()]
+          .filter((t) => t.why)
+          .map((t) => ({ name: t.name, title: t.title, why: t.why! })),
+        unavailable: [...surface.unavailable].map(([name, g]) => ({
+          name,
+          title: g.title,
+          reason: g.reason,
+        })),
+      },
       contextUsed: Math.ceil(
         (contributed + (row.summary?.length ?? 0) + num(chars?.n ?? 0) + num(retained?.n ?? 0)) /
           CHARS_PER_TOKEN,

@@ -23,7 +23,7 @@ import { AgentBatchTargets } from './batch/batch-targets.js'
 import { AgentDiagnosticsController } from './diagnostics/diagnostics.controller.js'
 import { AgentDiagnosticsService } from './diagnostics/diagnostics.service.js'
 import { AgentSweepStats } from './diagnostics/sweep-stats.js'
-import { AgentMcpServer, AgentMcpTool } from './entities/agent-mcp.entity.js'
+import { AgentMcpServer, AgentMcpTool, AgentToolRestriction } from './entities/agent-mcp.entity.js'
 import {
   AgentInstruction,
   AgentPlatformSkill,
@@ -75,7 +75,11 @@ import {
   AgentSkillController,
 } from './skills/skill.controller.js'
 import { AgentPlatformSkillService, AgentSkillService } from './skills/skill.service.js'
-import { AgentToolPolicies, AgentToolPolicyController } from './tools/tool-policy.js'
+import {
+  AgentToolPolicies,
+  AgentToolPolicyController,
+  AgentToolRestrictionController,
+} from './tools/tool-policy.js'
 import { AgentWebModule } from './web/agent-web.module.js'
 
 /**
@@ -105,6 +109,7 @@ import { AgentWebModule } from './web/agent-web.module.js'
       AgentUsageEntry,
       AgentMcpServer,
       AgentMcpTool,
+      AgentToolRestriction,
       McpToolSwitch,
       AgentAutomation,
       AgentAutomationRun,
@@ -119,6 +124,7 @@ import { AgentWebModule } from './web/agent-web.module.js'
     AgentChatController,
     AgentMcpServerController,
     AgentToolPolicyController,
+    AgentToolRestrictionController,
     AgentSkillController,
     AgentPlatformSkillController,
     AgentInstructionController,

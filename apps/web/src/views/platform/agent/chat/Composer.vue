@@ -13,7 +13,7 @@ import FileUpload from '@/core/components/FileUpload.vue'
 import IconButton from '@/core/components/IconButton.vue'
 import { isImage } from '@/core/composables/use-upload'
 import { useAuthStore } from '@/core/stores/auth'
-import { comboOf, DEFAULT_SHORTCUTS } from './shortcuts'
+import { comboLabel, comboOf, DEFAULT_SHORTCUTS } from './shortcuts'
 import {
   loadHistory,
   clearHistory,
@@ -36,7 +36,7 @@ export interface ComposerSettings {
   approvalMode: AgentApprovalMode
 }
 
-/** 一次发送：文字、`$` 技能、已上传的附件，以及运行中时的发送方式。 */
+/** 一次发送：文字、`$` 技能、已上传的附件，以及运行中时的发送方式（Enter 插话，按钮或快捷键排到下一轮）。 */
 export interface ComposerMessage {
   text: string
   skill?: string
@@ -51,9 +51,11 @@ export interface ComposerMessage {
  * `@` 提及技能、外部服务器与当前页面带来的记录（插入可读的文字记号，模型直接读；提及技能同时作为本轮技能），
  * `/prompts` 与“提示词”菜单插入模板；↑/↓ 翻看本人发过的消息，Ctrl+R 搜索它们；附件（图片只给能看图的模型）；模型、
  * 快速档、推理强度与会话模式（只读 / 计划 / 每次询问 / 自动审查，只列平台此刻提供的；输入框里 Shift+Tab 循环）
- * 放在输入框下的一条工具栏里，按键说明是工具栏下一行淡色提示；上下文用量；运行中可选“追加到当前步骤”或“排到下一轮”，
- * 等待确认时提示“发送即拒绝待确认的操作”（服务端把这句话作为拒绝说明并继续本轮）；
- * 输入框为空时按停止键（默认 Esc，可在页面自定义）停止本轮。发送按钮在请求进行中 loading 且不可再点，失败时文字保留。
+ * 放在输入框下的一条工具栏里，按键说明是工具栏下一行淡色提示；上下文用量。
+ * 本轮运行中：Enter 插话（当前工具步骤结束后送达本轮），“排到下一轮”按钮或它的快捷键（默认 Alt+Enter）留到下一轮；
+ * 等待确认时 Enter 等于拒绝待确认的操作并把这句话作为说明，排队则不碰卡片；停止键（默认 Esc，可在页面自定义）
+ * 不论输入框有没有文字都停止本轮，草稿保留（Esc 先用来关闭候选、历史搜索与提示词）。
+ * 发送与排队按钮在请求进行中 loading 且不可再点，失败时文字保留；`restore` 把停止时撤下的排队消息或回退的消息放回来。
  */
 defineOptions({ name: 'AgentComposer' })
 const {
@@ -67,6 +69,7 @@ const {
   context = null,
   records = [],
   stopKey = DEFAULT_SHORTCUTS.stop,
+  queueKey = DEFAULT_SHORTCUTS.queue,
 } = defineProps<{
   options: AgentOptionsVo | null
   /** 发送一条消息，成功时为 true（此时才清空输入框与附件） */
@@ -84,6 +87,8 @@ const {
   records?: { target: string; id: number }[]
   /** 停止本轮的组合键（见 shortcuts.ts），默认 Esc */
   stopKey?: string
+  /** 运行中排到下一轮的组合键（见 shortcuts.ts），默认 Alt+Enter */
+  queueKey?: string
 }>()
 const settings = defineModel<ComposerSettings>('settings', { required: true })
 const emit = defineEmits<{ stop: []; command: [cmd: SlashCommand] }>()
@@ -400,13 +405,19 @@ function onKeydown(e: KeyboardEvent) {
     pickingPrompt.value = false
     return
   }
-  // 停止本轮只在输入框为空时：正在打字时按到不会误停
-  if (running && !text.value && comboOf(e) === stopKey) {
+  const combo = comboOf(e)
+  // 停止本轮时草稿留在输入框里（停止后撤下的排队消息也会接回来）
+  if (running && stopKey && combo === stopKey) {
     e.preventDefault()
     emit('stop')
     return
   }
   if (e.key === 'Escape') return
+  if (running && queueKey && combo === queueKey) {
+    e.preventDefault()
+    void send('queue')
+    return
+  }
   if (
     (e.key === 'ArrowUp' || e.key === 'ArrowDown') &&
     !e.shiftKey &&
@@ -422,8 +433,9 @@ function onKeydown(e: KeyboardEvent) {
 }
 
 // ---- 发送 ----
-const sendMode = ref<'steer' | 'queue'>('steer')
 const sending = ref(false)
+/** 进行中的这次发送是“排到下一轮”：转圈的是排队按钮 */
+const queuing = ref(false)
 let sendEpoch = 0
 let draftRevision = 0
 watch(
@@ -432,7 +444,6 @@ watch(
       text: text.value,
       files: files.value.map((file) => file.id),
       settings: settings.value,
-      mode: sendMode.value,
     }),
   () => draftRevision++,
   { flush: 'sync' },
@@ -462,7 +473,7 @@ function matchesDraft(msg?: ComposerMessage): boolean {
   )
 }
 
-/** 迟到的接收回执只清发送时未再编辑的草稿，不能清掉随后准备的新正文、模型或队列模式。 */
+/** 迟到的接收回执只清发送时未再编辑的草稿，不能清掉随后准备的新正文或模型。 */
 function acknowledge(msg?: ComposerMessage) {
   if (!msg) return
   pushHistory(auth.me?.user.id ?? 0, msg.text, { temporary, tenantId: auth.tenant?.id ?? 1 })
@@ -473,8 +484,11 @@ function acknowledge(msg?: ComposerMessage) {
   showFiles.value = false
   caret.value = 0
 }
-/** 发送：`$名称` 若是可用技能则一并带上；图片附件只给能看图的模型；请求成功后才清空。 */
-async function send() {
+/**
+ * 发送：`$名称` 若是可用技能则一并带上；图片附件只给能看图的模型；请求成功后才清空。
+ * 本轮运行中 `mode` 决定送达方式：默认插话（steer），排队按钮或快捷键为 queue；没有进行中的轮次时不带。
+ */
+async function send(mode: 'steer' | 'queue' = 'steer') {
   if (!canSend.value) return
   if (files.value.some((f) => isImage(f.mime)) && !current.value?.vision) {
     ElMessage.warning(t('agent.chat.composer.noVision'))
@@ -483,6 +497,7 @@ async function send() {
   const value = text.value.trim()
   const epoch = sendEpoch
   sending.value = true
+  queuing.value = mode === 'queue'
   try {
     const msg: ComposerMessage = { text: value, draftRevision }
     const names = options?.skills.map((s) => s.name) ?? []
@@ -490,7 +505,7 @@ async function send() {
       skillOf(value, names) ?? mentionedSkill(value, t('agent.chat.mention.skill'), names)
     if (skill) msg.skill = skill
     if (files.value.length) msg.fileIds = files.value.map((f) => f.id)
-    if (running) msg.mode = sendMode.value
+    if (running) msg.mode = mode
     if (!(await submit(msg)) || epoch !== sendEpoch) return
     acknowledge(msg)
   } finally {
@@ -503,6 +518,46 @@ const contextPercent = computed(() =>
     ? Math.min(100, Math.round((context.used / context.window) * 100))
     : null,
 )
+
+/** 放回输入框的一条消息：停止时撤下的排队消息，或原地回退删掉的那条用户消息 */
+export interface RestoredMessage {
+  text: string
+  skill?: string
+  attachments?: { fileId: number; name: string; mime: string; size: number }[]
+}
+/** 接在现有草稿后面（空行隔开），附件按文件去重追加；草稿还没有技能时补上第一条消息的技能。从不发送。 */
+async function restore(parts: RestoredMessage[]) {
+  if (!parts.length) return
+  const names = options?.skills.map((s) => s.name) ?? []
+  const hasSkill = (value: string) =>
+    !!(skillOf(value, names) ?? mentionedSkill(value, t('agent.chat.mention.skill'), names))
+  let value = [text.value.trim(), ...parts.map((p) => p.text.trim())].filter(Boolean).join('\n\n')
+  const skill = parts.find((p) => p.skill)?.skill
+  if (skill && !hasSkill(value)) value = `$${skill} ${value}`
+  const known = new Set(files.value.map((f) => f.id))
+  const added = parts
+    .flatMap((p) => p.attachments ?? [])
+    .filter((a) => {
+      if (known.has(a.fileId)) return false
+      known.add(a.fileId)
+      return true
+    })
+    .map((a): FsObjectVo => ({
+      id: a.fileId,
+      originalName: a.name,
+      mime: a.mime,
+      size: a.size,
+      url: null,
+      isPublic: false,
+      bizTag: 'attachment',
+      createdAt: '',
+    }))
+  if (added.length) {
+    files.value = [...files.value, ...added]
+    showFiles.value = true
+  }
+  await setText(value)
+}
 
 function openSelect(r: Openable | undefined) {
   r?.focus?.()
@@ -518,14 +573,9 @@ defineExpose({
     histPos = -1
   },
   focus: () => box.value?.focus(),
-  /** 填入文字（开场提示、编辑上一条消息） */
+  /** 填入文字（开场提示） */
   setText,
-  runCommand,
-  /** 直接发送一段文字（执行计划） */
-  sendText: async (value: string) => {
-    await setText(value)
-    await send()
-  },
+  restore,
   /** 点后续建议：输入框为空时直接发送；已有草稿时接在草稿后面，不覆盖也不发送 */
   suggest: async (value: string) => {
     if (!text.value.trim()) {
@@ -703,21 +753,31 @@ defineExpose({
           :high="context!.window * 0.85"
         />
       </label>
-      <el-radio-group
-        v-if="running"
-        v-model="sendMode"
-        :aria-label="t('agent.chat.composer.sendMode')"
-      >
-        <el-radio-button value="steer">{{ t('agent.chat.composer.steer') }}</el-radio-button>
-        <el-radio-button value="queue">{{ t('agent.chat.composer.queue') }}</el-radio-button>
-      </el-radio-group>
       <el-button v-if="running" :loading="stopping" :disabled="stopping" @click="emit('stop')">
         {{ t('agent.chat.composer.stop') }}
       </el-button>
-      <el-button type="primary" :loading="sending" :disabled="!canSend" @click="send">
+      <el-button
+        v-if="running"
+        class="agent-composer__queue"
+        :loading="sending && queuing"
+        :disabled="!canSend"
+        :title="queueKey ? comboLabel(queueKey) : undefined"
+        @click="send('queue')"
+      >
+        {{ t('agent.chat.composer.queue') }}
+      </el-button>
+      <el-button type="primary" :loading="sending && !queuing" :disabled="!canSend" @click="send()">
         {{ t('agent.chat.composer.send') }}
       </el-button>
     </div>
-    <p class="agent-composer__keys">{{ t('agent.chat.composer.keys') }}</p>
+    <!-- 页面放在工具栏下方的状态行（模式、上下文、积分、已放行数） -->
+    <slot name="status" />
+    <p class="agent-composer__keys">
+      {{
+        queueKey
+          ? t('agent.chat.composer.keys', { queue: comboLabel(queueKey) })
+          : t('agent.chat.composer.keysNoQueue')
+      }}
+    </p>
   </div>
 </template>

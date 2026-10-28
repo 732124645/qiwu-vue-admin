@@ -13,6 +13,7 @@ import { McpToolSwitch } from '../../mcp/mcp.entity.js'
 import { MCP_CONFIRMATION_REVISION, type ToolExecutionContext } from '../../mcp/mcp-tool.js'
 import { argsJson, ToolHost, ToolRefusal, type ToolPreview } from '../../mcp/tool-host.js'
 import { factsOf, loadPrincipal } from '../automation/pre-approval.js'
+import { AgentToolRestriction } from '../entities/agent-mcp.entity.js'
 import { AgentItem, AgentTurn } from '../entities/agent-thread.entity.js'
 import { type ItemInternal, ItemStore } from './item-store.js'
 
@@ -81,6 +82,12 @@ export class HumanConfirmation {
     const row = await this.ds.getRepository(McpToolSwitch).findOneBy({ name })
     if (row && (!row.enabled || row.agentPolicy === 'deny'))
       throw new BizError(Err.MCP_TOOL_DISABLED)
+    // 本租户的收紧与平台开关同等对待：确认之后才停用的同样拒绝；收紧行有任何变化都换新预览版本
+    const restriction = await this.ds.getRepository(AgentToolRestriction).findOne({
+      where: { tenantId: tenantId(), tool: name },
+      select: { id: true, policy: true, updatedAt: true },
+    })
+    if (restriction?.policy === 'deny') throw new BizError(Err.MCP_TOOL_DISABLED)
     const schema = canonicalJson(t.inputSchema)
     // 仅 JSON Schema 不能识别 refine、transform 与 default 的全部语义，维护者须同步递增稳定契约版本。
     // 只有服务端 receipt 的契约版本、schema 和原始调用都没变时才复用已验证快照。
@@ -131,6 +138,14 @@ export class HumanConfirmation {
           switch: row
             ? { enabled: row.enabled, policy: row.agentPolicy, updatedAt: row.updatedAt }
             : null,
+          // 没有收紧行时不放这个键，既有卡片的版本不变
+          ...(restriction && {
+            restriction: {
+              id: restriction.id,
+              policy: restriction.policy,
+              updatedAt: restriction.updatedAt,
+            },
+          }),
         }),
       )
       .digest('hex')

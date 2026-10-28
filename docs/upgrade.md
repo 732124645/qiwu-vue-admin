@@ -2,6 +2,12 @@
 
 从本模板建立的项目，怎样合并模板发布的新版本。新项目的建立见[从模板创建新项目](new-project.md)；已有安装的数据库升级（migrate → seed）见[入门指南](getting-started.md#5-检查与后续使用)与[部署](deploy.md)。
 
+## 升级到 v1.14.0
+
+照常执行迁移与种子。新迁移只建一张租户表 `agent_tool_restriction`（租户对工具的收紧）。种子在“技能”页下新增两个动作“浏览工具限制 / 修改工具限制”（`agent.restriction.browse` / `agent.restriction.modify`），第一次建出时自动补进已经包含技能页的租户套餐；之后 root 在套餐里去掉也不会再被补回。
+
+智能助手的几处交互变了，接口调用方需要留意：运行中按 Enter 是插话（`mode: 'steer'`），当前这次工具调用一结束就送进本轮，同一步后面会问人或会写入的调用以它为说明记为拒绝；`mode: 'queue'` 在等审批时只排队，不再拒绝卡片。`POST /api/agent/threads/:id/cancel` 改为返回被撤回的排队消息（`{ queued: [...] }`），这些消息不再在停止后自动开始。“编辑后重发”不再分叉，改为原地回退（`GET …/rewind-preview?seq=`、`POST …/rewind { seq, lastSeq }`，过期的 `lastSeq` 返回 409 `B8018`）；`POST …/revert` 保留，运行中改为返回 `AGENT_THREAD_BUSY`，自动化、子任务和批量会话不能回退（409）。实时事件新增 `{ type: 'rewound', threadId, fromSeq }`。审批卡新增 `why`，`unreviewed` 与 `blocked.reason` 新增 `tenant`，`blocked.reason` 新增 `list`（原来记为 `policy` 的“不在技能 / 方案清单里”）。`GET …/status` 新增模式、仍有效的放行、每轮上限、配置方案、实际上下文和按工具的原因。
+
 ## 升级到 v1.13.0
 
 照常执行迁移与种子。智能助手的会话改为一个模式（只读 / 计划 / 每次询问 / 自动审查）：原计划开关打开的会话变成“计划”模式；“信任本会话”模式并入“每次询问”，它按单条记录记下的信任一并清空；平台参数 `agent.trust_mode` 删除。工具策略改为 `auto` / `ask` / `human` / `deny`：原来的 `review` 并入 `ask`，此后会话选“自动审查”时，所有“需确认”的写入都先交审查模型，不再需要逐个工具开启。开放自动审查之前，root 应在“智能体设置 → 工具审批”逐个复核写入工具，把删除、批量修改、对外发送和涉及金额的设为“仅人工确认”（`human`）；项目自己的这类工具可在 `@McpTool` 上声明 `highRisk: true`。接口层面，会话的 `planMode` 字段与 `trust` 模式值已移除，审批卡的“本会话内同意”改为本会话内不再询问这个工具（外部 MCP 工具不提供）。

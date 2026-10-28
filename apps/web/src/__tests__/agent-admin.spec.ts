@@ -11,6 +11,7 @@ import type {
   AgentMcpServerVo,
   AgentProviderVo,
   AgentSkillVo,
+  AgentToolRestrictionVo,
   AgentToolVo,
   AgentUsageRowVo,
   ParameterVo,
@@ -33,6 +34,8 @@ import InstructionPanel from '@/views/platform/agent/skill/InstructionPanel.vue'
 import SkillImport from '@/views/platform/agent/skill/SkillImport.vue'
 import SkillForm from '@/views/platform/agent/skill/SkillForm.vue'
 import SkillList from '@/views/platform/agent/skill/SkillList.vue'
+import RestrictionTab from '@/views/platform/agent/skill/RestrictionTab.vue'
+import SkillPage from '@/views/platform/agent/skill/index.vue'
 import UsagePage from '@/views/platform/agent/usage/index.vue'
 import {
   chartPoints,
@@ -421,6 +424,126 @@ describe('tool policies', () => {
       w.findAll('.el-table__body .el-select.is-disabled, .el-table__body .is-disabled').length,
     ).toBeGreaterThan(0)
     expect(w.text()).not.toContain(t('agent.admin.tool.reset'))
+  })
+})
+
+describe('tenant tool restrictions', () => {
+  const RESTRICT = ['agent.restriction.browse', 'agent.restriction.modify']
+  const ROWS: AgentToolRestrictionVo[] = [
+    {
+      name: 'demo.customer.update',
+      title: 'Update a customer',
+      kind: 'write',
+      origin: 'local',
+      platformPolicy: 'ask',
+      tenantPolicy: null,
+      effective: 'ask',
+    },
+    {
+      name: 'mcp:12',
+      title: 'Create ticket',
+      kind: 'write',
+      origin: 'mcp',
+      platformPolicy: 'ask',
+      tenantPolicy: 'human',
+      effective: 'human',
+    },
+  ]
+  const rowText = (n: number) => w.findAll('.el-table__body tr')[n]!.text()
+  /** opens the n-th restriction select and clicks the option labelled `label` */
+  async function pick(n: number, label: string) {
+    const select = w.findAll('.el-table__body .el-select')[n]!
+    await select.find('.el-select__wrapper').trigger('click')
+    await flushPromises()
+    const listbox = select.find('input').attributes('aria-controls')!
+    const option = body()
+      .findAll(`#${listbox} .el-select-dropdown__item`)
+      .find((o) => o.text() === label)!
+    await option.trigger('click')
+    await flushPromises()
+  }
+
+  it('lists every tool with its platform policy, the tenant restriction and the effective one; filters', async () => {
+    mockApi({ 'GET /agent/tool-restrictions': ok(ROWS) })
+    await show(RestrictionTab, { perms: RESTRICT, root: false })
+    expect(w.text()).toContain(t('agent.admin.restriction.note'))
+    expect(rowText(0)).toContain('demo.customer.update')
+    expect(rowText(0)).toContain(t('agent.admin.tool.sources.local'))
+    expect(rowText(1)).toContain('mcp:12')
+    expect(rowText(1)).toContain(t('agent.admin.tool.sources.mcp'))
+    expect(rowText(1)).toContain(t('agent.admin.policy.human'))
+    await w.find('.restriction-tab__filter input').setValue('ticket')
+    await flushPromises()
+    expect(w.findAll('.el-table__body tr')).toHaveLength(1)
+    expect(rowText(0)).toContain('Create ticket')
+  })
+
+  it('sets people only, off, and clears a restriction with PUT, taking the returned row', async () => {
+    const calls = mockApi({
+      'GET /agent/tool-restrictions': ok(ROWS),
+      'PUT /agent/tool-restrictions/demo.customer.update': (c) => {
+        const { policy } = JSON.parse(String(c.data)) as { policy: 'human' | 'deny' | null }
+        return ok({ ...ROWS[0]!, tenantPolicy: policy, effective: policy ?? 'ask' })
+      },
+      'PUT /agent/tool-restrictions/mcp%3A12': ok({
+        ...ROWS[1]!,
+        tenantPolicy: null,
+        effective: 'ask',
+      }),
+    })
+    await show(RestrictionTab, { perms: RESTRICT, root: false })
+    await pick(0, t('agent.admin.policy.human'))
+    await pick(0, t('agent.admin.policy.deny'))
+    expect(rowText(0)).toContain(t('agent.admin.policy.deny'))
+    await pick(1, t('agent.admin.restriction.none'))
+    expect(sent(calls, 'put', '/agent/tool-restrictions/demo.customer.update')).toEqual([
+      { policy: 'human' },
+      { policy: 'deny' },
+    ])
+    expect(sent(calls, 'put', '/agent/tool-restrictions/mcp%3A12')).toEqual([{ policy: null }])
+  })
+
+  it('disables every select while a change saves; another pick meanwhile sends nothing', async () => {
+    let release!: (reply: ReturnType<typeof ok>) => void
+    const calls = mockApi({
+      'GET /agent/tool-restrictions': ok(ROWS),
+      'PUT /agent/tool-restrictions/demo.customer.update': () =>
+        new Promise((resolve) => (release = resolve)),
+    })
+    await show(RestrictionTab, { perms: RESTRICT, root: false })
+    await pick(0, t('agent.admin.policy.human'))
+    const disabled = () =>
+      w.findAll('.el-table__body .el-select').map((s) => s.find('.is-disabled').exists())
+    expect(disabled()).toEqual([true, true])
+    const other = w
+      .findAllComponents(ElSelect)
+      .filter((c) => (c.element as HTMLElement).closest('.el-table__body'))[1]!
+    other.vm.$emit('change', 'deny')
+    await flushPromises()
+    expect(sent(calls, 'put', '/agent/tool-restrictions/mcp%3A12')).toEqual([])
+    release(ok({ ...ROWS[0]!, tenantPolicy: 'human', effective: 'human' }))
+    await flushPromises()
+    expect(disabled()).toEqual([false, false])
+    expect(sent(calls, 'put', '/agent/tool-restrictions/demo.customer.update')).toEqual([
+      { policy: 'human' },
+    ])
+  })
+
+  it('is read-only without the modify permission', async () => {
+    mockApi({ 'GET /agent/tool-restrictions': ok(ROWS) })
+    await show(RestrictionTab, { perms: ['agent.restriction.browse'], root: false })
+    const selects = w.findAll('.el-table__body .el-select')
+    expect(selects).toHaveLength(2)
+    expect(selects.every((s) => s.find('.is-disabled').exists())).toBe(true)
+  })
+
+  it('the skill page shows the tab only with the browse permission', async () => {
+    mockApi({ 'GET /agent/skills': ok([]), 'GET /agent/tool-restrictions': ok(ROWS) })
+    await show(SkillPage, { perms: ['agent.chat.use'], root: false })
+    expect(w.text()).not.toContain(t('agent.admin.tab.restrictions'))
+    w.unmount()
+    await show(SkillPage, { perms: ['agent.chat.use', 'agent.restriction.browse'], root: false })
+    expect(w.text()).toContain(t('agent.admin.tab.restrictions'))
   })
 })
 

@@ -3,7 +3,7 @@ import { Injectable, Logger } from '@nestjs/common'
 import { InjectDataSource } from '@nestjs/typeorm'
 import { AGENT2_PARAMS, type AgentItemPayloads } from '@qiwu/shared'
 import { I18nService } from 'nestjs-i18n'
-import type { DataSource } from 'typeorm'
+import { type DataSource, IsNull } from 'typeorm'
 import { z } from 'zod'
 import { ParamService } from '../../settings/param.service.js'
 import {
@@ -308,12 +308,12 @@ export class AgentAutoReviewer implements AgentApprovalReviewer {
 
   /**
    * 用户本人在本会话最近的几条消息的文字（只取 user 条目，不取助手与工具的内容），从新到旧。不是本人的话的
-   * 部分不算：照抄前一条回答里后续建议的消息（建议是模型写的）与批准方案后运行时写的方案消息整条跳过，事件自动化消息末尾的事件行（领域、
+   * 部分不算：从没运行过的消息（排队中或被核对闸门作废的，status 不为空）不是本人此刻的请求；照抄前一条回答里后续建议的消息（建议是模型写的）与批准方案后运行时写的方案消息整条跳过，事件自动化消息末尾的事件行（领域、
    * 动作与记录 id，记录 id 可能来自外部数据）去掉。
    */
   private async requests(threadId: number): Promise<string[]> {
     const rows = await this.ds.getRepository(AgentItem).find({
-      where: { threadId, kind: 'user' },
+      where: { threadId, kind: 'user', status: IsNull() },
       order: { seq: 'DESC' },
       take: USER_MESSAGES,
       select: { id: true, seq: true, payload: true },

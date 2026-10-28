@@ -202,6 +202,8 @@ export const Err = {
   AGENT_REASONING_OFF_REJECTED: def('B8016', 502, 'error.agent.reasoning_off_rejected'),
   /** The model service refused the key (HTTP 401/403) while its model list was loaded. */
   AGENT_PROVIDER_KEY_REJECTED: def('B8017', 422, 'error.agent.provider_key_rejected'),
+  /** The thread has items the page has not seen yet (another tab); reload before rewinding. */
+  AGENT_THREAD_STALE: def('B8018', 409, 'error.agent.thread_stale'),
 
   /** WeChat Official Accounts gateway and account management errors. */
   WXOA_UPSTREAM: def('B6001', 502, 'error.wxoa.upstream'),

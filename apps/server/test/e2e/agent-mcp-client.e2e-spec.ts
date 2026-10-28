@@ -553,14 +553,14 @@ describe('external tool source', () => {
     for (const t of synced) if (t.name !== 'fail') await setTool(s.id, t.id, { enabled: true })
     const fail = synced.find((t) => t.name === 'fail')!
     await setTool(s.id, fail.id, { enabled: true, policy: 'deny' })
-    const listed = await ext.list(principal())
+    const listed = await inTenant1(() => ext.list(principal()))
     names = Object.fromEntries(
       listed.filter((d) => d.serverName === `${PREFIX}Tools 工具`).map((d) => [d.title, d.name]),
     )
   })
 
   it('lists enabled, not denied tools under sanitized unique names; descriptions stay untrusted data', async () => {
-    const listed = (await ext.list(principal())).filter(
+    const listed = (await inTenant1(() => ext.list(principal()))).filter(
       (d) => d.serverName === `${PREFIX}Tools 工具`,
     )
     expect(listed.map((d) => d.name).sort()).toEqual([
@@ -568,8 +568,8 @@ describe('external tool source', () => {
       'ext.e2e-agmcp-Tools.confirm',
       'ext.e2e-agmcp-Tools.lookup',
     ])
-    expect(new Set((await ext.list(principal())).map((d) => d.name)).size).toBe(
-      (await ext.list(principal())).length,
+    expect(new Set((await inTenant1(() => ext.list(principal()))).map((d) => d.name)).size).toBe(
+      (await inTenant1(() => ext.list(principal()))).length,
     )
     const lookup = listed.find((d) => d.name.endsWith('.lookup'))!
     expect(lookup).toMatchObject({ policy: 'ask', title: 'Look up a company' })

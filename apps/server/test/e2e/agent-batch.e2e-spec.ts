@@ -470,6 +470,34 @@ describe('batch runs', () => {
     }
   })
 
+  it('approve all skips a card whose tool the tenant restricted to human while it waits', async () => {
+    try {
+      const c = await customer({})
+      const res = await create({ skill: ENRICH_SKILL, target: 'demo.customer', ids: [c] })
+      expect(res.status).toBe(201)
+      const id = res.body.data.id
+      await allRows(id, ['waiting'])
+      await addRow(app, 1, 'agent_tool_restriction', {
+        tool: 'demo.customer.update',
+        policy: 'human',
+      })
+      const out = await http()
+        .post(`${URL}/${id}/decide`)
+        .set(bearer(tok.owner))
+        .send({ decision: 'approve' })
+      expect(out.body.data).toEqual({ decided: 0, skipped: 1 })
+      expect((await customerRow(c)).website).toBeNull()
+      await http()
+        .post(`${URL}/${id}/decide`)
+        .set(bearer(tok.owner))
+        .send({ decision: 'reject' })
+        .expect(200)
+      await allRows(id, ['completed'])
+    } finally {
+      await ds.query("DELETE FROM agent_tool_restriction WHERE tool = 'demo.customer.update'")
+    }
+  })
+
   it("decide all leaves an approval that writes another row's record pending (skipped)", async () => {
     const a = await customer({})
     const b = await customer({})

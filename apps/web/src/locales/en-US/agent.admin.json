@@ -17,7 +17,8 @@
         "params": "Rules & quotas",
         "prompts": "Prompt templates",
         "instructions": "Instructions",
-        "diagnostics": "Diagnostics"
+        "diagnostics": "Diagnostics",
+        "restrictions": "Tool restrictions"
       },
       "scope": {
         "platform": "Platform",
@@ -142,7 +143,8 @@
         },
         "sources": {
           "local": "This system",
-          "web": "Web"
+          "web": "Web",
+          "mcp": "External MCP"
         }
       },
       "param": {
@@ -350,6 +352,15 @@
         "view": "View",
         "unpriced": "These models have no rates configured: {models}. Unpriced calls do not count toward credit budgets.",
         "setPricing": "Configure rates"
+      },
+      "restriction": {
+        "note": "Your tenant can tighten a tool beyond the platform policy to \"People only\" or \"Off\", never loosen it: the stricter of the platform's and your tenant's setting applies. These restrictions apply to the in-app assistant only, not to MCP clients connected with a personal access token.",
+        "platform": "Platform policy",
+        "tenant": "Tenant restriction",
+        "effective": "Effective",
+        "none": "No restriction",
+        "filter": "Filter by title or tool name",
+        "set": "Tenant restriction for {name}"
       }
     }
   }

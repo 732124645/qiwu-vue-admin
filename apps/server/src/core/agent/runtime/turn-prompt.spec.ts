@@ -52,6 +52,8 @@ describe('historyMessages', () => {
       result('c2', 'full two'),
       item('assistant', { text: 'cut off' }, 'failed'),
       item('user', { text: 'queued' }, 'pending'),
+      // a queued message voided by the recovery stop never ran either
+      item('user', { text: 'expired intent' }, 'expired'),
       // a call whose result was summarized away, and a result without its call
       call('lost'),
       result('orphan', 'x'),
@@ -220,6 +222,18 @@ describe('reasoning, broken arguments, summaries', () => {
     expect(compactionBoundary([goal, c1, r1, c2], r1.seq, goal.seq)).toBeNull()
   })
 
+  it('the compaction transcript leaves out queued and voided user messages', () => {
+    const text = transcript([
+      item('user', { text: 'sent goal' }),
+      item('user', { text: 'still queued' }, 'pending'),
+      item('user', { text: 'voided by the check' }, 'expired'),
+      item('assistant', { text: 'done' }, 'done'),
+    ])
+    expect(text).toContain('User: sent goal')
+    expect(text).not.toContain('still queued')
+    expect(text).not.toContain('voided by the check')
+  })
+
   it('fits compaction evidence in the budget without cutting its untrusted closing boundary', () => {
     const rows = [item('user', { text: 'goal' }), result('large', 'x'.repeat(100_000))]
     const text = transcript(rows, 2000)
@@ -344,6 +358,7 @@ describe('contributed context', () => {
         item('user', { text: 'first' }),
         item('assistant', { text: 'ok' }, 'done'),
         item('user', { text: 'queued' }, 'pending'),
+        item('user', { text: 'voided' }, 'expired'),
       ]),
     ).toBe('first')
   })

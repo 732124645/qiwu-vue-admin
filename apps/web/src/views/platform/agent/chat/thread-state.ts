@@ -94,7 +94,7 @@ export function mergeThread(shown: AgentThreadVo | null, incoming: AgentThreadVo
  */
 export function applyItemEvent(
   items: AgentItemVo[],
-  ev: Exclude<AgentEvent, { type: 'turn' }>,
+  ev: Exclude<AgentEvent, { type: 'turn' } | { type: 'rewound' }>,
 ): AgentItemVo[] | null {
   if (ev.type === 'item') return mergeItems(items, [ev.item])
   const at = items.findIndex((i) => i.id === ev.itemId)

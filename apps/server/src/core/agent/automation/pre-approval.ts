@@ -22,7 +22,8 @@ import {
 } from '../agent-ports.js'
 import { McpToolSwitch } from '../../mcp/mcp.entity.js'
 import { AgentTurn } from '../entities/agent-thread.entity.js'
-import { AgentToolPolicies, effectivePolicy } from '../tools/tool-policy.js'
+import { AgentToolRestriction } from '../entities/agent-mcp.entity.js'
+import { AgentToolPolicies } from '../tools/tool-policy.js'
 import { AgentAutomation, AgentAutomationRun, type PreApprovedTool } from './automation.entity.js'
 
 /**
@@ -118,9 +119,20 @@ const switchOf = (row: Pick<McpToolSwitch, 'enabled' | 'agentPolicy'> | null): s
   row ? `${row.enabled ? 1 : 0}:${row.agentPolicy ?? 'default'}` : 'none'
 
 /**
+ * 本租户对这个工具最近一行收紧（含已去掉的）的值：`|t:<行 id>:<策略>:<更新时间>:<是否已去掉>`；从没收紧过为
+ * 空串（与加入租户收紧之前记下的凭据相同）。去掉的行也算：收紧后再去掉，旧的同意不会悄悄恢复。
+ */
+const restrictionOf = (
+  row: Pick<AgentToolRestriction, 'id' | 'policy' | 'updatedAt' | 'deletedAt'> | null,
+): string =>
+  row
+    ? `|t:${row.id}:${row.policy}:${new Date(row.updatedAt).getTime()}:${row.deletedAt ? 0 : 1}`
+    : ''
+
+/**
  * 自动化的预先同意（see docs/agent.md）：创建人建或改自动化时逐个勾选、输入当前密码同意的写入工具，
  * 在它的运行里不再停下等人。每个条目同意时记下凭据：与这个工具有关的生效事实的摘要（{@link factsOf}）
- * 与工具平台开关行的值（{@link switchOf}）。此刻重算的与记下的不一致——创建人在这个工具上的权限、数据范围、
+ * 与工具平台开关行、本租户收紧行的值（{@link switchOf}、{@link restrictionOf}）。此刻重算的与记下的不一致——创建人在这个工具上的权限、数据范围、
  * 部门或套餐变了，管理员动过这个工具的开关或策略——这项同意就作废，要重新输入密码同意；只有事实恢复到与同意时
  * 完全相同（摘要相同）才算仍然有效。开关行一旦出现就不会再回到“没有行”，所以动过开关的同意不会恢复。
  *
@@ -220,7 +232,8 @@ export class AutomationPreApproval implements AgentApprovalReviewer {
         (t) =>
           t.kind === 'write' &&
           !t.perCallConfirmation &&
-          (policies.get(t.name) ?? effectivePolicy('write', null)) === 'ask',
+          // 生效策略（已叠加本租户的收紧）；策略表里没有的不算
+          policies.get(t.name) === 'ask',
       )
       .map((t) => ({ name: t.name, title: t.title }))
       .sort((x, y) => x.name.localeCompare(y.name))
@@ -260,7 +273,17 @@ export class AutomationPreApproval implements AgentApprovalReviewer {
       where: { name: tool },
       select: { id: true, enabled: true, agentPolicy: true },
     })
-    return { facts: factsOf(owner, t?.perm ?? null, t?.feature, bound), switch: switchOf(row) }
+    // 本租户的收紧也进凭据（显式按当前租户取，含已去掉的行）
+    const restriction = await this.ds.getRepository(AgentToolRestriction).findOne({
+      where: { tenantId: tenantId(), tool },
+      withDeleted: true,
+      order: { id: 'DESC' },
+      select: { id: true, policy: true, updatedAt: true, deletedAt: true },
+    })
+    return {
+      facts: factsOf(owner, t?.perm ?? null, t?.feature, bound),
+      switch: switchOf(row) + restrictionOf(restriction),
+    }
   }
 
   /**

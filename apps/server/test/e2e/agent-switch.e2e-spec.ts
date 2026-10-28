@@ -162,8 +162,8 @@ describe('off', () => {
 
   it('the side menu and the grant tree leave the agent group out; the menu management lists it', async () => {
     const menus = await agentMenus(ds)
-    // the group, five pages, the hidden batch review page and their twelve actions
-    expect(menus).toHaveLength(19)
+    // the group, five pages, the hidden batch review page and their fourteen actions
+    expect(menus).toHaveLength(21)
     const http = () => request(app.getHttpServer())
     const side = (await http().get('/api/auth/menus').set(bearer(root)).expect(200)).body
       .data as MenuNode[]

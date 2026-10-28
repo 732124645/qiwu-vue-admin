@@ -66,6 +66,8 @@ export interface ItemInternal {
   reasoning?: string
   /** the model that produced `reasoning`: it is sent back only to that same model */
   reasoningModel?: string
+  /** the input tokens the provider reported for this step (on the same item as `reasoning`) */
+  promptTokens?: number
   /**
    * `<callId>#<n>`: the n-th item a built-in tool call added; a repeated call (restart, lost lock) replaces it
    * instead of adding another

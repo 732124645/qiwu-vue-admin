@@ -112,7 +112,9 @@
     "retry": "Retry jobs",
     "use": "Use",
     "batchRun": "Run on selected records",
-    "instructionModify": "Edit tenant instructions"
+    "instructionModify": "Edit tenant instructions",
+    "restrictionBrowse": "View tool restrictions",
+    "restrictionModify": "Change tool restrictions"
   },
   "oa": {
     "title": "Office",

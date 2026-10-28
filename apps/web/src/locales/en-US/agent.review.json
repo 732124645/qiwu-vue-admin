@@ -24,13 +24,14 @@
         "note": "Note:",
         "unreviewed": {
           "title": "Not reviewed automatically",
-          "policy": "This tool is set to \"People only\", so it is never sent to automatic review.",
+          "policy": "The platform set this tool to \"People only\", so it is never sent to automatic review.",
           "read": "This read tool is set to \"Needs confirmation\"; reads are never sent to automatic review.",
           "personal": "This action must be confirmed by you in person each time; automatic review cannot do it for you.",
           "mode": "The conversation is read-only or in plan mode, so it was not reviewed automatically.",
           "paused": "The agent is paused, so it was not reviewed automatically.",
           "no_model": "No review model is set on the platform, so it was not reviewed automatically.",
-          "other": "This call was not sent to automatic review and needs your confirmation."
+          "other": "This call was not sent to automatic review and needs your confirmation.",
+          "tenant": "Your tenant set this tool to \"People only\", so it is never sent to automatic review."
         }
       }
     }

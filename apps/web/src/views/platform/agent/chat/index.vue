@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   computed,
+  h,
   nextTick,
   onActivated,
   onDeactivated,
@@ -22,6 +23,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import dayjs from 'dayjs'
 import {
   agentPerms,
+  Err,
   RT,
   type AgentContext,
   type AgentThreadCreate,
@@ -29,6 +31,7 @@ import {
   type AgentOptionsVo,
   type AgentPlanDecide,
   type AgentProfileVo,
+  type AgentRewindPreviewVo,
   type AgentStatusVo,
   type AgentThreadVo,
   type AgentTurnVo,
@@ -44,11 +47,15 @@ import { useAuthStore } from '@/core/stores/auth'
 import ChatItem from './ChatItem.vue'
 import ContextPanel from './ContextPanel.vue'
 import SubtaskDetail from './SubtaskDetail.vue'
-import Composer, { type ComposerMessage, type ComposerSettings } from './Composer.vue'
+import Composer, {
+  type ComposerMessage,
+  type ComposerSettings,
+  type RestoredMessage,
+} from './Composer.vue'
 import NotifySettings from './NotifySettings.vue'
 import ProfileMemoryBar, { type ProfileDraft } from './ProfileMemoryBar.vue'
 import ShortcutSettings from './ShortcutSettings.vue'
-import { comboOf, loadShortcuts, saveShortcuts } from './shortcuts'
+import { comboLabel, comboOf, loadShortcuts, saveShortcuts } from './shortcuts'
 import { LIST_WIDTH, loadLayout, PANEL_WIDTH, panelMax, saveLayout, usePaneResize } from './layout'
 import ThreadList from './ThreadList.vue'
 import {
@@ -77,6 +84,9 @@ import { toolTitle } from '../tool-presentation'
  * 地址里的 `?shared=<token>` 显示同租户的只读分享快照。其他会话的推送更新列表（未读数、轮次状态，
  * 未列出的会话会重读列表）。快捷键（新会话、聚焦输入框、停止、切换计划模式）可在头部自定义，本人本浏览器
  * 保存；默认 Alt+N 新会话（不与全局菜单搜索的 Ctrl/⌘+K 冲突，也不占用浏览器的查找）。会话可在新窗口打开。
+ * 运行中 Enter 插话、“排到下一轮”留到下一轮、停止键停止并保留草稿（撤下的排队消息放回输入框）。
+ * 原地回退：任一条本人消息上“从这里重新编辑”、最后一条回答上“重新生成”、菜单“撤回最后一轮”都先读服务器
+ * 列出的、不会撤销的写入并确认，再删掉这条消息及其后的内容；分叉是另一个单独的操作。
  */
 // keep-alive 名称 = 菜单种子的 component_name
 defineOptions({ name: 'AgentChat' })
@@ -254,8 +264,6 @@ function inspectItem(id: number) {
 
 /** 新会话草稿的配置方案（undefined：默认方案）与是否使用记忆 */
 const draft = ref<ProfileDraft>({ profileId: undefined, memoryEnabled: true })
-/** 正在编辑最后一条用户消息：发送时从它之前分叉出新会话再发 */
-const editing = ref<{ seq: number } | null>(null)
 /** 只读分享快照的 token */
 const sharedToken = ref<string | null>(null)
 const readOnly = computed(() => !!sharedToken.value || thread.value?.parentThreadId != null)
@@ -264,7 +272,25 @@ const showStatus = ref(false)
 const stopping = ref(false)
 const rows = computed(() => chatRows(items.value, turn.value))
 const running = computed(() => turn.value?.status === 'running' || turn.value?.status === 'waiting')
-const lastUserSeq = computed(() => items.value.filter((i) => i.kind === 'user').at(-1)?.seq ?? null)
+type UserItem = Extract<AgentItemVo, { kind: 'user' }>
+/**
+ * 最后一轮的第一条已送达用户消息（没有状态；排队中或已作废的不算，服务器也只从已送达的消息回退）。
+ * 一轮中途插的话、待确认时附的理由也是同一轮里已送达的消息；从它们回退只会截短这一轮，
+ * 所以重新生成与“撤回最后一轮”从这一轮的开头回退，删掉整轮，与确认文案和服务器的撤回一致。
+ */
+const lastTurnStart = computed(() => {
+  const delivered = items.value.filter((i): i is UserItem => i.kind === 'user' && i.status === null)
+  const last = delivered.at(-1)
+  if (!last || last.turnId == null) return last ?? null
+  return delivered.find((i) => i.turnId === last.turnId) ?? last
+})
+/** 最后一轮开头之后的最后一条完整回答：“重新生成”按钮在它上面 */
+const lastAnswerId = computed(() => {
+  const from = lastTurnStart.value
+  if (!from || from.payload.fromPlan) return null
+  const answer = items.value.filter((i) => i.kind === 'assistant').at(-1)
+  return answer && answer.seq > from.seq && answer.status !== 'running' ? answer.id : null
+})
 /** 可 `@` 提及的记录：草稿带来的上下文，或会话第一条消息带着的上下文 */
 const records = computed(() => {
   let ctx = context.value
@@ -295,19 +321,56 @@ async function revokeTool(tool: string) {
     revokingTool.value = null
   }
 }
+/** 本会话的 `/status` 结果；换会话后旧会话的不算 */
+const ownStatus = computed(() =>
+  status.value && thread.value && status.value.threadId === thread.value.id ? status.value : null,
+)
+/** 输入框的上下文估算条；有上一步实际用量时状态行已显示实际值，不再并排显示另一个估算百分比 */
 const contextUse = computed(() =>
-  status.value && thread.value && status.value.threadId === thread.value.id
-    ? { used: status.value.contextUsed, window: status.value.contextWindow }
+  ownStatus.value && ownStatus.value.contextReported == null
+    ? { used: ownStatus.value.contextUsed, window: ownStatus.value.contextWindow }
     : null,
 )
+/**
+ * 输入框下方常显的状态行：模式 · 上下文（有上一步实际用量时用实际值，否则标“约”的估算）· 本轮积分（随轮次事件
+ * 实时变化，有每轮上限时带上限）· 本人今日积分 · 本会话已放行数。还不知道的部分不显示，不用 0 充数。
+ */
+const statusLine = computed(() => {
+  if (readOnly.value) return null
+  const s = ownStatus.value
+  const parts = [t(`agent.chat.mode.${settings.value.approvalMode}`)]
+  if (s && s.contextWindow > 0) {
+    const used = s.contextReported ?? s.contextUsed
+    const percent = Math.min(100, Math.round((used / s.contextWindow) * 100))
+    parts.push(
+      t(`agent.chat.statusLine.${s.contextReported != null ? 'context' : 'contextApprox'}`, {
+        percent,
+      }),
+    )
+  }
+  const now = thread.value && turn.value?.threadId === thread.value.id ? turn.value : null
+  if (now)
+    parts.push(
+      s?.turnLimit
+        ? t('agent.chat.statusLine.turnOf', { credits: now.credits, limit: s.turnLimit })
+        : t('agent.chat.statusLine.turn', { credits: now.credits }),
+    )
+  if (s) parts.push(t('agent.chat.statusLine.today', { credits: s.today.userCredits }))
+  return { parts, allowed: s?.allowedTools.length ?? 0 }
+})
+/** 状态行的“已放行 N 个工具”：打开会话设置里的已放行列表，可逐个撤销 */
+function openAllowed() {
+  settingsTab.value = 'session'
+  settingsOpen.value = true
+}
 let openSeq = 0
 let catchUpRequest = 0
+let statusRequest = 0
 const auth = useAuthStore()
 const actor = computed(() => (auth.me ? `${auth.me.user.id}:${auth.tenant?.id ?? 1}` : ''))
 type Delivery = PendingDeliveryIds & {
   request?: ComposerMessage
   create?: Partial<AgentThreadCreate>
-  fork?: { threadId: number; seq: number }
 }
 const pendingDelivery = shallowRef<Delivery | null>(null)
 const checkingDelivery = ref(false)
@@ -584,7 +647,6 @@ async function openThread(id: number) {
     )
       turn.value = mergeTurn(sameThread ? turn.value : null, d.turn)
     context.value = null
-    editing.value = null
     sharedToken.value = null
     settings.value = settingsOf(d.thread)
     showStatus.value = false
@@ -641,7 +703,6 @@ async function newDraft(
   turn.value = null
   status.value = null
   context.value = ctx
-  editing.value = null
   sharedToken.value = null
   settings.value = defaultSettings()
   void loadOptions(from ?? undefined)
@@ -674,17 +735,42 @@ async function catchUp() {
   }
 }
 
-/** 上下文用量、本轮与今日用量和限额（输入框旁的用量条与 `/status`）。 */
+/**
+ * 上下文用量、本轮与今日用量和限额（输入框旁的用量条与 `/status`）。只采用最后一次请求的回复：先发的
+ * 回复（如运行中节流的刷新）晚到时不覆盖已显示的较新状态。
+ */
 async function loadStatus() {
   const th = thread.value
   if (!th) return
+  statusAt = Date.now()
+  const request = ++statusRequest
   try {
     const s = await agentApi.status(th.id)
-    if (thread.value?.id === th.id) status.value = s
+    if (thread.value?.id === th.id && request === statusRequest) status.value = s
   } catch {
     // 用量只是提示，读不到不打扰用户
   }
 }
+
+/** 运行中至多每 10 秒刷新一次状态（今日积分、上下文），不随每一步都请求 */
+const RUNNING_STATUS_MS = 10_000
+let statusAt = 0
+function refreshRunningStatus() {
+  if (Date.now() - statusAt >= RUNNING_STATUS_MS) void loadStatus()
+}
+// 同一会话的模式、配置方案或已放行工具变了：重读状态（需确认与不可用的工具、放行数随之变化）
+watch(
+  () =>
+    [
+      thread.value?.id,
+      thread.value?.approvalMode,
+      thread.value?.profileId,
+      thread.value?.allowedTools.join('\n'),
+    ] as const,
+  (now, before) => {
+    if (now[0] != null && now[0] === before[0]) void loadStatus()
+  },
+)
 
 // ---- 已读：页面显示着会话时，把看到的最后一条标为已读 ----
 let readSeq = 0
@@ -729,9 +815,12 @@ onRealtime(RT.agentEvent, (ev) => {
     // 较早一轮迟到的状态不覆盖当前轮
     turn.value = mergeTurn(turn.value, ev.turn)
     if (ev.turn.status !== 'running') void loadStatus()
+    else refreshRunningStatus()
     if (ev.turn.status !== 'running' && ev.turn.status !== 'waiting') void catchUp()
     return
   }
+  // 别的标签页（或本页）原地回退：去掉被删的条目，再从接口补齐会话状态
+  if (ev.type === 'rewound') return void dropFrom(ev.fromSeq)
   const next = applyItemEvent(items.value, ev)
   if (!next) return void catchUp()
   items.value = next
@@ -805,8 +894,7 @@ function onThreadUpdated(next: AgentThreadVo) {
 }
 
 /**
- * 发送一条消息：没有会话时先创建；编辑最后一条用户消息时先从它之前分叉出新会话再发（原会话不变）。
- * 运行中按输入框选的方式追加或排队。
+ * 发送一条消息：没有会话时先创建。运行中按输入框给的方式送达：插话（本轮当前工具步骤之后）或排到下一轮。
  */
 async function submit(msg: ComposerMessage): Promise<boolean> {
   const owner = actor.value,
@@ -835,14 +923,10 @@ async function submit(msg: ComposerMessage): Promise<boolean> {
   const fresh = !delivery
   if (!delivery) {
     delivery = {
-      // 编辑重发是新的分叉意图，不能复用原创建会话或前一次分叉的永久幂等标识。
-      clientDraftId: editing.value ? crypto.randomUUID() : clientDraftId,
+      clientDraftId,
       clientMessageId: crypto.randomUUID(),
-      threadId: editing.value ? null : (thread.value?.id ?? null),
+      threadId: thread.value?.id ?? null,
       request: structuredClone(msg),
-      ...(editing.value && thread.value
-        ? { fork: { threadId: thread.value.id, seq: editing.value.seq - 1 } }
-        : {}),
     }
     rememberDelivery(delivery)
   }
@@ -854,9 +938,7 @@ async function submit(msg: ComposerMessage): Promise<boolean> {
   const scope = openSeq
   try {
     let th = thread.value
-    const fork = selected.fork
-    if (fork) th = await agentApi.fork(fork.threadId, fork.seq, selected.clientDraftId)
-    else if (!th || (selected.threadId && th.id !== selected.threadId)) {
+    if (!th || (selected.threadId && th.id !== selected.threadId)) {
       if (selected.threadId) {
         const receipt = await agentApi.draftReceipt(selected.clientDraftId)
         if (receipt.status === 'removed' || !receipt.thread)
@@ -874,11 +956,9 @@ async function submit(msg: ComposerMessage): Promise<boolean> {
       thread.value = th
       items.value = []
       turn.value = null
-      editing.value = null
       readSeq = 0
       listRef.value?.upsert(th)
       setQuery({ thread: th.id })
-      if (fork) await openThread(th.id)
     }
     const payload = { ...selected.request! }
     delete payload.draftRevision
@@ -911,12 +991,28 @@ async function submit(msg: ComposerMessage): Promise<boolean> {
   }
 }
 
+/**
+ * 停止本轮（等待中的卡片随之作废），输入框里的草稿不动；服务器撤下的排队消息不会再开始，原文、附件和技能
+ * 接回输入框，由本人决定是否再发。
+ */
 async function stop() {
   const th = thread.value
   if (!th || stopping.value) return
+  const owner = actor.value
   stopping.value = true
   try {
-    await agentApi.cancel(th.id)
+    const res = await agentApi.cancel(th.id)
+    // 撤下的排队消息已在服务器删除，不会再推送：本地也去掉
+    if (thread.value?.id === th.id)
+      items.value = items.value.filter(
+        (i) => !(i.kind === 'user' && i.turnId === null && i.status === 'pending'),
+      )
+    const queued = res?.queued ?? []
+    // 切到别的会话也放回：输入框在会话之间共用，丢掉就找不回了；换了登录身份则不放
+    if (queued.length && owner === actor.value) {
+      await composerRef.value?.restore(queued)
+      ElMessage.info(t('agent.chat.composer.restoredQueued', { n: queued.length }))
+    }
     await catchUp()
   } catch (e) {
     toastRest(e)
@@ -977,32 +1073,164 @@ async function fork(seq: number) {
   }
 }
 
-/** 编辑最后一条用户消息：文字放回输入框，发送时分叉重发。 */
-function startEdit(seq: number, text: string) {
-  editing.value = { seq }
-  void composerRef.value?.setText(text)
+// ---- 原地回退：从这里重新编辑、重新生成、撤回最后一轮 ----
+/** 回退的用途：重新编辑把消息放回输入框，重新生成原样再发一次，撤回只删除 */
+type RewindPurpose = 'edit' | 'regenerate' | 'revert'
+const rewinding = ref(false)
+/**
+ * 此刻能否原地回退：本人可写的普通会话，没有正在运行的轮次、待核对的结果不明写入或未确认送达的消息；
+ * 等人确认的轮次可以回退（服务器截短并取消它；外部表单的调用还在执行时服务器回 409，照常提示）。
+ * 自动化、子任务和批量会话的轮次另有记录依赖它们，服务器也会拒绝。
+ */
+const canRewind = computed(() => {
+  const th = thread.value
+  return (
+    !!th &&
+    !readOnly.value &&
+    turn.value?.status !== 'running' &&
+    !th.recoveryRequired &&
+    th.automationRunId == null &&
+    th.parentThreadId == null &&
+    th.batchId == null &&
+    !pendingDelivery.value
+  )
+})
+
+/** 去掉 `seq` 及其后的条目，再从接口补齐会话、最近一轮（可能是更早的一轮或没有）与用量。 */
+async function dropFrom(seq: number) {
+  items.value = items.value.filter((i) => i.seq < seq)
+  // 被删的轮次可能正是当前轮：清掉后由补齐换成服务器的最近一轮，不让较早的一轮被当成迟到的旧状态
+  turn.value = null
+  await catchUp()
+  void loadStatus()
+}
+
+/** 确认框正文：会删掉什么、这些轮次里不会撤销的写入（已执行或结果不明，按工具标题），以及其他不撤销的事。 */
+function rewindMessage(purpose: RewindPurpose, writes: AgentRewindPreviewVo['writes']) {
+  return h('div', { class: 'agent-chat__rewind' }, [
+    h('p', t(`agent.chat.rewind.confirm.${purpose}`)),
+    ...(writes.length
+      ? [
+          h('p', t('agent.chat.rewind.writes')),
+          h(
+            'ul',
+            writes.map((w) =>
+              h(
+                'li',
+                { key: w.seq },
+                `${toolTitle(w.tool, w.title)} · ${t(`agent.chat.rewind.outcome.${w.outcome}`)}`,
+              ),
+            ),
+          ),
+        ]
+      : []),
+    h('p', t('agent.chat.rewind.notUndone')),
+  ])
+}
+
+/**
+ * 原地回退到本人的一条用户消息：先向服务器要这条之后不会撤销的写入并确认（重新生成在没有写入时不问），
+ * 再带上本页见过的最大序号删除（别的窗口刚加了本页没看到的内容时服务器拒绝，页面重新载入并提示）。
+ * 之后按用途把消息放回输入框（不发送）或用新的消息标识原样重发。
+ */
+async function rewindTo(target: UserItem, purpose: RewindPurpose) {
+  const th = thread.value
+  if (!th || !canRewind.value || rewinding.value) return
+  const owner = actor.value,
+    epoch = deliveryEpoch,
+    scope = openSeq
+  const same = () =>
+    owner === actor.value &&
+    epoch === deliveryEpoch &&
+    scope === openSeq &&
+    thread.value?.id === th.id
+  const restorable = (u: UserItem): RestoredMessage => ({
+    text: u.payload.text,
+    ...(u.payload.skill && { skill: u.payload.skill }),
+    attachments: u.payload.attachments ?? [],
+  })
+  const message = restorable(target)
+  rewinding.value = true
+  try {
+    const { writes } = await agentApi.rewindPreview(th.id, target.seq)
+    if (!same()) return
+    if (purpose !== 'regenerate' || writes.length) {
+      const verb = { edit: 'action.edit', regenerate: 'action.regenerate', revert: 'revert.title' }
+      try {
+        await ElMessageBox.confirm(
+          rewindMessage(purpose, writes),
+          t(`agent.chat.${verb[purpose]}`),
+          {
+            type: 'warning',
+            confirmButtonText: t(`agent.chat.rewind.continue.${purpose}`),
+            cancelButtonText: t('common.action.cancel'),
+          },
+        )
+      } catch {
+        return
+      }
+      if (!same()) return
+    }
+    const lastSeq = items.value.reduce((max, i) => Math.max(max, i.seq), 0)
+    // 锚点之后排队的消息（等人确认时排到下一轮的）随回退一起删掉：像停止一样把原文接回输入框，
+    // 不让打好的文字无声丢失；带上本页见过的最大序号，服务器删的不会多于这些
+    const queued = items.value
+      .filter(
+        (i): i is UserItem =>
+          i.kind === 'user' && i.turnId === null && i.status === 'pending' && i.seq > target.seq,
+      )
+      .map(restorable)
+    const putBack = async (own: RestoredMessage[]) => {
+      if (owner !== actor.value) return
+      await composerRef.value?.restore([...own, ...queued])
+      if (queued.length)
+        ElMessage.info(t('agent.chat.composer.restoredQueued', { n: queued.length }))
+    }
+    await agentApi.rewind(th.id, target.seq, lastSeq)
+    if (!same()) {
+      // 等回应时切走了会话：服务器已删掉原文，输入框在会话之间共用，放回去免得找不回（重新生成也不在别处重发）
+      await putBack(purpose !== 'revert' ? [message] : [])
+      return
+    }
+    await dropFrom(target.seq)
+    await putBack(purpose === 'edit' ? [message] : [])
+    if (purpose !== 'regenerate' || !same()) return
+    // 原样重发是一条新消息（新的消息标识）；没能送出时放回输入框，不让被删的原文就此丢失
+    const sent = await submit({
+      text: message.text,
+      ...(message.skill && { skill: message.skill }),
+      ...(message.attachments?.length && { fileIds: message.attachments.map((a) => a.fileId) }),
+    })
+    if (!sent && owner === actor.value) await composerRef.value?.restore([message])
+  } catch (e) {
+    if (!same()) return
+    if (e instanceof ApiError && e.code === Err.AGENT_THREAD_STALE.code) {
+      ElMessage.warning(t('agent.chat.rewind.stale'))
+      await openThread(th.id)
+    } else {
+      toastRest(e)
+      // 这条消息或会话已不在（别的窗口删了）：重新载入
+      if (e instanceof ApiError && e.status === 404) await openThread(th.id)
+    }
+  } finally {
+    rewinding.value = false
+  }
+}
+
+/** “从这里重新编辑”：回退到这条消息，把原文、附件和技能放回输入框。 */
+function editFrom(seq: number) {
+  const target = items.value.find((i): i is UserItem => i.kind === 'user' && i.seq === seq)
+  if (target) void rewindTo(target, 'edit')
+}
+/** “重新生成”：回退到最后一轮的开头，再把这一轮的第一条消息原样发一次。 */
+function regenerate() {
+  if (lastTurnStart.value) void rewindTo(lastTurnStart.value, 'regenerate')
 }
 
 // ---- 会话菜单：撤回、导出、分享 ----
-/** 撤回最后一轮：确认时说明已执行的写入不会回滚。 */
+/** 撤回最后一轮：与原地回退同一流程，从最后一轮的第一条已送达消息删起，不放回输入框。 */
 async function revert() {
-  const th = thread.value
-  if (!th) return
-  try {
-    await ElMessageBox.confirm(t('agent.chat.revert.confirm'), t('agent.chat.revert.title'), {
-      type: 'warning',
-      confirmButtonText: t('agent.chat.revert.action'),
-      cancelButtonText: t('common.action.cancel'),
-    })
-  } catch {
-    return
-  }
-  try {
-    await agentApi.revert(th.id)
-    await openThread(th.id)
-  } catch (e) {
-    toastRest(e)
-  }
+  if (lastTurnStart.value) await rewindTo(lastTurnStart.value, 'revert')
 }
 
 /** 导出为 Markdown 文件。 */
@@ -1128,6 +1356,14 @@ async function onCommand(cmd: SlashCommand) {
 // ---- 快捷键：本人在本浏览器自定义（默认 Alt+N 新会话）；只在本页显示时；按物理键判断，mac 的 ⌥ 会改变 e.key ----
 const shortcuts = ref(loadShortcuts(layoutUser))
 watch(shortcuts, (m) => saveShortcuts(layoutUser, m))
+/** 输入框里的停止键：嵌入窗口的 Esc 用来收起窗口，此时只能点按钮或用带修饰键的快捷键 */
+const stopKey = computed(() =>
+  props.embedded && shortcuts.value.stop === 'Escape' ? '' : shortcuts.value.stop,
+)
+/** 运行中提示里的停止方式：停止键，或没有停止键时的“停止”按钮（带引号的按钮名，免得读成“停止 停止本轮”） */
+const stopLabel = computed(() =>
+  stopKey.value ? comboLabel(stopKey.value) : t('agent.chat.composer.stopButton'),
+)
 useEventListener(window, 'keydown', (e: KeyboardEvent) => {
   if (!pageActive || e.defaultPrevented) return
   // 专注模式下 Esc 退出；焦点在弹层、对话框等页面外的浮层里时由它们自己处理 Esc
@@ -1484,7 +1720,11 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
               <el-dropdown-item command="skill" :disabled="savingSkill || running">
                 {{ t('agent.chat.saveSkill.action') }}
               </el-dropdown-item>
-              <el-dropdown-item command="revert" divided :disabled="!turn || running">
+              <el-dropdown-item
+                command="revert"
+                divided
+                :disabled="!lastTurnStart || !canRewind || rewinding"
+              >
                 {{ t('agent.chat.revert.title') }}
               </el-dropdown-item>
             </el-dropdown-menu>
@@ -1586,18 +1826,15 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
           :row="r"
           :can-fork="!!thread && !readOnly && !running && !thread.recoveryRequired"
           :can-edit="
-            r.kind === 'item' &&
-            r.item.kind === 'user' &&
-            r.item.seq === lastUserSeq &&
-            !running &&
-            !thread?.recoveryRequired &&
-            !readOnly
+            canRewind && r.kind === 'item' && r.item.kind === 'user' && r.item.status === null
           "
+          :can-regenerate="canRewind && r.kind === 'item' && r.item.id === lastAnswerId"
           :last="i === rows.length - 1 && !running"
           :readonly="readOnly"
           :auto-review="options?.approvalModes.includes('auto_review') ?? false"
           @fork="fork"
-          @edit="startEdit"
+          @edit="editFrom"
+          @regenerate="regenerate"
           @suggest="(s) => composerRef?.suggest(s)"
           @changed="catchUp"
           @plan-decided="onPlanDecided"
@@ -1619,6 +1856,16 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
             />
           </header>
           <dl v-if="status" class="agent-card__fields">
+            <dt>{{ t('agent.chat.status.mode') }}</dt>
+            <dd>{{ t(`agent.chat.mode.${status.mode}`) }}</dd>
+            <template v-if="status.model">
+              <dt>{{ t('agent.chat.status.model') }}</dt>
+              <dd>{{ status.model }}</dd>
+            </template>
+            <template v-if="status.profile">
+              <dt>{{ t('agent.chat.status.profile') }}</dt>
+              <dd>{{ status.profile.name }}</dd>
+            </template>
             <template v-if="status.turn">
               <dt>{{ t('agent.chat.status.state') }}</dt>
               <dd>{{ t(`agent.chat.turn.${status.turn.status}`) }}</dd>
@@ -1647,19 +1894,38 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
               <dt>{{ t('agent.chat.status.started') }}</dt>
               <dd>{{ time(status.turn.startedAt) }}</dd>
             </template>
-            <dt>
-              {{
-                t('agent.chat.composer.contextEstimate', {
-                  percent:
-                    status.contextWindow > 0
-                      ? Math.round((status.contextUsed / status.contextWindow) * 100)
-                      : 0,
-                })
-              }}
-            </dt>
+            <dt>{{ t('agent.chat.status.contextEstimated') }}</dt>
             <dd>
               {{
                 t('agent.chat.status.of', { used: status.contextUsed, limit: status.contextWindow })
+              }}
+            </dd>
+            <template v-if="status.contextReported != null && status.contextWindow > 0">
+              <dt>
+                {{ t('agent.chat.status.contextReported') }}
+              </dt>
+              <dd>
+                {{
+                  t('agent.chat.status.of', {
+                    used: status.contextReported,
+                    limit: status.contextWindow,
+                  })
+                }}
+              </dd>
+            </template>
+            <template v-if="status.turnLimit">
+              <dt>{{ t('agent.chat.status.turnLimit') }}</dt>
+              <dd>{{ status.turnLimit }}</dd>
+            </template>
+            <dt>{{ t('agent.chat.status.allowed') }}</dt>
+            <dd>
+              {{
+                status.allowedTools.length
+                  ? t('agent.chat.status.allowedValue', {
+                      n: status.allowedTools.length,
+                      names: status.allowedTools.map((n) => toolTitle(n)).join(', '),
+                    })
+                  : t('agent.chat.status.allowedNone')
               }}
             </dd>
             <dt>{{ t('agent.chat.status.userCreditsToday') }}</dt>
@@ -1700,6 +1966,36 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
             </dd>
           </dl>
           <p v-else class="agent-card__meta">{{ t('agent.chat.status.none') }}</p>
+          <template v-if="status">
+            <details
+              v-if="status.tools.asks.length"
+              class="agent-chat__status-tools"
+              :open="status.tools.asks.length <= 3"
+            >
+              <summary>{{ t('agent.chat.status.asks', { n: status.tools.asks.length }) }}</summary>
+              <ul>
+                <li v-for="tool in status.tools.asks" :key="tool.name">
+                  <strong :title="tool.name">{{ toolTitle(tool.name, tool.title) }}</strong>
+                  <span>{{ t(`agent.chat.approval.why.${tool.why}`) }}</span>
+                </li>
+              </ul>
+            </details>
+            <details
+              v-if="status.tools.unavailable.length"
+              class="agent-chat__status-tools"
+              :open="status.tools.unavailable.length <= 3"
+            >
+              <summary>
+                {{ t('agent.chat.status.unavailable', { n: status.tools.unavailable.length }) }}
+              </summary>
+              <ul>
+                <li v-for="tool in status.tools.unavailable" :key="tool.name">
+                  <strong :title="tool.name">{{ toolTitle(tool.name, tool.title) }}</strong>
+                  <span>{{ t(`agent.chat.status.unavailableWhy.${tool.reason}`) }}</span>
+                </li>
+              </ul>
+            </details>
+          </template>
         </div>
       </div>
 
@@ -1707,18 +2003,24 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
         {{ t('agent.chat.subtask.readonly') }}
       </p>
       <template v-if="!readOnly">
-        <div v-if="context || editing" class="agent-chat__context">
+        <div v-if="context" class="agent-chat__context">
           <el-tag v-if="context" closable type="info" @close="context = null">
             {{ t('agent.chat.context.from', { title: context.title || context.route }) }}
             <template v-if="context.ids?.length"
               >· {{ t('agent.chat.context.selected', { n: context.ids.length }) }}</template
             >
           </el-tag>
-          <el-tag v-if="editing" closable type="warning" @close="editing = null">
-            {{ t('agent.chat.action.editing') }}
-          </el-tag>
         </div>
-        <p v-if="running" class="agent-card__meta">{{ t('agent.chat.composer.queueHint') }}</p>
+        <p v-if="running" class="agent-card__meta">
+          {{
+            t(
+              awaitingApproval
+                ? 'agent.chat.composer.waitingHint'
+                : 'agent.chat.composer.queueHint',
+              { stop: stopLabel },
+            )
+          }}
+        </p>
         <Composer
           ref="composerRef"
           v-model:settings="settings"
@@ -1731,10 +2033,36 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
           :records
           :temporary="thread ? thread.temporary : temporary"
           :disabled="unavailable"
-          :stop-key="props.embedded && shortcuts.stop === 'Escape' ? '' : shortcuts.stop"
+          :stop-key="stopKey"
+          :queue-key="shortcuts.queue"
           @stop="stop"
           @command="onCommand"
-        />
+        >
+          <template #status>
+            <div
+              v-if="statusLine"
+              class="agent-chat__statusline"
+              role="group"
+              :aria-label="t('agent.chat.statusLine.label')"
+            >
+              <span
+                v-for="(part, i) in statusLine.parts"
+                :key="i"
+                class="agent-chat__statusline-part"
+                >{{ part }}</span
+              >
+              <el-button
+                v-if="statusLine.allowed"
+                link
+                size="small"
+                class="agent-chat__statusline-allowed"
+                :title="t('agent.chat.statusLine.allowedHint')"
+                @click="openAllowed"
+                >{{ t('agent.chat.statusLine.allowed', { n: statusLine.allowed }) }}</el-button
+              >
+            </div>
+          </template>
+        </Composer>
       </template>
     </section>
     <div
@@ -2062,6 +2390,32 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm:
   display: flex;
   min-height: 0;
   padding: 12px;
+}
+.agent-chat__statusline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  font-size: 12px;
+  color: var(--qw-text-3);
+}
+.agent-chat__statusline > * + *::before {
+  margin-right: 8px;
+  content: '·';
+}
+.agent-chat__status-tools summary {
+  cursor: pointer;
+  font-size: 13px;
+}
+.agent-chat__status-tools ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+.agent-chat__status-tools li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 13px;
 }
 .agent-threads {
   flex: none;

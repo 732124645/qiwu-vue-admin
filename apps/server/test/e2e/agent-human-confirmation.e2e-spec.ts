@@ -434,6 +434,34 @@ describe('per-call human confirmation', () => {
     expect(written).toHaveLength(1)
   })
 
+  it("treats the tenant's restriction like the platform switch: a change renews the card, a deny refuses", async () => {
+    script({ toolCalls: [call()] }, { text: 'Done.' })
+    const t = await begin()
+    const card = await pending(t.id)
+    const restriction = await inTenant1(() =>
+      insertRow(ds.manager, 'agent_tool_restriction', { tool: NAME, policy: 'human' }),
+    )
+    try {
+      await decide(card).expect(409)
+      await pending(t.id, 0, card.payload.confirmationToken)
+      expect(written).toHaveLength(0)
+      await ds.query("UPDATE agent_tool_restriction SET policy = 'deny' WHERE id = ?", [
+        restriction,
+      ])
+      const p = await principal()
+      await expect(
+        inTenant1(() =>
+          app
+            .get(HumanConfirmation)
+            .prepare(p, { threadId: t.id, turnId: t.turnId, callId: 'denied' }, NAME, call().args),
+        ),
+      ).rejects.toMatchObject({ err: Err.MCP_TOOL_DISABLED })
+      expect(written).toHaveLength(0)
+    } finally {
+      await ds.query('DELETE FROM agent_tool_restriction WHERE id = ?', [restriction])
+    }
+  })
+
   it('consumes approval once under concurrent clicks and refuses a used receipt', async () => {
     script({ toolCalls: [call()] }, { text: 'Done.' })
     const t = await begin()

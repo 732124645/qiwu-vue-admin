@@ -3,7 +3,9 @@ import type {
   AgentApprovalDecide,
   AgentApprovalMode,
   AgentToolPolicy,
+  AgentToolRestrictionPolicy,
   AgentAttachment,
+  AgentCancelVo,
   AgentItemKind,
   AgentItemPayloads,
   AgentMessageSend,
@@ -42,7 +44,20 @@ export interface ExternalToolDescriptor {
    * 自动审查模式时可先交给审查模型，`human` 只能由人确认）
    */
   policy: AgentToolPolicy
+  /**
+   * 类型：按平台策略定（平台设成 auto 的是读取，其余按写入）；本租户收紧成仅人工确认的读取仍是读取（只读与
+   * 计划模式下照样提供，每次问人）。缺省时按 `policy` 推断
+   */
+  kind?: McpToolKind
   serverName: string
+  /** 本租户对它的收紧（没有时不给）；`policy` 已是叠加后的生效值 */
+  restricted?: AgentToolRestrictionPolicy
+}
+
+/** 平台此刻提供的一个外部工具，带工具行 id 与平台层的策略（`policy` 为叠加本租户收紧后的值，可能是 deny）。 */
+export interface ExternalToolOffer extends ExternalToolDescriptor {
+  id: number
+  platformPolicy: AgentToolPolicy
 }
 
 /** 外部服务器在工具调用中途要求用户补充信息（MCP elicitation）：运行时把它变成问题卡片并等待回答。 */
@@ -53,8 +68,10 @@ export type ElicitHandler = (req: {
 }) => Promise<{ action: 'accept' | 'decline' | 'cancel'; content?: Record<string, unknown> }>
 
 export interface ExternalToolSource {
-  /** 当前可用的外部工具（服务器已启用、工具已启用且策略不是 deny） */
+  /** 当前可用的外部工具（服务器已启用、工具已启用，平台与本租户叠加后的策略不是 deny） */
   list(p: Principal): Promise<ExternalToolDescriptor[]>
+  /** 平台此刻提供的全部外部工具，含被本租户停用的（说明为什么不可用、租户收紧页用）；不连外部服务器 */
+  offered?(p: Principal): Promise<ExternalToolOffer[]>
   /** 调用一个外部工具；返回给模型的文本已按不可信内容包装并限长 */
   call(
     p: Principal,
@@ -114,7 +131,7 @@ export const INSTRUCTION_SOURCE = Symbol('qw:agent:instructions')
 export interface TurnControl {
   /** 发一条消息：没有进行中的轮次就开新一轮；有则按 `mode` 追加（steer）或排队（queue） */
   send(p: Principal, threadId: number, msg: AgentMessageSend): Promise<{ turnId: number }>
-  cancel(p: Principal, threadId: number): Promise<void>
+  cancel(p: Principal, threadId: number): Promise<AgentCancelVo>
   compact(p: Principal, threadId: number): Promise<void>
   decideApproval(
     p: Principal,
