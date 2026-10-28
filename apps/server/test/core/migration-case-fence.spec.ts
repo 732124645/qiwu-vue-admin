@@ -1,7 +1,6 @@
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, relative, sep } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import type { DataSource } from 'typeorm'
@@ -14,6 +13,30 @@ import {
   migrationSafetyFile,
   recoverMigrationRun,
 } from '../setup/migration-run-safety.js'
+
+/** 服务端根目录：子进程 Vitest 的工作目录（也是它的根）。 */
+const SERVER_ROOT = fileURLToPath(new URL('../../', import.meta.url))
+
+/**
+ * 临时用例目录放在服务端根目录之下（`test/.tmp-fence-*`，已加入 .gitignore，常规测试排除它）：Windows 上
+ * 系统临时目录可能在另一个盘、不在 Vitest 根目录下，子进程按绝对路径匹配不到用例。
+ */
+const tempDir = (prefix: string) => mkdtempSync(join(SERVER_ROOT, 'test', `.tmp-fence-${prefix}-`))
+
+/** 路径改用正斜杠：写进子进程用例与配置的路径在 Windows 上也按同一种写法解析。 */
+const slash = (path: string) => path.split(sep).join('/')
+
+/** 交给子进程 Vitest 的路径：相对服务端根目录、正斜杠（Windows 上带盘符和反斜杠的绝对路径匹配不到）。 */
+const forVitest = (path: string) => slash(relative(SERVER_ROOT, path))
+
+/** 子进程 Vitest：在服务端根目录下运行给定的配置文件。 */
+const vitest = (binary: string, config: string, timeout: number, env: NodeJS.ProcessEnv) =>
+  spawnSync(process.execPath, [binary, 'run', '--config', config], {
+    cwd: SERVER_ROOT,
+    encoding: 'utf8',
+    timeout,
+    env,
+  })
 
 let env: NodeJS.ProcessEnv
 beforeEach(() => {
@@ -171,9 +194,9 @@ it('marker read/write failures refuse work instead of treating the channel as cl
 })
 
 it('a real Vitest run blocks afterAll and later files after a stuck migration; a successful rebuild enables the next run', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'qw-fence-run-'))
-  const helper = fileURLToPath(new URL('../setup/migrations.ts', import.meta.url))
-  const safety = fileURLToPath(new URL('../setup/migration-run-safety.ts', import.meta.url))
+  const dir = tempDir('run')
+  const helper = slash(fileURLToPath(new URL('../setup/migrations.ts', import.meta.url)))
+  const safety = slash(fileURLToPath(new URL('../setup/migration-run-safety.ts', import.meta.url)))
   const nodeApi = new URL('../../node_modules/vitest/dist/node.js', import.meta.url).href
   const binary = fileURLToPath(new URL('../../node_modules/vitest/vitest.mjs', import.meta.url))
   const after = join(dir, 'after.flag'),
@@ -207,14 +230,10 @@ it('in-flight SQL never returns', fence.wrap(async () => await ds.createQueryRun
       config,
       `import { BaseSequencer } from ${JSON.stringify(nodeApi)};
 class Order extends BaseSequencer { sort(files) { return files.sort((a,b) => a.moduleId.localeCompare(b.moduleId)) } }
-export default {ssr:{resolve:{conditions:['source']}},test:{globals:true,globalSetup:[],setupFiles:${JSON.stringify(guard ? [setup] : [])},include:[${JSON.stringify(join(dir, onlyLater ? '02-later.spec.ts' : '*.spec.ts'))}],fileParallelism:false,maxWorkers:1,pool:'forks',sequence:{sequencer:Order},testTimeout:20000}};
+export default {ssr:{resolve:{conditions:['source']}},test:{globals:true,globalSetup:[],setupFiles:${JSON.stringify(guard ? [forVitest(setup)] : [])},include:[${JSON.stringify(forVitest(join(dir, onlyLater ? '02-later.spec.ts' : '*.spec.ts')))}],fileParallelism:false,maxWorkers:1,pool:'forks',sequence:{sequencer:Order},testTimeout:20000}};
 `,
     )
-    return spawnSync(process.execPath, [binary, 'run', '--config', config], {
-      encoding: 'utf8',
-      timeout: 30_000,
-      env,
-    })
+    return vitest(binary, config, 30_000, env)
   }
   try {
     const baseline = run(false)
@@ -246,9 +265,9 @@ export default {ssr:{resolve:{conditions:['source']}},test:{globals:true,globalS
 }, 100_000)
 
 it('plain and parameterized registrations fence actual Vitest timeouts before every SQL step', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'qw-fence-registrations-'))
-  const helper = fileURLToPath(new URL('../setup/migrations.ts', import.meta.url))
-  const safety = fileURLToPath(new URL('../setup/migration-run-safety.ts', import.meta.url))
+  const dir = tempDir('registrations')
+  const helper = slash(fileURLToPath(new URL('../setup/migrations.ts', import.meta.url)))
+  const safety = slash(fileURLToPath(new URL('../setup/migration-run-safety.ts', import.meta.url)))
   const binary = fileURLToPath(new URL('../../node_modules/vitest/vitest.mjs', import.meta.url))
   const spec = join(dir, 'registration.spec.ts'),
     config = join(dir, 'vitest.config.mjs'),
@@ -287,13 +306,9 @@ ${parameterized ? "it.each(['row'])('parameter %s', async label => await body(la
     )
     writeFileSync(
       config,
-      `export default {ssr:{resolve:{conditions:['source']}},test:{globals:true,globalSetup:[],setupFiles:[],include:[${JSON.stringify(spec)}],fileParallelism:false,pool:'forks'}};`,
+      `export default {ssr:{resolve:{conditions:['source']}},test:{globals:true,globalSetup:[],setupFiles:[],include:[${JSON.stringify(forVitest(spec))}],fileParallelism:false,pool:'forks'}};`,
     )
-    const result = spawnSync(process.execPath, [binary, 'run', '--config', config], {
-      encoding: 'utf8',
-      timeout: 20_000,
-      env,
-    })
+    const result = vitest(binary, config, 20_000, env)
     expect(result.status).not.toBe(0)
     expect(result.error).toBeUndefined()
     expect(`${result.stdout}${result.stderr}`).toContain('timed out')

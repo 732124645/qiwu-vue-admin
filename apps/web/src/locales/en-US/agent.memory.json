@@ -8,7 +8,7 @@
       "none": "No profile",
       "default": "Default",
       "toolsAll": "Any",
-      "toolsHint": "Leave empty to allow all tools. Select your available system tools or enter another tool identifier. Existing selections are preserved.",
+      "toolsHint": "Leave empty to allow all tools. Select from your available tools (system, web, built-in and external MCP tools) or enter another tool identifier. Existing selections are preserved.",
       "modelDefault": "Platform default model",
       "toolsLoadFailed": "Could not load tools. Existing selections are preserved; close and retry."
     },

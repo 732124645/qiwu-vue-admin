@@ -170,7 +170,7 @@ tools: [web.search, web.fetch, demo.customer.get, demo.customer.update, ask.user
 - **运行时**工具清单与 `$技能` 的工具清单同一条规则：给了清单就只提供清单里的工具，只读的内置工具总在，写入类内置工具（如 `memory.save`）必须列在清单里；技能和方案都给了清单时两边都要列着。额外说明作为用户角色的上下文放进每次请求（不进系统提示）。
 - 方案被删除、被改成别人的个人方案或在别的租户时，用着它的会话退回默认行为（不限制工具、不加说明），不报错。会话里也可以换用或去掉方案（`PATCH /api/agent/threads/:id` 的 `profileId`）。
 
-接口：`GET|POST /api/agent/profiles`、`PUT|DELETE /api/agent/profiles/:id`（`agent.chat.use`）。
+接口：`GET|POST /api/agent/profiles`、`PUT|DELETE /api/agent/profiles/:id`（`agent.chat.use`）。表单里的候选工具来自 `GET /api/agent/my-tools`（`agent.chat.use`）：本人此刻能触达的本系统工具、联网工具、内置工具和已启用的外部 MCP 工具，平台停用或策略为 deny 的不列；它属于智能体模块，`APP_MCP` 关着时同样可用。
 
 ## 记忆
 

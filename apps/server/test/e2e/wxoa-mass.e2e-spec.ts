@@ -5,6 +5,7 @@ import { BizError } from '../../src/core/http/biz-error.js'
 import { upstreamError } from '../../src/modules/platform/wxoa/core/wxoa-gateway.js'
 import { WxoaInboundHub } from '../../src/modules/platform/wxoa/core/wxoa-inbound-hub.js'
 import { bearer } from '../setup/auth.js'
+import { waitIdempotencyWindow } from '../setup/redis.js'
 import {
   addAccount,
   addContentUser,
@@ -318,7 +319,7 @@ describe('wxoa mass jobs', () => {
       errmsg: 'clientmsgid exist',
       msg_id: 1000001700,
     })
-    await new Promise((resolve) => setTimeout(resolve, 3100))
+    await waitIdempotencyWindow(ctx.app)
     const retried = await http()
       .post(`/api/wxoa/mass-jobs/${pending.id}/retry`)
       .set(bearer(ctx.admin))

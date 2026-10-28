@@ -16,6 +16,7 @@ import { ApiOperation, ApiTags } from '@nestjs/swagger'
 import {
   type AgentFeedbackSave,
   agentFeedbackSave,
+  agentMyToolVo,
   agentDraftReceiptVo,
   agentMessageReceiptVo,
   agentRecoveryAcknowledge,
@@ -49,10 +50,12 @@ import { z } from 'zod'
 import { ActionLog } from '../../audit/action-log.js'
 import { RequirePerm } from '../../auth/decorators.js'
 import type { Principal } from '../../auth/principal.js'
+import { HomeTenant } from '../../auth/tenant-scope.js'
 import { clsGet } from '../../context/cls.js'
 import { Idempotent } from '../../guard/idempotent.js'
 import { ApiEnvelope } from '../../http/api-envelope.decorator.js'
 import { BizError } from '../../http/biz-error.js'
+import { AgentToolPolicies } from '../tools/tool-policy.js'
 import { AgentOptionsService } from './agent-options.service.js'
 import { AgentThreadService } from './thread.service.js'
 
@@ -252,7 +255,7 @@ export class AgentThreadController {
 }
 
 /**
- * 对话页的其余接口（`agent.chat.use`）：选项、分享查看、反馈、提示词模板；用量（`agent.usage.browse`）。
+ * 对话页的其余接口（`agent.chat.use`）：选项、配置方案可选的工具、分享查看、反馈、提示词模板；用量（`agent.usage.browse`）。
  */
 @ApiTags('agent')
 @Controller('agent')
@@ -260,6 +263,7 @@ export class AgentChatController {
   constructor(
     private readonly threads: AgentThreadService,
     private readonly options: AgentOptionsService,
+    private readonly tools: AgentToolPolicies,
   ) {}
 
   @Get('options')
@@ -271,6 +275,19 @@ export class AgentChatController {
   @ApiEnvelope(agentOptionsVo)
   getOptions(@Query({ schema: agentOptionsQuery }) query: z.infer<typeof agentOptionsQuery>) {
     return this.options.options(me(), query.route)
+  }
+
+  /** 配置方案表单的候选工具：方案存在本人的租户里，候选也按本人租户里的权限与套餐算（`@HomeTenant()`）。 */
+  @Get('my-tools')
+  @RequirePerm(agentPerms.chat.use)
+  @HomeTenant()
+  @ApiOperation({
+    summary:
+      "The tools the caller may list in a profile: this system's ones the caller reaches, web, built-in and enabled external MCP tools; denied ones left out",
+  })
+  @ApiEnvelope(z.array(agentMyToolVo))
+  myTools() {
+    return this.tools.pickable(me())
   }
 
   @Get('shared/:token')

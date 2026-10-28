@@ -32,6 +32,8 @@ playwright-report/
 test-results/
 blob-report/
 .vitest/
+# temporary specs of the migration fence test (removed after its run)
+apps/server/test/.tmp-fence-*/
 
 # os / editor / logs
 .DS_Store

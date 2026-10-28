@@ -1,4 +1,11 @@
-import type { AgentMemoryVo, AgentProfileSave, AgentProfileVo, Page } from '@qiwu/shared'
+import type {
+  AgentMemoryVo,
+  AgentMyToolVo,
+  AgentProfileSave,
+  AgentProfileVo,
+  Page,
+} from '@qiwu/shared'
+import type { AxiosRequestConfig } from 'axios'
 import { api } from '@/core/request/http'
 
 const PROFILES = '/agent/profiles'
@@ -15,6 +22,11 @@ export const agentProfileApi = {
   create: (dto: AgentProfileSave) => api.post<AgentProfileVo>(PROFILES, dto),
   update: (id: number, dto: AgentProfileSave) => api.put<AgentProfileVo>(`${PROFILES}/${id}`, dto),
   remove: (id: number) => api.delete(`${PROFILES}/${id}`),
+}
+
+/** /api/agent/my-tools：本人能放进配置方案工具清单的工具（本系统、联网、内置与外部 MCP 工具），不依赖 MCP 开关。 */
+export const agentMyToolApi = {
+  list: (config?: AxiosRequestConfig) => api.get<AgentMyToolVo[]>('/agent/my-tools', config),
 }
 
 /** /api/agent/memories：本人的记忆（分页、增改删、输入当前密码后全部忘记）。 */

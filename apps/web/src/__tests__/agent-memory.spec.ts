@@ -125,7 +125,7 @@ describe('profiles', () => {
   it('sends selected tool identifiers, empty for any tool', async () => {
     const calls = mockApi({
       'POST /agent/profiles': [201, { code: 0, msg: 'ok', data: profile({ id: 4 }) }],
-      'GET /mcp/my-tools': ok([
+      'GET /agent/my-tools': ok([
         { name: 'demo.customer.get', title: 'Read a customer' },
         { name: 'demo.customer.search', title: 'Search customers' },
       ]),
@@ -155,8 +155,30 @@ describe('profiles', () => {
     expect(sent(calls, 'post', '/agent/profiles')[1]).toMatchObject({ tools: null })
   })
 
+  it('offers this system’s, built-in and external MCP tools from the agent’s own tool list', async () => {
+    const calls = mockApi({
+      'GET /agent/my-tools': ok([
+        { name: 'demo.customer.get', title: 'Read a customer', kind: 'read', origin: 'local' },
+        { name: 'memory.save', title: 'Save a memory', kind: 'write', origin: 'builtin' },
+        { name: 'ext.crm.lookup', title: 'CRM lookup', kind: 'read', origin: 'mcp' },
+      ]),
+    })
+    await show(ProfileForm)
+    const tools = w
+      .findAllComponents({ name: 'ElSelect' })
+      .find((select) => select.props('multiple') === true)!
+    expect(tools.findAllComponents({ name: 'ElOption' }).map((o) => o.props('value'))).toEqual([
+      'demo.customer.get',
+      'memory.save',
+      'ext.crm.lookup',
+    ])
+    expect(w.text()).not.toContain(t('agent.profile.toolsLoadFailed'))
+    expect(calls.some((c) => c.url === '/agent/my-tools')).toBe(true)
+    expect(calls.some((c) => c.url?.startsWith('/mcp/'))).toBe(false)
+  })
+
   it('offers the platform modes; a tenant-shared profile cannot use auto review', async () => {
-    mockApi({ 'GET /mcp/my-tools': ok([]) })
+    mockApi({ 'GET /agent/my-tools': ok([]) })
     await show(ProfileForm, {
       canTenant: true,
       options: { approvalModes: ['read_only', 'plan', 'ask', 'auto_review'], providers: [] },
@@ -180,7 +202,7 @@ describe('profiles', () => {
 
   it('allows other tool identifiers for a new profile without an administration request', async () => {
     const calls = mockApi({
-      'GET /mcp/my-tools': ok([]),
+      'GET /agent/my-tools': ok([]),
       'POST /agent/profiles': [201, { code: 0, msg: 'ok', data: profile({ id: 4 }) }],
     })
     await show(ProfileForm)
@@ -203,7 +225,7 @@ describe('profiles', () => {
   it('preserves existing unavailable tools when the personal tool list fails', async () => {
     const calls = mockApi({
       'GET /agent/profiles': ok([profile({ tools: ['ext.crm.lookup', 'plan.update'] })]),
-      'GET /mcp/my-tools': [503, { code: 1, msg: 'unavailable', data: null }],
+      'GET /agent/my-tools': [503, { code: 1, msg: 'unavailable', data: null }],
       'PUT /agent/profiles/1': ok(profile({})),
     })
     await show(ProfileForm, { id: 1 })

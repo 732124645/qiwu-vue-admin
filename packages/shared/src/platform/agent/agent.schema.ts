@@ -12,6 +12,8 @@ import { agentCreditAmount, agentModelPricing, agentTokenUsage } from './agent-b
  * Chat page (`agent.chat.use`; every thread route acts on the caller's own threads only, another's is 404):
  * - `GET /api/agent/options?<agentOptionsQuery>` → `AgentOptionsVo` (models, skills, modes, starters for the
  *   page the user came from)
+ * - `GET /api/agent/my-tools` → `AgentMyToolVo[]` (the tools the caller may list in a profile; answers whether
+ *   `APP_MCP` is on or off)
  * - `GET /api/agent/threads?<agentThreadQuery>` → `{ items: AgentThreadVo[], total }`
  * - `POST /api/agent/threads` `agentThreadCreate` → `AgentThreadVo`
  * - `PATCH /api/agent/threads/:id` `agentThreadUpdate` → `AgentThreadVo`; `DELETE /api/agent/threads/:id` → null
@@ -850,6 +852,20 @@ export const agentToolVo = z.object({
   humanOnly: z.literal(true).optional(),
 })
 export type AgentToolVo = z.infer<typeof agentToolVo>
+
+/**
+ * A tool the caller may put into a profile's tool list (`GET /api/agent/my-tools`): this system's tools the
+ * caller reaches (`local`), the web tools, the built-in tools and the enabled tools of external MCP servers
+ * (`mcp`, named `ext.<server>.<tool>`); tools switched off or denied in the agent are left out. `kind` of an
+ * external tool: `read` when its policy is `auto`, else `write`.
+ */
+export const agentMyToolVo = z.object({
+  name: z.string(),
+  title: z.string(),
+  kind: z.enum(MCP_TOOL_KINDS),
+  origin: z.enum(['local', 'web', 'builtin', 'mcp']),
+})
+export type AgentMyToolVo = z.infer<typeof agentMyToolVo>
 
 /** Switches a built-in tool on or off for the agent (this system's other tools: the MCP tool page). */
 export const agentToolEnabledUpdate = z.object({ enabled: z.boolean() })

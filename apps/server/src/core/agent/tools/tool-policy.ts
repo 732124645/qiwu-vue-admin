@@ -1,9 +1,10 @@
-import { Body, Controller, Get, Injectable, Param, Put } from '@nestjs/common'
+import { Body, Controller, Get, Inject, Injectable, Param, Put } from '@nestjs/common'
 import { ApiOperation, ApiTags } from '@nestjs/swagger'
 import { TransactionHost } from '@nestjs-cls/transactional'
 import type { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm'
 import {
   agentPerms,
+  type AgentMyToolVo,
   agentToolEnabledUpdate,
   type AgentToolPolicy,
   agentToolPolicyUpdate,
@@ -16,11 +17,14 @@ import { z } from 'zod'
 import { ActionLog } from '../../audit/action-log.js'
 import { RequirePerm } from '../../auth/decorators.js'
 import { PlatformOnly } from '../../auth/platform-only.js'
+import type { Principal } from '../../auth/principal.js'
 import { clsGet } from '../../context/cls.js'
 import { ApiEnvelope } from '../../http/api-envelope.decorator.js'
 import { BizError } from '../../http/biz-error.js'
 import { McpRegistry } from '../../mcp/mcp-registry.js'
 import { McpToolSwitch } from '../../mcp/mcp.entity.js'
+import { ToolHost } from '../../mcp/tool-host.js'
+import { EXTERNAL_TOOL_SOURCE, type ExternalToolSource } from '../agent-ports.js'
 import { AgentExtensions } from '../runtime/agent-extensions.js'
 import { WEB_TOOLS } from '../web/web-tools.js'
 import { AgentRootOnly } from './root-only.js'
@@ -63,6 +67,8 @@ export class AgentToolPolicies {
     private readonly registry: McpRegistry,
     private readonly ext: AgentExtensions,
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
+    private readonly host: ToolHost,
+    @Inject(EXTERNAL_TOOL_SOURCE) private readonly external: ExternalToolSource,
   ) {}
 
   /** 全部本系统工具：名称、标题、类型、来源与权限点。 */
@@ -145,6 +151,28 @@ export class AgentToolPolicies {
         return [t.name, t.humanOnly && policy !== 'deny' ? 'human' : policy]
       }),
     )
+  }
+
+  /**
+   * 调用者能放进配置方案工具清单的工具：本人此刻能触达的本系统工具（权限点、套餐功能，平台启用）、联网工具、
+   * 平台启用的内置工具和已启用的外部 MCP 工具；策略为 deny 或被停用的不列（运行时也不会提供它们）。
+   * 只用智能体自己的登记表与 ToolHost，不经 McpModule，所以 `APP_MCP` 关着时同样可用。
+   */
+  async pickable(p: Principal): Promise<AgentMyToolVo[]> {
+    const reachable = new Set((await this.host.list(p)).map((t) => t.name))
+    const own = (await this.list())
+      .filter(
+        (t) => t.policy !== 'deny' && t.enabled && (t.source !== 'local' || reachable.has(t.name)),
+      )
+      .map((t) => ({ name: t.name, title: t.title, kind: t.kind, origin: t.source }))
+    // 外部工具的来源已去掉停用的服务器、停用的与 deny 的工具；类型与运行时一致：只有 auto 的按只读执行
+    const external = (await this.external.list(p)).map((d) => ({
+      name: d.name,
+      title: d.title,
+      kind: d.policy === 'auto' ? ('read' as const) : ('write' as const),
+      origin: 'mcp' as const,
+    }))
+    return [...own, ...external]
   }
 
   /**

@@ -7,7 +7,10 @@ import { TEST_AGENT_PRICING, clearAgentUsage } from '../setup/agent-pricing.js'
 // profile's tool list limits the tools like a skill's, both lists together only what both list (read built-ins
 // always stay, write built-ins only when listed), and its instructions reach the model as a user message, never
 // the system prompt; a deleted profile leaves the thread on the default behaviour. No session 401, no
-// agent.chat.use 403, invalid bodies 400. Multi-tenancy on.
+// agent.chat.use 403, invalid bodies 400. The profile form's tool list (`GET /api/agent/my-tools`) offers the
+// caller's reachable local tools, the web, built-in and enabled external MCP tools, never switched-off or
+// denied ones. The MCP module is switched off here: profiles and their tool list do not need it.
+// Multi-tenancy on.
 import { ConfigService } from '@nestjs/config'
 import type { NestExpressApplication } from '@nestjs/platform-express'
 import { Test } from '@nestjs/testing'
@@ -23,10 +26,16 @@ import { FakeChatModel, type FakeTurn } from '../../src/core/agent/provider/fake
 import { ProviderRegistry } from '../../src/core/agent/provider/provider-registry.js'
 import { EnvSchema } from '../../src/core/config/env.schema.js'
 import { McpRegistry } from '../../src/core/mcp/mcp-registry.js'
+import { McpService } from '../../src/core/mcp/mcp.service.js'
 import { ParamService } from '../../src/core/settings/param.service.js'
 import { insertRow } from '../../src/db/seeds/upsert.js'
 import { bearer, signIn } from '../setup/auth.js'
 import { addRow, addUser, createTenant, type PeopledTenant } from '../setup/tenants.js'
+
+// before AppModule is imported: the module list reads the switch when the app module loads
+vi.hoisted(() => {
+  process.env.APP_MCP = 'false'
+})
 
 const PREFIX = 'e2e-agprof-'
 const URL = '/api/agent/profiles'
@@ -517,5 +526,146 @@ describe('agent profiles', () => {
       .set(as('member'))
       .send({ profileId: null })
     expect(dropped.body.data.profileId).toBeNull()
+  })
+})
+
+describe('the tool list of the profile form', () => {
+  const MY_TOOLS = '/api/agent/my-tools'
+  const BUILTIN_OFF = 'report.write'
+  let serverId = 0
+  let offServerId = 0
+  let builtinRow: { id: number; enabled: number } | undefined
+  type Tool = { name: string; title: string; kind: string; origin: string }
+  const listOf = async (token: string) =>
+    (await http().get(MY_TOOLS).set(bearer(token)).expect(200)).body.data as Tool[]
+  const names = (tools: Tool[]) => tools.map((t) => t.name)
+
+  beforeAll(async () => {
+    const reg = app.get(McpRegistry)
+    reg.add(
+      {
+        name: 'test.pnote.managed',
+        title: 'Manage notes',
+        description: 'Needs the skill permission',
+        perm: agentPerms.skill.modify,
+        kind: 'read',
+        input: z.object({}),
+      },
+      () => ({ ok: true }),
+    )
+    reg.add(
+      {
+        name: 'test.pnote.denied',
+        title: 'Denied note tool',
+        description: 'Denied in the agent',
+        perm: null,
+        kind: 'read',
+        input: z.object({}),
+      },
+      () => ({ ok: true }),
+    )
+    await ds.query(
+      "INSERT INTO cfg_mcp_tool (name, enabled, agent_policy) VALUES ('test.pnote.denied', 1, 'deny')",
+    )
+    // 一个内置工具在平台上停用（结束时恢复原状）
+    ;[builtinRow] = await ds.query<{ id: number; enabled: number }[]>(
+      'SELECT id, enabled FROM cfg_mcp_tool WHERE name = ? AND deleted_at IS NULL',
+      [BUILTIN_OFF],
+    )
+    if (builtinRow)
+      await ds.query('UPDATE cfg_mcp_tool SET enabled = 0 WHERE id = ?', [builtinRow.id])
+    else await ds.query('INSERT INTO cfg_mcp_tool (name, enabled) VALUES (?, 0)', [BUILTIN_OFF])
+    // 外部 MCP 服务器：启用的工具、deny 的工具、停用的工具；另一台停用的服务器
+    serverId = await insertRow(ds.manager, 'agent_mcp_server', {
+      name: `${PREFIX}srv`,
+      url: 'https://mcp.example.com/mcp',
+      auth_kind: 'none',
+      enabled: 1,
+    })
+    offServerId = await insertRow(ds.manager, 'agent_mcp_server', {
+      name: `${PREFIX}off`,
+      url: 'https://mcp.example.com/mcp',
+      auth_kind: 'none',
+      enabled: 0,
+    })
+    for (const [server, name, enabled, policy] of [
+      [serverId, 'lookup', 1, 'auto'],
+      [serverId, 'change', 1, 'ask'],
+      [serverId, 'wipe', 1, 'deny'],
+      [serverId, 'hidden', 0, 'auto'],
+      [offServerId, 'lookup', 1, 'auto'],
+    ] as const)
+      await insertRow(ds.manager, 'agent_mcp_tool', {
+        server_id: server,
+        name,
+        title: `External ${name}`,
+        enabled,
+        policy,
+        input_schema: { type: 'object' },
+      })
+  })
+
+  afterAll(async () => {
+    if (!ds) return
+    await ds.query("DELETE FROM cfg_mcp_tool WHERE name = 'test.pnote.denied'")
+    if (builtinRow)
+      await ds.query('UPDATE cfg_mcp_tool SET enabled = ? WHERE id = ?', [
+        builtinRow.enabled,
+        builtinRow.id,
+      ])
+    else await ds.query('DELETE FROM cfg_mcp_tool WHERE name = ?', [BUILTIN_OFF])
+    const servers = [serverId, offServerId].filter(Boolean)
+    if (servers.length) {
+      await ds.query('DELETE FROM agent_mcp_tool WHERE server_id IN (?)', [servers])
+      await ds.query('DELETE FROM agent_mcp_server WHERE id IN (?)', [servers])
+    }
+  })
+
+  it('answers with the MCP module off and lists local, web, built-in and external tools', async () => {
+    expect(() => app.get(McpService, { strict: false })).toThrow()
+    await http().get('/api/mcp/my-tools').set(as('member')).expect(404)
+    const tools = await listOf(users.member.token)
+    const byName = new Map(tools.map((t) => [t.name, t]))
+    expect(byName.get('test.pnote.read')).toEqual({
+      name: 'test.pnote.read',
+      title: 'Read a note',
+      kind: 'read',
+      origin: 'local',
+    })
+    expect(byName.get('test.pnote.update')).toMatchObject({ kind: 'write', origin: 'local' })
+    expect(byName.get('web.fetch')).toMatchObject({ kind: 'read', origin: 'web' })
+    expect(byName.get('plan.update')).toMatchObject({ origin: 'builtin' })
+    expect(byName.get(`ext.${PREFIX}srv.lookup`)).toEqual({
+      name: `ext.${PREFIX}srv.lookup`,
+      title: 'External lookup',
+      kind: 'read',
+      origin: 'mcp',
+    })
+    expect(byName.get(`ext.${PREFIX}srv.change`)).toMatchObject({ kind: 'write', origin: 'mcp' })
+    // 停用的与 deny 的都不列：本系统工具、内置工具、外部工具与停用服务器上的工具
+    for (const name of [
+      'test.pnote.denied',
+      BUILTIN_OFF,
+      `ext.${PREFIX}srv.wipe`,
+      `ext.${PREFIX}srv.hidden`,
+      `ext.${PREFIX}off.lookup`,
+    ])
+      expect(byName.has(name)).toBe(false)
+    // 每个名字都能存进配置方案
+    const saved = await createProfile('member', { tools: names(tools) })
+    await http().delete(`${URL}/${saved.id}`).set(as('member')).expect(200)
+  })
+
+  it('offers a local tool only to callers holding its permission, in their own tenant', async () => {
+    expect(names(await listOf(users.member.token))).not.toContain('test.pnote.managed')
+    expect(names(await listOf(users.manager.token))).toContain('test.pnote.managed')
+    const foreign = names(await listOf(otherMember))
+    expect(foreign).toContain('test.pnote.read')
+    expect(foreign).not.toContain('test.pnote.managed')
+  })
+
+  it('answers 401 without a session and 403 without the chat permission', async () => {
+    await http().get(MY_TOOLS).expect(401)
+    await http().get(MY_TOOLS).set(as('reader')).expect(403)
   })
 })

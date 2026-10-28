@@ -4,14 +4,13 @@ import { useI18n } from 'vue-i18n'
 import {
   AGENT_REASONING,
   AGENT_SKILL_BODY_MAX,
+  type AgentMyToolVo,
   type AgentOptionsVo,
-  type McpToolVo,
   type AgentProfileSave,
   agentProfileSave,
 } from '@qiwu/shared'
-import { myToolApi } from '@/api/platform/mcp'
 import { toolTitle } from '../tool-presentation'
-import { agentProfileApi } from '@/api/platform/agent-memory'
+import { agentMyToolApi, agentProfileApi } from '@/api/platform/agent-memory'
 import { useCrudForm } from '@/core/composables/use-crud'
 
 /**
@@ -61,10 +60,10 @@ const reasoningModel = computed(
       .find((p) => p.id === model.providerId)
       ?.models.find((m) => m.id === model.model)?.reasoning ?? false,
 )
-const tools = shallowRef<McpToolVo[]>([])
+const tools = shallowRef<AgentMyToolVo[]>([])
 const toolsFailed = ref(false)
-// 只请求本人的工具清单；载入失败或工具已移除时保留旧选择，不扩大权限接口。
-void myToolApi.list({ silent: true }).then(
+// 只请求本人可选的工具清单（智能体模块的接口，MCP 关着也可用）；载入失败或工具已移除时保留旧选择。
+void agentMyToolApi.list({ silent: true }).then(
   (list) => (tools.value = list),
   () => (toolsFailed.value = true),
 )

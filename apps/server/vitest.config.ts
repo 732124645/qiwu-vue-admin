@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config'
+import { configDefaults, defineConfig } from 'vitest/config'
 
 // one shard of a sharded run (`--shard i/n`, scripts/ci-local.mjs --part server) covers only its files:
 // `vitest run --merge-reports --coverage` over the blob reports of all shards checks the thresholds
@@ -14,6 +14,8 @@ export default defineConfig({
     globals: true,
     root: './',
     include: ['src/**/*.spec.ts', 'test/**/*.spec.ts', 'test/**/*.e2e-spec.ts'],
+    // the migration fence test writes throwaway specs under test/.tmp-fence-*: never run a leftover
+    exclude: [...configDefaults.exclude, 'test/.tmp-fence-*/**'],
     fileParallelism: false,
     // eventsource-parser (imported by the MCP SDK's client) exports TypeScript under the `source`
     // condition above: Vite resolves and transforms the client and it instead of Node loading the .ts file

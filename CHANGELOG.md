@@ -1,8 +1,17 @@
 # Changelog
 
-中文说明：本文件按功能区域汇总栖梧 / Qiwu 的用户可见变化，正文使用英文。`1.0.0` 于 2026-10-05 发布，`1.0.3` 于 2026-10-06 发布（`1.0.1`、`1.0.2` 未发布，内容并入 `1.0.3`），`1.1.0`（多租户）、`1.2.0`（手写 SQL 的数据权限）、`1.2.1`（修复）与 `1.3.0`（任务队列）于 2026-10-14 发布，`1.3.1`（开发调试开关）与 `1.4.0`（安全审查修复）于 2026-10-15 发布，`1.4.1`（界面细节）、`1.5.0`（微信公众号管理，默认关闭）与 `1.6.0`（MCP 智能体接入，默认关闭；下游合并改进）于 2026-10-20 发布，`1.6.1`（后端连不上时停在原页面等待；README 更新）与 `1.7.0`（AI 编程友好：公开开发规则、任务配方、检查报错带修复提示、项目地图）于 2026-10-21 发布，`1.7.1`（列表操作列不再截断误点）、`1.8.0`（后台智能助手，默认关闭）与 `1.9.0`（智能助手：自动化、记忆、配置方案、自动审查、子智能体与深度研究）于 2026-10-22 发布，`1.10.0`（基础办公申请）于 2026-10-23 发布，`1.11.0`（助手积分额度与断线恢复）与 `1.12.0`（助手桌面工作区、用量与设置页；积分升级修复）于 2026-10-27 发布，`1.13.0`（助手会话模式、自动审查与方案批准，对标常见编程智能体的交互）于 2026-10-28 发布。
+中文说明：本文件按功能区域汇总栖梧 / Qiwu 的用户可见变化，正文使用英文。`1.0.0` 于 2026-10-05 发布，`1.0.3` 于 2026-10-06 发布（`1.0.1`、`1.0.2` 未发布，内容并入 `1.0.3`），`1.1.0`（多租户）、`1.2.0`（手写 SQL 的数据权限）、`1.2.1`（修复）与 `1.3.0`（任务队列）于 2026-10-14 发布，`1.3.1`（开发调试开关）与 `1.4.0`（安全审查修复）于 2026-10-15 发布，`1.4.1`（界面细节）、`1.5.0`（微信公众号管理，默认关闭）与 `1.6.0`（MCP 智能体接入，默认关闭；下游合并改进）于 2026-10-20 发布，`1.6.1`（后端连不上时停在原页面等待；README 更新）与 `1.7.0`（AI 编程友好：公开开发规则、任务配方、检查报错带修复提示、项目地图）于 2026-10-21 发布，`1.7.1`（列表操作列不再截断误点）、`1.8.0`（后台智能助手，默认关闭）与 `1.9.0`（智能助手：自动化、记忆、配置方案、自动审查、子智能体与深度研究）于 2026-10-22 发布，`1.10.0`（基础办公申请）于 2026-10-23 发布，`1.11.0`（助手积分额度与断线恢复）与 `1.12.0`（助手桌面工作区、用量与设置页；积分升级修复）于 2026-10-27 发布，`1.13.0`（助手会话模式、自动审查与方案批准，对标常见编程智能体的交互）于 2026-10-28 发布，`1.13.1`（修复：MCP 关闭时配置方案的工具列表、Windows 与 Docker Redis 下的测试）同日发布。
 
 All notable product changes are recorded here in Keep a Changelog style. The initial release below summarizes the delivered features. Planned work is identified explicitly.
+
+## [1.13.1] - 2026-10-28
+
+### Fixed
+
+- The assistant's profile form loads its tool choices from the assistant itself, so it works with MCP access turned off, and it lists built-in and external MCP tools as well as the caller's own tools.
+- Migration fence tests write their temporary specs inside the server directory, so they also run on Windows.
+- Tests that wait for the duplicate-submit window now wait until the keys are actually gone instead of sleeping for a fixed time, which was not enough on Docker Desktop Redis.
+- MCP tool-call arguments are masked in HTTP request traces, so private business content passed to tools is not kept in the trace log.
 
 ## [1.13.0] - 2026-10-28
 

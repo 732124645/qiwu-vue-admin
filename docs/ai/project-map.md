@@ -200,6 +200,7 @@
 |  | GET | `/api/agent/automation-events` | agent.automation.use |  |
 |  | GET | `/api/agent/automation-tools` | agent.automation.use |  |
 | `AgentChatController`（core/agent/threads/threads.controller.ts） | GET | `/api/agent/options` | agent.chat.use |  |
+|  | GET | `/api/agent/my-tools` | agent.chat.use | HomeTenant |
 |  | GET | `/api/agent/shared/:token` | agent.chat.use |  |
 |  | POST | `/api/agent/feedback` | agent.chat.use | Idempotent |
 |  | GET | `/api/agent/prompts` | agent.chat.use |  |

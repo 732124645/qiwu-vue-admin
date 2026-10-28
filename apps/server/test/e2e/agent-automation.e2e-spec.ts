@@ -74,6 +74,7 @@ import { REDIS, type Redis } from '../../src/core/redis/redis.module.js'
 import { ParamService } from '../../src/core/settings/param.service.js'
 import { insertRow } from '../../src/db/seeds/upsert.js'
 import { bearer, signIn } from '../setup/auth.js'
+import { waitIdempotencyWindow } from '../setup/redis.js'
 import {
   TENANT_PASSWORD,
   addRow,
@@ -839,7 +840,7 @@ describe('write modes', () => {
     expect((await http().put(`${URL}/${a.id}`).set(bearer(owner.token)).send(add)).status).toBe(400)
 
     // a write outside the list waits for the owner
-    await sleep(3100)
+    await waitIdempotencyWindow(app)
     const unlisted = await runNow(a.id, owner.token)
     const waits = await runIs(unlisted.body.data.id, ['waiting', 'completed', 'failed'])
     expect(waits.status).toBe('waiting')
@@ -1634,7 +1635,7 @@ describe('deleting an automation', () => {
     )
     await http().delete(`${URL}/${a.id}`).set(bearer(u.token)).expect(409)
     // 等首次成功运行的防重复窗口结束，再独立验证风险闸。
-    await sleep(3100)
+    await waitIdempotencyWindow(app)
     await runNow(a.id, u.token).expect(409)
     const [kept] = await ds.query('SELECT deleted_at FROM agent_automation WHERE id = ?', [a.id])
     expect(kept.deleted_at).toBeNull()

@@ -23,6 +23,7 @@ import { withTenant } from '../../src/core/context/tenant.js'
 import { insertRow } from '../../src/db/seeds/upsert.js'
 import { Inbox } from '../../src/modules/platform/messaging/inbox/inbox.entity.js'
 import { bearer } from '../setup/auth.js'
+import { waitIdempotencyWindow } from '../setup/redis.js'
 import { TEST_AGENT_PRICING } from '../setup/agent-pricing.js'
 import {
   addUser,
@@ -217,7 +218,7 @@ it('accepts a concurrent message only once across sessions and after the short g
   expect([a.status, b.status]).toEqual([201, 201])
   expect(a.body.data.id).toBe(b.body.data.id)
   expect(kick).toHaveBeenCalledTimes(1)
-  await new Promise((resolve) => setTimeout(resolve, 3100))
+  await waitIdempotencyWindow(app)
   const retried = await send(thread.id, id).expect(201)
   expect(retried.body.data.id).toBe(a.body.data.id)
   expect(kick).toHaveBeenCalledTimes(1)
