@@ -12,6 +12,7 @@ import {
 import { cpu, currentLoad, fsSize, mem, osInfo } from 'systeminformation'
 import type { DataSource } from 'typeorm'
 import { AppConfigService } from '../../../core/config/config.module.js'
+import { EventLoopMonitor } from '../../../core/monitor/event-loop.js'
 import { REDIS, type Redis } from '../../../core/redis/redis.module.js'
 
 /** INFO fields never shown: file system paths of the Redis host. */
@@ -49,6 +50,7 @@ export class MonitorService {
     @InjectDataSource() private readonly ds: DataSource,
     @Inject(REDIS) private readonly redis: Redis,
     private readonly cfg: AppConfigService,
+    private readonly eventLoop: EventLoopMonitor,
   ) {}
 
   async server(): Promise<MonitorServerVo> {
@@ -95,6 +97,8 @@ export class MonitorService {
         heapTotal: m.heapTotal,
         heapUsed: m.heapUsed,
         external: m.external,
+        // 只反映响应这次请求的进程，统计区间是该进程上次被读取以来
+        eventLoop: this.eventLoop.read(),
       },
     }
   }

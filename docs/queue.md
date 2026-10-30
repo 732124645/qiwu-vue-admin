@@ -98,9 +98,9 @@ async requestBuild(reportId: number) {
 
 `handle` 抛出的错误使这一次失败并按上表重试；明确不该再试的错误抛出 BullMQ 的 `UnrecoverableError`，任务立即进入失败。每次添加时可用第四个参数覆盖：`attempts`、`backoff`、`delay`（延迟执行）、`priority`、`jobId`（去重）等，见 BullMQ 文档。
 
-## 每个实例都运行处理器
+## 哪些实例运行处理器
 
-应用的每个实例启动时都会为本应用里的每个处理器开一个 worker，同一任务只会被其中一个实例取走；增加实例即增加并发。关闭应用时，worker 在第一阶段（`onModuleDestroy`）停止取新任务并等当前任务执行完，之后其他服务才做各自的关闭工作（定时任务、通知发件箱、Socket.IO），最后关闭 Redis 与数据库连接，所以执行中的任务仍可使用这些服务。多实例的其他前提见[多实例部署](scale-out.md)。
+默认（`APP_ROLE=all`）应用的每个实例启动时都会为本应用里的每个处理器开一个 worker，同一任务只会被其中一个实例取走；增加实例即增加并发。`APP_ROLE=api` 的实例不开任何 worker（启动的任何时刻都不领任务），只添加任务（`QueueService.add`、`queues()` 照常可用），处理器在启动时登记的 BullMQ 定时任务（智能体的清理、记忆提炼、自动化）也留给开 worker 的实例；`APP_ROLE=worker` 的实例与 `all` 一样开全部 worker。至少要有一个 `all` 或 `worker` 实例，否则任务只进不出；角色说明见[多实例部署](scale-out.md#进程角色)。关闭应用时，worker 在第一阶段（`onModuleDestroy`）停止取新任务并等当前任务执行完，之后其他服务才做各自的关闭工作（定时任务、通知发件箱、Socket.IO），最后关闭 Redis 与数据库连接，所以执行中的任务仍可使用这些服务。多实例的其他前提见[多实例部署](scale-out.md)。
 
 ## 队列监控页
 

@@ -6,6 +6,7 @@ import type { ChatModel } from './chat-model.js'
 import type { AgentUsageTarget } from '../agent-ports.js'
 import { type ChatModelConfig, OpenAiChatModel } from './openai-chat-model.js'
 import { withUsageEstimate } from './usage.js'
+import { ProviderSlots, withProviderSlot } from './provider-slots.js'
 import {
   ProviderSettingsService,
   SearchProviderSettingsService,
@@ -45,13 +46,15 @@ export class ProviderRegistry {
   constructor(
     private readonly providers: ProviderSettingsService,
     private readonly searches: SearchProviderSettingsService,
+    private readonly slots: ProviderSlots,
   ) {}
 
   /**
    * 启用的提供方 + 模型：`providerId` 不给时取默认（没有标默认就取排序最前的启用者），`model` 不给时取
    * 该提供方的第一个模型；找不到、已停用、模型不在其列表里一律 AGENT_NOT_CONFIGURED。
    * 没配费率的模型照常可用（升级前的模型都没有费率，拒绝会让助手整体停用），调用记为未计价；
-   * 配了但不合法的费率仍拒绝，不能静默当成免费。
+   * 配了但不合法的费率仍拒绝，不能静默当成免费。提供方配了并发上限时，返回的模型每次调用先取得名额
+   * （跨实例、跨租户计数），上限每次取模型时从库里读，改了下一次调用就生效。
    */
   async resolve(providerId?: number, model?: string): Promise<ResolvedModel> {
     const rows = (await this.providers.rows()).filter((r) => r.enabled)
@@ -60,8 +63,19 @@ export class ProviderRegistry {
     if (!row || !m) throw new BizError(Err.AGENT_NOT_CONFIGURED)
     const pricing = m.pricing ? agentModelPricing.safeParse(m.pricing) : null
     if (pricing && !pricing.success) throw new BizError(Err.AGENT_CREDIT_CONFIG_INVALID)
+    const id = Number(row.id)
+    const chat = withUsageEstimate(
+      this.connect({
+        baseUrl: row.baseUrl,
+        apiKey: this.providers.openKey(row),
+        models: row.models,
+        retries: 0, // 每次持久调用只发一个物理请求，5xx 结果不明时不自动重发付费请求。
+      }),
+    )
+    // 配了并发上限才套名额（在用量估算之外）；没取到名额的调用经 onSlot 告知计量不计费。空或 0 与不限时完全同一路径
+    const limit = row.maxConcurrency
     return {
-      providerId: Number(row.id),
+      providerId: id,
       providerName: row.name,
       model: {
         id: m.id,
@@ -75,14 +89,9 @@ export class ProviderRegistry {
         reasoningDefault: m.reasoningDefault ?? 'provider',
         reasoningStyle: m.reasoningStyle ?? 'standard',
       },
-      chat: withUsageEstimate(
-        this.connect({
-          baseUrl: row.baseUrl,
-          apiKey: this.providers.openKey(row),
-          models: row.models,
-          retries: 0, // 每次持久调用只发一个物理请求，5xx 结果不明时不自动重发付费请求。
-        }),
-      ),
+      chat: limit
+        ? withProviderSlot(chat, (signal) => this.slots.acquire(id, limit, signal))
+        : chat,
     }
   }
 

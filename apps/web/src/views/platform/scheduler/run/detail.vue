@@ -57,6 +57,12 @@ const time = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm'
       <el-descriptions-item :label="t('field.scheduler.run.costMs')">
         {{ row.costMs }}
       </el-descriptions-item>
+      <el-descriptions-item :label="t('field.scheduler.run.instance')">
+        {{ row.instance ?? '—' }}
+      </el-descriptions-item>
+      <el-descriptions-item :label="t('field.scheduler.run.loopMaxMs')">
+        {{ row.loopMaxMs ?? '—' }}
+      </el-descriptions-item>
     </el-descriptions>
   </div>
 </template>

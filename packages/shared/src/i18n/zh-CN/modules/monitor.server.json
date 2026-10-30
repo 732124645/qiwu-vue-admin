@@ -30,7 +30,9 @@
         "rss": "常驻内存",
         "heapTotal": "堆总量",
         "heapUsed": "堆已用",
-        "external": "外部内存"
+        "external": "外部内存",
+        "eventLoopDelay": "事件循环延迟 p50 / p99 / 最大",
+        "eventLoopUtilization": "事件循环利用率"
       }
     }
   }

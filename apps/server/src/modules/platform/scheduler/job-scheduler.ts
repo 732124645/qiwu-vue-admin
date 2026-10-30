@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto'
+import { hostname } from 'node:os'
+import { type IntervalHistogram, monitorEventLoopDelay } from 'node:perf_hooks'
 import { setTimeout as sleep } from 'node:timers/promises'
 import {
   type BeforeApplicationShutdown,
@@ -13,6 +15,7 @@ import type { JobOutcome } from '@qiwu/shared'
 import { CronJob, CronTime } from 'cron'
 import { ClsService } from 'nestjs-cls'
 import type { DataSource } from 'typeorm'
+import { AppConfigService } from '../../../core/config/config.module.js'
 import type { AppClsStore } from '../../../core/context/cls.js'
 import {
   clearTenantContext,
@@ -21,12 +24,26 @@ import {
   withTenant,
 } from '../../../core/context/tenant.js'
 import { RedisLock } from '../../../core/guard/redis-lock.js'
+import { LOOP_RESOLUTION_MS, loopDelayMs } from '../../../core/monitor/event-loop.js'
+import { runningJobs } from '../../../core/monitor/running-jobs.js'
 import { Notifier } from '../../../core/notify/notify.js'
+import { QueueService } from '../../../core/queue/queue.service.js'
 import { redisChannel, redisKey } from '../../../core/redis/cache-namespaces.js'
 import { REDIS, type Redis } from '../../../core/redis/redis.module.js'
 import { JobRegistry, type RegisteredJob } from './job-registry.js'
 import { Run } from './run/run.entity.js'
 import { Task } from './task/task.entity.js'
+
+/**
+ * Platform queue of the "run once" requests an `APP_ROLE=api` process hands to a worker (`runOnce`):
+ * a queue, not pub/sub, so a request made while no worker is up waits for one.
+ */
+export const SCHEDULER_RUN_QUEUE = 'scheduler-run'
+/** A queued "run once": the task and the fire time the request answered with. */
+export interface QueuedRunOnce {
+  taskId: number
+  scheduledAt: number
+}
 
 /** What started a fire: its cron, `POST /tasks/:id/run`, the misfire catch-up at start (`run_once`). */
 export type JobTrigger = 'cron' | 'manual' | 'misfire'
@@ -45,6 +62,8 @@ const LOCK_TTL_MS = 30_000
 const FIRE_KEY_TTL_MS = 5 * 60_000
 /** How often an instance compares its cron jobs with the stored tasks (a missed `job:sync` heals here). */
 const RECONCILE_MS = 60_000
+/** `job_run.instance`: which process ran the attempt (cluster workers share the host name). */
+const RUN_INSTANCE = `${hostname()}:${process.pid}`.slice(0, 64)
 /** setTimeout's limit (2^31 - 1 ms); the schema caps timeouts at a day anyway. */
 const TIMER_MAX_MS = 2_147_483_647
 
@@ -89,6 +108,9 @@ export class JobTimeoutError extends Error {
  * that passed while the app was down is either recorded as one `skipped` run (`skip`) or run once
  * (`run_once`), however many were missed; a catch-up stays pending in `misfire_pending_at` until it
  * starts, so a crash before that leaves it for the next start (see `catchUp`).
+ *
+ * `APP_ROLE=api`: no cron jobs, catch-ups, reconciling or `job:sync` subscription in this process; task
+ * writes still publish `job:sync` and "run once" goes to a worker through `SCHEDULER_RUN_QUEUE`.
  */
 @Injectable()
 export class JobScheduler implements OnApplicationBootstrap, BeforeApplicationShutdown {
@@ -117,13 +139,25 @@ export class JobScheduler implements OnApplicationBootstrap, BeforeApplicationSh
     private readonly locks: RedisLock,
     private readonly notifier: Notifier,
     @Inject(REDIS) private readonly redis: Redis,
+    private readonly cfg: AppConfigService,
+    private readonly queues: QueueService,
   ) {}
 
   private get tasks() {
     return this.ds.getRepository(Task)
   }
 
+  /** api 角色的进程只接 HTTP：不装 cron、不补跑、不对账，"执行一次"交给 worker。 */
+  private get apiOnly(): boolean {
+    return this.cfg.get('APP_ROLE') === 'api'
+  }
+
+  /**
+   * 启动时订阅 `job:sync`、为启用的任务装 cron、处理停机期间错过的触发并开启周期对账；api 角色的进程
+   * 不运行任务，这些都不做（任务改动仍由 `changed` 发布给运行任务的实例）。
+   */
   async onApplicationBootstrap(): Promise<void> {
+    if (this.apiOnly) return
     // subscribed before loading: a write racing the start reaches this instance either way
     this.sub = this.redis.duplicate()
     this.sub.on('error', (err: unknown) => this.logger.error({ err }, 'job:sync subscriber'))
@@ -174,7 +208,8 @@ export class JobScheduler implements OnApplicationBootstrap, BeforeApplicationSh
    * `job:sync`. A message lost on the way is healed by the next tick of the stale schedule (`fire`).
    */
   async changed(ids: readonly number[]): Promise<void> {
-    for (const id of ids) await this.sync(id)
+    // api 角色没有 cron：只发布，由运行任务的实例各自同步
+    if (!this.apiOnly) for (const id of ids) await this.sync(id)
     await this.redis
       .publish(redisChannel('jobSync'), JSON.stringify({ from: this.instance, ids }))
       .catch((err: unknown) => this.logger.warn({ ids, err }, 'job:sync not published'))
@@ -227,11 +262,25 @@ export class JobScheduler implements OnApplicationBootstrap, BeforeApplicationSh
     return this.crons.doesExist('cron', cronName(taskId))
   }
 
-  /** `POST /tasks/:id/run`: fires once now, in the background; `scheduledAt` = the request time. */
-  runOnce(task: Task): { scheduledAt: string } {
+  /**
+   * `POST /tasks/:id/run`: fires once now, in the background; `scheduledAt` = the request time. An
+   * `APP_ROLE=api` process runs no handler: it queues the fire for a worker (`SCHEDULER_RUN_QUEUE`), which
+   * runs it with that same fire time.
+   */
+  async runOnce(task: Task): Promise<{ scheduledAt: string }> {
     const at = Date.now()
-    this.track(this.fire(task.id, at, 'manual'))
+    if (this.apiOnly)
+      await this.queues.add<QueuedRunOnce>(SCHEDULER_RUN_QUEUE, 'run', {
+        taskId: task.id,
+        scheduledAt: at,
+      })
+    else this.runQueued({ taskId: task.id, scheduledAt: at })
     return { scheduledAt: new Date(at).toISOString() }
+  }
+
+  /** 在本进程后台执行一次手动触发（本地的"执行一次"，或 worker 取到的 api 进程转来的请求）。 */
+  runQueued({ taskId, scheduledAt }: QueuedRunOnce): void {
+    this.track(this.fire(taskId, scheduledAt, 'manual'))
   }
 
   /** Waits until every fire started so far has ended (tests). */
@@ -481,17 +530,41 @@ export class JobScheduler implements OnApplicationBootstrap, BeforeApplicationSh
     attempt: number,
     lost?: AbortSignal,
   ): Promise<JobOutcome | null> {
+    // 本次执行期间本进程的事件循环延迟，记录时读出 max 写入 job_run.loop_max_ms（不一定是本任务造成的）
+    const loop = monitorEventLoopDelay({ resolution: LOOP_RESOLUTION_MS })
+    loop.enable()
+    try {
+      return await this.attempt(task, attempt, loop, lost)
+    } finally {
+      // record() 之前抛错（如结果无法序列化）也要关掉直方图，否则它的采样计时器一直运行到进程退出
+      loop.disable()
+    }
+  }
+
+  /** execute() 的主体：在已开启的事件循环直方图 `loop` 下执行一次并记录。 */
+  private async attempt(
+    task: Task,
+    attempt: number,
+    loop: IntervalHistogram,
+    lost?: AbortSignal,
+  ): Promise<JobOutcome | null> {
     const started = new Date()
     const job = this.jobs.get(task.handler)
     const params = job && this.paramsOf(task, job)
     if (!job || params instanceof Error) {
       // the registry or the handler's schema changed since the task was saved
       const error = job ? errorText(params) : `unknown handler ${task.handler}`
-      await this.record(task, { outcome: 'failed', error, started, attempt })
+      await this.record(task, { outcome: 'failed', error, started, attempt, loop })
       return null
     }
     const controller = new AbortController()
     this.running.add(controller)
+    // 登记到本进程的运行中任务，供慢请求标记与事件循环日志说明“当时在跑什么”
+    const end = runningJobs.begin({
+      taskId: task.id,
+      handler: task.handler,
+      startedAt: started.getTime(),
+    })
     const lines: string[] = []
     // a handler that throws before its first await still ends as a rejected promise
     const settled = (async () =>
@@ -504,7 +577,10 @@ export class JobScheduler implements OnApplicationBootstrap, BeforeApplicationSh
         (value) => ({ value }),
         (err: unknown) => ({ err }),
       )
-      .finally(() => this.running.delete(controller))
+      .finally(() => {
+        this.running.delete(controller)
+        end()
+      })
     let timer: NodeJS.Timeout | undefined
     const ends: Promise<'timeout' | 'lost'>[] = []
     if (task.timeoutMs > 0)
@@ -535,6 +611,7 @@ export class JobScheduler implements OnApplicationBootstrap, BeforeApplicationSh
         error: errorText(lost!.reason),
         started,
         attempt,
+        loop,
       })
       await settled
       return null
@@ -551,6 +628,7 @@ export class JobScheduler implements OnApplicationBootstrap, BeforeApplicationSh
         error: `timed out after ${task.timeoutMs} ms`,
         started,
         attempt,
+        loop,
       })
       try {
         // qw:cross-tenant tasks are the platform's: only the default tenant's root accounts hear of them
@@ -593,6 +671,7 @@ export class JobScheduler implements OnApplicationBootstrap, BeforeApplicationSh
         error: errorText(first.err),
         started,
         attempt,
+        loop,
       })
       return 'failed'
     }
@@ -601,6 +680,7 @@ export class JobScheduler implements OnApplicationBootstrap, BeforeApplicationSh
       output: outputText(lines, first.value),
       started,
       attempt,
+      loop,
     })
     return 'ok'
   }
@@ -625,9 +705,13 @@ export class JobScheduler implements OnApplicationBootstrap, BeforeApplicationSh
       attempt?: number
       output?: string | null
       error?: string | null
+      /** the attempt's own event-loop histogram (none for a run that never executed: skipped) */
+      loop?: IntervalHistogram
     },
   ): Promise<void> {
     const ended = new Date()
+    // 先停掉直方图再写库：写库失败也不留下运行中的采样计时器
+    run.loop?.disable()
     await this.ds.getRepository(Run).insert({
       taskId: task.id,
       taskName: task.name,
@@ -640,6 +724,8 @@ export class JobScheduler implements OnApplicationBootstrap, BeforeApplicationSh
       startedAt: run.started,
       endedAt: ended,
       costMs: Math.max(0, ended.getTime() - run.started.getTime()),
+      instance: RUN_INSTANCE,
+      loopMaxMs: run.loop ? Math.round(loopDelayMs(run.loop.max)) : null,
     })
   }
 }

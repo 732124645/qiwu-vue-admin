@@ -317,6 +317,7 @@ const providerVo = (r: AgentProvider): AgentProviderVo => ({
     reasoningStyle: m.reasoningStyle ?? 'standard',
     ...(m.image && { image: true }),
   })),
+  maxConcurrency: r.maxConcurrency ?? null,
   enabled: r.enabled,
   isDefault: r.isDefault,
   sort: r.sort,

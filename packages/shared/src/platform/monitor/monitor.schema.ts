@@ -78,6 +78,17 @@ export const monitorServerVo = z.object({
     heapTotal: z.number(),
     heapUsed: z.number(),
     external: z.number(),
+    /**
+     * The event loop of the process that answered, since the previous read of this endpoint there:
+     * delay percentiles and max in ms beyond normal scheduling (the 20 ms sampling interval taken off,
+     * near 0 when idle), utilization 0–1 (each instance of a cluster has its own)
+     */
+    eventLoop: z.object({
+      p50: z.number(),
+      p99: z.number(),
+      max: z.number(),
+      utilization: z.number(),
+    }),
   }),
 })
 export type MonitorServerVo = z.infer<typeof monitorServerVo>

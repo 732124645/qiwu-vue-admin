@@ -18,7 +18,7 @@ import { zodRules } from '@/core/form/zod-rules'
 /**
  * 模型提供方的新增 / 编辑表单（`openDialog(ProviderForm, { id })`）：名称、兼容 OpenAI 的接口地址、
  * 只写的密钥（已保存时显示“已保存”，留空则保留原密钥，从不读回）、模型清单（每行模型 id、显示名、
- * 推理强度、看图、快速档、上下文窗口）、启用、默认。
+ * 推理强度、看图、快速档、上下文窗口）、并发上限、启用、默认。
  */
 defineOptions({ name: 'AgentProviderForm' })
 type Model = AgentProviderSave['models'][number]
@@ -52,6 +52,7 @@ const { model, row, formRef, rules, loading, submitting, submit } = useCrudForm(
     baseUrl: '',
     apiKey: '',
     models: [newModel()],
+    maxConcurrency: null,
     enabled: true,
     isDefault: false,
     sort: 0,
@@ -335,6 +336,21 @@ function setReasoningStyle(m: Model, value: 'standard' | 'vllm') {
         </p>
       </el-collapse-item>
     </el-collapse>
+    <el-form-item :label="t('field.agent.provider.maxConcurrency')" prop="maxConcurrency">
+      <el-input-number
+        v-model="model.maxConcurrency"
+        :min="0"
+        :max="10_000"
+        :step="1"
+        step-strictly
+        :value-on-clear="null"
+        controls-position="right"
+        :aria-label="t('field.agent.provider.maxConcurrency')"
+      />
+      <p class="provider-form__hint provider-form__full">
+        {{ t('agent.admin.maxConcurrencyHint') }}
+      </p>
+    </el-form-item>
     <el-form-item :label="t('field.agent.provider.enabled')" prop="enabled">
       <el-switch v-model="model.enabled" />
     </el-form-item>
@@ -384,5 +400,8 @@ function setReasoningStyle(m: Model, value: 'standard' | 'vllm') {
   color: var(--qw-text-3);
   font-size: 12px;
   line-height: 1.5;
+}
+.provider-form__full {
+  flex-basis: 100%;
 }
 </style>

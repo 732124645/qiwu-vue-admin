@@ -2,6 +2,16 @@
 
 从本模板建立的项目，怎样合并模板发布的新版本。新项目的建立见[从模板创建新项目](new-project.md)；已有安装的数据库升级（migrate → seed）见[入门指南](getting-started.md#5-检查与后续使用)与[部署](deploy.md)。
 
+## 升级到 v1.15.0
+
+照常执行迁移与种子。新迁移只加三个可空列：任务日志的 `instance`（执行实例）与 `loop_max_ms`（执行期间事件循环最大延迟），模型提供方的 `max_concurrency`（并发上限）。旧记录保持空值。
+
+新增的环境变量都有不改变原行为的默认值：`APP_ROLE`（默认 `all`）、`DB_POOL_SIZE`（默认 10）、`DB_POOL_ACQUIRE_TIMEOUT_MS` / `DB_POOL_QUEUE_LIMIT`（默认 0 不限）、`LOG_SLOW_REQUEST_MS` / `LOG_EVENT_LOOP_INTERVAL_MS` / `LOG_EVENT_LOOP_WARN_MS`（默认 0 关闭）。默认 `all` 角色多一个空闲的 `scheduler-run` 队列（任务队列监控页能看到），用于把 api 进程上的“执行一次”交给 worker。
+
+启动日志多两类内容：`.env` 与 `.env.local` 同一个键写了不同值时的一条警告（只列键名），以及 `listen` 后一行 `effective config: …`。项目自己的非秘密键可以追加到 `EFFECTIVE_CONFIG_KEYS`。
+
+要把后台任务拆到单独进程时，按[部署 · 使用 PM2 部署](deploy.md)设置 `QW_PM2_WORKER_INSTANCES`；第一次开启和切回单个应用都要先 `pm2 delete` 再启动，因为 PM2 会沿用进程原来的环境变量。至少保留一个 `all` 或 `worker` 实例，否则定时任务和队列都会停。
+
 ## 升级到 v1.14.0
 
 照常执行迁移与种子。新迁移只建一张租户表 `agent_tool_restriction`（租户对工具的收紧）。种子在“技能”页下新增两个动作“浏览工具限制 / 修改工具限制”（`agent.restriction.browse` / `agent.restriction.modify`），第一次建出时自动补进已经包含技能页的租户套餐；之后 root 在套餐里去掉也不会再被补回。

@@ -162,6 +162,11 @@ describe('server', () => {
     expect(vo.node).toEqual({ version: process.versions.node, v8: process.versions.v8 })
     expect(vo.process.pid).toBe(process.pid)
     expect(vo.process.heapUsed).toBeGreaterThan(0)
+    const loop = vo.process.eventLoop
+    expect(loop.p99).toBeGreaterThanOrEqual(loop.p50)
+    expect(loop.max).toBeGreaterThanOrEqual(0)
+    expect(loop.utilization).toBeGreaterThanOrEqual(0)
+    expect(loop.utilization).toBeLessThanOrEqual(1)
     const denied = await call('stranger', 'get', '/server').expect(403)
     expect(denied.body.code).toBe(Err.FORBIDDEN.code)
   })

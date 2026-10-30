@@ -52,5 +52,9 @@ export const runVo = z.object({
   startedAt: z.iso.datetime(),
   endedAt: z.iso.datetime().nullable(),
   costMs: z.number().int(),
+  /** `host:pid` of the process that ran it; null on rows written before it was recorded */
+  instance: z.string().nullable(),
+  /** max event-loop delay of that process during the run (ms), a hint only: other work shares the loop */
+  loopMaxMs: z.number().int().nullable(),
 })
 export type RunVo = z.infer<typeof runVo>

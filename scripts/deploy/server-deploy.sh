@@ -9,8 +9,8 @@
 #        server-deploy.sh --dry-run <release.tar.gz> <vX.Y.Z> [<sha>] | --dry-run --rollback
 #            test mode for a scratch root marked by a DRY_RUN file: tags resolve in the local git
 #            repository QW_REPO, the release comes from the tarball; no network, pnpm, database or
-#            PM2 reload; the health check reads QW_HEALTH_URL, and the workers' working directories
-#            under <root>/proc (written there by a stand-in pm2 on PATH)
+#            PM2 reload; the health check reads QW_HEALTH_URL (and QW_WORKER_HEALTH_URL), and the
+#            workers' working directories under <root>/proc (written there by a stand-in pm2 on PATH)
 # Exit: 0 ok | 1 failed before or at the switch: the old release still runs and the new release
 #       directory is deleted (its migrations and seeds may have run) | 2 unhealthy, switched back
 #       | 3 unhealthy and the way back failed too: manual action | 64 usage | 75 another deploy is running
@@ -61,7 +61,11 @@ set +a
 : "${QW_ASSET_CARRY_DAYS:=14}" "${QW_SHARED_LINKS:=apps/server/.env apps/server/.env.local}"
 : "${QW_DB_NAME:=}" "${QW_DB_BACKUP_CNF:=}" "${QW_MIGRATE_ENV:=}" "${QW_ALLOW_DOWNGRADE:=0}"
 : "${QW_BUILD_TIMEOUT:=30m}" "${QW_MIGRATE_TIMEOUT:=10m}"
-export QW_DEPLOY_ROOT QW_PM2_NAME QW_PM2_INSTANCES # read by ecosystem.config.cjs
+: "${QW_PM2_WORKER_INSTANCES:=0}" "${QW_WORKER_PORT:=3001}"
+: "${QW_WORKER_HEALTH_URL:=http://127.0.0.1:$QW_WORKER_PORT/api/health}"
+[[ $QW_PM2_WORKER_INSTANCES =~ ^[0-9]+$ ]] || { echo 'QW_PM2_WORKER_INSTANCES must be a number' >&2; exit 64; }
+# read by ecosystem.config.cjs
+export QW_DEPLOY_ROOT QW_PM2_NAME QW_PM2_INSTANCES QW_PM2_WORKER_INSTANCES QW_WORKER_PORT
 [[ $(id -un) == "$QW_APP_USER" ]] || { echo "server-deploy.sh runs as $QW_APP_USER" >&2; exit 64; }
 ROOT=$(readlink -f "$QW_DEPLOY_ROOT")
 CUR=$ROOT/current
@@ -99,19 +103,28 @@ live() { # runs a command, or only logs it in dry-run mode
 
 PROC=/proc
 [[ -z $DRY ]] || PROC=$ROOT/proc # dry-run: entries written by a stand-in pm2
-workers_in() { # <release>: every PM2 worker runs from <release>
+workers_in() { # <release> <pm2 app> <count>: at least <count> workers of the app, each running from <release>
   local pid all=0 ok=0
-  for pid in $(pm2 pid "$QW_PM2_NAME" 3>&- 9>&- 2>/dev/null || true); do
+  for pid in $(pm2 pid "$2" 3>&- 9>&- 2>/dev/null || true); do
     all=$((all + 1))
     [[ $pid != 0 && $(readlink -f "$PROC/$pid/cwd" 2>/dev/null || true) == "$1/apps/server" ]] && ok=$((ok + 1))
   done
-  ((all >= QW_PM2_INSTANCES && ok == all))
+  ((all >= $3 && ok == all))
 }
-health() { # <release>: the health URL answers ok and the workers run that release
-  local i body
+ok_at() { # <url>: the health URL answers ok
+  local body
+  body=$(curl -fsS --max-time 3 "$1" 2>/dev/null || true)
+  [[ $body == *'"status":"ok"'* ]]
+}
+up() { # <release>: the app (and the worker app, when configured) answers ok and runs that release
+  ok_at "$QW_HEALTH_URL" && workers_in "$1" "$QW_PM2_NAME" "$QW_PM2_INSTANCES" || return 1
+  ((QW_PM2_WORKER_INSTANCES == 0)) && return 0
+  ok_at "$QW_WORKER_HEALTH_URL" && workers_in "$1" "$QW_PM2_NAME-worker" "$QW_PM2_WORKER_INSTANCES"
+}
+health() { # <release>: the health URLs answer ok and the workers run that release
+  local i
   for ((i = 1; ; i++)); do
-    body=$(curl -fsS --max-time 3 "$QW_HEALTH_URL" 2>/dev/null || true)
-    [[ $body == *'"status":"ok"'* ]] && workers_in "$1" && return 0
+    up "$1" && return 0
     ((i < QW_HEALTH_TRIES)) || return 1
     sleep 2
   done
@@ -165,6 +178,12 @@ check_uploads() { # local uploads must live outside the code: a switch replaces 
     found=1
   done < <(grep -hs '^STORAGE_LOCAL_ROOT=' "$REL/apps/server/.env" "$REL/apps/server/.env.local" || true)
   [[ -n $found ]] || abort 'set STORAGE_LOCAL_ROOT to an absolute path in the shared env files'
+}
+env_keys() { sed -n 's/^[[:space:]]*\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p' "$1" 2>/dev/null | sort -u || true; }
+env_overlap() { # warning only: a key set in both shared env files takes its .env value (names, never values)
+  local keys
+  keys=$({ env_keys "$REL/apps/server/.env"; env_keys "$REL/apps/server/.env.local"; } | sort | uniq -d | tr '\n' ' ')
+  [[ -z $keys ]] || say "warning: keys in both .env and .env.local, .env wins: ${keys% }"
 }
 # shellcheck disable=SC2317 # called through live
 backup_db() {
@@ -234,6 +253,7 @@ for p in $QW_SHARED_LINKS; do
   ln -sfn "$ROOT/shared/$p" "$REL/$p"
 done
 check_uploads
+env_overlap
 PIN=$(tr -d '[:space:]' <"$REL/scripts/ip2region.sha256" 2>/dev/null || true)
 if [[ $PIN =~ $PIN_RE ]]; then # one data file per pin, so an older release keeps its own
   XDB=$ROOT/shared/ip2region/$PIN.xdb

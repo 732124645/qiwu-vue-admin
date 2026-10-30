@@ -83,6 +83,13 @@ const columns: QwColumn[] = [
     width: 140,
     align: 'right',
   },
+  {
+    prop: 'instance',
+    label: 'field.scheduler.run.instance',
+    width: 180,
+    showOverflowTooltip: true,
+  },
+  { prop: 'loopMaxMs', label: 'field.scheduler.run.loopMaxMs', width: 180, align: 'right' },
 ]
 // computed: the perms reload when the server's permission version moves
 const perm = usePerm()
@@ -217,6 +224,9 @@ async function clean() {
         <template #cell-startedAt="{ row }">{{
           dayjs(row.startedAt).format('YYYY-MM-DD HH:mm:ss')
         }}</template>
+        <!-- rows written before these were recorded have none -->
+        <template #cell-instance="{ row }">{{ row.instance ?? '—' }}</template>
+        <template #cell-loopMaxMs="{ row }">{{ row.loopMaxMs ?? '—' }}</template>
         <template #actions="{ row }">
           <el-button v-perm="runPerms.remove" link type="danger" @click="remove([row.id])">
             {{ t('crud.action.delete') }}

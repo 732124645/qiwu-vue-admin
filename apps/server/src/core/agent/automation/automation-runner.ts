@@ -25,6 +25,7 @@ import { type DataSource, In, IsNull } from 'typeorm'
 import { type ActionHeard, AuditWriter } from '../../audit/audit-writer.js'
 import { PermVersion } from '../../auth/perm-version.js'
 import type { Principal } from '../../auth/principal.js'
+import { AppConfigService } from '../../config/config.module.js'
 import { allTenants, withTenant } from '../../context/tenant.js'
 import { dataScopeOf } from '../../data-scope/data-scope.js'
 import { BizError } from '../../http/biz-error.js'
@@ -143,6 +144,7 @@ export class AgentAutomationRunner
     @Inject(REDIS) private readonly redis: Redis,
     private readonly threads: AgentThreadService,
     @Inject(TURN_CONTROL) private readonly control: TurnControl,
+    private readonly cfg: AppConfigService,
     @Optional() @Inject(PROFILE_SOURCE) private readonly profiles?: ProfileSource,
     @Optional() @Inject(SKILL_SOURCE) private readonly skills?: SkillSource,
   ) {}
@@ -165,8 +167,12 @@ export class AgentAutomationRunner
     while (this.inFlight.size) await Promise.all(this.inFlight)
   }
 
-  /** 启动时按库里的自动化重新登记定时任务（Redis 被清空或换过时也能恢复）；登记失败只记日志。 */
+  /**
+   * 启动时按库里的自动化重新登记定时任务（Redis 被清空或换过时也能恢复）；登记失败只记日志。api 角色
+   * 不开 worker，启动时的重新登记留给执行它们的进程（自动化增改时的登记仍照常做）。
+   */
   async onApplicationBootstrap(): Promise<void> {
+    if (this.cfg.get('APP_ROLE') === 'api') return
     try {
       // qw:cross-tenant boot-time re-registration of every tenant's schedules; each one is handled in its own tenant
       const rows = await allTenants(() =>

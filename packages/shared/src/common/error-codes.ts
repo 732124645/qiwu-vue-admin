@@ -27,6 +27,8 @@ export const Err = {
   UNPROCESSABLE: def('A0422', 422, 'error.common.unprocessable'),
   TOO_MANY_REQUESTS: def('A0429', 429, 'error.common.too_many_requests'),
   INTERNAL: def('A0500', 500, 'error.common.internal'),
+  /** no database connection became free in time (pool timeout or wait queue full): retry later */
+  SERVICE_BUSY: def('A0503', 503, 'error.common.service_busy'),
 
   /** Excel import (core/excel; see docs/design-notes.md#security): not a readable .xlsx */
   EXCEL_INVALID: def('A0450', 400, 'error.excel.invalid'),

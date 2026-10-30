@@ -18,6 +18,7 @@ import { HealthController } from './core/health/health.controller.js'
 import { CoreHttpModule } from './core/http/http.module.js'
 import { CoreI18nModule } from './core/i18n/i18n.module.js'
 import { CoreLoggerModule } from './core/logger/logger.module.js'
+import { CoreMonitorModule } from './core/monitor/event-loop.js'
 import { McpModule } from './core/mcp/mcp.module.js'
 import { CoreMcpTokenModule } from './core/mcp/token-revocation.js'
 import { CoreNotifyModule } from './core/notify/notify.js'
@@ -50,7 +51,7 @@ import { WorkflowModule } from './modules/workflow/workflow.module.js'
     // TypeORM DataSource + @Transactional() (CLS plugin): after CoreContextModule
     CoreDbModule,
     CoreRedisModule,
-    // BullMQ job queues on the shared Redis client (workers run on every instance)
+    // BullMQ job queues on the shared Redis client (workers run on every instance but APP_ROLE=api ones)
     CoreQueueModule,
     // AuditWriter (sign-in log, @ActionLog): needs the DataSource
     CoreAuditModule,
@@ -67,6 +68,7 @@ import { WorkflowModule } from './modules/workflow/workflow.module.js'
     // Single-use captcha ticket verifier for auth and SMS
     CoreCaptchaModule,
     CoreLoggerModule,
+    CoreMonitorModule,
     CoreI18nModule,
     CoreThrottlerModule,
     CoreHttpModule,

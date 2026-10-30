@@ -1091,6 +1091,7 @@ export class TurnRunner {
         tools: chatTools,
         reasoning: ctx.thread.reasoning ?? undefined,
         signal: invocation.signal,
+        onSlot: invocation.onSlot,
       })) {
         if (ev.type === 'usage') {
           usage = ev.usage

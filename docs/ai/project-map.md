@@ -1072,6 +1072,7 @@
 | `agent-cleanup` | core/agent/agent.module.ts | AgentCleanupProcessor（core/agent/runtime/turn.processor.ts） |
 | `agent-memory` | core/agent/memory/agent-memory.module.ts | AgentMemoryProcessor（core/agent/memory/memory-extract.ts） |
 | `agent-turn` | core/agent/agent.module.ts | AgentTurnProcessor（core/agent/runtime/turn.processor.ts） |
+| `scheduler-run` | modules/platform/scheduler/job-scheduler.module.ts | RunOnceProcessor（modules/platform/scheduler/run-once.processor.ts） |
 
 ## 定时任务处理器
 

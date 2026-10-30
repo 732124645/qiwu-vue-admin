@@ -18,6 +18,7 @@ import {
   requestSummary,
 } from '../audit/audit-writer.js'
 import { requestId } from '../context/context.module.js'
+import { isPoolExhausted } from '../db/pool-acquire.js'
 import { resolveLocale } from '../i18n/locale.js'
 import { rememberedSensitive, textRedactor } from '../redact.js'
 import { BizError } from './biz-error.js'
@@ -65,6 +66,8 @@ export function classify(e: unknown): Failure {
     const err = BY_ERRNO[(e.driverError as { errno?: number } | undefined)?.errno ?? 0]
     if (err) return { err, status: err.status }
   }
+  // no free database connection in time: a 503 the client may retry, not a 500 or a hang
+  if (isPoolExhausted(e)) return { err: Err.SERVICE_BUSY, status: Err.SERVICE_BUSY.status }
   // the body parser's own failures (http-errors, `expose` = the client's fault): a body over the JSON
   // limit → 413, an unsupported charset → 415, … (a malformed one is a SyntaxError: Nest makes it a 400)
   const { status, expose } = (e ?? {}) as { status?: unknown; expose?: unknown }
@@ -122,7 +125,9 @@ export class HttpErrorFilter implements ExceptionFilter {
       })
       body.msg = body.errors[0]?.msg ?? body.msg
     }
-    if (status >= 500) this.logFault(req, exception)
+    // 连接池耗尽是预期的过载，不是故障：池那边已记一条 warn；这里再写 error 日志和
+    // aud_http_fault（同一个已满的池）只会放大负载、刷屏
+    if (status >= 500 && err !== Err.SERVICE_BUSY) this.logFault(req, exception)
     const since = httpTracedAlways(req)
     // the interceptor records the requests it saw (it remembered their `@Sensitive` fields)
     if (since !== undefined && rememberedSensitive(req) === undefined)

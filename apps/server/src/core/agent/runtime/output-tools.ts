@@ -154,6 +154,11 @@ export class AgentOutputTools {
               prompt,
               size,
               ...receipt,
+              // 等提供方名额时请求还没发出：没取到名额就失败的不是结果不明的付费请求，不进核对
+              onSlot: (held) => {
+                attempted = held
+                receipt.onSlot(held)
+              },
             })
           },
           ctx.signal,

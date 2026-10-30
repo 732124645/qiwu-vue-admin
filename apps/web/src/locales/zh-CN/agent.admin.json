@@ -6,6 +6,7 @@
       "default": "默认",
       "close": "关闭",
       "keyStored": "已保存",
+      "maxConcurrencyHint": "同时发往该提供方的调用总数，跨所有实例和租户；留空或 0 不限",
       "keyMissing": "未设置",
       "rootOnly": "这里的设置只有超级管理员能修改，你可以查看当前内容。",
       "tab": {
@@ -310,6 +311,7 @@
           "no_model": "没有配置模型",
           "search_not_configured": "没有可用的密钥",
           "failed": "失败",
+          "provider_busy": "模型繁忙（等待并发名额超时）",
           "reasoning_off_rejected": "模型服务不接受“关闭思考”（reasoning_effort: none）",
           "http": "HTTP {status}"
         }

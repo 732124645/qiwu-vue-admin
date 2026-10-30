@@ -80,6 +80,8 @@ export interface ChatRequest {
   maxTokens?: number
   /** 本次非流调用的实际用量，正文校验失败前回报；仅保留在本次调用闭包，不随错误对象共享。 */
   onUsage?: (usage: ChatUsage) => void
+  /** 提供方配了并发上限时：开始等名额回报 false，取得名额（请求随即发出）回报 true；不发给提供方。 */
+  onSlot?: (held: boolean) => void
 }
 
 /** The whole answer of `complete()`. */
@@ -99,6 +101,8 @@ export interface ImageRequest {
   signal?: AbortSignal
   /** 收到实际用量后即时回报，图片正文错误也能记账；不发给提供方。 */
   onUsage?: (usage: ChatUsage) => void
+  /** 同 {@link ChatRequest.onSlot} */
+  onSlot?: (held: boolean) => void
 }
 /** The image's bytes and the usage the provider reported (null when it reports none). */
 export interface ImageResult {

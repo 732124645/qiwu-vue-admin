@@ -79,7 +79,7 @@ NestJS 12（ESM）+ Vue 3.5 + Vite + Element Plus + TypeScript + MySQL + Redis�
 - **数据权限**：带 `@DataScoped` 的实体只经 `BaseCrudService` 的 `scopedQb()` 读，按 id 写之前在事务内 `lockScopedIds(ids)`，新增与改范围列时 `assertWritableScope()`。自定义过滤用 `andWhere()`，不要用会覆盖范围的 `where()`。
 - 原始 SQL 读带范围的表：在同一函数里调用 `dataScopeSql` / `dataScopeSqlFor`，把 `${scope.sql}` 插进语句；不代表调用者读数据的系统查询写 `qw:no-data-scope <理由>`。原始 SQL 还要自己写 `deleted_at IS NULL`（有意读已删除行时写 `qw:include-deleted`）。
 - Redis 键一律经 `apps/server/src/core/redis/cache-namespaces.ts` 构造（前缀 `qw:`，每个命名空间声明 `tenant` / `global-id` / `platform` 维度）。
-- 后台任务用队列：`QueueService.add` 记下当前租户，处理器继承 `TenantJobProcessor` 且必须幂等，见 [docs/queue.md](docs/queue.md)。
+- 后台任务用队列：`QueueService.add` 记下当前租户，处理器继承 `TenantJobProcessor` 且必须幂等，见 [docs/queue.md](docs/queue.md)。处理器启动时若登记定时任务（`onApplicationBootstrap` 里的 `upsertJobScheduler` 等），在 `APP_ROLE=api` 下要跳过，留给开 worker 的实例。
 - 新的 `@Public()` 路由在 `apps/server/test/e2e/tenant-public.e2e-spec.ts` 登记租户来源（模板文件，升级时可能冲突）。
 
 ## 安全默认
@@ -91,7 +91,7 @@ NestJS 12（ESM）+ Vue 3.5 + Vite + Element Plus + TypeScript + MySQL + Redis�
 - 新建类写路由加 `@Idempotent()`（`core/guard/idempotent.ts`，3 秒内重复回 429）；前端提交按钮在请求期间 `loading` 且禁用（CRUD 套件已处理）。
 - 不用 `eval`、`new Function`、`vm`；富文本经 `sanitizeFields` 清洗；文件上传与 Excel 走 core 的现成服务。
 - 业务私有附件用 `StorageAccess.register(tag, checker, { exclusive: true, feature })` 强制单据授权；绑定、替换与业务保存同事务，不能借上传者或全局文件权限绕过。文件名读取安全元信息接口；原生客户端用固定同源 content 入口，不能带登录令牌跟随外部重定向。
-- 秘密（数据库与 Redis 凭据、`APP_SECRET`、`SEED_ADMIN_PASSWORD`）只写在 git 忽略的 `apps/server/.env.local`；`.env` 不定义这些键（空值也会遮住 `.env.local`）；任何秘密都不放 `VITE_*`。
+- 秘密（数据库与 Redis 凭据、`APP_SECRET`、`SEED_ADMIN_PASSWORD`）只写在 git 忽略的 `apps/server/.env.local`；`.env` 不定义这些键（空值也会遮住 `.env.local`）；非秘密键两边都写时 `.env` 生效（启动时警告重复键名）；任何秘密都不放 `VITE_*`。
 - 必须逐次本人确认的工具声明 `perCallConfirmation: true`、真实 `preview` 和跨 API/worker 实例一致的 `confirmationRevision`。opaque Zod 校验、转换或默认值语义变化必须递增 revision；JSON Schema 不能自动识别这些代码语义。确认凭据只由服务器产生/单次消费，工具在业务事务锁内复核预览快照；不能信任客户端 confirmed/prepared 字段或绕过到 MCP/PAT。普通工具与既有 humanOnly 的策略保持。
 - 依赖只选维护活跃、许可宽松的包，要过 `pnpm license:check`（禁用包列表在 `scripts/license-check.mjs`）；需要构建脚本的包登记到 `pnpm-workspace.yaml` 的 `allowBuilds`。
 

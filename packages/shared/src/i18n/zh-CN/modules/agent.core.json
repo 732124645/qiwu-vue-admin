@@ -53,6 +53,7 @@
         "baseUrl": "接口地址",
         "apiKey": "密钥",
         "models": "模型",
+        "maxConcurrency": "并发上限",
         "enabled": "启用",
         "isDefault": "默认",
         "sort": "排序"

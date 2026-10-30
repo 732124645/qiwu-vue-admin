@@ -4,6 +4,7 @@ import { InjectDataSource } from '@nestjs/typeorm'
 import { AGENT_PAUSED_PARAM, AGENT2_PARAMS, agentPerms } from '@qiwu/shared'
 import { type DataSource, In, IsNull, LessThan, MoreThan } from 'typeorm'
 import { PermVersion } from '../../auth/perm-version.js'
+import { AppConfigService } from '../../config/config.module.js'
 import { allTenants, tenantId, withTenant } from '../../context/tenant.js'
 import { RedisLock } from '../../guard/redis-lock.js'
 import { QueueService } from '../../queue/queue.service.js'
@@ -347,12 +348,16 @@ export class AgentMemoryProcessor
   constructor(
     private readonly extractor: AgentMemoryExtractor,
     private readonly queues: QueueService,
+    private readonly cfg: AppConfigService,
   ) {
     super()
   }
 
-  /** 启动时登记定时任务（参数关着时任务照跑，但什么也不做）。 */
+  /**
+   * 启动时登记定时任务（参数关着时任务照跑，但什么也不做）；api 角色不开 worker，登记留给执行它的进程。
+   */
   async onApplicationBootstrap(): Promise<void> {
+    if (this.cfg.get('APP_ROLE') === 'api') return
     const data: QueuedJob<object> = { tenantId: null, payload: {} }
     await this.queues
       .queues()

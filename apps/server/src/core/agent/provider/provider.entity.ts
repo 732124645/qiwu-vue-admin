@@ -44,6 +44,10 @@ export class AgentProvider extends BaseEntity {
   @Column({ type: 'json' })
   models: ProviderModel[]
 
+  /** 跨实例的并发上限；空或 0 不限 */
+  @Column({ name: 'max_concurrency', type: 'int', unsigned: true, nullable: true })
+  maxConcurrency: number | null
+
   @Column({ type: 'boolean', default: true })
   enabled: boolean
 

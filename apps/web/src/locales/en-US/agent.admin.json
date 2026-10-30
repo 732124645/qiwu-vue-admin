@@ -6,6 +6,7 @@
       "default": "Default",
       "close": "Close",
       "keyStored": "Stored",
+      "maxConcurrencyHint": "Total calls in flight to this provider at once, across all instances and tenants; empty or 0 means unlimited.",
       "keyMissing": "Not set",
       "rootOnly": "Only the super administrator can change these settings; you can view them.",
       "tab": {
@@ -310,6 +311,7 @@
           "no_model": "No model configured",
           "search_not_configured": "No usable key",
           "failed": "Failed",
+          "provider_busy": "Model busy (timed out waiting for a concurrency slot)",
           "reasoning_off_rejected": "The model service does not accept turning reasoning off (reasoning_effort: none)",
           "http": "HTTP {status}"
         }

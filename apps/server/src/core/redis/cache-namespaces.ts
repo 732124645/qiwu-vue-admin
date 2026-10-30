@@ -103,7 +103,8 @@ export const CACHE_NAMESPACES = {
   excelReport: ns('excel:report:', true, true, 'global-id'),
   /**
    * RedisLock keys by global ids (a lock by a natural key unique within a tenant gets a `tenant`
-   * namespace of its own)
+   * namespace of its own); `agent-provider:{providerId}` → a ZSET of the provider's concurrency leases
+   * (lease id → expiry ms, ProviderSlots)
    */
   lock: ns('lock:', false, false, 'global-id'),
   jobLock: ns('job:lock:', false, false, 'platform'),

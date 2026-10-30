@@ -1,4 +1,4 @@
-import { BullModule } from '@nestjs/bullmq'
+import { BullModule, BullRegistrar } from '@nestjs/bullmq'
 import {
   Global,
   Inject,
@@ -6,8 +6,10 @@ import {
   Module,
   type OnApplicationBootstrap,
   type OnModuleDestroy,
+  type OnModuleInit,
 } from '@nestjs/common'
 import { DiscoveryModule } from '@nestjs/core'
+import { AppConfigService } from '../config/config.module.js'
 import { queuePrefix } from '../redis/cache-namespaces.js'
 import { REDIS, type Redis } from '../redis/redis.module.js'
 import { QUEUE_JOB_DEFAULTS } from './queue-registry.js'
@@ -43,7 +45,8 @@ export async function checkEvictionPolicy(
  * blocking reads. Every key is under `queuePrefix()` (`qw:queue:`). Modules declare queues with
  * `registerQueue` and processors as `TenantJobProcessor` subclasses; `QueueService.add` adds jobs.
  * Workers stop (finishing the jobs they run) in the first shutdown phase, before the other services'
- * shutdown work, the Socket.IO server and the shared clients close.
+ * shutdown work, the Socket.IO server and the shared clients close. `APP_ROLE=api` creates no worker
+ * at all (the queues still take jobs); the other roles start one per processor, as `all` always did.
  */
 @Global()
 @Module({
@@ -56,18 +59,30 @@ export async function checkEvictionPolicy(
         prefix: queuePrefix(),
         defaultJobOptions: QUEUE_JOB_DEFAULTS,
       }),
+      // workers are created in onModuleInit below, by role (never started and then closed)
+      extraOptions: { manualRegistration: true },
     }),
   ],
   providers: [QueueService],
   exports: [QueueService],
 })
-export class CoreQueueModule implements OnApplicationBootstrap, OnModuleDestroy {
+export class CoreQueueModule implements OnModuleInit, OnApplicationBootstrap, OnModuleDestroy {
   private readonly logger = new Logger('Queue')
 
   constructor(
     @Inject(REDIS) private readonly redis: Redis,
     private readonly queues: QueueService,
+    private readonly registrar: BullRegistrar,
+    private readonly cfg: AppConfigService,
   ) {}
+
+  /**
+   * 按进程角色决定是否开 worker：api 角色一个都不创建，启动的任何时刻都不会领到任务；
+   * 其余角色为每个处理器创建一个（与默认的自动注册相同）。
+   */
+  onModuleInit() {
+    if (this.cfg.get('APP_ROLE') !== 'api') this.registrar.register()
+  }
 
   async onApplicationBootstrap() {
     // BullMQ reports connection trouble as 'error' events: logged, never thrown

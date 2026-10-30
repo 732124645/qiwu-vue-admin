@@ -150,6 +150,19 @@ describe('EnvSchema', () => {
     await expect(configOf()).rejects.toThrow(/REDIS_KEY_PREFIX/)
   })
 
+  it('APP_ROLE: all by default, api or worker when set, anything else refused', async () => {
+    vi.stubEnv('APP_ROLE', undefined)
+    expect((await configOf()).get('APP_ROLE')).toBe('all')
+    for (const role of ['api', 'worker'] as const) {
+      vi.stubEnv('APP_ROLE', role)
+      expect((await configOf()).get('APP_ROLE')).toBe(role)
+    }
+    for (const bad of ['API', 'cron', 'both']) {
+      vi.stubEnv('APP_ROLE', bad)
+      await expect(configOf()).rejects.toThrow(/APP_ROLE/)
+    }
+  })
+
   it('outbound port lists (see docs/design-notes.md#security): port numbers only, comma or space separated, none by default', async () => {
     vi.stubEnv('OUTBOUND_S3_PORTS', '9000, 8333  9443')
     vi.stubEnv('OUTBOUND_SMTP_PORTS', '')

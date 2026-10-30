@@ -129,12 +129,35 @@ const PROVIDER: AgentProviderVo = {
       contextWindow: 64000,
     },
   ],
+  maxConcurrency: null,
   enabled: true,
   isDefault: true,
   sort: 0,
 }
 
 describe('provider form', () => {
+  it('shows the concurrency limit with its hint and submits it; cleared sends null', async () => {
+    const calls = mockApi({
+      'GET /agent/providers': ok([{ ...PROVIDER, maxConcurrency: 4 }]),
+      'PUT /agent/providers/3': ok(PROVIDER),
+    })
+    await show(ProviderForm, { props: { id: 3 } })
+    expect(w.text()).toContain(t('field.agent.provider.maxConcurrency'))
+    expect(w.text()).toContain(t('agent.admin.maxConcurrencyHint'))
+    const input = w.find(`input[aria-label="${t('field.agent.provider.maxConcurrency')}"]`)
+    expect((input.element as HTMLInputElement).value).toBe('4')
+    await input.setValue('6')
+    await input.trigger('change')
+    await button(t('crud.action.save'))!.trigger('click')
+    await flushPromises()
+    expect(sent(calls, 'put', '/agent/providers/3')[0]).toMatchObject({ maxConcurrency: 6 })
+    await input.setValue('')
+    await input.trigger('change')
+    await button(t('crud.action.save'))!.trigger('click')
+    await flushPromises()
+    expect(sent(calls, 'put', '/agent/providers/3')[1]).toMatchObject({ maxConcurrency: null })
+  })
+
   it('saves exact rates, explicit free pricing, cache inheritance and default reasoning', async () => {
     const provider = { ...PROVIDER, models: [{ ...PROVIDER.models[0]!, reasoning: true }] }
     const calls = mockApi({

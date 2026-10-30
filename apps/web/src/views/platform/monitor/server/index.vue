@@ -57,6 +57,10 @@ onBeforeUnmount(stop)
 // the first load happens anyway (a page opened in a background tab is ready when shown)
 void load()
 
+/** 事件循环延迟三项（毫秒）：p50 / p99 / 最大。 */
+const loopDelay = ({ p50, p99, max }: MonitorServerVo['process']['eventLoop']) =>
+  `${p50.toFixed(2)} / ${p99.toFixed(2)} / ${max.toFixed(2)} ms`
+
 const gauges = computed(
   (): { key: string; title: string; value: number; facts: [string, string][] }[] => {
     const d = data.value
@@ -156,10 +160,19 @@ const barText = (p: number) => `${p.toFixed(1)}%`
             <el-descriptions-item :label="t('field.monitor.server.uptime')">
               {{ duration(data.process.uptime) }}
             </el-descriptions-item>
+            <el-descriptions-item :label="t('field.monitor.server.eventLoopDelay')">
+              <span data-event-loop="delay">{{ loopDelay(data.process.eventLoop) }}</span>
+            </el-descriptions-item>
+            <el-descriptions-item :label="t('field.monitor.server.eventLoopUtilization')">
+              <span data-event-loop="utilization">{{
+                `${(data.process.eventLoop.utilization * 100).toFixed(1)}%`
+              }}</span>
+            </el-descriptions-item>
             <el-descriptions-item v-if="auth.tenant" :label="t('monitor.server.multiTenant')">
               {{ t('monitor.server.multiTenantOn') }}
             </el-descriptions-item>
           </el-descriptions>
+          <p class="monitor-server__note">{{ t('monitor.server.eventLoopNote') }}</p>
         </el-card>
       </div>
 
@@ -209,6 +222,11 @@ const barText = (p: number) => `${p.toFixed(1)}%`
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
   gap: 16px;
+}
+.monitor-server__note {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--qw-text-3);
 }
 .monitor-server__placeholder {
   min-height: 240px;

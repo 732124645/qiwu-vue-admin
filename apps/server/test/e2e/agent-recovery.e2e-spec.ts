@@ -30,6 +30,7 @@ import {
 } from '../../src/core/agent/entities/agent-thread.entity.js'
 import { FakeChatModel } from '../../src/core/agent/provider/fake-chat-model.js'
 import { ProviderRegistry } from '../../src/core/agent/provider/provider-registry.js'
+import { ProviderSlots } from '../../src/core/agent/provider/provider-slots.js'
 import { usageOf } from '../../src/core/agent/provider/usage.js'
 import { ItemStore, StaleItem } from '../../src/core/agent/runtime/item-store.js'
 import { TurnRunner } from '../../src/core/agent/runtime/turn-runner.js'
@@ -765,6 +766,101 @@ it.each(['output', 'business-error'] as const)(
     ).toMatchObject({ status: 'failed', errorCode: Err.AGENT_RECOVERY_REQUIRED.code })
   },
 )
+
+/** 提供方并发上限设为 1、等名额最多 300 毫秒，跑完 `fn` 后恢复。 */
+async function withBusyProvider(fn: (slots: ProviderSlots) => Promise<void>) {
+  const slots = app.get(ProviderSlots)
+  const wait = slots.maxWaitMs
+  slots.maxWaitMs = 300
+  await ds.query('UPDATE agent_provider SET max_concurrency = 1 WHERE id = ?', [providerId])
+  try {
+    await fn(slots)
+  } finally {
+    slots.maxWaitMs = wait
+    await ds.query('UPDATE agent_provider SET max_concurrency = NULL WHERE id = ?', [providerId])
+  }
+}
+
+it('charges no credits and counts no call for a step whose request never got a provider slot', async () => {
+  await withBusyProvider(async (slots) => {
+    const fake = new FakeChatModel([{ text: 'never sent' }])
+    const connect = vi.spyOn(app.get(ProviderRegistry), 'connect').mockReturnValue(fake)
+    const blocker = await slots.acquire(providerId, 1)
+    try {
+      const before = await tenant(() => book.today(ownerId))
+      const { turn } = await makeTurn()
+      await tenant(() => app.get(TurnRunner).run(Number(turn.id)))
+      expect(fake.requests).toHaveLength(0)
+      expect(
+        await tenant(() => ds.getRepository(AgentTurn).findOneByOrFail({ id: turn.id })),
+      ).toMatchObject({ status: 'failed', errorCode: Err.AGENT_PROVIDER_FAILED.code })
+      expect(
+        await ds.query('SELECT id FROM agent_usage_entry WHERE turn_id = ?', [turn.id]),
+      ).toEqual([])
+      expect(await tenant(() => book.today(ownerId))).toEqual(before)
+    } finally {
+      await blocker()
+      connect.mockRestore()
+    }
+  })
+})
+
+it('an image that never got a provider slot is a plain failure, not a paid request to verify', async () => {
+  const models = (image: boolean) =>
+    JSON.stringify([
+      {
+        id: 'restart-model',
+        label: 'Restart model',
+        contextWindow: 64000,
+        pricing: TEST_AGENT_PRICING,
+        ...(image && { image: true }),
+      },
+    ])
+  await ds.query('UPDATE agent_provider SET models = ? WHERE id = ?', [models(true), providerId])
+  await withBusyProvider(async (slots) => {
+    class ImageModel extends FakeChatModel {
+      images = 0
+      image(): Promise<never> {
+        this.images++
+        return Promise.reject(new Error('never sent'))
+      }
+    }
+    const fake = new ImageModel([
+      { toolCalls: [{ name: 'image.generate', args: { prompt: 'A generic test square' } }] },
+    ])
+    const reg = app.get(ProviderRegistry)
+    const connect = vi.spyOn(reg, 'connect').mockReturnValue(fake)
+    const resolveImage = reg.resolveImage.bind(reg)
+    let blocker: (() => Promise<void>) | undefined
+    // 第一步的流结束、名额已还后，由别的调用占满名额，图片只能等到上限
+    const spy = vi.spyOn(reg, 'resolveImage').mockImplementation(async () => {
+      if (fake.requests.length && !blocker) blocker = await slots.acquire(providerId, 1)
+      return resolveImage()
+    })
+    try {
+      const { thread, turn } = await makeTurn()
+      await tenant(() => app.get(TurnRunner).run(Number(turn.id)))
+      expect(blocker).toBeDefined()
+      expect(fake.images).toBe(0)
+      expect(
+        await tenant(() => ds.getRepository(AgentThread).findOneByOrFail({ id: thread.id })),
+      ).toMatchObject({ recoveryRequired: false })
+      expect(
+        await ds.query("SELECT id FROM agent_usage_entry WHERE turn_id = ? AND kind = 'image'", [
+          turn.id,
+        ]),
+      ).toEqual([])
+    } finally {
+      await blocker?.()
+      spy.mockRestore()
+      connect.mockRestore()
+      await ds.query('UPDATE agent_provider SET models = ? WHERE id = ?', [
+        models(false),
+        providerId,
+      ])
+    }
+  })
+})
 
 it('retains real image usage without a usable image and blocks another generation', async () => {
   await ds.query('UPDATE agent_provider SET models = ? WHERE id = ?', [

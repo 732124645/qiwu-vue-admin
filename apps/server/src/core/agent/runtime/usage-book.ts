@@ -35,6 +35,8 @@ export interface UsageInvocation {
   signal: AbortSignal
   fence(m: EntityManager): Promise<void>
   observe(usage: ChatUsage): Promise<void>
+  /** 交给模型请求的 `onSlot`：等提供方名额时没取到就结束的调用，请求没有发出，结算时删掉记录不计费 */
+  onSlot(held: boolean): void
   settle(usage: ChatUsage | null, failed?: boolean): Promise<string | null>
   release(): void
 }
@@ -135,6 +137,8 @@ export class UsageBook implements OnModuleInit {
     if (signal?.aborted) abort()
     let released = false
     let renewing = false
+    // 正在等提供方名额：此时结束说明请求没有发出
+    let unsent = false
     let finish!: () => void
     const done = new Promise<void>((resolve) => {
       finish = resolve
@@ -215,9 +219,15 @@ export class UsageBook implements OnModuleInit {
           ctrl.abort(new InvocationLeaseLost('invocation receipt is fenced'))
         }
       },
+      onSlot: (held) => {
+        unsent = !held
+      },
       settle: async (usage, failed = false) => {
         try {
-          const credits = await this.settle(id, usage, failed, false)
+          // 没取到名额（等待中被停止、暂停、到时限，或等到上限繁忙）：请求从未发出，删掉这条尝试，不计积分也不记调用
+          const credits = unsent
+            ? (await this.discard(id), null)
+            : await this.settle(id, usage, failed, false)
           if (ctrl.signal.reason instanceof InvocationLeaseLost) throw ctrl.signal.reason
           return credits
         } catch (error) {
@@ -236,7 +246,11 @@ export class UsageBook implements OnModuleInit {
     userId: number,
     target: AgentUsageTarget,
     context: UsageContext,
-    work: (receipt: { signal: AbortSignal; onUsage(usage: ChatUsage): void }) => Promise<T>,
+    work: (receipt: {
+      signal: AbortSignal
+      onUsage(usage: ChatUsage): void
+      onSlot(held: boolean): void
+    }) => Promise<T>,
     signal?: AbortSignal,
   ): Promise<T> {
     const invocation = await this.begin(userId, target, context, signal)
@@ -258,6 +272,7 @@ export class UsageBook implements OnModuleInit {
             receipt = receipt.then(() => invocation.observe(usage))
             void receipt.catch(() => {})
           },
+          onSlot: invocation.onSlot,
         }),
         aborted,
       ])
@@ -279,6 +294,11 @@ export class UsageBook implements OnModuleInit {
       remove()
       invocation.release()
     }
+  }
+
+  /** 删掉没发出请求的待结算记录；已被接管结算的不再动。 */
+  private async discard(id: number): Promise<void> {
+    await this.ds.getRepository(AgentUsageEntry).delete({ id, status: 'pending' })
   }
 
   /** 只结算已过期的调用；跨租户仅枚举身份，实际结算回到所属租户。 */

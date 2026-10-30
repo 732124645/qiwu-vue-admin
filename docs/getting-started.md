@@ -114,6 +114,8 @@ pnpm dev
 
 重复的模块初始化与路由注册信息只在开发 runner 中收起，业务日志、警告、错误和编译诊断继续显示；开发请求日志改为单行，保留请求追踪号、路径、状态和耗时。生产的结构化日志与脱敏规则不变。日志级别仍由 `LOG_LEVEL` 控制，不需要为了减少刷屏把全部信息关掉。
 
+排查请求卡顿时，可用 `LOG_SLOW_REQUEST_MS`（慢请求日志标记 `"slow":true` 与当时在跑的定时任务）、`LOG_EVENT_LOOP_INTERVAL_MS` / `LOG_EVENT_LOOP_WARN_MS`（事件循环周期日志），默认都为 0 即关闭；事后用 `grep '"slow":true'` 检索日志。说明与任务日志的 `instance` / `loop_max_ms` 见[卡顿诊断](scale-out.md#卡顿诊断)。
+
 普通 Vue 页面和样式沿用 Vite 热更新；Web 与 shared 的翻译文件新增、修改、删除会更新现有翻译实例，保留当前页面和所选语言。修改共享运行时代码或前端入口逻辑仍可能整页刷新，后端代码仍通过整个应用进程重启生效。默认网页标题的通用文案不再被当作 Vite 启动配置依赖。
 
 开发编译输出到 `apps/server/dist-dev`（已被 git 忽略），开发服务从这里启动；`pnpm build`、`db:migrate`、`db:seed` 等仍各自构建并读取 `apps/server/dist`，`nest build` 删除重建 `dist` 时不影响正在运行的开发服务。应用在就绪前非零退出时，开发脚本延迟 2 秒自动重试一次，仍失败则等下一次保存。

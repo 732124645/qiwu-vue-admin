@@ -291,7 +291,12 @@ export interface AgentToolWait {
 export interface AgentModelCalls {
   invokeModel<T extends { usage?: AgentModelUsage | null }>(
     target: AgentUsageTarget,
-    work: (receipt: { signal: AbortSignal; onUsage(usage: AgentModelUsage): void }) => Promise<T>,
+    work: (receipt: {
+      signal: AbortSignal
+      onUsage(usage: AgentModelUsage): void
+      /** 原样交给模型请求：没取到提供方名额的调用请求没有发出，不计费 */
+      onSlot(held: boolean): void
+    }) => Promise<T>,
     signal?: AbortSignal,
   ): Promise<T>
 }

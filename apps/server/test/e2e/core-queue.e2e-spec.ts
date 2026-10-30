@@ -13,6 +13,7 @@ import { QueueService } from '../../src/core/queue/queue.service.js'
 import { QUEUE_JOB_DEFAULTS } from '../../src/core/queue/queue-registry.js'
 import { keyPrefix } from '../../src/core/redis/cache-namespaces.js'
 import { REDIS, type Redis } from '../../src/core/redis/redis.module.js'
+import { SCHEDULER_RUN_QUEUE } from '../../src/modules/platform/scheduler/job-scheduler.js'
 import {
   ECHO,
   FLAKY,
@@ -24,8 +25,8 @@ import { bearer } from '../setup/auth.js'
 import { cleanRedis } from '../setup/redis.js'
 import { createTenant, inTenant1, type PeopledTenant, signInDirect } from '../setup/tenants.js'
 
-// before AppModule is imported: only the fixture queues of this spec are registered (the agent's own
-// queues come with APP_AGENT, on in the test env)
+// before AppModule is imported: only the fixture queues of this spec and the scheduler's "run once"
+// queue are registered (the agent's own queues come with APP_AGENT, on in the test env)
 vi.hoisted(() => {
   process.env.APP_AGENT = 'false'
 })
@@ -76,7 +77,9 @@ beforeEach(() => {
 })
 
 it('registers the fixture queues under qw:queue: with the documented job defaults', async () => {
-  expect([...queues.queues().keys()].sort()).toEqual([ECHO, FLAKY, PLATFORM].sort())
+  expect([...queues.queues().keys()].sort()).toEqual(
+    [ECHO, FLAKY, PLATFORM, SCHEDULER_RUN_QUEUE].sort(),
+  )
   expect(queue(ECHO).opts.prefix).toBe(`${keyPrefix()}queue`)
   expect(QUEUE_JOB_DEFAULTS).toEqual({
     attempts: 3,

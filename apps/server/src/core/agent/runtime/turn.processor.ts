@@ -1,6 +1,7 @@
 import { Processor } from '@nestjs/bullmq'
 import { Logger, type OnApplicationBootstrap } from '@nestjs/common'
 import type { Job } from 'bullmq'
+import { AppConfigService } from '../../config/config.module.js'
 import { QueueService } from '../../queue/queue.service.js'
 import { type QueuedJob, TenantJobProcessor } from '../../queue/tenant-job.processor.js'
 import { AGENT_CLEANUP_QUEUE, AGENT_TURN_QUEUE, TurnQueue } from './turn-queue.js'
@@ -38,12 +39,14 @@ export class AgentCleanupProcessor
     private readonly temps: TurnQueue,
     private readonly queues: QueueService,
     private readonly runner: TurnRunner,
+    private readonly cfg: AppConfigService,
   ) {
     super()
   }
 
-  /** 启动时登记两个定时任务（同名的定时任务只存一份）。 */
+  /** 启动时登记两个定时任务（同名的定时任务只存一份）；api 角色不开 worker，登记留给执行它们的进程。 */
   async onApplicationBootstrap(): Promise<void> {
+    if (this.cfg.get('APP_ROLE') === 'api') return
     const data: QueuedJob<object> = { tenantId: null, payload: {} }
     const q = this.queues.queues().get(AGENT_CLEANUP_QUEUE)
     await q

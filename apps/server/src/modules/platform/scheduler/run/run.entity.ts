@@ -48,4 +48,12 @@ export class Run extends IdEntity {
   /** 耗时（毫秒） */
   @Column({ name: 'cost_ms', type: 'int', unsigned: true, default: 0 })
   costMs: number
+
+  /** 执行实例（主机名:进程号）；旧记录为空 */
+  @Column({ type: 'varchar', length: 64, nullable: true })
+  instance: string | null
+
+  /** 执行期间本进程事件循环最大延迟（毫秒），任务并行时只能参考；旧记录为空 */
+  @Column({ name: 'loop_max_ms', type: 'int', unsigned: true, nullable: true })
+  loopMaxMs: number | null
 }

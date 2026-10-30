@@ -26,9 +26,12 @@ import {
   AgentSearchProviderController,
 } from '../../src/core/agent/provider/provider.controller.js'
 import { ProviderRegistry } from '../../src/core/agent/provider/provider-registry.js'
+import { ProviderSlots } from '../../src/core/agent/provider/provider-slots.js'
 import { PLATFORM_ONLY } from '../../src/core/auth/platform-only.js'
 import { EnvSchema } from '../../src/core/config/env.schema.js'
 import { BizError } from '../../src/core/http/biz-error.js'
+import { redisKey } from '../../src/core/redis/cache-namespaces.js'
+import { REDIS, type Redis } from '../../src/core/redis/redis.module.js'
 import { logOf } from '../setup/audit.js'
 import { bearer, signIn } from '../setup/auth.js'
 import { addUser, createTenant, type PeopledTenant } from '../setup/tenants.js'
@@ -185,6 +188,7 @@ describe('provider settings', () => {
           contextWindow: 128_000,
         },
       ],
+      maxConcurrency: null,
       enabled: true,
       isDefault: false,
       sort: 0,
@@ -362,6 +366,43 @@ describe('provider settings', () => {
     expect(await storedKey('agent_search_provider', id)).toBeNull()
   })
 
+  it('saves and answers the concurrency limit; null and 0 are unlimited, a negative or fraction 400', async () => {
+    const res = await http()
+      .post('/api/agent/providers')
+      .set(bearer(root))
+      .send(providerBody('limit', { maxConcurrency: 3 }))
+    expect(res.status).toBe(201)
+    expect(res.body.data.maxConcurrency).toBe(3)
+    const id = res.body.data.id as number
+    for (const maxConcurrency of [0, null, 7]) {
+      const put = await http()
+        .put(`/api/agent/providers/${id}`)
+        .set(bearer(root))
+        .send(providerBody('limit', { maxConcurrency }))
+      expect(put.status).toBe(200)
+      expect(put.body.data.maxConcurrency).toBe(maxConcurrency)
+    }
+    const list = await http().get('/api/agent/providers').set(bearer(root))
+    expect(list.body.data.find((p: { id: number }) => p.id === id).maxConcurrency).toBe(7)
+    for (const maxConcurrency of [-1, 1.5, '2'])
+      expect(
+        (
+          await http()
+            .put(`/api/agent/providers/${id}`)
+            .set(bearer(root))
+            .send(providerBody('limit', { maxConcurrency }))
+        ).status,
+      ).toBe(400)
+    expect(
+      (
+        await http()
+          .post('/api/agent/providers')
+          .set(bearer(reader))
+          .send(providerBody('limit-x', { maxConcurrency: 1 }))
+      ).status,
+    ).toBe(403)
+  })
+
   it('403 without agent.setting.*, 403 for a user of another tenant; reads are platform-only, changes root-only', async () => {
     for (const token of [reader, otherAdmin]) {
       expect((await http().get('/api/agent/providers').set(bearer(token))).status).toBe(403)
@@ -431,6 +472,30 @@ describe('ProviderRegistry', () => {
       { type: 'finish', reason: 'stop' },
     ])
     expect(seen[0]!.auth).toBe(`Bearer ${KEY}`)
+  })
+
+  it('takes a provider slot only when a concurrency limit is set, read again at each resolve', async () => {
+    const reg = app.get(ProviderRegistry)
+    const slots = app.get(ProviderSlots)
+    const acquire = vi.spyOn(slots, 'acquire')
+    const { body } = await http()
+      .post('/api/agent/providers')
+      .set(bearer(root))
+      .send(providerBody('reg-slots', { maxConcurrency: 0 }))
+    const id = body.data.id as number
+    const spy = vi
+      .spyOn(reg, 'connect')
+      .mockImplementation(() => new FakeChatModel([{ text: 'a' }, { text: 'b' }]))
+    const ask = { model: 'chat-1', messages: [] }
+    expect((await (await reg.resolve(id)).chat.complete(ask)).text).toBe('a')
+    expect(acquire).not.toHaveBeenCalled()
+    await ds.query('UPDATE agent_provider SET max_concurrency = 2 WHERE id = ?', [id])
+    expect((await (await reg.resolve(id)).chat.complete(ask)).text).toBe('a')
+    expect(acquire).toHaveBeenCalledWith(id, 2, undefined)
+    // the slot is back: nothing of this provider is left in Redis
+    expect(await app.get<Redis>(REDIS).exists(redisKey('lock', 'agent-provider', id))).toBe(0)
+    spy.mockRestore()
+    acquire.mockRestore()
   })
 
   it('a fake model can stand in for the provider', async () => {

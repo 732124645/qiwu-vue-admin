@@ -801,6 +801,8 @@ export const agentProviderSave = z
       )
       .min(1)
       .max(50),
+    /** calls in flight to this provider at once, across all instances and tenants; null or 0 = unlimited */
+    maxConcurrency: z.number().int().min(0).max(10_000).nullable().default(null),
     enabled: z.boolean().default(true),
     isDefault: z.boolean().default(false),
     sort: z.number().int().default(0),
@@ -815,6 +817,8 @@ export const agentProviderVo = z.object({
   /** a key is stored (never the key itself) */
   hasKey: z.boolean(),
   models: z.array(agentModelVo),
+  /** null or 0 = unlimited */
+  maxConcurrency: z.number().int().nullable(),
   enabled: z.boolean(),
   isDefault: z.boolean(),
   sort: z.number().int(),

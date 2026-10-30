@@ -37,11 +37,19 @@ APP_MCP=false
 APP_AGENT=false
 STORAGE_LOCAL_ROOT=/srv/qiwu/uploads
 LOG_LEVEL=info
+# 卡顿诊断（默认 0 关闭，见 scale-out.md#卡顿诊断）
+LOG_SLOW_REQUEST_MS=0
+LOG_EVENT_LOOP_INTERVAL_MS=0
+LOG_EVENT_LOOP_WARN_MS=0
 ```
 
 这里的 Redis db 0 必须先确认空闲且在服务配置范围内；开发、测试与独立演示安装不能共用它。Redis 的 `maxmemory-policy` 必须设为 `noeviction`（在 `redis.conf` 中配置，应用账号不能执行 `CONFIG`）：任务队列把任务存在普通键里，其他淘汰策略在内存不足时会悄悄丢掉排队中的任务；应用启动时检查这一设置，不符合时记警告日志。应用的 Redis 用户需要只读的 `INFO`（任务队列建立连接时读取 Redis 版本），见[任务队列](queue.md#redis-要求)。`TRUST_PROXY` 只填实际代理地址；同机代理示例是 `127.0.0.1/32`，跨机部署需替换。Nest 保持 loopback 监听，不向 LAN / 公网开放端口；浏览器走同源 `/api/`，CORS 列表只列实际允许的源。
 
 `DB_USER`、`DB_PASSWORD`、`REDIS_USERNAME`、`REDIS_PASSWORD`、`APP_SECRET`、可选 `SEED_ADMIN_PASSWORD` 与微信密钥只放 git 忽略的 `apps/server/.env.local`，或由部署密钥系统注入进程环境。`.env` 不得定义这些键，连空值也不写；否则会遮住 `.env.local`。`APP_SECRET` 至少 32 个随机字符；同一部署全部实例必须一致，它还用于派生加密密钥，轮换需另做数据与会话处理。不要复制测试密钥；在 `NODE_ENV=production` 下，服务启动校验以及 `db:seed` / `db:migrate` 都拒绝含 `not-for-production`（不区分大小写）的 `APP_SECRET` / `SEED_ADMIN_PASSWORD`；数据库命令在连接或写入之前退出，错误不输出凭据值。任何 `VITE_*` 都不得含秘密。
+
+`.env.local` 不是本地覆盖文件：同一个键两边都写时 `.env` 生效。要覆盖非秘密配置，请改 `.env` 或用进程环境。这与测试用的 `.env.test.local` / `.env.e2e.local` 方向相反（它们高于各自的模式文件）。服务启动时比较两个文件，同一个键写了不同的值就记一条 `warn`，只列键名、不输出值；`listen` 之后再记一行 `effective config: …`，列出实际生效的非秘密配置（`NODE_ENV`、`PORT`、进程角色 `APP_ROLE`、功能开关、`DB_NAME`、`DB_POOL_SIZE`、`REDIS_DB`、PM2 的 `NODE_APP_INSTANCE` 等，键列表见 `apps/server/src/core/config/env.schema.ts` 的 `EFFECTIVE_CONFIG_KEYS`，项目可以追加自己的非秘密键）。
+
+偶发卡顿时可以临时打开三个诊断键：`LOG_SLOW_REQUEST_MS` 给超过阈值的请求日志加 `"slow":true` 和本进程当时在跑的定时任务，`LOG_EVENT_LOOP_INTERVAL_MS` / `LOG_EVENT_LOOP_WARN_MS` 定期记录事件循环延迟；任务日志的执行实例和事件循环最大延迟两列用来把一次执行和同一进程的慢请求对上。用法与读数含义见[卡顿诊断](scale-out.md#卡顿诊断)。
 
 部署用户必须能读构建产物与凭据，能写 `/srv/qiwu/uploads/public`、`/srv/qiwu/uploads/private` 与受限日志目录；nginx 只读公开目录。凭据文件在 POSIX 下设为 0600。IP 数据仍放服务端工作目录的 `data/`，见 [IP 地理位置数据](#ip-地理位置数据ip2region)。
 
@@ -58,7 +66,7 @@ pnpm db:seed
 
 生产环境的 `pnpm db:seed` 也会创建请假样例的 5 个 OA 示例账号，共用一个仅打印一次的随机密码，非演示模式下首登强制改密；正式上线前应禁用 / 删除这些账号，或移除请假样例，不要公开 seed 日志。
 
-使用 PM2 升级时，顺序为 `pnpm -r build` → `pnpm db:migrate` → `pnpm db:seed` → `pm2 restart qiwu-server`。migrate / seed 会重新执行 `nest build`，其 `deleteOutDir` 会删除并重建运行中 PM2 所用的 `apps/server/dist/`；代码生成器运行时也从该目录读取模板。迁移期间旧进程代码与新数据库结构会短暂并存，须确认兼容；需要避免这一窗口时，先 `pm2 stop qiwu-server`，再构建、迁移、seed 与重启。按版本目录部署（见 [GitHub Actions 自动部署](#github-actions-自动部署可选)）时，每个版本在独立目录构建，不会删除运行中的 `dist/`。
+使用 PM2 升级时，顺序为 `pnpm -r build` → `pnpm db:migrate` → `pnpm db:seed` → `sudo -u qiwu -H pm2 restart qiwu-server`（PM2 命令以应用用户执行，见[使用 PM2 部署](#使用-pm2-部署可选)）。migrate / seed 会重新执行 `nest build`，其 `deleteOutDir` 会删除并重建运行中 PM2 所用的 `apps/server/dist/`；代码生成器运行时也从该目录读取模板。迁移期间旧进程代码与新数据库结构会短暂并存，须确认兼容；需要避免这一窗口时，先 `sudo -u qiwu -H pm2 stop qiwu-server`，再构建、迁移、seed 与重启。按版本目录部署（见 [GitHub Actions 自动部署](#github-actions-自动部署可选)）时，每个版本在独立目录构建，不会删除运行中的 `dist/`。
 
 直接启动时必须进入服务端目录：
 
@@ -67,7 +75,7 @@ cd /srv/qiwu/current/apps/server
 node --env-file-if-exists=.env.local --env-file-if-exists=.env dist/main.js
 ```
 
-或先由密钥系统提供全部进程环境，再在相同工作目录执行 `node dist/main.js`。环境优先级是进程环境高于文件；Node 先读 `.env.local` 再读 `.env`，后者覆盖同名键。Nest 也按 `.env` → `.env.local` 加载。`apps/server/src/core/paths.ts` 的 i18n、迁移、模板、IP 数据与默认上传路径均基于 cwd；不要从仓库根直接执行 `node apps/server/dist/main.js`。
+或先由密钥系统提供全部进程环境，再在相同工作目录执行 `node dist/main.js`。环境优先级是进程环境高于文件；Node 先读 `.env.local` 再读 `.env`，后者覆盖同名键。Nest 也按 `.env` → `.env.local` 加载，结果相同：两边都写的键以 `.env` 为准（见上文）。`apps/server/src/core/paths.ts` 的 i18n、迁移、模板、IP 数据与默认上传路径均基于 cwd；不要从仓库根直接执行 `node apps/server/dist/main.js`。
 
 部署后由管理员检查 `GET /api/health`、登录、上传 / 私有下载及推送。本文只给出源码核对过的配置示例，未在真实 PM2 / nginx 服务器执行；生产网络、TLS、权限、存储与容量需要实际验收。
 
@@ -193,6 +201,7 @@ upstream qiwu_api {
 
 server {
     listen 443 ssl;
+    http2 on;          # nginx ≥ 1.25.1；更早的版本写成 listen 443 ssl http2;
     server_name qiwu.example.com;
     ssl_certificate /etc/nginx/tls/qiwu.fullchain.pem;
     ssl_certificate_key /etc/nginx/tls/qiwu.key;
@@ -266,6 +275,8 @@ server {
 }
 ```
 
+`http2 on` 只作用于浏览器到 nginx 这一段，到 Nest 的上游仍是 `proxy_http_version 1.1`。浏览器对同一主机最多开 6 个 HTTP/1.1 连接，慢接口、上传下载和导出会让同页其他请求排队；HTTP/2 在一个连接上多路复用，没有这个限制。不支持 HTTP/2 的客户端自动回落到 HTTP/1.1；nginx 不支持基于 HTTP/2 的 WebSocket，浏览器会为 `/socket.io/` 单独建一个 HTTP/1.1 连接，现有的 `Upgrade` 配置照常可用。修改后先 `nginx -t` 再重载，并在浏览器开发者工具网络面板的 Protocol 列确认显示 `h2`。
+
 SPA 回退支持 `/sso` 等前端路由；`/api/` 与 `/socket.io/` 保留原路径转发。代理**覆盖** `X-Forwarded-For`，不追加客户端伪造的值；Host 与 Proto 保留本站来源，避免登录、refresh 与 WebSocket 的 Origin 校验失败（失败时控制台登录回 403 `A1007`）。WebSocket 读超时应长于心跳周期；若修改心跳配置，重新核对 75 秒示例。原理见 [nginx WebSocket 官方说明](https://nginx.org/en/docs/http/websocket.html)。
 
 `location ~ /\.` 也会阻断 `/.well-known/`。使用 webroot 方式续签证书时，在处理 ACME 请求的 `server` 中单独放行挑战目录（HTTP-01 通常由 80 端口处理）；`root` 与证书客户端的 webroot 一致，例如：
@@ -298,18 +309,52 @@ npm install -g pm2
 
 仓库自带 [`scripts/deploy/ecosystem.config.cjs`](../scripts/deploy/ecosystem.config.cjs)：cluster 模式 2 个 worker，cwd 为 `<根目录>/current/apps/server`，两个 env 文件按绝对路径加载，日志写入 `<根目录>/logs/`。仓库是 ESM，所以配置使用 `.cjs`。根目录、进程名与 worker 数取环境变量 `QW_DEPLOY_ROOT`（默认 `/srv/qiwu`）、`QW_PM2_NAME`（默认 `qiwu-server`）与 `QW_PM2_INSTANCES`（默认 2）。由部署管理员建立仅部署用户可写的 `/srv/qiwu/logs`，并把该文件放到部署用户不可写的 `/opt/qiwu-deploy/bin/`（下文的准备脚本会这样安装）。
 
+本节所有 `pm2` 命令都以应用用户（示例为 `qiwu`）执行。PM2 的进程列表按用户分开（`~/.pm2`）：在 root 会话里直接执行 `pm2` 会另起一个属于 root 的空 daemon，看不到应用用户的进程；在 root 下 `pm2 start` / `pm2 save` 还会另建一套进程和 dump，两份进程抢同一个端口，或开机自启拉起错的那一份。当前是 root 时写成 `sudo -u qiwu -H pm2 …`（或 `su - qiwu -c "pm2 …"`）。
+
 env 文件通过 Node 的 `node_args` 加载，密钥仍在受限 `.env.local` 或外部进程环境，配置文件不含秘密。发布管理员**先执行一次 migrate → seed**，再以同一部署用户管理 PM2：
 
 ```sh
-pm2 start /opt/qiwu-deploy/bin/ecosystem.config.cjs --env production
-pm2 logs qiwu-server
-pm2 save
-pm2 startup
+sudo -u qiwu -H pm2 start /opt/qiwu-deploy/bin/ecosystem.config.cjs --env production
+sudo -u qiwu -H pm2 logs qiwu-server
+sudo -u qiwu -H pm2 save
+sudo -u qiwu -H pm2 startup
 ```
+
+默认只有一个应用 `qiwu-server`，每个 worker 同时接 HTTP、跑定时任务和全部队列处理器。要把后台工作放到单独的进程（见[进程角色](scale-out.md#进程角色)），在启动 PM2 的环境里（启用了下文的自动部署时写进 `/opt/qiwu-deploy/deploy.env`）设 `QW_PM2_WORKER_INSTANCES=1`（或更多）：`qiwu-server` 改为 `APP_ROLE=api`（仍是 `QW_PM2_INSTANCES` 个），另加应用 `qiwu-server-worker`（`APP_ROLE=worker`，`QW_PM2_WORKER_INSTANCES` 个），监听本机端口 `QW_WORKER_PORT`（默认 3001，进程环境优先于 env 文件里的 `PORT`）。这个端口只给健康检查用，反向代理不要转发到它。已在运行的 `qiwu-server` 重载时不一定换上新的进程环境，第一次切换时重启一次，之后照常 `startOrReload`：
+
+```sh
+sudo -u qiwu -H env QW_PM2_WORKER_INSTANCES=1 pm2 delete qiwu-server
+sudo -u qiwu -H env QW_PM2_WORKER_INSTANCES=1 pm2 start /opt/qiwu-deploy/bin/ecosystem.config.cjs --env production
+sudo -u qiwu -H pm2 save
+curl -fsS http://127.0.0.1:3001/api/health
+```
+
+切回单个应用时同样先删除再启动，两个应用都删：PM2 保存了进程环境，`restart` / `startOrReload`（即使带 `--update-env`）都不会去掉已有的 `APP_ROLE=api`，只重启 `qiwu-server` 会留下一个只有 api 实例的部署，定时任务不再触发、队列任务只进不出，而且不报错。启用了自动部署时，先在 `deploy.env` 把 `QW_PM2_WORKER_INSTANCES` 改回 `0`，再执行：
+
+```sh
+sudo -u qiwu -H pm2 delete qiwu-server-worker
+sudo -u qiwu -H pm2 delete qiwu-server
+sudo -u qiwu -H env QW_PM2_WORKER_INSTANCES=0 pm2 start /opt/qiwu-deploy/bin/ecosystem.config.cjs --env production
+sudo -u qiwu -H pm2 save
+```
+
+上面两段手动命令只带了 `QW_PM2_WORKER_INSTANCES`，其余取默认值。`deploy.env`（或启动 PM2 的环境）里的 `QW_DEPLOY_ROOT`、`QW_PM2_NAME`、`QW_PM2_INSTANCES`、`QW_WORKER_PORT` 与默认值不同时，手动命令必须用同样的值：像 `QW_PM2_WORKER_INSTANCES` 那样逐个写在 `env` 后面，或者在同一个 `sudo -u qiwu -H sh -c '…'` 里先加载 `deploy.env`，例如：
+
+```sh
+sudo -u qiwu -H sh -c 'set -a; . /opt/qiwu-deploy/deploy.env; set +a; pm2 start /opt/qiwu-deploy/bin/ecosystem.config.cjs --env production'
+```
+
+否则 PM2 会按默认的根目录、进程名和实例数另起一套进程，与自动部署管理的那套对不上；`pm2 delete` 的进程名与健康检查的端口也要换成实际的值。
+
+只把 `deploy.env` 改回 `0` 而不删除 worker 应用不行：部署的 `startOrReload` 只处理配置里有的应用，旧的 `qiwu-server-worker` 会继续用旧版本跑定时任务和队列，而健康检查在 0 个 worker 实例时不看它。
 
 `pm2 logs` 是交互观察，Ctrl+C 退出。`pm2 save` 保存当前进程列表；`pm2 startup` 打印的系统自启安装命令由服务器管理员核对后执行，再确认重启后的进程状态，流程见 [PM2 自启说明](https://pm2.keymetrics.io/docs/usage/startup/)。日志目录和 PM2 状态目录须限制访问并安排轮转；进程环境中的秘密也须按秘密文件管理。
 
-升级后用 `pm2 startOrReload /opt/qiwu-deploy/bin/ecosystem.config.cjs --env production` 逐个替换 worker，服务不中断；调整 worker 数用 `pm2 scale qiwu-server <n>` 后 `pm2 save`；启用了下文的自动部署时，同时把 `/opt/qiwu-deploy/deploy.env` 的 `QW_PM2_INSTANCES` 改成同一个数：健康检查要求 worker 数不少于它，两者不一致时之后每次部署都会失败，切回后的检查同样失败（退出 3）。
+升级后用 `sudo -u qiwu -H pm2 startOrReload /opt/qiwu-deploy/bin/ecosystem.config.cjs --env production` 逐个替换 worker，服务不中断；调整 worker 数用 `sudo -u qiwu -H pm2 scale qiwu-server <n>` 后 `sudo -u qiwu -H pm2 save`；启用了下文的自动部署时，同时把 `/opt/qiwu-deploy/deploy.env` 的 `QW_PM2_INSTANCES` 改成同一个数：健康检查要求 worker 数不少于它，两者不一致时之后每次部署都会失败，切回后的检查同样失败（退出 3）。
+
+看到 `[PM2][ERROR] Process or Namespace qiwu-server not found` 时，服务多半仍在运行：先用 `whoami` 确认当前用户是不是应用用户，再执行 `sudo -u qiwu -H pm2 list`。修改 `.env` / `.env.local` 后必须重启（`sudo -u qiwu -H pm2 restart qiwu-server`）：env 文件在进程启动时由 `node_args` 读取，运行中的进程不会重新读。重启后可以用 `sudo -u qiwu -H pm2 env <id>` 查看进程环境，但 `--env-file` 加载的键可能不出现在里面，以服务端实际行为为准：启动日志的 `effective config: …` 一行列出每个 worker 实际生效的非秘密配置。
+
+每个 worker 有自己的数据库连接池（`DB_POOL_SIZE`，默认 10），总连接数约为 `QW_PM2_INSTANCES × DB_POOL_SIZE` 再加迁移、备份等脚本的连接，必须小于 MySQL 的 `max_connections`，并给管理员与监控留出余量。后台任务处理器的并发、长事务和 `FOR UPDATE` 等锁会长时间占住连接，池的大小至少要能同时容纳处理器并发之和与预期的 HTTP 并发；更好的做法是把长事务拆短，不在事务里等外部 I/O。池满时请求默认会一直排队，直到前端 30 秒超时，服务端没有任何日志；建议设 `DB_POOL_ACQUIRE_TIMEOUT_MS=10000`（小于前端的 30 秒）：等不到连接的请求返回 503「服务繁忙，请稍后重试」，并记一条带 `limit/total/idle/queued` 计数的 `warn` 日志。`DB_POOL_QUEUE_LIMIT` 限制排队的请求数（等待超时的请求随即退出排队），超出的立即返回 503；两者默认 0，即不限制。
 
 同一主机上的 cluster 已满足 [scale-out.md](scale-out.md) 的大部分前提：各 worker 读同一组 env 文件，共用 MySQL 库、Redis 库号与前缀及 `APP_SECRET`；上传目录是同一主机路径；项目只启用 websocket，每条连接固定在一个 worker 上，无需粘性会话；定时任务靠 Redis 锁去重。Redis 版本、ACL 与适配器就绪仍按 scale-out.md 核对；跨主机多实例另需共享存储与代理验收，将来启用 polling 必须另配粘性会话。
 
@@ -371,23 +416,26 @@ git push origin vX.Y.Z                # 4. 推送标签，触发发布工作流
 
 `deploy.env` 的键：
 
-| 键                                 | 默认                                      | 说明                                                                                                  |
-| ---------------------------------- | ----------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `QW_DEPLOY_ROOT`                   | `/srv/qiwu`                               | 部署根目录                                                                                            |
-| `QW_REPO`                          | 必填                                      | 标签来源的公开仓库 `<owner>/<name>`，下载不需要凭据                                                   |
-| `QW_APP_USER`                      | `qiwu`                                    | 脚本只以该用户运行                                                                                    |
-| `QW_PM2_NAME`、`QW_PM2_INSTANCES`  | `qiwu-server`、`2`                        | PM2 进程名与 worker 数                                                                                |
-| `QW_HEALTH_URL`、`QW_HEALTH_TRIES` | 本机 `:3000/api/health`、`30`             | 健康检查地址与次数（间隔 2 秒）                                                                       |
-| `QW_KEEP_RELEASES`                 | `3`                                       | 保留的已部署版本数（含当前版本）                                                                      |
-| `QW_MIN_FREE_MB`                   | `3072`                                    | 部署前要求的剩余空间                                                                                  |
-| `QW_DEPLOY_SEED`                   | `1`                                       | 迁移后运行种子（幂等；新菜单与权限需要它）                                                            |
-| `QW_ASSET_CARRY_DAYS`              | `14`                                      | 旧版本网页资源的保留天数                                                                              |
-| `QW_SHARED_LINKS`                  | `apps/server/.env apps/server/.env.local` | 从 `shared/` 链接进版本目录的文件                                                                     |
-| `QW_DB_NAME`、`QW_DB_BACKUP_CNF`   | 空                                        | 两者都设置时，迁移前 `mysqldump`；后者是仅有备份权限账号的 MySQL 选项文件（0600）                     |
-| `QW_MIGRATE_ENV`                   | 空                                        | 可选 env 文件，提供有 DDL 权限的 `DB_USER` 与 `DB_PASSWORD`，只用于迁移与种子；应用账号可以只保留 DML |
-| `QW_ALLOW_DOWNGRADE`               | `0`                                       | 默认拒绝部署比当前更低的标签                                                                          |
-| `QW_BUILD_TIMEOUT`                 | `30m`                                     | `pnpm i` 与 `pnpm -r build` 各自的时限（GNU `timeout` 的写法）                                        |
-| `QW_MIGRATE_TIMEOUT`               | `10m`                                     | 迁移与种子各自的时限；等元数据锁的 DDL 会阻塞线上对该表的查询，时限不宜过长                           |
+| 键                                 | 默认                                      | 说明                                                                                                                                                                                                     |
+| ---------------------------------- | ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `QW_DEPLOY_ROOT`                   | `/srv/qiwu`                               | 部署根目录                                                                                                                                                                                               |
+| `QW_REPO`                          | 必填                                      | 标签来源的公开仓库 `<owner>/<name>`，下载不需要凭据                                                                                                                                                      |
+| `QW_APP_USER`                      | `qiwu`                                    | 脚本只以该用户运行                                                                                                                                                                                       |
+| `QW_PM2_NAME`、`QW_PM2_INSTANCES`  | `qiwu-server`、`2`                        | PM2 进程名与 worker 数                                                                                                                                                                                   |
+| `QW_HEALTH_URL`、`QW_HEALTH_TRIES` | 本机 `:3000/api/health`、`30`             | 健康检查地址与次数（间隔 2 秒）                                                                                                                                                                          |
+| `QW_PM2_WORKER_INSTANCES`          | `0`                                       | 大于 0 时另起 worker 应用 `<QW_PM2_NAME>-worker`（见[使用 PM2 部署](#使用-pm2-部署可选)），健康检查也要求它正常、它的每个进程都运行新版本；改回 `0` 之前先按上文删除 worker 应用并重新启动 `qiwu-server` |
+| `QW_WORKER_PORT`                   | `3001`                                    | worker 应用的本机端口                                                                                                                                                                                    |
+| `QW_WORKER_HEALTH_URL`             | 本机 `:<QW_WORKER_PORT>/api/health`       | worker 应用的健康检查地址                                                                                                                                                                                |
+| `QW_KEEP_RELEASES`                 | `3`                                       | 保留的已部署版本数（含当前版本）                                                                                                                                                                         |
+| `QW_MIN_FREE_MB`                   | `3072`                                    | 部署前要求的剩余空间                                                                                                                                                                                     |
+| `QW_DEPLOY_SEED`                   | `1`                                       | 迁移后运行种子（幂等；新菜单与权限需要它）                                                                                                                                                               |
+| `QW_ASSET_CARRY_DAYS`              | `14`                                      | 旧版本网页资源的保留天数                                                                                                                                                                                 |
+| `QW_SHARED_LINKS`                  | `apps/server/.env apps/server/.env.local` | 从 `shared/` 链接进版本目录的文件                                                                                                                                                                        |
+| `QW_DB_NAME`、`QW_DB_BACKUP_CNF`   | 空                                        | 两者都设置时，迁移前 `mysqldump`；后者是仅有备份权限账号的 MySQL 选项文件（0600）                                                                                                                        |
+| `QW_MIGRATE_ENV`                   | 空                                        | 可选 env 文件，提供有 DDL 权限的 `DB_USER` 与 `DB_PASSWORD`，只用于迁移与种子；应用账号可以只保留 DML                                                                                                    |
+| `QW_ALLOW_DOWNGRADE`               | `0`                                       | 默认拒绝部署比当前更低的标签                                                                                                                                                                             |
+| `QW_BUILD_TIMEOUT`                 | `30m`                                     | `pnpm i` 与 `pnpm -r build` 各自的时限（GNU `timeout` 的写法）                                                                                                                                           |
+| `QW_MIGRATE_TIMEOUT`               | `10m`                                     | 迁移与种子各自的时限；等元数据锁的 DDL 会阻塞线上对该表的查询，时限不宜过长                                                                                                                              |
 
 ### 服务器准备（一次）
 
@@ -427,7 +475,7 @@ bash /root/qiwu-kit-$TAG/scripts/deploy/server-migrate-layout.sh --pubkey deploy
 3. 按提交号从 GitHub 下载源码包到新的 `releases/<标签>-<UTC 时间>`，链接共享文件与 IP 数据，然后 `pnpm i --frozen-lockfile` 与 `pnpm -r build`（低优先级，把 CPU 让给在线服务）。
 4. 把当前版本自身的网页资源与最近 `QW_ASSET_CARRY_DAYS` 天的资源硬链接进新版本：已打开的页面仍能加载旧分块，CDN 也不会缓存到 404。
 5. 可选备份，然后运行新版本的迁移与种子（`dist/db/migrate.js`、`dist/db/seed.js`）。
-6. 原子切换 `current`，`pm2 startOrReload` 逐个替换 worker。健康检查要求 `/api/health` 正常，**并且**每个 worker 的工作目录都是新版本；通过后写 `DEPLOYED`、`pm2 save`，清理多余版本与过期的日志和备份。
+6. 原子切换 `current`，`pm2 startOrReload` 逐个替换 worker。健康检查要求 `/api/health` 正常，**并且**每个 worker 的工作目录都是新版本（配置了 worker 应用时，它的健康地址与进程同样检查）；通过后写 `DEPLOYED`、`pm2 save`，清理多余版本与过期的日志和备份。
 
 切换前任何一步失败（包括切换本身）：退出 1，删除新版本目录，旧版本照常服务；这时新版本的迁移与种子可能已经执行，数据库不回退（见下文边界）。切换后健康检查失败：切回上一版本并重载，成功退出 2，仍然失败退出 3（需要人工处理）。参数错误退出 64。SSH 中断不会打断部署，它会完成或切回。Actions 日志只有步骤摘要（公开仓库的日志所有人可见），详细输出在 `/srv/qiwu/logs/deploy/`。
 

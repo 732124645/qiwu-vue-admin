@@ -53,6 +53,7 @@
         "baseUrl": "Base URL",
         "apiKey": "API key",
         "models": "Models",
+        "maxConcurrency": "Concurrency limit",
         "enabled": "Enabled",
         "isDefault": "Default",
         "sort": "Sort order"

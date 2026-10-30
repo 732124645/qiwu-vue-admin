@@ -12,6 +12,7 @@
     "unprocessable": "请求无法处理",
     "too_many_requests": "请求过于频繁，请稍后再试",
     "internal": "服务器出错了，请稍后再试",
+    "service_busy": "服务繁忙，请稍后重试",
     "demo_read_only": "演示模式下不能执行此操作"
   },
   "auth": {
@@ -150,6 +151,7 @@
     "not_configured": "还没有配置可用的模型，请联系平台管理员",
     "limit": "已达到智能助手的使用上限：{reason}",
     "provider_failed": "模型服务没有正常应答，请稍后再试",
+    "provider_busy": "模型繁忙，请稍后重试",
     "approval_closed": "这个确认请求已经处理过或已失效",
     "url_not_allowed": "不能读取这个链接：只能读取公开网址，且必须来自本轮搜索结果或你给出的链接",
     "mcp_server_failed": "外部 MCP 服务器连接失败：{reason}",

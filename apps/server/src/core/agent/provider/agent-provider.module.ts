@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm'
 import { AgentProviderController, AgentSearchProviderController } from './provider.controller.js'
 import { AgentProvider, AgentSearchProvider } from './provider.entity.js'
 import { ProviderRegistry, ProviderSearchConfig } from './provider-registry.js'
+import { ProviderSlots } from './provider-slots.js'
 import {
   ProviderSettingsService,
   SearchProviderSettingsService,
@@ -20,6 +21,7 @@ import {
     SearchProviderSettingsService,
     ProviderRegistry,
     ProviderSearchConfig,
+    ProviderSlots,
   ],
   exports: [
     ProviderRegistry,

@@ -15,6 +15,7 @@ import { z } from 'zod'
 import { EnvSchema } from '../../src/core/config/env.schema.js'
 import { QueueService } from '../../src/core/queue/queue.service.js'
 import { REDIS, type Redis } from '../../src/core/redis/redis.module.js'
+import { SCHEDULER_RUN_QUEUE } from '../../src/modules/platform/scheduler/job-scheduler.js'
 import {
   ECHO,
   FLAKY,
@@ -33,8 +34,8 @@ import {
   signInDirect,
 } from '../setup/tenants.js'
 
-// before AppModule is imported: only the fixture queues of this spec are registered (the agent's own
-// queues come with APP_AGENT, on in the test env)
+// before AppModule is imported: only the fixture queues of this spec and the scheduler's "run once"
+// queue are registered (the agent's own queues come with APP_AGENT, on in the test env)
 vi.hoisted(() => {
   process.env.APP_AGENT = 'false'
 })
@@ -132,7 +133,7 @@ it('lists every registered queue with its counts and paused flag', async () => {
   try {
     const res = await get(off, 'reader').expect(200)
     const list = z.array(queueVo).parse(res.body.data)
-    expect(list.map((q) => q.name)).toEqual([PLATFORM, ECHO, FLAKY].sort())
+    expect(list.map((q) => q.name)).toEqual([PLATFORM, ECHO, FLAKY, SCHEDULER_RUN_QUEUE].sort())
     expect(list.find((q) => q.name === FLAKY)).toMatchObject({ failed: 1, paused: false })
     expect(list.find((q) => q.name === PLATFORM)).toMatchObject({ paused: true })
     expect(Object.keys(list[0]!).sort()).toEqual(

@@ -1,8 +1,26 @@
 # Changelog
 
-中文说明：本文件按功能区域汇总栖梧 / Qiwu 的用户可见变化，正文使用英文。`1.0.0` 于 2026-10-05 发布，`1.0.3` 于 2026-10-06 发布（`1.0.1`、`1.0.2` 未发布，内容并入 `1.0.3`），`1.1.0`（多租户）、`1.2.0`（手写 SQL 的数据权限）、`1.2.1`（修复）与 `1.3.0`（任务队列）于 2026-10-14 发布，`1.3.1`（开发调试开关）与 `1.4.0`（安全审查修复）于 2026-10-15 发布，`1.4.1`（界面细节）、`1.5.0`（微信公众号管理，默认关闭）与 `1.6.0`（MCP 智能体接入，默认关闭；下游合并改进）于 2026-10-20 发布，`1.6.1`（后端连不上时停在原页面等待；README 更新）与 `1.7.0`（AI 编程友好：公开开发规则、任务配方、检查报错带修复提示、项目地图）于 2026-10-21 发布，`1.7.1`（列表操作列不再截断误点）、`1.8.0`（后台智能助手，默认关闭）与 `1.9.0`（智能助手：自动化、记忆、配置方案、自动审查、子智能体与深度研究）于 2026-10-22 发布，`1.10.0`（基础办公申请）于 2026-10-23 发布，`1.11.0`（助手积分额度与断线恢复）与 `1.12.0`（助手桌面工作区、用量与设置页；积分升级修复）于 2026-10-27 发布，`1.13.0`（助手会话模式、自动审查与方案批准，对标常见编程智能体的交互）于 2026-10-28 发布，`1.13.1`（修复：MCP 关闭时配置方案的工具列表、Windows 与 Docker Redis 下的测试）同日发布，`1.14.0`（助手运行中插话、原地回退与重新生成、状态行、租户收紧工具策略）于 2026-10-29 发布，`1.14.1`（修复：已登录时打开登录页不再要求重新登录）于 2026-10-30 发布。
+中文说明：本文件按功能区域汇总栖梧 / Qiwu 的用户可见变化，正文使用英文。`1.0.0` 于 2026-10-05 发布，`1.0.3` 于 2026-10-06 发布（`1.0.1`、`1.0.2` 未发布，内容并入 `1.0.3`），`1.1.0`（多租户）、`1.2.0`（手写 SQL 的数据权限）、`1.2.1`（修复）与 `1.3.0`（任务队列）于 2026-10-14 发布，`1.3.1`（开发调试开关）与 `1.4.0`（安全审查修复）于 2026-10-15 发布，`1.4.1`（界面细节）、`1.5.0`（微信公众号管理，默认关闭）与 `1.6.0`（MCP 智能体接入，默认关闭；下游合并改进）于 2026-10-20 发布，`1.6.1`（后端连不上时停在原页面等待；README 更新）与 `1.7.0`（AI 编程友好：公开开发规则、任务配方、检查报错带修复提示、项目地图）于 2026-10-21 发布，`1.7.1`（列表操作列不再截断误点）、`1.8.0`（后台智能助手，默认关闭）与 `1.9.0`（智能助手：自动化、记忆、配置方案、自动审查、子智能体与深度研究）于 2026-10-22 发布，`1.10.0`（基础办公申请）于 2026-10-23 发布，`1.11.0`（助手积分额度与断线恢复）与 `1.12.0`（助手桌面工作区、用量与设置页；积分升级修复）于 2026-10-27 发布，`1.13.0`（助手会话模式、自动审查与方案批准，对标常见编程智能体的交互）于 2026-10-28 发布，`1.13.1`（修复：MCP 关闭时配置方案的工具列表、Windows 与 Docker Redis 下的测试）同日发布，`1.14.0`（助手运行中插话、原地回退与重新生成、状态行、租户收紧工具策略）于 2026-10-29 发布，`1.14.1`（修复：已登录时打开登录页不再要求重新登录）与 `1.15.0`（运维：进程角色拆分、连接池设置、卡顿诊断、模型提供方并发上限、配置可见性）于 2026-10-30 发布。
 
 All notable product changes are recorded here in Keep a Changelog style. The initial release below summarizes the delivered features. Planned work is identified explicitly.
+
+## [1.15.0] - 2026-10-30
+
+### Added
+
+- Process roles: `APP_ROLE=all|api|worker` (default `all`, as before). An `api` process serves HTTP and Socket.IO but runs no cron, no misfire catch-up and no queue worker; "Run once" is handed to a worker through a queue. A `worker` process runs cron and every queue worker and still pushes to browsers through the Redis adapter. The PM2 template adds an optional worker app (`QW_PM2_WORKER_INSTANCES`, default 0 keeps the single app) and the deploy script health-checks it.
+- Database pool settings: `DB_POOL_SIZE` (default 10), `DB_POOL_ACQUIRE_TIMEOUT_MS` and `DB_POOL_QUEUE_LIMIT` (default 0 = unlimited, as before). A request that cannot get a connection in time fails with 503 "The service is busy" instead of waiting for the browser's timeout.
+- Stall diagnostics: the server monitor shows event-loop delay (p50/p99/max) and utilization of the answering instance; `LOG_SLOW_REQUEST_MS` marks slow requests with `"slow":true` and the scheduled tasks running in that process; `LOG_EVENT_LOOP_INTERVAL_MS` / `LOG_EVENT_LOOP_WARN_MS` log event-loop delay periodically; the run log records the executing instance and the event-loop maximum during each run. All off by default.
+- Model provider concurrency limit: a provider can set the maximum number of simultaneous calls across all instances and tenants (turn steps, subtasks, review, memory, titles, skills). Calls over the limit wait for a slot (stop, pause and the turn deadline still end the wait) and fail as "The model is busy" after 120 s; calls that never got a slot are not billed.
+- Startup visibility: a warning lists keys set to different values in both `.env` and `.env.local` (names only; `.env` wins), and an `effective config` line logs the non-secret settings in effect (`EFFECTIVE_CONFIG_KEYS`, extendable).
+
+### Changed
+
+- Deploy guide: every `pm2` command is shown as the application user (`sudo -u qiwu -H pm2 …`) with a hint for "Process or Namespace not found"; the nginx example enables HTTP/2; a capacity note relates PM2 instances, pool size and MySQL `max_connections`.
+
+### Upgrade notes
+
+- Run migrations (two nullable columns: `job_run.instance` / `job_run.loop_max_ms`, `agent_provider.max_concurrency`). Nothing changes until the new settings are used. The queue monitor lists a new `scheduler-run` queue. See docs/upgrade.md before splitting processes with PM2.
 
 ## [1.14.1] - 2026-10-30
 
