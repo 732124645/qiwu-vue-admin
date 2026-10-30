@@ -134,6 +134,62 @@ describe('router guard', () => {
     await router.push('/register')
     expect(router.currentRoute.value.name).toBe('register')
   })
+  it('/login with a live session: straight to the page asked for, without signing in again', async () => {
+    const calls = signedIn()
+    await router.push('/login?redirect=/settings/dicts?tab=2')
+    expect(router.currentRoute.value.fullPath).toBe('/settings/dicts?tab=2')
+    expect(calls.map((c) => c.url)).toEqual(['/auth/refresh', '/auth/me', '/auth/menus'])
+    // signed in already: no request at all; a redirect back to /login itself goes home
+    await router.push('/login?redirect=/login')
+    expect(router.currentRoute.value.path).toBe('/settings/dicts')
+    expect(calls).toHaveLength(3)
+  })
+
+  it('/login stays the sign-in page when the session is over, the check fails or the screen is locked', async () => {
+    mockApi({ 'POST /auth/refresh': fail(401, 'A1006') })
+    await router.push('/login?redirect=/settings/dicts')
+    expect(router.currentRoute.value.name).toBe('login')
+
+    // a fresh page whose /me fails (the API erring): one quiet try, then the sign-in page
+    setSessionHint(true)
+    router = createAppRouter(createMemoryHistory())
+    const erring = mockApi({
+      'POST /auth/refresh': ok({ accessToken: 'at-1', expiresIn: 900 }),
+      'GET /auth/me': fail(500, 'B0500'),
+    })
+    const toast = vi.spyOn(ElMessage, 'error')
+    await router.push('/login')
+    expect(router.currentRoute.value.name).toBe('login')
+    expect(erring.map((c) => c.url)).toEqual(['/auth/refresh', '/auth/me'])
+    expect(toast).not.toHaveBeenCalled()
+    toast.mockRestore()
+
+    // sent here half-loaded (the menus refused): the sign-in page, no loop back to the guard
+    setActivePinia(createPinia())
+    accessToken.value = ''
+    router = createAppRouter(createMemoryHistory())
+    // refused once, then answered: a loop back to the guard shows as a second /menus call, not a hang
+    let menuCalls = 0
+    const refused = signedIn({
+      'GET /auth/menus': () => (++menuCalls === 1 ? fail(403, 'A0301') : ok(tree)),
+    })
+    await router.push('/settings/dicts')
+    expect(router.currentRoute.value.fullPath).toBe('/login?redirect=/settings/dicts')
+    expect(refused.filter((c) => c.url === '/auth/menus')).toHaveLength(1)
+
+    // locked: signing in again is how the lock is left
+    setActivePinia(createPinia())
+    accessToken.value = ''
+    setSessionHint(true)
+    router = createAppRouter(createMemoryHistory())
+    const locked = signedIn()
+    useAuthStore().lock('/settings/dicts')
+    await router.push('/login')
+    expect(router.currentRoute.value.name).toBe('login')
+    expect(locked).toEqual([])
+    useAuthStore().unlock()
+  })
+
   it('no access token and refresh fails → /login?redirect=', async () => {
     const calls = mockApi({ 'POST /auth/refresh': fail(401, 'A1006') })
     await router.push('/settings/dicts?tab=2')
@@ -252,6 +308,7 @@ describe('router guard', () => {
     setLocale('zh-CN')
     await flushPromises()
     expect(document.title).toBe('文档 - 栖梧管理系统')
+    await useAuthStore().logout()
     await router.push('/login')
     expect(document.title).toBe(`${i18n.global.t('common.login.title')} - 栖梧管理系统`)
   })
