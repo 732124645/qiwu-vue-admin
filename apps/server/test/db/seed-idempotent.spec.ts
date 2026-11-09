@@ -13,6 +13,9 @@ import {
   agentPerms,
   applyFormCalc,
   APP_UPDATE_PARAMS,
+  appSessionParams,
+  DEFAULT_IM_FILE_EXTS,
+  imParams,
   appVersionPerms,
   CAPTCHA_IMAGE_TYPE_PARAM,
   CAPTCHA_MODE_PARAM,
@@ -1256,6 +1259,7 @@ it('menu groups and pages follow the requested order', async () => {
     'oa',
     'biz',
     'wxoa',
+    'im',
     'system',
     'monitor',
     'devtools',
@@ -2603,6 +2607,24 @@ it('dicts with labels in every language, params with defaults', async () => {
     // App updates: no update prompt unless switched on
     [APP_UPDATE_PARAMS.enabled]: 'false',
     [APP_UPDATE_PARAMS.reviewVersion]: '',
+    // App sessions: no expiry, one App session per user
+    [appSessionParams.sessionDays]: '0',
+    [appSessionParams.singleSession]: 'true',
+    // chat: defaults, the sync epoch a random UUID of this database
+    [imParams.retentionDays]: '180',
+    [imParams.epoch]: expect.stringMatching(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    ),
+    [imParams.textMaxChars]: '5000',
+    [imParams.recallMinutes]: '2',
+    [imParams.editMinutes]: '5',
+    [imParams.groupRecallAnytime]: 'true',
+    [imParams.groupMaxMembers]: '200',
+    [imParams.fileMaxMb]: '20',
+    [imParams.fileExts]: DEFAULT_IM_FILE_EXTS,
+    [imParams.voiceMaxSeconds]: '60',
+    [imParams.voiceMaxMb]: '5',
+    [imParams.callEnabled]: 'false',
   })
   // WeChat subscribe messages: a valid mapping for the new to-do, its template id left for the operator
   expect(wxSubscribeTemplates.parse(JSON.parse(params[WX_SUBSCRIBE_TEMPLATES_PARAM]))).toEqual({

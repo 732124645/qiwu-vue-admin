@@ -31,6 +31,7 @@ const ALLOW = {
   'scripts/i18n-check.mjs': /^const MOBILE = /,
   'scripts/license-check.mjs': /^const MOBILE = /,
   'scripts/originality-check.mjs': /^const MOBILE = /,
+  'scripts/im-stickers.mjs': /^const MOBILE = /,
   // the code generator's withMobile output: the one path constant each, paths built from it
   'scripts/gen-check-golden.mjs': /^const MOBILE = /,
   'apps/server/src/modules/platform/codegen/workspace.ts': /^export const MOBILE = /,

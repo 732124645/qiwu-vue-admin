@@ -18,6 +18,16 @@
       "types": "./dist/validation/testing.d.ts",
       "default": "./dist/validation/testing.js"
     },
+    "./im-client": {
+      "source": "./src/im-client.ts",
+      "types": "./dist/im-client.d.ts",
+      "default": "./dist/im-client.js"
+    },
+    "./im-media": {
+      "source": "./src/im-media.ts",
+      "types": "./dist/im-media.d.ts",
+      "default": "./dist/im-media.js"
+    },
     "./i18n/*": "./src/i18n/*"
   },
   "scripts": {
@@ -27,6 +37,10 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@noble/hashes": "1.8.0",
+    "@stablelib/utf8": "2.1.0",
+    "livekit-client": "2.23.0",
+    "recorder-core": "1.3.26070800",
     "zod": "catalog:"
   },
   "devDependencies": {

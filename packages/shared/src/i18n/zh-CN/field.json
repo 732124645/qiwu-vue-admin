@@ -38,7 +38,8 @@
     "wxMp": {
       "code": "微信登录凭证"
     },
-    "tenantCode": "租户编码"
+    "tenantCode": "租户编码",
+    "mobileKind": "移动端类型"
   },
   "messaging": {
     "inboxMine": {

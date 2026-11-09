@@ -84,13 +84,16 @@
 
 现有类型：
 
-| 类型              | 载荷                                                                           | 发给                                                                                   |
-| ----------------- | ------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------- |
-| `session:kicked`  | `{ sid, reason? }`（`reason` 只在不是普通踢出时下发，如 `tenant_unavailable`） | 被管理员强退或因租户不可用而结束的会话，随后断开                                       |
-| `notify:new`      | `{ id, title }`                                                                | 站内信的收件人（`user:{id}`）                                                          |
-| `notify:bulletin` | `{ action, ids }`                                                              | 发布者所在租户的所有已登录 socket（`tenant:{tid}`）                                    |
-| `demo:message`    | `{ from: { id, name }, text, at }`                                             | 示例页选定的用户 / 角色成员 / 本租户全员                                               |
-| `wf:task`         | `{ instanceId }`                                                               | 待办有变化的用户（分配、办理、取消等），流程动作的事务提交后推送；前端刷新待办数与列表 |
+| 类型              | 载荷                                                                                                                             | 发给                                                                                                                                                     |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `session:kicked`  | `{ sid, reason? }`（`reason` 只在不是普通踢出时下发：`tenant_unavailable`，或 `app_replaced` 即同一账号在另一台设备的 App 登录） | 被管理员强退、因租户不可用或被新的 App 登录顶替而结束的会话，随后断开                                                                                    |
+| `notify:new`      | `{ id, title }`                                                                                                                  | 站内信的收件人（`user:{id}`）                                                                                                                            |
+| `notify:bulletin` | `{ action, ids }`                                                                                                                | 发布者所在租户的所有已登录 socket（`tenant:{tid}`）                                                                                                      |
+| `demo:message`    | `{ from: { id, name }, text, at }`                                                                                               | 示例页选定的用户 / 角色成员 / 本租户全员                                                                                                                 |
+| `wf:task`         | `{ instanceId }`                                                                                                                 | 待办有变化的用户（分配、办理、取消等），流程动作的事务提交后推送；前端刷新待办数与列表                                                                   |
+| `im:entry`        | `{ roomId, seq, authorId, kind }`（`kind` 为 `text` `image` `file` `voice` `sticker` `event`）                                   | 会话的当前全部成员，消息或系统事件提交后推送；不带正文，客户端只增量拉取该会话（见 [im.md](im.md)）                                                      |
+| `im:room`         | `{ roomId, readSeq? }`                                                                                                           | 带 `readSeq`：本人在别的设备读了，只发本人，客户端零请求更新未读；不带：成员、角色、群名或解散变化，发受影响的用户（含被移出者），客户端重取该会话的摘要 |
+| `im:call`         | `{ callId, roomId, rev }`                                                                                                        | 通话邀请或公开状态提交后的参与者提示；HTTP 重新鉴权恢复，不携带 token、媒体 URL 或其他成员详情；心跳和纯巡检不广播                                       |
 
 ## 前端：`onRealtime` 订阅
 
@@ -131,7 +134,7 @@ onRealtime(RT.demoMessage, (m) => {
 - **一条代码路径**：官方 `socket.io-client` 加自写的传输类 `UniSocketTransport`（`mobile/src/core/realtime.ts`）。它继承 socket.io-client 导出的 `WebSocket` 传输，只重写 `createSocket`，改用 `uni.connectSocket`，所以 H5、微信小程序、App 走同一套代码，H5 的 Playwright 也就测到了这条路径。调用 `uni.connectSocket` 时一定要带 `fail` 回调：不带任何回调时 uni 返回 Promise 而不是 SocketTask；`fail` 也把小程序"域名不在合法列表"之类的早期失败转成 socket 错误，交给 Socket.IO 退避重连。
 - **地址**：H5 连页面自己的源（开发服务器与 `vite preview` 的 `/socket.io` 代理）。代理必须写成对象形式 `{ target, ws: true }`：字符串简写会改写 `Host`，服务端的 Origin 检查随即判为外站（`forbidden_origin`）。小程序与 App 连 `VITE_API_BASE` 的源（`https://…` → `wss://…/socket.io/`）。
 - **何时连、何时断**：应用回到前台（`App.vue` 的 `onShow`，冷启动也算）和 Tab 页 `onShow` 时 `startRealtime()`（有会话才连，已有 socket 时不重复建）；应用进入后台（`App.vue` 的 `onHide`）断开，回到前台重连并补拉；登录与登出时 `stopRealtime()`，新用户不会沿用上一位的 socket。小程序打开选图、订阅消息等系统弹窗时也会触发 `onHide`，回来后重连一次，无害。握手用当前的访问令牌（`request.ts` 的 `currentAccessToken()`）与语言。启动后的第一次握手没有访问令牌（它只放在内存里），被拒 `unauthorized` 后刷新一次令牌再连；刷新后仍被拒，或 `forbidden_origin`，就不再连，由轮询兜底。
-- **推送做什么**：`wf:task`、`notify:new` → 重新拉取待办数与未读数（`useCountsStore().load()`，工作台的最新待办随之刷新）；`session:kicked` → 结束会话、回登录页并提示原因；`notify:bulletin` 不处理（消息页每次显示都会重新加载）。连上时也拉一次，补上断线期间的变化。
+- **推送做什么**：`wf:task`、`notify:new` → 重新拉取待办数与未读数（`useCountsStore().load()`，工作台的最新待办随之刷新）；`im:entry`、`im:room` → 交给聊天客户端更新本地缓存（重连时做一次全量同步）；`session:kicked` → 结束会话、回登录页并提示原因；`notify:bulletin` 不处理（消息页每次显示都会重新加载）。连上时也拉一次，补上断线期间的变化。
 - **轮询兜底**：Tab 页每 60 s 调一次 `pollCounts()`，只在 socket 没连上（`realtimeUp` 为 false）时才真的请求。所以 socket 连不上时，角标仍在 60 秒内刷新。
 - **小程序禁用 `Function`**：engine.io-client 的 `globals.js` 在模块加载时求值 `self ?? window ?? Function("return this")()`。小程序既没有 `self` 也没有 `window`，又禁止 `Function`/`eval`。`mobile/vite.config.ts` 的预处理插件把它换成 `mobile/src/core/eio-globals.ts`（导出与原文件逐个对应，单测 `mobile-realtime.spec.ts` 比对），`mobile/scripts/mp-size.mjs` 在 `build:mp-weixin` 之后检查产物：出现 `Function("return this")`、`require("ws")` 或 `xmlhttprequest-ssl` 就失败。同一配置里 `socket.io-client` 别名到它的真实目录：uni 强制 `preserveSymlinks`，从 pnpm 的符号链接位置找不到它自己的依赖。
 - **测试**：单测 `mobile/src/__tests__/mobile-realtime.spec.ts`（真实的 socket.io-client 跑在伪造的 SocketTask 上，由用例逐帧扮演服务端）；Playwright `mobile/e2e/mobile-push.spec.ts`（H5 经预览代理连真实服务端：新待办与站内信 2 秒内刷新角标，强退 2 秒内回到登录页；在没有 Tab 栏的页面冷启动后连上，切到后台即断开，回到前台 2 秒内重连）；`mobile-home.spec.ts` 的轮询用例先用 `page.routeWebSocket` 挡掉 socket，专测兜底。

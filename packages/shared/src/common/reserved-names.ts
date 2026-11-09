@@ -57,5 +57,6 @@ export const WEB_STATIC_ROUTE_NAMES: readonly string[] = [
   'redirect',
   'profile',
   'my-inbox',
+  'im-chat',
   'not-found',
 ]

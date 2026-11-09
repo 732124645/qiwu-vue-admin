@@ -33,6 +33,14 @@ export const STORAGE_PRIVATE_TAGS = [
 export const STORAGE_BIZ_TAGS = [...STORAGE_PUBLIC_TAGS, ...STORAGE_PRIVATE_TAGS] as const
 export type StorageBizTag = (typeof STORAGE_BIZ_TAGS)[number]
 
+/**
+ * 即时通讯的内部私有标签（see docs/im.md）：不在 `STORAGE_BIZ_TAGS` 里，通用上传、预签与确认直接 400；
+ * 通用存储的详情、下载、内容与删除对任何人都拒绝，授权只在聊天自己的文件路由里做。
+ * `im.attachment` 是消息附件（`biz_ref` `im:<roomId>:<seq>`），`im.sticker` 是个人表情（`stk:<id>`）。
+ */
+export const IM_STORAGE_TAGS = ['im.attachment', 'im.sticker'] as const
+export type ImStorageTag = (typeof IM_STORAGE_TAGS)[number]
+
 export const isPublicBizTag = (tag: string): boolean =>
   (STORAGE_PUBLIC_TAGS as readonly string[]).includes(tag)
 

@@ -19,6 +19,7 @@ import type { DataSource } from 'typeorm'
 import { z } from 'zod'
 import { AppModule } from '../../src/app.module.js'
 import { setupApp } from '../../src/app.setup.js'
+import { MAX_SESSION_MS } from '../../src/core/auth/token.service.js'
 import { clsGet } from '../../src/core/context/cls.js'
 import { RedisLock } from '../../src/core/guard/redis-lock.js'
 import { runningJobs } from '../../src/core/monitor/running-jobs.js'
@@ -1033,6 +1034,7 @@ describe('retry', () => {
     expect(rows.map((r) => [r.name, r.handler, r.enabled])).toEqual([
       ['seed.task.wxoaMessagePurge', 'wxoa.message.purge', 0],
       ['seed.task.wxoaFanSync', 'wxoa.fan.sync', 0],
+      ['seed.task.imPurge', 'im.purge', 0],
       ['seed.task.auditPurge', 'audit.purge', 1],
       ['seed.task.sessionSweep', 'session.sweep', 1],
       ['seed.task.notifyDispatch', 'notify.dispatch', 0],
@@ -1056,7 +1058,8 @@ describe('retry', () => {
       { score: now + 3_600_000, value: `${PREFIX}live` },
     ])
     await redis.zAdd(redisKey('authSeen'), [
-      { score: now - 31 * 86_400_000, value: `${PREFIX}ancient` },
+      // 超过最长会话（App 长期会话）的最后活跃时间才清掉
+      { score: now - MAX_SESSION_MS - 86_400_000, value: `${PREFIX}ancient` },
       { score: now - 8 * 86_400_000, value: `${PREFIX}third-party` },
       { score: now, value: `${PREFIX}live` },
     ])

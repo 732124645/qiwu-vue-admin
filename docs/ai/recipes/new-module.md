@@ -6,6 +6,8 @@
 
 不适用：没有表的纯接口、改平台模块（`apps/server/src/modules/platform/`）。
 
+扩展员工 IM 媒体时复用已有 `@qiwu/shared/im-client` 控制器、私有附件与持久发件箱。浏览器 SDK 只能从 `@qiwu/shared/im-media` 子入口引入，不能由 shared 根或 im-client 以值重导出；App 通过原生媒体端口接同一控制器，页面只拿安全快照。详细边界见 [聊天](../../im.md) 与 [LiveKit](../../livekit.md)。
+
 ## 步骤
 
 以表 `crm_customer` 为例：领域取表名第一段 `crm`，业务取其余部分 `customer`。没有独立领域的表（如 `course`）落到内置领域 `biz`。内置办公业务使用 `oa_` 前缀，复用工作流的业务接入机制；项目新领域不要占用 `oa`。固定办公审批表通过业务服务接入工作流，`oa_` 表不允许通用 CRUD 导入，以免生成任意修改审批状态的入口。命名规则见[代码生成：名称、父菜单与路径](../../codegen.md#名称父菜单与路径)。

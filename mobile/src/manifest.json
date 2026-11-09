@@ -27,16 +27,17 @@
             "delay" : 0
         },
         /* 模块配置 */
-        "modules" : {},
+        "modules" : { "SQLite" : {}, "Record" : {} },
         /* 应用发布信息 */
         "distribute" : {
             /* android打包配置 */
             "android" : {
-                /* only network state and camera; docs/mobile.md "App 权限" */
+                /* network state, camera and explicit voice/call capture */
                 "permissions" : [
                     "<uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\"/>",
                     "<uses-permission android:name=\"android.permission.ACCESS_WIFI_STATE\"/>",
                     "<uses-permission android:name=\"android.permission.CAMERA\"/>",
+                    "<uses-permission android:name=\"android.permission.RECORD_AUDIO\"/>",
                     "<uses-feature android:name=\"android.hardware.camera\"/>"
                 ]
             },
@@ -45,7 +46,8 @@
                string for each, or the call crashes and review rejects the build; docs/mobile.md "发布清单" */
             "ios" : {
                 "privacyDescription" : {
-                    "NSCameraUsageDescription" : "用于拍照更换头像或上传附件图片",
+                    "NSCameraUsageDescription" : "用于拍照更换头像、上传附件图片或在你主动加入视频通话时开启摄像头",
+                    "NSMicrophoneUsageDescription" : "仅在你主动录制语音消息或接听、加入通话时采集声音，退出或切后台即停止",
                     "NSPhotoLibraryUsageDescription" : "用于从相册选择图片更换头像或上传附件"
                 }
             },

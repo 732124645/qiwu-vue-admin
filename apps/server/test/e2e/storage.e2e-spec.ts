@@ -7,7 +7,9 @@
 // direct upload (presign → PUT → confirm by its owner only, the grant kept for anyone else, bytes
 // checked again) against an in-memory S3 stand-in; the file list (filters, names, detail, export,
 // delete; soft, the files go with the retention purge, a public one leaves /files at once).
-// The private `wf.attachment` tag and `bindRefs` (own, unbound, that tag, all or nothing).
+// The private `wf.attachment` tag and `bindRefs` (own, unbound, that tag, all or nothing). The chat tags
+// (`im.attachment`, `im.sticker`, the chat switch on): no generic route serves, lists or deletes them, for
+// their uploader, root and `storage.object.view` alike; `putImObject` keeps to its rule and the storage limit.
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
@@ -39,6 +41,7 @@ import { redisKey } from '../../src/core/redis/cache-namespaces.js'
 import { REDIS, type Redis } from '../../src/core/redis/redis.module.js'
 import { ParamService } from '../../src/core/settings/param.service.js'
 import { insertRow } from '../../src/db/seeds/upsert.js'
+import { FsObject } from '../../src/modules/platform/storage/fs-object.entity.js'
 import { StorageAccess } from '../../src/modules/platform/storage/storage-access.js'
 import {
   PRESIGN_TTL_SEC,
@@ -542,6 +545,99 @@ describe('bindRefs', () => {
       err: { code: Err.STORAGE_REF_INVALID.code },
     })
     expect(await refOf(mine)).toBeNull()
+  })
+})
+
+describe('chat tags', () => {
+  const TAGS = ['im.attachment', 'im.sticker'] as const
+  const made: number[] = []
+  beforeAll(async () => {
+    for (const tag of TAGS) {
+      const row = await inTenant1(() =>
+        app.get(StorageService).putImObject(pdf, 'chat.pdf', tag, ids.owner!, {
+          exts: ['pdf'],
+          maxBytes: 1024 * 1024,
+        }),
+      )
+      made.push(row.id)
+    }
+  })
+
+  it('putImObject stores a private unbound object of the tag; its rule and the storage limit hold', async () => {
+    const rows = await ds.query(
+      'SELECT biz_tag, biz_ref, is_public, public_url, uploader_id, sha256 FROM fs_object WHERE id IN (?) ORDER BY id',
+      [made],
+    )
+    expect(rows).toEqual(
+      TAGS.map((tag) => ({
+        biz_tag: tag,
+        biz_ref: null,
+        is_public: 0,
+        public_url: null,
+        uploader_id: ids.owner,
+        sha256: createHash('sha256').update(pdf).digest('hex'),
+      })),
+    )
+    const put = (data: Buffer, name: string, maxBytes = 1024 * 1024, exts = ['pdf', 'html']) =>
+      inTenant1(() =>
+        app.get(StorageService).putImObject(data, name, 'im.attachment', ids.owner!, {
+          exts,
+          maxBytes,
+        }),
+      )
+    await expect(put(pdf, 'chat.txt')).rejects.toMatchObject({ err: Err.STORAGE_TYPE_REJECTED })
+    // never html, even when the rule lists it
+    await expect(put(Buffer.from('<html></html>'), 'x.html')).rejects.toMatchObject({
+      err: Err.STORAGE_TYPE_REJECTED,
+    })
+    await expect(put(pdf, 'chat.pdf', pdf.length - 1)).rejects.toMatchObject({
+      err: Err.PAYLOAD_TOO_LARGE,
+    })
+    await withParam(storageParams.maxSizeMb, '1', () =>
+      expect(put(Buffer.alloc(1024 * 1024 + 1), 'big.pdf', 50 * 1024 * 1024)).rejects.toMatchObject(
+        { err: Err.PAYLOAD_TOO_LARGE },
+      ),
+    )
+  })
+
+  it('detail, metadata, download, content and delete refuse everyone: uploader, root, storage.object.view', async () => {
+    for (const id of made)
+      for (const who of ['owner', 'admin', 'viewer'] as const) {
+        const as = (req: request.Test) => req.set(bearer(tokens[who]))
+        await as(http().get(`${URL}/${id}`)).expect(403)
+        await as(http().get(`${URL}/${id}/metadata`)).expect(403)
+        await binary(as(http().get(`${URL}/${id}/download`))).expect(403)
+        await binary(as(http().get(`${URL}/${id}/content`))).expect(403)
+        await as(http().delete(`${URL}/${id}`)).expect(403)
+      }
+    expect(
+      await ds.query('SELECT id FROM fs_object WHERE id IN (?) AND deleted_at IS NULL', [made]),
+    ).toHaveLength(made.length)
+  })
+
+  it('the list and the export never show them, and the tags are no filter', async () => {
+    const listed = (await http().get(`${URL}?pageSize=200`).set(bearer(tokens.admin)).expect(200))
+      .body.data.items as { id: number }[]
+    expect(listed.filter((o) => made.includes(o.id))).toEqual([])
+    for (const tag of TAGS)
+      await http().get(`${URL}?bizTag=${tag}`).set(bearer(tokens.admin)).expect(400)
+    const xlsx = await binary(http().get(`${URL}/export`).set(bearer(tokens.admin))).expect(200)
+    const book = new ExcelJS.Workbook()
+    await book.xlsx.load(xlsx.body)
+    const cells = book.worksheets.flatMap((ws) =>
+      ws.getSheetValues().flatMap((r) => (Array.isArray(r) ? r : [])),
+    )
+    expect(cells.filter((c) => c === 'chat.pdf')).toEqual([])
+  })
+
+  it('serveAuthorized: the same output as a download, proxy over 20 MiB 413', async () => {
+    const svc = app.get(StorageService)
+    const obj = await inTenant1(() => ds.getRepository(FsObject).findOneByOrFail({ id: made[0]! }))
+    const out = await svc.serveAuthorized(obj, { inline: false, proxy: true })
+    expect('redirect' in out).toBe(false)
+    await expect(
+      svc.serveAuthorized({ ...obj, size: 20 * 1024 * 1024 + 1 }, { inline: false, proxy: true }),
+    ).rejects.toMatchObject({ status: 413 })
   })
 })
 

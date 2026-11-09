@@ -9,7 +9,8 @@ export type Switch = { [K in keyof Env]-?: Env[K] extends boolean ? K : never }[
  * The API docs page (iframe on /api/docs, served only with SWAGGER_ENABLED); the tenant and tenant
  * package pages (multi-tenancy, see docs/design-notes.md#tenancy); the Official Account group with its
  * pages (see docs/design-notes.md#wxoa); the MCP tool and access token pages (see docs/mcp.md); the agent
- * group with its pages (see docs/agent.md).
+ * group with its pages (see docs/agent.md); the hidden chat group that tenant packages use to grant chat
+ * (see docs/im.md).
  */
 export const MENU_FEATURES: Readonly<Record<string, Switch>> = {
   'devtools-api-docs': 'SWAGGER_ENABLED',
@@ -19,6 +20,7 @@ export const MENU_FEATURES: Readonly<Record<string, Switch>> = {
   'mcp-tool': 'APP_MCP',
   'mcp-token': 'APP_MCP',
   agent: 'APP_AGENT',
+  im: 'APP_IM',
 }
 
 /** The switches whose menus the role grant tree hides too (the API docs page stays grantable). */
@@ -27,6 +29,7 @@ export const GRANT_SWITCHES: ReadonlySet<Switch> = new Set([
   'APP_WXOA',
   'APP_MCP',
   'APP_AGENT',
+  'APP_IM',
 ])
 
 /** Whether the menu with `routeName` belongs to a switched-off feature (`on` judges the switches). */

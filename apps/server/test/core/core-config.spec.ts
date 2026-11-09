@@ -166,13 +166,41 @@ describe('EnvSchema', () => {
   it('outbound port lists (see docs/design-notes.md#security): port numbers only, comma or space separated, none by default', async () => {
     vi.stubEnv('OUTBOUND_S3_PORTS', '9000, 8333  9443')
     vi.stubEnv('OUTBOUND_SMTP_PORTS', '')
+    vi.stubEnv('OUTBOUND_LIVEKIT_PORTS', '7880, 8443')
     const cfg = await configOf()
     expect(cfg.get('OUTBOUND_S3_PORTS')).toEqual([9000, 8333, 9443])
     expect(cfg.get('OUTBOUND_SMTP_PORTS')).toEqual([])
+    expect(cfg.get('OUTBOUND_LIVEKIT_PORTS')).toEqual([7880, 8443])
     for (const bad of ['9000,abc', '70000', '0', '80.5', '-1', 'all', '0x16', '1e3', '+80']) {
       vi.stubEnv('OUTBOUND_S3_PORTS', bad)
       await expect(configOf()).rejects.toThrow(/OUTBOUND_S3_PORTS/)
     }
+  })
+
+  it('media is unconfigured by default and bounds every connection setting', () => {
+    const base = {
+      APP_SECRET: productionSecretFixture,
+      DB_USER: 'fixture',
+      DB_NAME: 'fixture_test',
+    }
+    const cfg = EnvSchema.parse(base)
+    for (const key of [
+      'IM_LIVEKIT_URL',
+      'IM_LIVEKIT_API_URL',
+      'IM_LIVEKIT_API_KEY',
+      'IM_LIVEKIT_API_SECRET',
+    ] as const)
+      expect(cfg[key]).toBe('')
+    for (const [key, length] of [
+      ['IM_LIVEKIT_URL', 2048],
+      ['IM_LIVEKIT_API_URL', 2048],
+      ['IM_LIVEKIT_API_KEY', 1024],
+      ['IM_LIVEKIT_API_SECRET', 4096],
+    ] as const)
+      expect(EnvSchema.safeParse({ ...base, [key]: 'x'.repeat(length + 1) }).success).toBe(false)
+    expect(
+      EnvSchema.safeParse({ ...base, OUTBOUND_LIVEKIT_PORTS: '7880,not-a-port' }).success,
+    ).toBe(false)
   })
 
   it('AppConfigService returns parsed, typed values with defaults', async () => {

@@ -26,11 +26,11 @@ H5 调试服务器与预览服务器（锁定的 Vite 5.2）在 `mobile/vite.con
 
 - **请求**（`request.ts`）：`api.get/post/put/delete`、`upload`（`uni.uploadFile` 走后端上传，字段 `file`）。基址默认 `/api`（H5 走代理）；小程序与 App 构建时设 `VITE_API_BASE=https://<域名>/api`。每个请求带 `X-Client-Id: mobile`、`Accept-Language`、`X-Timezone`；access 令牌只在内存，refresh 令牌存 uni 存储（`qw.auth.rt`），401 时单飞刷新（`POST /auth/refresh {refreshToken}`，应答同登录：`accessToken` + 轮换后的 `refreshToken`）并重放。刷新被拒 → 清会话、`reLaunch` 到 `/pages/login/index`。403/409/422/429/5xx 与网络错误弹 toast，`silent` 调用方自己处理；例外是 403 `A1004`（须先改密码，服务端此时只放行 `/auth/me`、`/auth/menus`、改密与退出）：不弹 toast，`reLaunch` 到改密页 `/pages-sys/password/index`。
 - **登录态与权限**（`stores/auth.ts`）：`hasPerm()`（任一即可，`*` 全通过）与 `<QwPerm perm="…">`（小程序不支持自定义指令）；只控制显示，权限以服务端为准。`/auth/me` 带 `mustChangePassword` 或 `passwordExpired`（初始密码、密码过期）时 `passwordChangeDue` 为真：`fetchMe()` 之后与每次 tab 页显示时都转到改密页；改密页此时显示原因和"退出登录"，改完重新取 `/auth/me` 再进入工作台。
-- **实时推送**（`core/realtime.ts`；细节见 `docs/realtime.md` 的"移动端（uni-app）"一节）：登录后连服务端的 Socket.IO 网关（只走 websocket），握手带内存里的 access 令牌和当前语言；用的是官方 `socket.io-client`，加自写的 `uni.connectSocket` 传输类，H5、小程序、App 走同一套代码。收到 `wf:task`、`notify:new` → 重新拉取待办数和未读数（`stores/counts.ts`）；`session:kicked` → 回登录页，并提示"你已被管理员强制下线，请重新登录"。应用回到前台（`App.vue` 的 `onShow`）和 tab 页显示时连接，并补拉一次计数；进入后台（`onHide`）、登录、登出时断开。socket 连不上时（小程序没配 socket 合法域名、网络受限等），tab 页每 60 秒轮询一次，所以角标最迟 60 秒内刷新。
+- **实时推送**（`core/realtime.ts`；细节见 `docs/realtime.md` 的"移动端（uni-app）"一节）：登录后连服务端的 Socket.IO 网关（只走 websocket），握手带内存里的 access 令牌和当前语言；用的是官方 `socket.io-client`，加自写的 `uni.connectSocket` 传输类，H5、小程序、App 走同一套代码。收到 `wf:task`、`notify:new` → 重新拉取待办数和未读数（`stores/counts.ts`）；`session:kicked` → 回登录页，并提示"你已被管理员强制下线，请重新登录"（另一台设备登录了 App 时提示"账号已在另一台设备登录"，并清除本机聊天缓存）；`im:entry`、`im:room` → 交给聊天客户端，见[聊天](#聊天)。应用回到前台（`App.vue` 的 `onShow`）和 tab 页显示时连接，并补拉一次计数；进入后台（`onHide`）、登录、登出时断开。socket 连不上时（小程序没配 socket 合法域名、网络受限等），tab 页每 60 秒轮询一次，所以角标最迟 60 秒内刷新。
 - **国际化**（`i18n.ts`）：一律用 `t(key, params)` / `tx()` / `issueText(schema, issue)`，不要用 vue-i18n 的 `t`/`$t`（小程序上不插值，完整版还会 `new Function`）。文案放 `src/locales/{zh-CN,en-US}/*.json`，`validation.*`/`field.*`/`seed.*` 直接来自 shared；`setLocale()` 同时切换 wot-ui 与 uni 内置界面，并存入 `qw.locale`。
 - **主题**（`App.vue`、`core/theme.ts`）：`page, .wd-root-portal` 上定义"远洋"亮色与暗色令牌（同名令牌与 web `tokens.css` 的亮/暗值一致，移动端独有的见 visual-system §12.1，`mobile-theme.spec.ts` 校验），`--wot-*` 只指向 `--qw-*`；不要用 `<wd-config-provider>`（它的 `.wot-theme-light` 会覆盖映射）。默认跟随系统；App 与 H5 在「我的」→「外观」三选一（跟随系统 / 浅色 / 深色，`setThemePref()`，存 `qw.theme`，即时生效、重启后保持），小程序只跟随系统（该菜单项用条件编译 `#ifndef MP-WEIXIN` 去掉）。暗色在 H5 由 `<html>` 上的 `qw-dark` 类生效，App 与小程序走 `prefers-color-scheme`（App 用 `plus.nativeUI.setUIStyle` 连原生栏一起切）；原生导航栏、tab 栏与页面底色写在 `src/theme.json`，`pages.json` 用 `@` 变量引用，`manifest.json` 的 App 与小程序开 `darkmode`；H5 不开（uni-h5 开了之后 `uni.hideTabBar` 失效），构建时取 `theme.json` 的浅色值，由 `core/theme.ts` 读系统主题，深色时 `App.vue` 的样式按 `qw-dark` 类把原生导航栏改成深色（类一设上就生效，直接用地址打开的页面在它自己的代码加载前也不会先露出浅色栏）。App 的 `manifest.json` 写 `safearea.bottom.offset: none`：页面铺到底部 Home 指示条下（与 H5、小程序一致，底部栏和弹层用 `env(safe-area-inset-bottom)` 留白）；uni 对有 tabBar 的应用默认 `auto`，页面停在指示条上方，下面露出按浅色 tab 栏取色、不随主题的白带。App 上 uni 报告的主题（`getAppBaseInfo().theme`、`osTheme`、`plus.navigator.getUIStyle()`）都是被「外观」强制后的应用样式，系统主题改问 iOS 屏幕的 `traitCollection`（`plus.ios`；`setUIStyle` 只在 iOS 生效）；uni 在主题变化时会把所有页面的状态栏字色改成跟主题走，所以海军蓝页面（登录、微信绑定、tab 页）显示时与主题变化后都由 `whiteStatusBar()` 重设白字（`NAVY_PAGES` 与 `pages.json` 对照校验）。主题变化时 uni 还会按 `pages.json` 重建每个页面的原生导航栏：页面运行时设的标题（`uni.setNavigationBarTitle`）由 `core/theme.ts` 的拦截器同时写进该页的路由元数据，重建后保留；重建不带返回箭头颜色（iOS 上箭头随之变白，浅色栏上看不见但仍可点），所以 `pages.json` 的 `globalStyle["app-plus"]` 用 `theme.json` 的 `navBack` 指定。注意：HBuilder 基座（io.dcloud.HBuilder）的 Info.plist 写死 `UIUserInterfaceStyle = Light`，在基座上跟随系统看不到深色，要在模拟器上验证可临时改成 `Automatic`。z-paging 的主题属性统一用 `pagingTheme`（深色用它的 white 一套）。公共组件 `QwPageHeader`（tab 页海军蓝头部）、`QwBrandMark`、`QwEmpty`、`QwIcon`（自绘线性图标，CSS 遮罩 + `currentColor`）与 `App.vue` 的公共类（`.qw-sheet` `.qw-sec` `.qw-row` `.qw-av` `.qw-tile` `.qw-tag` `.qw-badge` `.qw-btn` 等）供各页使用；各页不写裸色值，只用 `--qw-*`。
 - **静态资源与图标/启动图**：插画（夜色梧桐 `art/`）、空状态（`empty/`）、tab 图标（`tab/`，常态与选中各按亮/暗一份，暗色文件名带 `-dark`）与白色标志（`brand/`）是 `src/static/` 下本项目自绘的 SVG，导出时只含对应主题的令牌色（`mobile-theme.spec.ts` 校验），每个 ≤ 4 KB，在主包里；换图时保持文件名、只用令牌色。App 图标（品牌蓝）与启动图是 PNG，放在 `mobile/unpackage/res/{icons,splash}/`（不放 `src/static`，否则会打进小程序主包），由 `manifest.json` 的 `app-plus.distribute.icons` / `splashscreen` 引用；改图标时用 HBuilderX 的 manifest 可视化编辑器从 1024×1024 原图重新生成各尺寸，云打包后在真机上核对（[发布清单](#发布清单) 第 4 节）。
-- **登录页**（`pages/login`，启动页）：账号密码与短信两种登录，都以 `clientId: 'mobile'` + `keepSignedIn: true` 建 `mobile` 会话（refresh 令牌在应答体里）；已有会话直接进入应用。外观：`LoginShell.vue` 画海军蓝背景与夜色梧桐插画（中文时左侧竖排题款「良禽择木而栖」，英文不显示）、标志与标语，下方是贴底的表单底板（深色下为表面色），两种登录方式用标题式选项卡切换；键盘弹起（`uni.onKeyboardHeightChange`，H5 用 `visualViewport`）或窗口高度 < 700 时换成紧凑头部，`onUnload` 解除监听；微信绑定页 `pages-sys/wx-bind` 用它的紧凑头部。验证码按 `captcha.mode`（公开参数）弹 `<QwCaptcha>`：滑块用 `go-captcha-uni`（MIT，只引 `components/slide`，300×220 与服务端滑块数据一致），图形模式取 `format=png`；服务端跨 IP 要求验证码（A1021）时再弹一次。"记住用户名"只存用户名（`qw.login.username`）。页脚左侧是语言切换（`.qw-login__lang`，底部弹层选语言），右侧是版本、隐私政策与用户协议（两者暂时打开"关于"页，正式页面的内容由部署方提供，见[发布清单](#发布清单) 第 3 节）。表单校验直接用 shared 的 zod schema（`fieldErrors()`），字段名来自 `field.auth.*`。
+- **登录页**（`pages/login`，启动页）：账号密码与短信两种登录，都以 `clientId: 'mobile'` + `keepSignedIn: true` 建 `mobile` 会话（refresh 令牌在应答体里），App 与 H5 构建另带 `mobileKind: 'app' | 'h5'`（期限见 [App 长期会话与单 App 会话](#app-长期会话与单-app-会话)）；已有会话直接进入应用。外观：`LoginShell.vue` 画海军蓝背景与夜色梧桐插画（中文时左侧竖排题款「良禽择木而栖」，英文不显示）、标志与标语，下方是贴底的表单底板（深色下为表面色），两种登录方式用标题式选项卡切换；键盘弹起（`uni.onKeyboardHeightChange`，H5 用 `visualViewport`）或窗口高度 < 700 时换成紧凑头部，`onUnload` 解除监听；微信绑定页 `pages-sys/wx-bind` 用它的紧凑头部。验证码按 `captcha.mode`（公开参数）弹 `<QwCaptcha>`：滑块用 `go-captcha-uni`（MIT，只引 `components/slide`，300×220 与服务端滑块数据一致），图形模式取 `format=png`；服务端跨 IP 要求验证码（A1021）时再弹一次。"记住用户名"只存用户名（`qw.login.username`）。页脚左侧是语言切换（`.qw-login__lang`，底部弹层选语言），右侧是版本、隐私政策与用户协议（两者暂时打开"关于"页，正式页面的内容由部署方提供，见[发布清单](#发布清单) 第 3 节）。表单校验直接用 shared 的 zod schema（`fieldErrors()`），字段名来自 `field.auth.*`。
 - **主框架**（`pages.json`）：主包只有登录页与四个 tab 页（`pages/{home,approval,message,mine}`），其余按领域分包：`pages-wf`（审批）、`pages-biz`（业务）、`pages-sys`（系统、消息与个人）。`tabBar.list` 仍列出四个 tab 页（`uni.switchTab` 保留页面），但原生 tabBar 不支持运行时文案，由每个 tab 页底部的 `<QwTabBar current="…">`（wot-ui `wd-tabbar`，图标为 `static/tab/` 的亮/暗 SVG）代替；登录页与四个 tab 页是自定义导航（`navigationStyle: custom`），tab 页顶部为 `QwPageHeader`（海军蓝 + 夜色插画），显示时隐藏原生的；它还负责无会话时回登录页、设置导航栏标题（`uni.setNavigationBarTitle`），以及在 tab 页显示时（切换 tab、从子页面返回、回到前台）与显示期间每 60 秒刷新待办数与未读数（`stores/counts.ts`，工作台与 tab 角标共用；socket 已连上时由实时推送刷新，见上"实时推送"）。
 - **工作台**（`pages/home`）：头部问候与部门/角色；三格计数——待办、审批中（我发起且仍在进行的流程：`stores/counts.ts` 取 `GET /api/wf/instances/mine?state=running&pageSize=1` 的 `total`，与待办数、未读数一起每分钟刷新，`mobile-counts.spec.ts` 覆盖）、未读消息（点击进入对应 tab）；常用功能（`SHORTCUTS`，彩色图标块，带 `perm` 的按 `hasPerm()` 显示，进入各自分包的页面：发起审批、请假（新建请假单，需 `biz.leave.create`）、公告）；"待我审批"取待办前 3 条（`GET /api/wf/tasks/todo?pageSize=3`），"全部 ›"进入审批 tab。
 - **消息**（`pages/message` + `pages-sys/{inbox,bulletin}`）：头部摘要为未读条数；tab 页顶部是公告入口（最新一条标题 + 未读角标），下面是我的站内信（每条前为类别图标块：业务为公文包、系统为铃铛，未读带红点），用 `z-paging`（MIT，npm 包缺 license 字段，按版本在 `mobile/license-exceptions.json` 登记为 MIT）分页：下拉刷新、滚到底加载下一页；tab 页再次显示时（从详情返回、切 tab、回到前台）一次请求刷新已加载的各页。点开一条进入 `pages-sys/inbox/detail`（类别图标块 + 纯文本，保留换行），未读的随即标记已读并用应答里的未读数更新角标；"全部已读"读完其余。公告列表 `pages-sys/bulletin/index` 即服务端 feed（最新 5 条，与 web 铃铛一致），详情用 `rich-text` 显示保存时已清洗的 HTML（图片限宽），打开即已读，也可全部已读。时间统一 `core/format.ts` 的 `formatTime()`（本地时区 `YYYY-MM-DD HH:mm`，不依赖 Intl）。
@@ -48,7 +48,7 @@ H5 调试服务器与预览服务器（锁定的 Vite 5.2）在 `mobile/vite.con
   - `<QwUserPicker v-model="users" [multiple] [source]>`：`v-model` 为选中的用户（`id`、`displayName`、`deptName`），提交时取 `id`。`source="wf"`（默认，审批用：转办、委派、加签、抄送、发起人自选）走只要求登录的 `GET /api/wf/users/options`（全部启用用户，按姓名搜索，没有部门树）；`source="iam"` 走 `GET /api/iam/users/options`（调用者数据范围内），上方是部门树，逐级点进部门（面包屑返回），列表为该部门及其下级的用户。关键字停止输入 300 ms 后搜索，过期应答丢弃。单选点一下即选中并关闭；多选逐个勾选，按钮"确定（n）"提交（一个不选即清空）。
   - `<QwDeptPicker v-model="deptId">`：`GET /api/iam/depts/tree`（数据范围内）上的 `wd-cascader`，任一级可选（点部门展开下级，"确认"取最后点的一级；再点一次取消，确认空值即清为 `null`）；树里没有的部门显示其 id。
   - `<QwDictSelect v-model="kind" code="biz.leave_kind" [multiple]>`：字典条目上的 `wd-select-picker`，值为条目编码（未选为 `null`），标签按 `labelI18n[当前语言]` → 种子 key → 编码；字典在一次运行内只取一次（v1 不按 `version` 失效，改字典后重启应用生效）。
-  - `<QwUpload v-model="files" [biz-tag] [limit] [max-size]>`：`v-model` 为已存对象（`FsObjectVo[]`，提交时取 `id`）；先在本地检查个数与大小，再逐个经 `uni.uploadFile` 走后端 `POST /api/storage/objects`（`bizTag` 在文件之前，默认私有 `attachment`；公开标签只收图片，因此只让选图片），失败由请求层提示、列表不变；移除只从列表去掉。选文件：微信小程序从聊天记录选（`chooseMessageFile`），H5 用浏览器文件框，App 只能选图片（无原生插件时 uni 没有通用文件选择）。v1 只显示文件名与大小，不打开文件。
+  - `<QwUpload v-model="files" [biz-tag] [limit] [max-size]>`：`v-model` 为已存对象（`FsObjectVo[]`，提交时取 `id`）；先在本地检查个数与大小，再逐个经 `uni.uploadFile` 走后端 `POST /api/storage/objects`（`bizTag` 在文件之前，默认私有 `attachment`；公开标签只收图片，因此只让选图片），失败由请求层提示、列表不变；移除只从列表去掉。选文件：微信小程序从聊天记录选（`chooseMessageFile`），H5 用浏览器文件框，App 只能选图片（无原生插件时 uni 没有通用文件选择；聊天另有 App 的任意文件选择，见[聊天](#聊天)）。v1 只显示文件名与大小，不打开文件。
 
 ## 办公审批
 
@@ -57,6 +57,37 @@ H5 调试服务器与预览服务器（锁定的 Vite 5.2）在 `mobile/vite.con
 附件元信息、内容与当前单据都须验证归属和授权。文件经鉴权的固定同源 `content` 接口打开，上限20MiB，不携带系统令牌追随对象存储外链。H5使用自有Blob URL并限制数量与生命周期；App和小程序使用各自文件打开能力。读取决策信息或附件失败时不提供盲批；409关闭动作层并刷新，不重放写入。
 
 工作台与TabBar计数先等待真实身份信息再按套餐请求；并发身份读取共用当前会话请求，旧账号的身份和计数结果不回填新会话。仅有OA功能的账号不会因冷启动未知身份而先请求workflow计数。
+
+## 聊天
+
+服务端开关 `APP_IM` 打开时，App 与 H5 的消息 tab 顶部多一组「聊天 / 通知」切换（`pages/message`），聊天是会话列表，tab 角标是站内信与聊天未读之和；`GET /api/im/options` 回 404（开关关闭、套餐不含聊天）或 403 时只显示通知。会话、通讯录、群设置与表情管理在分包 `pages-im/{room,directory,group,stickers}`，内置表情图片在该分包自己的 `static` 里。`pages.json` 对所有平台登记这个分包；**微信小程序没有聊天**：客户端在小程序上不探测、不显示入口（分包与图片仍在产物里）。功能、参数与上限见[员工即时通讯](im.md)。
+
+- **客户端**（`core/im/client.ts`）：接共享引擎 `@qiwu/shared/im-client`。H5 用共享的 IndexedDB 缓存与主标签页选举；App 用 `core/im/cache-sqlite.ts`（`plus.sqlite`，库文件在 `_doc/`，SQL 由纯函数生成：整数只收安全整数、字符串单引号加倍转义、拒绝 NUL，表名列名都是常量，单测用 Node 自带的 `node:sqlite` 真跑）与 `core/im/blob-app.ts`（附件经 `uni.downloadFile` 带登录令牌走同源 `proxy=1` 下载，`uni.saveFile` 保存，路径记在 SQLite）。`App.vue` 的 `onShow` / `onHide` 驱动全量同步与暂停，socket 断开时的 60 秒轮询顺带做一次全量同步。实时连接断线后重连时补一次全量同步（首次连上不算）。
+- **H5 按单标签页使用**：多开标签页时只有选出的主标签页同步与发送，其它标签页不会自动刷新（PC web 的标签页之间会互相通知，H5 没有做）。浏览器存储空间不足时改用临时的内存缓存并提示一次，关闭页面后需要重新同步。
+- **清除与锁定**：主动退出、被踢（含 `app_replaced`）、换账号登录时删除本机聊天缓存（App 同时删 SQLite 库与附件文件）；刷新令牌被拒只锁定，回到登录页，同一账号重新登录后直接复用。
+- **发送**：文字、emoji、内置与自定义表情、图片（现有的 `chooseUploadFiles`）、文件（`core/im/file-pick.ts` 的 `chooseImFile`：H5 用浏览器文件框）。App 选任意文件用 `core/im/file-picker-app.ts`（整文件只在 App 编译）：安卓用 Native.js 发 `Intent.ACTION_OPEN_DOCUMENT`，iOS 用 `UIDocumentPickerViewController`，不需要插件和自定义基座；先查显示名与大小，按 `/options` 的扩展名与大小上限检查通过才复制进 `_doc/im-outbox/`，发送成功或失败过期后删除副本，取消选择不留文件（纯函数在 `core/im/file-pick.ts`，单测 `mobile-im-file-picker.spec.ts`）。
+- **打开文件**：App 下载后用 `uni.openDocument` 打开；超过 20MiB 的文件提示"请在电脑端打开"（同源输出的上限，登录令牌不发给对象存储）。H5 存为本地文件。
+- **SQLite 模块与重新打包**：`manifest.json` 的 `app-plus.modules` 加了 `"SQLite": {}`。这是原生层变化：升级到带聊天的版本时必须重新打整包（云打包，或真机调试用的自定义基座），只发 wgt 的旧安装包没有这个模块，之后的 wgt 要把「最低原生版本」设为这个整包的版本。
+- **测试**：单测 `mobile-im-sqlite.spec.ts`、`mobile-im-client.spec.ts`、`mobile-im-file-picker.spec.ts`；Playwright `mobile-im-chat.spec.ts`（H5：会话列表与角标、私聊收发、重新加载后从缓存显示且全量同步 304、退出后清除 IndexedDB）。SQLite、选文件、打开文件需要真机核对。
+
+### 语音和前台通话
+
+语音消息使用 WAV；H5 复用共享浏览器录音端口，App 使用全局一套 RecorderManager 监听。App 先等待麦克风授权，再复查账号和录音代次，取消、离页或退出后的授权结果不会开启采集。录音文件随发件箱保存，发送确认、过期与丢弃时清理。语音和通话互斥占用本端麦克风。
+
+App 通话接入 `uni_modules/qw-livekit`：业务授权与票据只在 App-service 的控制器内，专用 `.nvue` 通话页通过带页面/通话/身份代次的全局事件收取安全快照并发出操作，不接收 token。`<qw-livekit>` 原生视频组件只按连接编号与参与者 identity 绑定画面；H5 采用官方 JS SDK 的媒体元素。登录前后台、离页、锁定、清库和退出都会退役旧操作、停止采集与播放，回前台不自动开麦或接听。
+
+`manifest.json` 已登记 `Record`、Android 麦克风/摄像头权限及 iOS 用途说明，插件原生配置分别固定 Swift SDK 2.19.0 与 Android SDK 2.30.0。必须重新编译原生整包或自定义基座，旧包仅更新 wgt 无法增加这些能力。没有执行云打包或安装到目标真机；原生依赖和分发许可状态见 [插件说明](../mobile/src/uni_modules/qw-livekit/README.md)。依赖配置存在不代表 Android 传递分发许可已经放行。
+
+原生验证入口为 `pnpm mobile:native:ios` / `pnpm mobile:native:android`，分别在本次新建的 Simulator/AVD 跑真实平台测试并清理。UTS API 与兼容视频组件还要用匹配 HBuilderX 工具链真实编译/链接；H5 单测与构建不能替代原生证据。部署与跨网络清单见 [LiveKit](livekit.md)。
+
+## App 长期会话与单 App 会话
+
+App 要长期保持登录，聊天才能像手机应用一样随时可用；它们是登录本身的功能，与 `APP_IM` 无关。
+
+- **端类型**：登录体的 `mobileKind` 按构建平台写死（App → `app`，H5 → `h5`），微信小程序的会话由服务端定为小程序。它是第一方客户端的声明，不是设备防伪，只决定期限，不扩大任何权限；只有 `app` 走下面的规则，H5 仍是 7 天，小程序仍是微信静默登录，web 与 OAuth 不变。旧版 App 不带这个字段，按原来的 7 天。
+- **期限**：系统参数 `auth.mobile.session_days`（只有 root 能改）。0（默认）为不过期：每次刷新把期限顺延到 400 天之后，所以只有连续 400 天没打开才要重新登录；1–36500 为自登录起的天数，调小后已登录的会话按新值与原登录时间到期（刷新时与定时清扫都会结束它）。客户端不按 7 天或刷新令牌的有效期自己判断过期，刷新被拒才回登录页。
+- **单 App 会话**：系统参数 `auth.app.single_session`（默认 `true`，只有 root 能改）。同一账号在另一台设备登录 App 后，旧设备的 App 会话被结束，收到提示"账号已在另一台设备登录"并清除本机聊天缓存；H5、小程序、web 会话不受影响。两台同时登录时后到的一台得到 429，稍后重试即可，最终只留一个 App 会话。关闭后允许多个 App 会话，重新打开后下一次 App 登录只保留一个。
+- 改密（保留当前设备）、管理员重置密码、停用、删除、强退、租户停用或到期等现有的结束方式同样作用于 App 会话。原理见[设计说明](design-notes.md#auth-sessions)。
 
 ## 多租户（租户编码）
 
@@ -173,7 +204,7 @@ H5 调试服务器与预览服务器（锁定的 Vite 5.2）在 `mobile/vite.con
 
 ### App 权限（安卓）
 
-`manifest.json` 的 `app-plus.distribute.android.permissions` 只列代码用到的权限：`ACCESS_NETWORK_STATE`、`ACCESS_WIFI_STATE`（网络状态）与 `CAMERA` + `android.hardware.camera`（资料页换头像，`uni.chooseImage` 可拍照）。DCloud 模板默认带的读手机状态、账户、日志、系统设置、挂载文件系统、改网络/WLAN、闪光灯、振动、唤醒锁等已删除，`mobile-manifest.spec.ts` 校验列表。新功能要用某项原生能力时才加对应权限，同一提交里更新该测试，并在隐私政策（[发布清单](#发布清单) 第 3 节）的权限说明里写明用途与申请时机。
+`manifest.json` 的 `app-plus.distribute.android.permissions` 只列代码用到的权限：`ACCESS_NETWORK_STATE`、`ACCESS_WIFI_STATE`（网络状态）与 `CAMERA` + `android.hardware.camera`（资料页换头像及视频通话）与 `RECORD_AUDIO`（语音消息和前台通话，使用时申请）。DCloud 模板默认带的读手机状态、账户、日志、系统设置、挂载文件系统、改网络/WLAN、闪光灯、振动、唤醒锁等已删除，`mobile-manifest.spec.ts` 校验列表。新功能要用某项原生能力时才加对应权限，同一提交里更新该测试，并在隐私政策（[发布清单](#发布清单) 第 3 节）的权限说明里写明用途与申请时机。
 
 ## 发布清单
 
@@ -310,6 +341,8 @@ H5 调试服务器与预览服务器（锁定的 Vite 5.2）在 `mobile/vite.con
   3. 强制 wgt：提示里没有"稍后"；下载失败（例如断网）后再次弹出。
   4. 整包：安卓打开浏览器下载，iOS 打开 App Store 页面；强制更新时，从商店或浏览器返回 App 后再次弹出。
   5. 审核版本：`app.update.review_version` 等于当前原生版本时，收不到 wgt。
+- [ ] 聊天（服务端 `APP_IM=true`，安卓 App 与 iPhone App 各一遍）：收发文字、表情、图片；选一个 pdf、docx、zip 发送，再试超限、不支持的类型与取消选择，发送后 `_doc/im-outbox/` 里的副本已删除；打开收到的文件，超过 20MiB 的提示到电脑端；退出登录后再登录别的账号看不到上一位的聊天。
+- [ ] App 长期会话：登录超过 7 天仍在线；另一台设备登录同一账号的 App 后，旧设备回到登录页、提示已在另一台设备登录，聊天缓存已清除。
 - [ ] 小程序包体积：发布构建的 mp-size 输出里主包 ≤ 2 MB（超限时构建直接失败）。
 
 ### 5. 发布记录
@@ -338,9 +371,10 @@ H5 调试服务器与预览服务器（锁定的 Vite 5.2）在 `mobile/vite.con
 2. 根 `package.json`：删除全部 `"mobile:*"` 脚本。
 3. `.oxlintrc.json` 的 `ignorePatterns` 删 `"mobile/**"`；`.prettierignore` 删 `mobile/` 及其注释行；`eslint.config.mjs` 删 `'mobile/**',`。
 4. `scripts/ci-local.mjs`：删 `const MOBILE = …`、`mobileInstall` / `mobileE2e` 两个常量及它们在 `before`、`lanes`、`PARTS['more-e2e']` 中的引用（`more-e2e` 之后只剩多租户 Playwright），再删其余 4 个内联的 `mobile …` 步骤；`scripts/i18n-check.mjs`、`scripts/originality-check.mjs`、`scripts/license-check.mjs`：删 `const MOBILE = …` 及用到 `MOBILE` / `mobile` 的几行（都在"不存在则跳过"的分支里）。
-5. 代码生成器：`apps/server/src/modules/platform/codegen/workspace.ts` 的 `export const MOBILE = …` 和 `scripts/gen-check-golden.mjs` 的 `const MOBILE = …` 是 mobile-refs 白名单里的两行，其余路径都由这个常量拼出；模板目录 `apps/server/codegen-templates/uni/` 只用来渲染移动端页面。`mobile/` 不存在时，`hasMobile()` 为假：生成器不渲染、不写、也不打包移动端页面，`demo_*.cg.ts` 里的 `withMobile: true` 不产出任何文件，`gen:check-golden` 也不比对移动端文件，所以这几处都可以留着。想删的话：删掉 `codegen-templates/uni/`，再把 `crud.ts` 里的移动端目标、`withMobile` 选项和编辑页开关一并去掉（不建议，留着无害）。
-6. 可选：删除 `scripts/arch/mobile-refs.mjs` 与 `apps/server/test/arch/arch-mobile-refs.spec.ts`。
-7. macOS / POSIX 执行 `pnpm i --frozen-lockfile && pnpm --filter @qiwu/shared build && pnpm verify`；Windows 用下列顺序检查。全绿，根 `pnpm-lock.yaml` 不变（移动端从未进入根锁定文件）。删除演练仅在可丢弃副本进行。
+5. `scripts/im-stickers.mjs`（内置聊天表情的生成脚本）：删 `const MOBILE = …` 及写入移动端表情目录的几行；`mobile/` 不存在时它只写 web 一份。
+6. 代码生成器：`apps/server/src/modules/platform/codegen/workspace.ts` 的 `export const MOBILE = …` 和 `scripts/gen-check-golden.mjs` 的 `const MOBILE = …` 是 mobile-refs 白名单里的两行，其余路径都由这个常量拼出；模板目录 `apps/server/codegen-templates/uni/` 只用来渲染移动端页面。`mobile/` 不存在时，`hasMobile()` 为假：生成器不渲染、不写、也不打包移动端页面，`demo_*.cg.ts` 里的 `withMobile: true` 不产出任何文件，`gen:check-golden` 也不比对移动端文件，所以这几处都可以留着。想删的话：删掉 `codegen-templates/uni/`，再把 `crud.ts` 里的移动端目标、`withMobile` 选项和编辑页开关一并去掉（不建议，留着无害）。
+7. 可选：删除 `scripts/arch/mobile-refs.mjs` 与 `apps/server/test/arch/arch-mobile-refs.spec.ts`。
+8. macOS / POSIX 执行 `pnpm i --frozen-lockfile && pnpm --filter @qiwu/shared build && pnpm verify`；Windows 用下列顺序检查。全绿，根 `pnpm-lock.yaml` 不变（移动端从未进入根锁定文件）。删除演练仅在可丢弃副本进行。
 
 ```powershell
 pnpm.cmd i --frozen-lockfile

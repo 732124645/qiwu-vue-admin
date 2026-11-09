@@ -52,6 +52,7 @@ describe('cache-namespaces', () => {
         'auth:permver:',
         'auth:credver:',
         'auth:acting-leave:',
+        'auth:app-login:',
         'auth:fail:',
         'captcha:',
         'sms:limit:',

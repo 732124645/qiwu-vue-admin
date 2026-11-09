@@ -15,7 +15,8 @@
   "error": {
     "network": "网络异常，请稍后重试",
     "kicked": "你已被管理员强制下线，请重新登录",
-    "tenantUnavailable": "所在租户已停用或已到期，请联系管理员"
+    "tenantUnavailable": "所在租户已停用或已到期，请联系管理员",
+    "appReplaced": "账号已在另一台设备登录，请重新登录"
   },
   "tab": {
     "home": "工作台",

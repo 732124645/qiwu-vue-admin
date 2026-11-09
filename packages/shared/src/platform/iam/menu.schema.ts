@@ -64,6 +64,7 @@ export const BUILTIN_MENU_GROUPS: readonly string[] = [
   'wf-admin',
   'biz',
   'wxoa',
+  'im',
   'system',
   'messaging',
   'audit',

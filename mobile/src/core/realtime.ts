@@ -23,6 +23,8 @@ import {
   sessionEnd,
   setSession,
 } from './request'
+import { imEntryHint, imPoll, imRoomHint, imSync, imWipe } from './im/client'
+import { imCallHint } from './im/calls'
 import { useCountsStore } from './stores/counts'
 
 /** engine.io's websocket transport over uni.connectSocket: it needs only a WebSocket-like object. */
@@ -49,9 +51,14 @@ let refreshed = false
 /** Whether the socket is connected: pushes arrive, the counts' poll rests. */
 export const realtimeUp = ref(false)
 
-/** The tab pages' fallback poll: the counts reload only while no socket brings the changes. */
+/**
+ * The tab pages' fallback poll: the counts reload only while no socket brings the changes; chat runs its full
+ * sync on the same beat (a lost hint is made up there).
+ */
 export function pollCounts() {
-  if (!realtimeUp.value) useCountsStore().load()
+  if (realtimeUp.value) return
+  useCountsStore().load()
+  imPoll()
 }
 
 /**
@@ -60,6 +67,9 @@ export function pollCounts() {
  */
 function kicked({ reason }: RealtimePayloads['session:kicked']) {
   stopRealtime()
+  // a kick (another device took the App session too) wipes the chat cache; started before the session ends,
+  // so the end is not taken for an expiry (which only locks it)
+  void imWipe()
   setSession(null)
   const text = reason && SESSION_END_TEXT[reason]
   sessionEnd.value = reason && text ? reason : null
@@ -72,6 +82,10 @@ function kicked({ reason }: RealtimePayloads['session:kicked']) {
 function onMessage(msg: RealtimeMessage) {
   if (msg.type === RT.wfTask || msg.type === RT.notifyNew) useCountsStore().load()
   else if (msg.type === RT.sessionKicked) kicked(msg.payload)
+  // chat hints carry ids only: the engine patches the local cache or fetches just that room
+  else if (msg.type === RT.imEntry) imEntryHint(msg.payload)
+  else if (msg.type === RT.imRoom) imRoomHint(msg.payload)
+  else if (msg.type === RT.imCall) imCallHint(msg.payload)
 }
 
 /**
@@ -85,14 +99,22 @@ export function startRealtime(): void {
     auth: (cb) => cb({ token: currentAccessToken(), lang: locale() } satisfies RealtimeAuth),
   })
   s.on(REALTIME_EVENT, onMessage)
+  // 这个连接建立后真的断过线才算重连：首次连上不触发聊天全量同步（冷启动与回前台各自同步）
+  let dropped = false
   s.on('connect', () => {
     refreshed = false
     realtimeUp.value = true
     // catch up on what changed while away
     useCountsStore().load()
+    if (dropped) {
+      dropped = false
+      imSync('reconnect')
+    }
   })
   s.on('disconnect', () => {
-    if (s === socket) realtimeUp.value = false
+    if (s !== socket) return
+    realtimeUp.value = false
+    dropped = true
   })
   // refused (Socket.IO does not retry that by itself): no or an expired access token (the first connect after
   // launch has none: it lives in memory). One refresh, then connect again; refused again, or a foreign origin:

@@ -49,6 +49,7 @@ import { seedCodegen } from './codegen/codegen.seed.js'
 import { seedCustomerSamples } from './demo/customer-sample.seed.js'
 import { seedDemo } from './demo/demo.seed.js'
 import { seedIam } from './iam/iam.seed.js'
+import { seedIm } from './im/im.seed.js'
 import { seedTenant } from './iam/tenant.seed.js'
 import { seedTenantDemo } from './iam/tenant-demo.seed.js'
 import { seedTenantMenus } from './iam/tenant-menus.seed.js'
@@ -104,6 +105,8 @@ const SEEDS: Record<string, Seed[]> = {
   mcp: [seedMcp],
   // the in-app agent's top-level group with its pages
   agent: [seedAgent, seedResearchSkill],
+  // the staff chat's params, purge task and the hidden group tenant packages grant chat with
+  im: [seedIm],
   scheduler: [seedScheduler, seedTask, seedRun],
   // before demo: its menu group holds the demo group
   codegen: [seedCodegen],

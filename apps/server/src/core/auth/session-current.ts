@@ -24,6 +24,29 @@ export class SessionCurrent {
   ) {}
 
   /**
+   * 只确认事务外已认证快照的身份、作用域、密码门和权限版本未变；不重载用户、不写会话、不触发吊销钩子。
+   * 因而可在业务行锁内使用，完整 current 仍必须在取得锁之前和返回敏感凭据之前执行。
+   */
+  async unchanged(expected: Session): Promise<boolean> {
+    const live = await this.tokens.readLiveSnapshot(expected.sid)
+    if (
+      !live ||
+      live.userId !== expected.userId ||
+      live.clientId !== expected.clientId ||
+      live.tenantId !== expected.tenantId ||
+      live.actingTenantId !== expected.actingTenantId ||
+      live.permVer !== expected.permVer ||
+      live.flags.mustChangePassword !== expected.flags.mustChangePassword ||
+      live.flags.passwordExpired !== expected.flags.passwordExpired
+    )
+      return false
+    return (
+      expected.userId === null ||
+      (await this.permVersion.current(expected.userId)) === expected.permVer
+    )
+  }
+
+  /**
    * The session with the user's current roles, perms and tenant end, reloaded when permVer moved or the
    * session predates the `root` flag or its tenant (both read from the user row then; an older session
    * never counts as the default tenant's unchecked). The absolute end never moves past the tenant's.

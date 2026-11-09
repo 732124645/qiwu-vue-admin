@@ -40,6 +40,8 @@ const credentials = [
   'SEED_ADMIN_PASSWORD',
   'WX_MP_APPID',
   'WX_MP_SECRET',
+  'IM_LIVEKIT_API_KEY',
+  'IM_LIVEKIT_API_SECRET',
 ]
 // template dev 13, e2e 14, test 15, mobile e2e 9, multi-tenancy e2e 1; an optional private file adds more
 const lanesFile = join(root, 'scripts/test-lanes.private.json')
@@ -460,6 +462,12 @@ async function selfTest() {
       .concat(['-1', '1.5', '01', '1e2', '', '0\nX=1', '9007199254740992']))
       await rejectWithoutWrites({ ...opts, 'redis-db': redis })
     await rejectWithoutWrites({ name: 'demo' })
+    for (const key of ['IM_LIVEKIT_API_KEY', 'IM_LIVEKIT_API_SECRET']) {
+      await fixture()
+      await writeFile(join(base, files[0]), `DB_NAME=example_dev\n${key}=example\n`)
+      await rejectWithoutWrites(opts, env)
+    }
+    await fixture()
     for (const value of [
       '',
       'short',

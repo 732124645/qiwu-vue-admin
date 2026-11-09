@@ -130,6 +130,10 @@ async function designer(page) {
 /** 修改真实文案文件，由开发服务的操作系统监听触发浏览器热更新。 */
 async function localeHmr(page) {
   const keys = hmrFiles.map(([, namespace]) => `${namespace}.value`)
+  // 整页刷新可能晚于最后一次断言才到：全程记录主框架导航，结束前再静候一会儿。
+  let reloads = 0
+  const onNavigated = (frame) => frame === page.mainFrame() && reloads++
+  page.on('framenavigated', onNavigated)
   await page.evaluate(
     async ([smoke, keys]) => {
       const m = await import(smoke)
@@ -188,6 +192,9 @@ async function localeHmr(page) {
     undefined,
     { timeout: 10_000 },
   )
+  await page.waitForTimeout(1500)
+  page.off('framenavigated', onNavigated)
+  if (reloads) throw new Error(`locale hot update reloaded the page ${reloads} time(s)`)
 }
 
 async function main() {

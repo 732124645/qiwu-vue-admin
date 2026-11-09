@@ -166,5 +166,27 @@
     "reasoning_off_rejected": "模型服务不接受“关闭思考”（reasoning_effort: none）。请换一个思考强度，或请平台管理员把该模型的默认思考改为“提供方默认”或改用 vLLM 开关",
     "provider_key_rejected": "模型服务拒绝了这个密钥，请检查密钥与接口地址",
     "thread_stale": "此会话已有新的消息，请刷新后再操作"
+  },
+  "im": {
+    "staff_only": "只有内部员工可以使用聊天",
+    "room_not_found": "会话不存在或你已不在会话中",
+    "user_unavailable": "该用户不可聊天（不是本单位启用的员工）",
+    "role_required": "你在群里的角色不能执行此操作",
+    "member_limit": "群成员不能超过 {max} 人",
+    "owner_transfer_required": "群里还有其他成员，请先转让群主再退群",
+    "room_closed": "群已解散，不能执行此操作",
+    "client_id_conflict": "消息编号已被其他内容使用",
+    "rev_conflict": "消息已被修改，请刷新后重试",
+    "recall_denied": "这条消息不能撤回",
+    "edit_denied": "这条消息不能编辑",
+    "entry_not_found": "消息不存在或已不可见",
+    "sticker_limit": "自定义表情最多 {max} 个，且图片不能过大",
+    "voice_invalid": "语音文件无效，请使用支持的录音格式重新录制",
+    "voice_too_long": "语音消息超过时长上限",
+    "call_not_found": "通话不存在或你无权参与",
+    "call_conflict": "该会话已有尚未结束的通话",
+    "call_state": "通话状态已变化，请刷新后重试",
+    "call_session": "通话已由另一设备参与，请在原设备操作",
+    "call_unavailable": "音视频通话未配置或暂时不可用"
   }
 }

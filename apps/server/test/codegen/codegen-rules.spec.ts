@@ -359,7 +359,7 @@ describe('rule table (one row each)', () => {
   })
 })
 
-it('framework and WeChat Official Account tables are excluded from import', () => {
+it('framework, WeChat Official Account and chat tables are excluded from import', () => {
   for (const t of [
     'meta_migrations',
     'test_scoped_note',
@@ -368,9 +368,20 @@ it('framework and WeChat Official Account tables are excluded from import', () =
     'wxoa_account',
     'wxoa_message',
     'wxoa_qrcode',
+    'im_room',
+    'im_entry',
   ])
     expect(EXCLUDED_TABLE.test(t)).toBe(true)
-  for (const t of ['iam_position', 'demo_book', 'metadata', 'testimony', 'cgx', 'wxoax', 'wx_mp'])
+  for (const t of [
+    'iam_position',
+    'demo_book',
+    'metadata',
+    'testimony',
+    'cgx',
+    'wxoax',
+    'wx_mp',
+    'image_gallery',
+  ])
     expect(EXCLUDED_TABLE.test(t)).toBe(false)
 })
 

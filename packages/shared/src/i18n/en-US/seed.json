@@ -29,7 +29,8 @@
     "wfTaskRemind": "Send overdue to-do reminders",
     "wxoaMessagePurge": "Purge expired Official Account messages",
     "wxoaFanSync": "Sync Official Account fans",
-    "clockRetention": "Legacy attendance retention (retired)"
+    "clockRetention": "Legacy attendance retention (retired)",
+    "imPurge": "Purge expired chat history and unsent uploads"
   },
   "inboxTemplate": {
     "schedulerJobTimeout": "Job timeout alert"

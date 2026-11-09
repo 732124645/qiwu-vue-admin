@@ -10,8 +10,8 @@ const HOST = /^(?:[a-z0-9-]+\.)*[a-z0-9-]+$|^\[[0-9a-f:.]+\]$/
 const LOCAL = new Set(['localhost', '127.0.0.1', '[::1]'])
 
 /**
- * The origins in `raw` (`CSP_CONNECT_SRC`), each an https origin (`https://host[:port]`, a trailing `/`
- * tolerated) or, for development, `http://localhost|127.0.0.1|[::1][:port]`. Anything else (paths,
+ * The origins in `raw` (`CSP_CONNECT_SRC`), each an HTTPS/WSS origin (`https://host[:port]`, a trailing `/`
+ * tolerated) or, for development, `http://localhost|127.0.0.1|[::1][:port]` (or local `ws:`). Anything else (paths,
  * wildcards, keywords, other schemes, a `;`) throws: the build stops instead of shipping a wider policy.
  */
 export function connectOrigins(raw = ''): string[] {
@@ -26,9 +26,14 @@ export function connectOrigins(raw = ''): string[] {
         // reported below
       }
       const scheme =
-        url?.protocol === 'https:' || (url?.protocol === 'http:' && LOCAL.has(url.hostname))
+        !!url &&
+        (url.protocol === 'https:' ||
+          url.protocol === 'wss:' ||
+          (['http:', 'ws:'].includes(url.protocol) && LOCAL.has(url.hostname)))
       if (!url || !scheme || !HOST.test(url.hostname) || url.origin !== entry.replace(/\/$/, ''))
-        throw new Error(`CSP_CONNECT_SRC: '${entry}' is not an https origin (https://host[:port])`)
+        throw new Error(
+          'CSP_CONNECT_SRC must contain bare HTTPS/WSS origins or local development HTTP/WS origins',
+        )
       return url.origin
     })
 }
@@ -41,6 +46,7 @@ export const spaCsp = (connect: readonly string[] = []): string =>
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob: https:",
     ["connect-src 'self'", ...connect].join(' '),
+    "media-src 'self' blob:",
     "frame-src 'self' https:",
     "object-src 'none'",
     "base-uri 'self'",

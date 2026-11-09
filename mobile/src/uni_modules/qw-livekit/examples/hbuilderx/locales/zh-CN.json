@@ -1,0 +1,20 @@
+{
+  "hint": "开发者示例，需要服务端新签发的票据。麦克风与摄像头初始关闭。",
+  "connect": "连接",
+  "disconnect": "断开 / 取消",
+  "retryDisconnect": "重试断开",
+  "microphone": "麦克风",
+  "camera": "摄像头",
+  "switchCamera": "切换镜头",
+  "speaker": "优先使用内置扬声器",
+  "error": "操作失败",
+  "unconfigured": "请先把 requestConnection() 接到自己的已认证业务服务。",
+  "requestFailed": "无法申请或开始连接，请检查业务服务与原生构建。",
+  "states": {
+    "idle": "未连接",
+    "connecting": "连接中",
+    "connected": "已连接",
+    "reconnecting": "重连中",
+    "disconnecting": "断开中"
+  }
+}

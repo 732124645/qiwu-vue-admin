@@ -1,0 +1,244 @@
+{
+  "title": "Chat",
+  "entry": "Chat",
+  "entryUnread": "Chat, {count} unread",
+  "quota": "Browser storage is full: chat uses a temporary cache for now and syncs again after the page closes",
+  "disabled": "Chat is not enabled",
+  "locked": "Your session expired. Sign in again to continue chatting",
+  "offline": "You are offline: showing the local history",
+  "someone": "Someone",
+  "listSeparator": ", ",
+  "action": {
+    "confirm": "OK",
+    "cancel": "Cancel"
+  },
+  "tabs": {
+    "chats": "Chats",
+    "directory": "People"
+  },
+  "rooms": {
+    "label": "Conversations",
+    "empty": "No conversations yet. Find a colleague under People",
+    "direct": "Direct chat",
+    "group": "Group",
+    "closed": "Closed",
+    "itemUnread": "{title}, {count} unread"
+  },
+  "preview": {
+    "image": "[Image]",
+    "file": "[File]",
+    "sticker": "[Sticker]",
+    "recalled": "Message recalled",
+    "event": "[System message]",
+    "voice": "[Voice]"
+  },
+  "pane": {
+    "placeholder": "Pick a conversation to start chatting",
+    "label": "Messages",
+    "loadOlder": "Show earlier messages",
+    "noMore": "No earlier messages"
+  },
+  "message": {
+    "edited": "edited",
+    "recalled": "{name} recalled a message",
+    "recalledMine": "You recalled a message",
+    "actions": "Message actions",
+    "copy": "Copy",
+    "edit": "Edit",
+    "editTitle": "Edit message",
+    "editInvalid": "The text may be neither empty nor contain control characters",
+    "recall": "Recall",
+    "recallConfirm": "Recall this message?",
+    "addSticker": "Add to stickers",
+    "stickerAdded": "Added to my stickers",
+    "download": "Download",
+    "preview": "View the original image",
+    "loadFailed": "The file could not be loaded",
+    "pending": "Sending…",
+    "uploading": "Uploading {percent}%",
+    "failed": "Not sent",
+    "expired": "Not sent within 24 hours",
+    "retry": "Resend",
+    "discard": "Delete"
+  },
+  "composer": {
+    "label": "Message",
+    "placeholder": "Type a message. Enter sends, Shift+Enter starts a new line",
+    "send": "Send",
+    "emoji": "Emoji",
+    "sticker": "Stickers",
+    "image": "Send an image",
+    "file": "Send a file",
+    "builtin": "Built-in",
+    "mine": "Mine",
+    "mineItem": "My sticker {id}",
+    "mineEmpty": "No stickers of your own yet: upload one, or pick \"Add to stickers\" on an image in a chat",
+    "uploadSticker": "Upload a sticker",
+    "removeSticker": "Delete this sticker",
+    "stickerToFront": "Move to front",
+    "badType": "This file type is not supported",
+    "tooLarge": "Files may be at most {mb} MB",
+    "tooLong": "At most {max} characters",
+    "closed": "This group was closed: no more messages can be sent"
+  },
+  "directory": {
+    "label": "Colleagues",
+    "search": "Search by name",
+    "dept": "Department",
+    "allDepts": "All departments",
+    "createGroup": "New group",
+    "chatWith": "Chat with {name}",
+    "empty": "No colleague matches"
+  },
+  "group": {
+    "title": "Group settings",
+    "name": "Group name",
+    "rename": "Rename",
+    "add": "Add members",
+    "pickMembers": "Pick members",
+    "create": "Create",
+    "members": "Members",
+    "memberCount": "{count} members",
+    "disabledUser": "Disabled",
+    "setModerator": "Make moderator",
+    "unsetModerator": "Remove moderator",
+    "transfer": "Transfer ownership",
+    "remove": "Remove",
+    "close": "Close the group",
+    "leave": "Leave the group",
+    "confirmRemove": "Remove {name} from the group?",
+    "confirmTransfer": "Transfer the ownership to {name}?",
+    "confirmClose": "Nobody can send messages once the group is closed. Close it?",
+    "confirmLeave": "Leave this group?",
+    "role": {
+      "owner": "Owner",
+      "moderator": "Moderator",
+      "participant": "Member"
+    }
+  },
+  "event": {
+    "room": {
+      "create": "{actor} created the group \"{label}\"",
+      "rename": "{actor} renamed the group to \"{label}\"",
+      "close": "{actor} closed the group"
+    },
+    "member": {
+      "add": "{actor} added {users}",
+      "remove": "{actor} removed {users}",
+      "leave": "{actor} left the group"
+    },
+    "role": {
+      "change": "{actor} made {users} {role}"
+    },
+    "owner": {
+      "transfer": "{actor} transferred the ownership to {users}"
+    },
+    "entry": {
+      "edit": "{actor} edited a message",
+      "recall": "{actor} recalled a message"
+    },
+    "call": {
+      "ended": "Call ended"
+    }
+  },
+  "sticker": {
+    "smile": "Smile",
+    "laugh": "Laugh",
+    "grin": "Grin",
+    "wink": "Wink",
+    "blush": "Blush",
+    "heart": "Heart",
+    "cool": "Cool",
+    "think": "Thinking",
+    "wow": "Wow",
+    "sad": "Sad",
+    "cry": "Cry",
+    "angry": "Angry",
+    "sleepy": "Sleepy",
+    "sweat": "Sweat",
+    "facepalm": "Facepalm",
+    "shrug": "Shrug",
+    "thumbsup": "Thumbs up",
+    "clap": "Clap",
+    "ok": "OK",
+    "thanks": "Thanks",
+    "cheers": "Cheers",
+    "fighting": "Go for it",
+    "coffee": "Coffee",
+    "party": "Party"
+  },
+  "emoji": {
+    "smileys": "Smileys",
+    "gestures": "Gestures",
+    "symbols": "Symbols",
+    "objects": "Objects"
+  },
+  "voice": {
+    "record": "Record voice",
+    "finish": "Finish and send ({seconds}s)",
+    "cancel": "Cancel recording",
+    "play": "Play voice ({seconds}s)",
+    "stop": "Stop playback",
+    "failed": "Could not record. Check microphone permission",
+    "playFailed": "Voice could not be played",
+    "tooLarge": "Voice file exceeds the limit",
+    "saveFailed": "Voice could not be saved to the outbox. Try again"
+  },
+  "calls": {
+    "title": "Employee call",
+    "audio": "Audio call",
+    "video": "Video call",
+    "mode": {
+      "audio": "Audio",
+      "video": "Video"
+    },
+    "state": {
+      "ringing": "Waiting for an answer",
+      "active": "Call active",
+      "ending": "Ending",
+      "ended": "Ended"
+    },
+    "media": {
+      "idle": "Media disconnected",
+      "connecting": "Connecting media",
+      "connected": "Media connected",
+      "reconnecting": "Reconnecting media",
+      "disconnecting": "Releasing media"
+    },
+    "busy": "End the current connection first",
+    "otherDevice": "Answered on another device",
+    "failed": "The call action could not complete. Try again",
+    "unconfigured": "Calling is not configured",
+    "otherTab": "Use the already open primary tab for calls",
+    "locksUnavailable": "This browser cannot coordinate calls safely across tabs. Use a browser with Web Locks support",
+    "pickMembers": "Invite colleagues (up to 7)",
+    "invite": "Call",
+    "incoming": "{name} invites you to a {mode} call",
+    "accept": "Answer",
+    "decline": "Decline",
+    "join": "Rejoin",
+    "end": "End call",
+    "leave": "Leave call",
+    "mute": "Mute microphone",
+    "unmute": "Enable microphone",
+    "cameraOff": "Disable camera",
+    "cameraOn": "Enable camera",
+    "switchCamera": "Switch camera",
+    "muted": "Muted",
+    "enableAudio": "Enable audio",
+    "retryCleanup": "Retry releasing connection",
+    "summary": "{mode} call: {reason} ({seconds}s)",
+    "reason": {
+      "cancelled": "Cancelled",
+      "declined": "Declined",
+      "no_answer": "No answer",
+      "left": "Participant left",
+      "ended": "Ended",
+      "membership_changed": "Membership changed",
+      "session_ended": "Session ended",
+      "timeout": "Timed out",
+      "unavailable": "Media service unavailable",
+      "disabled": "Calling disabled"
+    }
+  }
+}

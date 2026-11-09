@@ -29,6 +29,14 @@ minimumReleaseAgeExclude: []
 
 # install scripts are opt-in (pnpm 11 strictDepBuilds); every dependency change updates this map
 allowBuilds:
+  # Media SDKs and WAV recording/parsing are prebuilt JavaScript; installation scripts are unnecessary.
+  livekit-client: false
+  livekit-server-sdk: false
+  music-metadata: false
+  recorder-core: false
+  # Portable namespace hashing in App JSCore; these libraries do not need installation scripts.
+  '@noble/hashes': false
+  '@stablelib/utf8': false
   # Markdown is parsed into safe Vue text nodes; this package has no installation build step.
   marked: false
   # install-time usage telemetry (via @nestjs/swagger -> swagger-ui-dist); never allowed to run

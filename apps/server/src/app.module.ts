@@ -7,6 +7,7 @@ import { CoreAuthModule } from './core/auth/auth.module.js'
 import { CoreCaptchaModule } from './core/captcha/captcha.module.js'
 import { agentOn } from './core/config/agent-switch.js'
 import { CoreConfigModule } from './core/config/config.module.js'
+import { imOn } from './core/config/im-switch.js'
 import { mcpOn } from './core/config/mcp-switch.js'
 import { wxoaOn } from './core/config/wxoa-switch.js'
 import { CoreContextModule } from './core/context/context.module.js'
@@ -30,6 +31,8 @@ import { AuditModule } from './modules/platform/audit/audit.module.js'
 import { CodegenModule } from './modules/platform/codegen/codegen.module.js'
 import { GeoModule } from './modules/platform/geo/geo.module.js'
 import { IamModule } from './modules/platform/iam/iam.module.js'
+import { ImModule } from './modules/platform/im/im.module.js'
+import { ImCallMaintenanceModule } from './modules/platform/im/im-call-maintenance.module.js'
 import { MessagingModule } from './modules/platform/messaging/messaging.module.js'
 import { MonitorModule } from './modules/platform/monitor/monitor.module.js'
 import { OauthModule } from './modules/platform/oauth/oauth.module.js'
@@ -87,6 +90,10 @@ import { WorkflowModule } from './modules/workflow/workflow.module.js'
     ConditionalModule.registerWhen(McpModule, (env) => mcpOn(env), { debug: false }),
     // 后台智能体只在 APP_AGENT 打开时加载：与 MCP 共用工具注册表与护栏，但 APP_MCP 关着时 /api/mcp 仍不存在
     ConditionalModule.registerWhen(AgentModule, (env) => agentOn(env), { debug: false }),
+    // 遗留通话的媒体清理不随菜单开关和实例角色停止，默认无存量时不外呼。
+    ImCallMaintenanceModule,
+    // 员工即时通讯只在 APP_IM 打开时加载：关闭时 /api/im/* 不存在，历史清理处理器不注册。
+    ConditionalModule.registerWhen(ImModule, (env) => imOn(env), { debug: false }),
     SchedulerModule,
     MessagingModule,
     AuditModule,

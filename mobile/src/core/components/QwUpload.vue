@@ -35,7 +35,7 @@ import { computed } from 'vue'
 import { isPublicBizTag, type FsObjectVo, type StorageBizTag } from '@qiwu/shared'
 import { formatSize } from '@/core/format'
 import { t } from '@/core/i18n'
-import { useUpload, type PickedFile } from '@/core/pickers'
+import { chooseUploadFiles, useUpload } from '@/core/pickers'
 
 /**
  * Attachments field (the web's FileUpload): `v-model` = the stored objects (`FsObjectVo[]`; send their
@@ -68,52 +68,10 @@ const { pending, remaining, maxSize: sizeLimit, add, remove } = useUpload({
 })
 const images = computed(() => isPublicBizTag(props.bizTag))
 
-/** The platform's picker: mp-weixin files from a chat, H5 the browser's, App the album / camera. */
-function choose(count: number): Promise<PickedFile[]> {
-  const type = images.value ? 'image' : 'all'
-  return new Promise((resolve) => {
-    const closed = () => resolve([])
-    // #ifdef MP-WEIXIN
-    uni.chooseMessageFile({
-      count,
-      type,
-      success: (r) => resolve(r.tempFiles.map((f) => ({ path: f.path, name: f.name, size: f.size }))),
-      fail: closed,
-    })
-    // #endif
-    // #ifdef H5
-    uni.chooseFile({
-      count,
-      type,
-      // uni-h5 answers File objects with the blob URL as `path`
-      success: (r) =>
-        resolve(
-          ([r.tempFiles].flat() as (File & { path: string })[]).map((f) => ({
-            path: f.path,
-            name: f.name,
-            size: f.size,
-          })),
-        ),
-      fail: closed,
-    })
-    // #endif
-    // App offers images only (uni has no general file picker there without a native plugin)
-    // #ifdef APP-PLUS
-    uni.chooseImage({
-      count,
-      sizeType: ['compressed'],
-      // compressed photos: the server's size limit (413) is enough
-      success: (r) => resolve([r.tempFilePaths].flat().map((path) => ({ path }))),
-      fail: closed,
-    })
-    // #endif
-  })
-}
-
 async function pick() {
   const room = remaining()
   if (room <= 0) return
-  void add(await choose(room))
+  void add(await chooseUploadFiles(room, images.value))
 }
 </script>
 

@@ -1,0 +1,9 @@
+{
+  "pages": [
+    {
+      "path": "pages/index",
+      "style": { "navigationBarTitleText": "Qw LiveKit" }
+    }
+  ],
+  "easycom": { "autoscan": true }
+}

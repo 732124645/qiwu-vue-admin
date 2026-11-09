@@ -2,6 +2,9 @@
 // Dict labels and param names are mode B (`*_i18n` JSON); the plain `label`/`name` column holds zh-CN.
 import {
   AGENT2_PARAMS,
+  appSessionParams,
+  DEFAULT_APP_SESSION_DAYS,
+  DEFAULT_APP_SINGLE_SESSION,
   AGENT_INSTRUCTIONS_PARAM,
   AGENT_LIMIT_PARAMS,
   AGENT_PAUSED_PARAM,
@@ -262,6 +265,25 @@ const PARAMS: ParamSeed[] = [
     key: APP_UPDATE_PARAMS.reviewVersion,
     value: '',
     nameI18n: { 'zh-CN': '审核中的原生版本', 'en-US': 'Native version in store review' },
+  },
+  {
+    // App sessions only (mobile clients declaring app); 0 or an invalid value = never expires (each refresh
+    // extends it by 400 days), 1-36500 = days from the sign-in. Root only.
+    key: appSessionParams.sessionDays,
+    value: DEFAULT_APP_SESSION_DAYS,
+    nameI18n: {
+      'zh-CN': 'App 会话天数（0 不过期，1–36500 为自登录起天数）',
+      'en-US': 'App session days (0 = never expires, 1–36500 = days from sign-in)',
+    },
+  },
+  {
+    // a new App sign-in ends the user's other App sessions; web, H5 and mini program sessions stay. Root only.
+    key: appSessionParams.singleSession,
+    value: String(DEFAULT_APP_SINGLE_SESSION),
+    nameI18n: {
+      'zh-CN': '单 App 会话（新 App 登录踢下旧 App）',
+      'en-US': 'Single App session (a new App sign-in replaces the old one)',
+    },
   },
   {
     key: signupParams.defaultRoleId,

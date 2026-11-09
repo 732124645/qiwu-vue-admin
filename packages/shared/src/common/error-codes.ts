@@ -1,7 +1,7 @@
 /**
  * Business error codes (see docs/design-notes.md#api-envelope). Every code has an HTTP status and an i18n key
  * `error.<domain>.<name>` translated by the server; clients branch on `code`, never on `msg`.
- * Ranges: A0xxx common · A1xxx auth · B1xxx iam · B2xxx settings · B3xxx messaging · B4xxx oauth · B6xxx wxoa · B7xxx mcp · B8xxx agent ·
+ * Ranges: A0xxx common · A1xxx auth · B1xxx iam · B2xxx settings · B3xxx messaging · B4xxx oauth · B5xxx im · B6xxx wxoa · B7xxx mcp · B8xxx agent ·
  * C1xxx storage · C2xxx scheduler · C3xxx codegen · D1xxx workflow · E1xxx+ biz.
  * Modules add their own codes later; codes are never renumbered.
  */
@@ -155,6 +155,40 @@ export const Err = {
   OAUTH_INSUFFICIENT_SCOPE: def('B4003', 403, 'error.oauth.insufficient_scope'),
   /** a built-in client (`console`) is read-only: change, enable/disable, reset secret, delete */
   OAUTH_CLIENT_BUILTIN: def('B4010', 422, 'error.oauth.client_builtin'),
+
+  /** 即时通讯（see docs/im.md）：只允许内部员工身份 */
+  IM_STAFF_ONLY: def('B5001', 403, 'error.im.staff_only'),
+  /** 会话不存在、调用者不是当前成员或属于别的租户（客户端据此删除本地会话） */
+  IM_ROOM_NOT_FOUND: def('B5002', 404, 'error.im.room_not_found'),
+  /** 私聊对象或新成员不是本租户启用员工、是自己；向已停用对象的私聊发送 */
+  IM_USER_UNAVAILABLE: def('B5003', 404, 'error.im.user_unavailable'),
+  /** 群角色不够（含管理员操作群主或其他管理员） */
+  IM_ROLE_REQUIRED: def('B5004', 403, 'error.im.role_required'),
+  /** 超过群人数上限；params `{ max }` */
+  IM_MEMBER_LIMIT: def('B5005', 422, 'error.im.member_limit'),
+  /** 群里还有其他成员时群主不能直接退群，先转让群主 */
+  IM_OWNER_TRANSFER_REQUIRED: def('B5006', 409, 'error.im.owner_transfer_required'),
+  /** 群已解散：不能发送、编辑、撤回或管理 */
+  IM_ROOM_CLOSED: def('B5007', 409, 'error.im.room_closed'),
+  /** 同一个 clientEntryId 已用于不同内容 */
+  IM_CLIENT_ID_CONFLICT: def('B5008', 409, 'error.im.client_id_conflict'),
+  /** 编辑时内容修订号已变 */
+  IM_REV_CONFLICT: def('B5009', 409, 'error.im.rev_conflict'),
+  /** 超过撤回时间窗、系统事件或不可撤回的类型 */
+  IM_RECALL_DENIED: def('B5010', 422, 'error.im.recall_denied'),
+  /** 不是本人的文字、超过编辑时间窗或已撤回 */
+  IM_EDIT_DENIED: def('B5011', 422, 'error.im.edit_denied'),
+  /** 消息不在本人可见区间、已被清理、已撤回后取附件或该行没有附件 */
+  IM_ENTRY_NOT_FOUND: def('B5012', 404, 'error.im.entry_not_found'),
+  /** 自定义表情达到上限或规范化后仍过大；params `{ max }` */
+  IM_STICKER_LIMIT: def('B5013', 422, 'error.im.sticker_limit'),
+  IM_VOICE_INVALID: def('B5020', 422, 'error.im.voice_invalid'),
+  IM_VOICE_TOO_LONG: def('B5021', 422, 'error.im.voice_too_long'),
+  IM_CALL_NOT_FOUND: def('B5030', 404, 'error.im.call_not_found'),
+  IM_CALL_CONFLICT: def('B5031', 409, 'error.im.call_conflict'),
+  IM_CALL_STATE: def('B5032', 409, 'error.im.call_state'),
+  IM_CALL_SESSION: def('B5033', 409, 'error.im.call_session'),
+  IM_CALL_UNAVAILABLE: def('B5034', 503, 'error.im.call_unavailable'),
 
   /** Agent access over MCP (see docs/mcp.md): a user holds at most this many live tokens; params `{ max }` */
   MCP_TOKEN_LIMIT: def('B7001', 422, 'error.mcp.token_limit'),

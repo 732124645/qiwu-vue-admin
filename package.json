@@ -32,12 +32,14 @@
     "codegen:report": "node scripts/codegen-report.mjs",
     "mobile:install": "pnpm -C mobile i --frozen-lockfile",
     "mobile:verify": "pnpm -C mobile verify",
+    "mobile:native:ios": "pnpm -C mobile native:ios",
     "mobile:test": "pnpm -C mobile test",
     "mobile:e2e": "pnpm -C mobile e2e",
     "mobile:build:h5": "pnpm -C mobile build:h5",
     "mobile:build:mp-weixin": "pnpm -C mobile build:mp-weixin",
     "mobile:build:app": "pnpm -C mobile build:app",
-    "prepare": "husky"
+    "prepare": "husky",
+    "mobile:native:android": "pnpm -C mobile native:android"
   },
   "devDependencies": {
     "@commitlint/cli": "^21.2.3",

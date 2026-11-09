@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { breakpointsElement, useBreakpoints } from '@vueuse/core'
 import { shownFrame } from '@/core/router/build-routes'
+import { useImStore } from '@/core/im/im-store'
 import { useAppStore } from '@/core/stores/app'
 import { useAuthStore } from '@/core/stores/auth'
 import { useMenuStore } from '@/core/stores/menu'
@@ -21,6 +22,8 @@ import TenantBanner from './TenantBanner.vue'
 defineOptions({ name: 'AppLayout' })
 
 const { t } = useI18n()
+const im = useImStore()
+const CallPanel = defineAsyncComponent(() => import('@/views/platform/im/components/CallPanel.vue'))
 const route = useRoute()
 const app = useAppStore()
 const auth = useAuthStore()
@@ -162,6 +165,7 @@ const frames = computed(() =>
     </div>
     <SettingsDrawer v-model="settingsOpen" />
     <AgentEntry />
+    <CallPanel v-if="im.enabled" />
   </el-watermark>
 </template>
 

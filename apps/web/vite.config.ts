@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath, URL } from 'node:url'
-import { defineConfig, defaultClientConditions } from 'vite'
+import { defineConfig, defaultClientConditions, normalizePath } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import Components from 'unplugin-vue-components/vite'
 import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
@@ -46,6 +46,12 @@ const fcDesignerCjs = [
   'js-beautify',
 ].map((d) => `@form-create/designer > ${d}`)
 
+// 由 core/i18n/messages.ts 的 glob 汇总的语言文件：web 的 src/locales 与 shared 的 src/i18n
+const LOCALE_FILE = /[\\/](?:src[\\/]locales|shared[\\/]src[\\/]i18n)[\\/].+\.json$/
+// 模块 id 一律是正斜杠路径（Windows 上 fileURLToPath 给反斜杠）
+const MESSAGES = normalizePath(
+  fileURLToPath(new URL('./src/core/i18n/messages.ts', import.meta.url)),
+)
 const FC_ICON_CSS = /@form-create[\\/]designer[\\/]src[\\/]style[\\/]icon\.css$/
 let appTitle: string | undefined
 
@@ -67,6 +73,23 @@ export default defineConfig({
           ) as { app: { title: string } }
           return html.replace('%VITE_APP_TITLE%', common.app.title)
         },
+      },
+    },
+    {
+      name: 'qw-locale-file-hmr',
+      // 删除语言文件后，messages.ts 重新转换时不再导入它，旧 JSON 节点就没有导入者了；
+      // 同名文件再出现时（新增，或被文件监听合并成修改/删除事件），Vite 仍把这个孤立节点
+      // 算进更新，判为无边界而整页刷新。这里改由 glob 汇总方 messages.ts 承接：它重新转换时
+      // 重新匹配语言文件，并由 core/i18n 接受热更新，页面状态得以保留。
+      hotUpdate({ file, modules }) {
+        if (!LOCALE_FILE.test(file)) return
+        // 只换掉本文件的孤立节点；同批其他模块（如解析失败待恢复的入口）照常决定是否刷新
+        const live = modules.filter((mod) => mod.file !== file || mod.importers.size > 0)
+        if (live.length === modules.length) return
+        const messages = this.environment.moduleGraph.getModuleById(MESSAGES)
+        // 找不到汇总方时不改动，退回 Vite 原本的整页刷新，不静默丢掉更新
+        if (!messages) return
+        return [...new Set([...live, messages])]
       },
     },
     // cropperjs 2 is a set of custom elements (<cropper-canvas>, …): AvatarCropper uses them in its template

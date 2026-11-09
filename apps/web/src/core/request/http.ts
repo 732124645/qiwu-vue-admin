@@ -87,6 +87,7 @@ export const sessionEnd = ref<SessionEndReason | null>(null)
 /** The text of each reason. */
 export const SESSION_END_TEXT: Record<SessionEndReason, string> = {
   tenant_unavailable: 'auth.tenant.unavailable',
+  app_replaced: 'auth.session.appReplaced',
 }
 
 /**

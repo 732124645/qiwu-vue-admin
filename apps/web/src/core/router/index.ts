@@ -130,6 +130,13 @@ export const staticRoutes: RouteRecordRaw[] = [
         component: () => import('@/views/platform/messaging/inbox-mine/index.vue'),
         meta: { title: 'notify.inbox.pageTitle', icon: 'lucide:inbox' },
       },
+      // 员工聊天：静态路由，不是菜单页；入口在顶栏，是否可用由页面探测 GET /api/im/options 决定
+      {
+        path: '/im/chat',
+        name: 'im-chat',
+        component: () => import('@/views/platform/im/index.vue'),
+        meta: { title: 'im.title', icon: 'lucide:messages-square' },
+      },
     ],
   },
   // not public: an unknown path may be a menu route that is registered after sign-in

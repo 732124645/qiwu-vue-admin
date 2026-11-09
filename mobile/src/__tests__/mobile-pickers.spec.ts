@@ -7,6 +7,7 @@ import { setLocale } from '@/core/i18n'
 import {
   SEARCH_DEBOUNCE_MS,
   choiceText,
+  chooseUploadFiles,
   deptChoices,
   deptPath,
   dictChoices,
@@ -221,6 +222,66 @@ describe('user picker', () => {
     p.back(0)
     expect(p.path.value).toEqual([])
     expect(query(call(4))).toEqual(['/api/iam/users/options', {}])
+  })
+})
+
+describe('system file selection', () => {
+  const originalUni = uni
+  const chooseFile = vi.fn()
+  const chooseMessageFile = vi.fn()
+  const chooseImage = vi.fn()
+
+  beforeEach(() => {
+    chooseFile.mockReset()
+    chooseMessageFile.mockReset()
+    chooseImage.mockReset()
+    vi.stubGlobal('uni', { ...uni, chooseFile, chooseMessageFile, chooseImage })
+  })
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    vi.stubGlobal('uni', originalUni)
+  })
+
+  it('keeps H5 file names and sizes while restricting image selection', async () => {
+    vi.stubEnv('UNI_PLATFORM', 'h5')
+    const picked = chooseUploadFiles(2, true)
+    const options = chooseFile.mock.calls[0]![0]
+    expect(options).toMatchObject({ count: 2, type: 'image' })
+    options.success({ tempFiles: [{ path: 'blob:photo', name: 'photo.png', size: 64 }] })
+    await expect(picked).resolves.toEqual([{ path: 'blob:photo', name: 'photo.png', size: 64 }])
+    expect(chooseImage).not.toHaveBeenCalled()
+    expect(chooseMessageFile).not.toHaveBeenCalled()
+  })
+
+  it('keeps mini-program message files available to the upload field', async () => {
+    vi.stubEnv('UNI_PLATFORM', 'mp-weixin')
+    const picked = chooseUploadFiles(1)
+    const options = chooseMessageFile.mock.calls[0]![0]
+    expect(options).toMatchObject({ count: 1, type: 'all' })
+    options.success({ tempFiles: [{ path: 'tmp://report', name: 'report.pdf', size: 128 }] })
+    await expect(picked).resolves.toEqual([{ path: 'tmp://report', name: 'report.pdf', size: 128 }])
+    expect(chooseFile).not.toHaveBeenCalled()
+    expect(chooseImage).not.toHaveBeenCalled()
+  })
+
+  it('uses the App image picker and accepts a single returned temporary path', async () => {
+    vi.stubEnv('UNI_PLATFORM', 'app')
+    const picked = chooseUploadFiles(1, true)
+    const options = chooseImage.mock.calls[0]![0]
+    expect(options).toMatchObject({ count: 1, sizeType: ['compressed'] })
+    options.success({ tempFilePaths: 'tmp://camera.jpg' })
+    await expect(picked).resolves.toEqual([{ path: 'tmp://camera.jpg' }])
+    expect(chooseFile).not.toHaveBeenCalled()
+    expect(chooseMessageFile).not.toHaveBeenCalled()
+  })
+
+  it.each(['h5', 'mp-weixin', 'app'])('returns no files when %s selection is cancelled', async (platform) => {
+    vi.stubEnv('UNI_PLATFORM', platform)
+    const picked = chooseUploadFiles(1, true)
+    const call = [chooseFile, chooseMessageFile, chooseImage].find((picker) => picker.mock.calls.length)
+    call!.mock.calls[0]![0].fail({ errMsg: 'cancel' })
+    await expect(picked).resolves.toEqual([])
+    expect(uni.uploadFile).not.toHaveBeenCalled()
   })
 })
 

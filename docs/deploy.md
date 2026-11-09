@@ -35,6 +35,7 @@ APP_DEMO_MODE=false
 APP_WXOA=false
 APP_MCP=false
 APP_AGENT=false
+APP_IM=false
 STORAGE_LOCAL_ROOT=/srv/qiwu/uploads
 LOG_LEVEL=info
 # 卡顿诊断（默认 0 关闭，见 scale-out.md#卡顿诊断）
@@ -207,6 +208,9 @@ server {
     ssl_certificate_key /etc/nginx/tls/qiwu.key;
     root /srv/qiwu/current/apps/web/dist;
     index index.html;
+    # 接口的 JSON（聊天同步、通讯录等）压缩传输；nginx 默认只压缩 text/html
+    gzip on;
+    gzip_types application/json;
 
     location ^~ /api/ {
         client_max_body_size 21m;
@@ -256,21 +260,21 @@ server {
         add_header Cache-Control "public, max-age=31536000, immutable";
         add_header X-Content-Type-Options nosniff always;
         add_header Referrer-Policy same-origin always;
-        add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self'; frame-src 'self' https:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'" always;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob:; connect-src 'self'; frame-src 'self' https:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'" always;
     }
 
     location = /index.html {
         add_header Cache-Control no-cache;
         add_header X-Content-Type-Options nosniff always;
         add_header Referrer-Policy same-origin always;
-        add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self'; frame-src 'self' https:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'" always;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob:; connect-src 'self'; frame-src 'self' https:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'" always;
     }
 
     location / {
         try_files $uri $uri/ /index.html;
         add_header X-Content-Type-Options nosniff always;
         add_header Referrer-Policy same-origin always;
-        add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self'; frame-src 'self' https:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'" always;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob:; connect-src 'self'; frame-src 'self' https:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'" always;
     }
 }
 ```
@@ -530,7 +534,7 @@ demo seed 给**新建**的种子管理员与 OA 示例用户免首登改密；�
 - `SWAGGER_ENABLED=true` 时服务端在 `/api/docs` 提供 Swagger UI（JSON：`/api/docs-json`）；默认 `false`，生产环境建议保持关闭。
 - `SWAGGER_ENABLED=false` 时不注册 Swagger UI / JSON 端点，菜单也自动隐藏；关闭后可人工检查两端点为 404。开发 `.env.example` 显式设为 `true`，正式部署须按本文设回 `false`。
 - 菜单"系统工具 → 系统接口"是 `link_type=iframe` 的页面，在布局内以 iframe 打开同源的 `/api/docs`（反向代理须把 `/api/` 转发到服务端）。
-- `SWAGGER_ENABLED=false` 时 `GET /api/auth/menus` 不下发该菜单（无论角色是否授权），前端也就不注册该路由。映射在 `apps/server/src/core/auth/menu-features.ts`（`route_name → 开关`；另有租户管理两页随 `APP_MULTI_TENANT`、「公众号」分组随 `APP_WXOA`、“MCP 工具”“访问令牌”两页随 `APP_MCP`、「智能体」分组随 `APP_AGENT`）：新增"随服务端开关出现"的菜单时在此登记。
+- `SWAGGER_ENABLED=false` 时 `GET /api/auth/menus` 不下发该菜单（无论角色是否授权），前端也就不注册该路由。映射在 `apps/server/src/core/auth/menu-features.ts`（`route_name → 开关`；另有租户管理两页随 `APP_MULTI_TENANT`、「公众号」分组随 `APP_WXOA`、“MCP 工具”“访问令牌”两页随 `APP_MCP`、「智能体」分组随 `APP_AGENT`、隐藏的「聊天」分组随 `APP_IM`）：新增"随服务端开关出现"的菜单时在此登记。
 
 ## 公众号模块开关
 
@@ -555,6 +559,15 @@ demo seed 给**新建**的种子管理员与 OA 示例用户免首登改密；�
 - 模型、搜索与外部 MCP 的密钥在平台的“智能体设置”页填写，用 `APP_SECRET` 派生的密钥加密存库，不放进任何 env 文件；更换 `APP_SECRET` 后须重新填写。
 - 运行中的暂停开关是系统参数 `agent.paused`（默认 `false`，只有 root 能改），经参数缓存失效对所有实例同时生效；成本与并发由 `agent.limit.*` 参数限制。
 - `ALLOW_PRIVATE_ENDPOINTS=true` 会同时放开联网读取与外部 MCP 的内网地址检查，生产环境保持 `false`。
+
+## 员工即时通讯（聊天）
+
+`APP_IM` 默认 `false`，只在启动时读取，切换须全部实例重启。关闭时不加载聊天路由：`/api/im/*` 回 404，不注册历史清理任务 `im.purge` 的处理器，web 顶栏与移动端消息 tab 不出现聊天，租户套餐与角色授权树不显示「聊天」分组。通话维护模块始终加载，继续处理已有媒体房间的结束与清理。打开后的参数、本地缓存与已知上限见[员工即时通讯](im.md)。
+
+- 基础聊天和语音消息不需要新的服务：实时提示走现有 Socket.IO，附件存进现有文件存储；表始终由迁移创建。音视频另需自托管 LiveKit，见 [LiveKit 接入](livekit.md)；未配置时不发票据，语音消息独立可用。
+- 上传大小取参数 `im.file.max_mb` 与 `storage.max_size_mb` 的较小值（默认 20 MB），nginx 的 `client_max_body_size` 要覆盖它；同步与通讯录是 JSON，建议像上面的示例一样打开 `gzip_types application/json`。
+- 使用 S3 存储时，web 读聊天附件会 302 到 60 秒有效的预签名地址，需要与私有下载相同的 S3 CORS 与 `CSP_CONNECT_SRC`（见下面的[文件存储](#文件存储s3-直传与私有下载)）；App 一律经同源输出读取。
+- 恢复数据库备份后，由 root 修改参数 `im.sync.epoch`，让所有客户端重建本地缓存，见[保留与恢复](im.md#保留与恢复)。
 
 ## 实时推送（Socket.IO）
 

@@ -4,6 +4,30 @@
 
 All notable product changes are recorded here in Keep a Changelog style. The initial release below summarizes the delivered features. Planned work is identified explicitly.
 
+## [1.16.0] - 2026-11-09
+
+### Added
+
+- Employee instant messaging for desktop Web and the uni-app employee client: private and group conversations, text and emoji, images and files, original and personal stickers, message editing and recall, read positions, and tenant-aware staff directory. `APP_IM` remains off by default; tenant packages can control access. Local caches and a persistent outbox reduce repeated transfers and survive reloads.
+- Voice messages with server-verified WAV duration and private attachment access, persistent retries, and cleanup when sent or discarded. Voice messages do not require a LiveKit service.
+- Configurable foreground one-to-one and small-group audio/video calls, up to eight participants, using official LiveKit SDKs. The application owns staff authorization, invitations and call history; LiveKit carries media. Includes Android/iOS uni-app UTS bridge source and a native video component, plus self-hosting, TURN and integration guidance.
+- App session settings: an optional long-lived session and a single-App-session policy, with the existing expiry, logout, replacement and security-revocation paths retained.
+
+### Fixed
+
+- Re-added locale files hot-update their translations instead of unnecessarily reloading the page.
+
+### Upgrade notes
+
+- Back up the database, run migrations and seeds, and keep `APP_IM` off until chat is configured. New calls also require LiveKit configuration and `im.call.enabled`; use the documented server version and disable automatic room creation. See docs/im.md, docs/livekit.md and docs/upgrade.md.
+- App upgrades require a new native package or custom development base containing SQLite, recording and the native plugin; a wgt update cannot add these modules. Set the deployment API URL and complete platform signing and installation.
+
+### Known limits
+
+- This is a source release. It contains bridge source, dependency coordinates and third-party notices, with no bundled native SDK binaries or signed APK/IPA. The Android SDK's `android-jain-sip-ri` transitive dependency still needs a version-specific redistribution-license clarification; adding notices or passing npm license checks does not close that gate. See the plugin README and the upstream issue linked there before distributing an Android build.
+- Native compilation/linking and simulator platform tests have passed. Product-host signing/install, physical Android/iPhone audio/video, a deployed LiveKit/TURN service and old-token reconnect rejection after room deletion have not been accepted. Simulator/H5 results do not prove device media or network reachability.
+- Calls require the App to be in the foreground. Mini-program chat, offline push, background answering, external/member chat, screen sharing and call recording are not included.
+
 ## [1.15.0] - 2026-10-30
 
 ### Added

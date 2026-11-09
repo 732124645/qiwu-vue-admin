@@ -1,0 +1,244 @@
+{
+  "title": "聊天",
+  "entry": "聊天",
+  "entryUnread": "聊天，{count} 条未读",
+  "quota": "浏览器存储空间不足，本次改用临时缓存，关闭页面后需要重新同步",
+  "disabled": "聊天未启用",
+  "locked": "登录已过期，重新登录后继续聊天",
+  "offline": "网络不可用，正在显示本地记录",
+  "someone": "某人",
+  "listSeparator": "、",
+  "action": {
+    "confirm": "确定",
+    "cancel": "取消"
+  },
+  "tabs": {
+    "chats": "会话",
+    "directory": "通讯录"
+  },
+  "rooms": {
+    "label": "会话列表",
+    "empty": "还没有会话，去通讯录找同事聊聊",
+    "direct": "私聊",
+    "group": "群聊",
+    "closed": "已解散",
+    "itemUnread": "{title}，{count} 条未读"
+  },
+  "preview": {
+    "image": "[图片]",
+    "file": "[文件]",
+    "sticker": "[表情]",
+    "recalled": "消息已撤回",
+    "event": "[系统消息]",
+    "voice": "[语音]"
+  },
+  "pane": {
+    "placeholder": "选择一个会话开始聊天",
+    "label": "消息记录",
+    "loadOlder": "查看更早的消息",
+    "noMore": "没有更早的消息了"
+  },
+  "message": {
+    "edited": "已编辑",
+    "recalled": "{name} 撤回了一条消息",
+    "recalledMine": "你撤回了一条消息",
+    "actions": "消息操作",
+    "copy": "复制",
+    "edit": "编辑",
+    "editTitle": "编辑消息",
+    "editInvalid": "内容不能为空，也不能含控制字符",
+    "recall": "撤回",
+    "recallConfirm": "确定撤回这条消息？",
+    "addSticker": "添加到表情",
+    "stickerAdded": "已添加到我的表情",
+    "download": "下载",
+    "preview": "查看原图",
+    "loadFailed": "文件加载失败",
+    "pending": "发送中…",
+    "uploading": "上传中 {percent}%",
+    "failed": "发送失败",
+    "expired": "超过 24 小时未发出",
+    "retry": "重发",
+    "discard": "删除"
+  },
+  "composer": {
+    "label": "输入消息",
+    "placeholder": "输入消息，Enter 发送，Shift+Enter 换行",
+    "send": "发送",
+    "emoji": "表情符号",
+    "sticker": "表情",
+    "image": "发送图片",
+    "file": "发送文件",
+    "builtin": "内置",
+    "mine": "我的",
+    "mineItem": "我的表情 {id}",
+    "mineEmpty": "还没有自定义表情：上传一张，或在聊天里的图片上选“添加到表情”",
+    "uploadSticker": "上传表情",
+    "removeSticker": "删除这个表情",
+    "stickerToFront": "移到最前",
+    "badType": "不支持的文件类型",
+    "tooLarge": "文件不能超过 {mb} MB",
+    "tooLong": "最多 {max} 个字",
+    "closed": "群聊已解散，不能再发送消息"
+  },
+  "directory": {
+    "label": "同事",
+    "search": "搜索姓名",
+    "dept": "部门",
+    "allDepts": "全部部门",
+    "createGroup": "发起群聊",
+    "chatWith": "和 {name} 聊天",
+    "empty": "没有匹配的同事"
+  },
+  "group": {
+    "title": "群设置",
+    "name": "群名称",
+    "rename": "修改",
+    "add": "添加成员",
+    "pickMembers": "选择成员",
+    "create": "创建",
+    "members": "群成员",
+    "memberCount": "{count} 位成员",
+    "disabledUser": "已停用",
+    "setModerator": "设为管理员",
+    "unsetModerator": "取消管理员",
+    "transfer": "转让群主",
+    "remove": "移出",
+    "close": "解散群聊",
+    "leave": "退出群聊",
+    "confirmRemove": "确定把 {name} 移出群聊？",
+    "confirmTransfer": "确定把群主转让给 {name}？",
+    "confirmClose": "解散后所有人都不能再发送消息，确定解散？",
+    "confirmLeave": "确定退出这个群聊？",
+    "role": {
+      "owner": "群主",
+      "moderator": "管理员",
+      "participant": "成员"
+    }
+  },
+  "event": {
+    "room": {
+      "create": "{actor} 创建了群聊“{label}”",
+      "rename": "{actor} 把群名改为“{label}”",
+      "close": "{actor} 解散了群聊"
+    },
+    "member": {
+      "add": "{actor} 邀请 {users} 加入了群聊",
+      "remove": "{actor} 把 {users} 移出了群聊",
+      "leave": "{actor} 退出了群聊"
+    },
+    "role": {
+      "change": "{actor} 把 {users} 设为{role}"
+    },
+    "owner": {
+      "transfer": "{actor} 把群主转让给了 {users}"
+    },
+    "entry": {
+      "edit": "{actor} 编辑了一条消息",
+      "recall": "{actor} 撤回了一条消息"
+    },
+    "call": {
+      "ended": "通话已结束"
+    }
+  },
+  "sticker": {
+    "smile": "微笑",
+    "laugh": "大笑",
+    "grin": "咧嘴笑",
+    "wink": "眨眼",
+    "blush": "害羞",
+    "heart": "比心",
+    "cool": "酷",
+    "think": "思考",
+    "wow": "哇",
+    "sad": "难过",
+    "cry": "哭",
+    "angry": "生气",
+    "sleepy": "困",
+    "sweat": "流汗",
+    "facepalm": "捂脸",
+    "shrug": "摊手",
+    "thumbsup": "点赞",
+    "clap": "鼓掌",
+    "ok": "好的",
+    "thanks": "谢谢",
+    "cheers": "干杯",
+    "fighting": "加油",
+    "coffee": "喝咖啡",
+    "party": "庆祝"
+  },
+  "emoji": {
+    "smileys": "表情",
+    "gestures": "手势",
+    "symbols": "符号",
+    "objects": "物品"
+  },
+  "voice": {
+    "record": "录制语音",
+    "finish": "结束并发送（{seconds}秒）",
+    "cancel": "取消录音",
+    "play": "播放语音（{seconds}秒）",
+    "stop": "停止播放",
+    "failed": "无法录音，请检查麦克风权限",
+    "playFailed": "语音无法播放",
+    "tooLarge": "语音文件超过上限",
+    "saveFailed": "语音未能保存到发件箱，请重试"
+  },
+  "calls": {
+    "title": "员工通话",
+    "audio": "语音通话",
+    "video": "视频通话",
+    "mode": {
+      "audio": "语音",
+      "video": "视频"
+    },
+    "state": {
+      "ringing": "等待接听",
+      "active": "通话中",
+      "ending": "正在结束",
+      "ended": "已结束"
+    },
+    "media": {
+      "idle": "媒体未连接",
+      "connecting": "正在连接媒体",
+      "connected": "媒体已连接",
+      "reconnecting": "媒体重连中",
+      "disconnecting": "媒体清理中"
+    },
+    "busy": "请先结束当前连接",
+    "otherDevice": "已在另一台设备接听",
+    "failed": "通话操作未完成，请重试",
+    "unconfigured": "通话尚未配置",
+    "otherTab": "请在已打开的主标签页中通话",
+    "locksUnavailable": "当前浏览器无法安全协调多标签页通话，请使用支持网页锁的浏览器",
+    "pickMembers": "邀请同事（最多7人）",
+    "invite": "发起邀请",
+    "incoming": "{name} 邀请你进行{mode}通话",
+    "accept": "接听",
+    "decline": "拒绝",
+    "join": "重新加入",
+    "end": "结束通话",
+    "leave": "离开通话",
+    "mute": "关闭麦克风",
+    "unmute": "开启麦克风",
+    "cameraOff": "关闭摄像头",
+    "cameraOn": "开启摄像头",
+    "switchCamera": "切换镜头",
+    "muted": "已静音",
+    "enableAudio": "启用声音",
+    "retryCleanup": "重试清理连接",
+    "summary": "{mode}通话：{reason}（{seconds}秒）",
+    "reason": {
+      "cancelled": "已取消",
+      "declined": "已拒绝",
+      "no_answer": "无人接听",
+      "left": "成员离开",
+      "ended": "已结束",
+      "membership_changed": "成员资格变化",
+      "session_ended": "会话已结束",
+      "timeout": "已超时",
+      "unavailable": "媒体服务不可用",
+      "disabled": "通话已停用"
+    }
+  }
+}

@@ -41,6 +41,8 @@ export const PASSWORD_RESET = 'password_reset'
 interface Owned {
   sid: string
   clientId?: string
+  /** a mobile session's kind (Session.mobileKind) */
+  mobileKind?: string
 }
 
 const kickedMsg = (sid: string): RealtimeMessage => ({
@@ -84,12 +86,39 @@ export class SessionRevoker {
   private readonly revokeUserAgain: Array<(userId: number, reason: string) => Promise<void>> = []
   private readonly revokeTenantHooks: Array<(tenantId: number, reason: string) => Promise<void>> =
     []
+  private readonly sessionEndedHooks: Array<
+    (sid: string, reason: string, session?: Session) => Promise<void>
+  > = []
 
   constructor(
     @Inject(REDIS) private readonly redis: Redis,
     private readonly realtime: RealtimeService,
     private readonly audit: AuditWriter,
   ) {}
+
+  /** 凭据已经移除后的通用结束通知；可重复投递，模块须幂等，失败不复活凭据或改变吊销结果。 */
+  onSessionEnded(hook: (sid: string, reason: string, session?: Session) => Promise<void>): void {
+    this.sessionEndedHooks.push(hook)
+  }
+
+  /** 先完成密钥删除再通知，避免业务补偿错误使失效会话重新可用。 */
+  private async notifySessionEnded(
+    sids: readonly string[],
+    reason: string,
+    sessions: readonly Session[] = [],
+  ): Promise<void> {
+    if (!this.sessionEndedHooks.length) return
+    const bySid = new Map(sessions.map((session) => [session.sid, session]))
+    const results = await Promise.allSettled(
+      [...new Set(sids)].flatMap((sid) =>
+        this.sessionEndedHooks.map((hook) =>
+          Promise.resolve().then(() => hook(sid, reason, bySid.get(sid))),
+        ),
+      ),
+    )
+    const failures = results.filter((result) => result.status === 'rejected').length
+    if (failures) this.logger.warn({ failures }, 'session ended handler failed')
+  }
 
   /**
    * Runs first in every `revokeUser`, with its reason (modules clean up their own credentials, e.g. unused
@@ -126,6 +155,7 @@ export class SessionRevoker {
     // no session: its at/rt keys (if any) already point nowhere; sockets it left behind just end
     if (!raw) {
       this.realtime.endSessions([sid])
+      await this.notifySessionEnded([sid], reason)
       return null
     }
     const [ended = null] = await this.purge(
@@ -161,14 +191,32 @@ export class SessionRevoker {
     }
     const ended = await this.purge(
       redisKey('authUser', userId),
-      (o, clientId) =>
+      (o, session) =>
         (opts.exceptSid === undefined || o.sid !== opts.exceptSid) &&
-        (!opts.clientId || clientId === opts.clientId),
+        (!opts.clientId || session?.clientId === opts.clientId),
       reason,
     )
     this.logger.log({ userId, sessions: ended.length, reason }, 'user sessions revoked')
     const failed = hooks.find((h) => h.status === 'rejected')
     if (failed) throw failed.reason
+    return ended
+  }
+
+  /**
+   * 单 App 会话：结束该用户除 `exceptSid`（刚签发的新会话）外的全部 App 会话（`clientId='mobile'` 且
+   * `mobileKind='app'`），它们的 socket 先收到带原因的 `session:kicked`。只动会话，不像 `revokeUser`
+   * 那样递增 credver、跑模块钩子或删 OAuth2 授权码：换一台设备登录不是凭据变化，web、H5、小程序与
+   * 第三方会话都不受影响。用户 id 全局唯一，所以只会碰到本用户（本租户）的会话。
+   */
+  async revokeAppSessions(userId: number, exceptSid: string, reason: string): Promise<Session[]> {
+    const ended = await this.purge(
+      redisKey('authUser', userId),
+      (o, session) =>
+        o.sid !== exceptSid && session?.clientId === 'mobile' && session.mobileKind === 'app',
+      reason,
+    )
+    if (ended.length)
+      this.logger.log({ userId, sessions: ended.length, reason }, 'app sessions replaced')
     return ended
   }
 
@@ -224,12 +272,12 @@ export class SessionRevoker {
   }
 
   /**
-   * Deletes the index members `pick` selects (given the client of their session, when its entry is
-   * live), plus expired ones, and ends the sockets of their sessions; returns the sessions it ended.
+   * Deletes the index members `pick` selects (given their session's entry, when it is live), plus
+   * expired ones, and ends the sockets of their sessions; returns the sessions it ended.
    */
   private async purge(
     indexKey: string,
-    pick: (o: Owned, clientId: string | undefined) => boolean,
+    pick: (o: Owned, session: Owned | undefined) => boolean,
     reason: string,
   ): Promise<Session[]> {
     const members = await this.redis.sMembers(indexKey)
@@ -237,16 +285,16 @@ export class SessionRevoker {
     const values = (await this.redis.mGet(members)).map((raw) =>
       raw ? (JSON.parse(raw) as Owned) : null,
     )
-    // token entries carry only their sid: the client is their session entry's
-    const clientOf = new Map<string | undefined, string>()
-    for (const o of values) if (o?.clientId) clientOf.set(o.sid, o.clientId)
+    // token entries carry only their sid: the client and kind are their session entry's
+    const sessionOf = new Map<string | undefined, Owned>()
+    for (const o of values) if (o?.clientId) sessionOf.set(o.sid, o)
     const sessionKey = redisKey('authSession', '')
     const sids = new Set<string>()
     const sessions: Session[] = []
     const doomed = members.filter((key, i) => {
       const owned = values[i]
       if (!owned) return true
-      if (!pick(owned, clientOf.get(owned.sid))) return false
+      if (!pick(owned, sessionOf.get(owned.sid))) return false
       if (owned.sid) sids.add(owned.sid)
       if (key.startsWith(sessionKey)) sessions.push(owned as Session)
       return true
@@ -257,6 +305,7 @@ export class SessionRevoker {
     await tx.exec()
     // after the keys are gone: a socket connecting meanwhile re-checks the session once it joined
     this.realtime.endSessions(sids, lastMsg(reason))
+    await this.notifySessionEnded([...sids], reason, sessions)
     // a session inside another tenant leaves it with its end, recorded in the default tenant
     for (const s of sessions)
       if (s.actingTenantId !== undefined)

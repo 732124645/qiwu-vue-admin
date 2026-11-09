@@ -94,5 +94,8 @@
   },
   "tenant_code_reserved": "{field} is reserved",
   "tenant_domain": "{field} must be a host name: letters, digits, hyphens and dots (kept in lower case), without scheme, port, path or wildcard",
-  "tenant_domain_duplicate": "{field} lists a host name twice"
+  "tenant_domain_duplicate": "{field} lists a host name twice",
+  "im": {
+    "control_char": "{field} contains control characters that cannot be sent"
+  }
 }

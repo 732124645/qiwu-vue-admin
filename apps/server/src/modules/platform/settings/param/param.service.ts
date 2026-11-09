@@ -10,7 +10,9 @@ import {
   AGENT_PAUSED_PARAM,
   AGENT_WEB_DOMAINS_PARAM,
   AGENT_WEB_MODE_PARAM,
+  appSessionParams,
   AUDIT_RETENTION_PARAM,
+  imParams,
   MCP_PAUSED_PARAM,
   Err,
   type Page,
@@ -64,7 +66,8 @@ const shown = (p: Parameter): Parameter =>
  * Sign-up switch, role and dept, the WeChat sign-in switch, the audit retention and the agent access
  * stop switch (`mcp.paused`: an emergency stop for every tenant), the in-app agent's stop switch, limits,
  * platform instructions, web settings, the auto-review model, the memory params and the research
- * limits (they bound every tenant's cost and safety) are root-managed,
+ * limits (they bound every tenant's cost and safety), the chat retention and sync epoch, the App session
+ * term and single App session switch are root-managed,
  * root being the platform's super admin only (403 `grant_exceeds_own`; see docs/design-notes.md#permissions,
  * #tenancy): the retention purge is the one way rows nobody may delete (tenant enter / leave) go.
  */
@@ -74,6 +77,10 @@ const ROOT_ONLY: ReadonlySet<unknown> = new Set([
   signupParams.defaultDeptId,
   WX_MP_ENABLED_PARAM,
   AUDIT_RETENTION_PARAM,
+  imParams.retentionDays,
+  imParams.epoch,
+  appSessionParams.sessionDays,
+  appSessionParams.singleSession,
   MCP_PAUSED_PARAM,
   AGENT_PAUSED_PARAM,
   ...Object.values(AGENT_LIMIT_PARAMS),

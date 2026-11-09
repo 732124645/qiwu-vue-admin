@@ -1,0 +1,29 @@
+{
+  "field": {
+    "im": {
+      "ids": "会话",
+      "peerId": "聊天对象",
+      "label": "群名",
+      "userIds": "成员",
+      "userId": "成员",
+      "role": "群角色",
+      "seq": "消息序号",
+      "afterSeq": "起始序号",
+      "beforeSeq": "截止序号",
+      "seqs": "消息序号",
+      "limit": "条数",
+      "clientEntryId": "消息编号",
+      "kind": "消息类型",
+      "text": "消息内容",
+      "objectId": "附件",
+      "stickerCode": "内置表情",
+      "stickerId": "自定义表情",
+      "rev": "内容版本",
+      "thumb": "缩略图",
+      "proxy": "同源读取",
+      "roomId": "会话",
+      "clientCallId": "通话请求编号",
+      "mode": "通话类型"
+    }
+  }
+}

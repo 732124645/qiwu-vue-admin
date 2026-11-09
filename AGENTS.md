@@ -35,7 +35,7 @@ NestJS 12（ESM）+ Vue 3.5 + Vite + Element Plus + TypeScript + MySQL + Redis�
 - `platform` 不导入 `workflow` 与项目领域；
 - `workflow` 不导入项目领域；
 - 项目领域可以使用以上各层；前后端共享的东西放 `@qiwu/shared`。
-- `packages/shared` 也跑在移动端，只能导入 zod 与自身文件（不用 Node API、不用 Vue）。
+- `packages/shared` 也跑在移动端，通用契约只导入 zod 与自身文件（不用 Node API、不用 Vue）；IM 引擎只在登记位置使用纯 JS 哈希/UTF-8。浏览器 LiveKit/录音 SDK 仅从 `@qiwu/shared/im-media` 子入口加载，不从 shared 根或 im-client 以值重导出，App 使用原生端口，见 [docs/im.md](docs/im.md)。
 
 ## 命名
 

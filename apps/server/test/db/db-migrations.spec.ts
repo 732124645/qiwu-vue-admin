@@ -451,6 +451,10 @@ describe('DDL conventions', () => {
         k: 'agent_thread.uk_agent_thread_client',
         cols: 'tenant_id,user_id,client_draft_id',
       },
+      {
+        k: 'im_call.uk_im_call_media',
+        cols: 'tenant_id,media_room',
+      },
     ])
     const alive = await ds.query<{ t: string; c: string }[]>(
       `SELECT table_name AS t, CONCAT(table_name, ' ', generation_expression) AS c FROM information_schema.columns
@@ -945,6 +949,210 @@ describe('Audit user_type', () => {
       await runAll()
     }
     await expectApplied(MIGRATIONS.length)
+  })
+})
+
+describe('IM tables', () => {
+  const IM = ['im_entry', 'im_room', 'im_roster', 'im_sticker']
+  const dup = { driverError: { code: 'ER_DUP_ENTRY' } }
+
+  it('media slots remain occupied while ending and media names remain unique after soft deletion', async () => {
+    const qr = ds.createQueryRunner()
+    await qr.startTransaction()
+    try {
+      const create = (room: number, client: string, media: string, tenant = 1) =>
+        qr.query(
+          `INSERT INTO im_call (tenant_id,room_id,caller_id,client_call_id,mode_code,media_room,invite_expires_at)
+         VALUES (?,?,901,?,'audio',?,DATE_ADD(NOW(3),INTERVAL 45 SECOND))`,
+          [tenant, room, client, media],
+        )
+      const { insertId: first } = await create(90001, 'call-a', 'media-a')
+      await expect(create(90001, 'call-b', 'media-b')).rejects.toMatchObject(dup)
+      await qr.query("UPDATE im_call SET state_code='ending' WHERE id=?", [first])
+      await expect(create(90001, 'call-b', 'media-b')).rejects.toMatchObject(dup)
+      await qr.query("UPDATE im_call SET state_code='ended' WHERE id=?", [first])
+      const { insertId: second } = await create(90001, 'call-b', 'media-b')
+      await qr.query('UPDATE im_call SET deleted_at=NOW(3) WHERE id=?', [first])
+      await expect(create(90002, 'call-c', 'media-a')).rejects.toMatchObject(dup)
+      await create(90001, 'call-a', 'media-a', 2)
+      const member = (call: number, user: number) =>
+        qr.query(
+          `INSERT INTO im_call_member (tenant_id,call_id,user_id,roster_id,display_name,identity)
+         VALUES (1,?,?,1,'fixture',?)`,
+          [call, user, `member-${call}-${user}`],
+        )
+      await member(second, 901)
+      await expect(member(second, 901)).rejects.toMatchObject(dup)
+      const { insertId: other } = await create(90002, 'call-d', 'media-d')
+      await member(other, 901)
+      const generated = await qr.query('SELECT active_room_id FROM im_call WHERE id=?', [second])
+      expect(Number(generated[0].active_room_id)).toBe(90001)
+    } finally {
+      await qr.rollbackTransaction()
+      await qr.release()
+    }
+  })
+
+  it('the four chat tables have their columns, a non-null tenant_id without default and no other keys', async () => {
+    const cols: { c: string }[] = await ds.query(
+      `SELECT CONCAT(table_name, '.', column_name, ' ', column_type, ' ', is_nullable, ' ', COALESCE(column_default, '-')) AS c
+         FROM information_schema.columns
+        WHERE table_schema = DATABASE() AND table_name IN (?) AND column_name NOT IN
+          ('id', 'created_by', 'created_at', 'updated_by', 'updated_at', 'deleted_at', 'alive')
+        ORDER BY table_name, ordinal_position`,
+      [IM],
+    )
+    expect(cols.map((r) => r.c)).toEqual([
+      'im_entry.tenant_id bigint unsigned NO -',
+      'im_entry.room_id bigint unsigned NO -',
+      'im_entry.seq bigint unsigned NO -',
+      'im_entry.author_id bigint unsigned YES -',
+      'im_entry.author_kind varchar(16) YES -',
+      'im_entry.author_label varchar(64) YES -',
+      'im_entry.client_entry_id varchar(64) YES -',
+      'im_entry.request_digest char(64) YES -',
+      'im_entry.entry_kind varchar(16) NO -',
+      'im_entry.text_value mediumtext YES -',
+      'im_entry.sticker_code varchar(32) YES -',
+      'im_entry.attachment json YES -',
+      'im_entry.event_data json YES -',
+      'im_entry.target_seq bigint unsigned YES -',
+      'im_entry.content_rev int unsigned NO 1',
+      'im_entry.edited_at datetime(3) YES -',
+      'im_entry.recalled_at datetime(3) YES -',
+      'im_entry.recalled_by bigint unsigned YES -',
+      'im_room.tenant_id bigint unsigned NO -',
+      'im_room.room_kind varchar(16) NO -',
+      'im_room.scope_code varchar(24) NO staff',
+      'im_room.pair_low_id bigint unsigned YES -',
+      'im_room.pair_high_id bigint unsigned YES -',
+      'im_room.label varchar(80) YES -',
+      'im_room.last_seq bigint unsigned NO 0',
+      'im_room.floor_seq bigint unsigned NO 1',
+      'im_room.last_entry_at datetime(3) YES -',
+      'im_room.meta_rev int unsigned NO 1',
+      'im_room.closed_at datetime(3) YES -',
+      'im_roster.tenant_id bigint unsigned NO -',
+      'im_roster.room_id bigint unsigned NO -',
+      'im_roster.user_id bigint unsigned NO -',
+      'im_roster.identity_kind varchar(16) NO admin',
+      'im_roster.role_code varchar(16) NO -',
+      'im_roster.member_label varchar(64) NO -',
+      'im_roster.visible_from_seq bigint unsigned NO -',
+      'im_roster.read_seq bigint unsigned NO 0',
+      'im_roster.owner_one tinyint YES -',
+      'im_sticker.tenant_id bigint unsigned NO -',
+      'im_sticker.user_id bigint unsigned NO -',
+      'im_sticker.object_id bigint unsigned NO -',
+      'im_sticker.sha256 char(64) NO -',
+      'im_sticker.mime varchar(64) NO -',
+      'im_sticker.width smallint unsigned NO -',
+      'im_sticker.height smallint unsigned NO -',
+      'im_sticker.sort_no int NO 0',
+    ])
+    const ascii: { c: string }[] = await ds.query(
+      `SELECT CONCAT(table_name, '.', column_name) AS c FROM information_schema.columns
+        WHERE table_schema = DATABASE() AND table_name IN (?) AND collation_name = 'ascii_bin' ORDER BY c`,
+      [IM],
+    )
+    expect(ascii.map((r) => r.c)).toEqual([
+      'im_entry.client_entry_id',
+      'im_entry.request_digest',
+      'im_sticker.sha256',
+    ])
+    const [owner] = await ds.query(
+      `SELECT extra AS gen, generation_expression AS expr FROM information_schema.columns
+        WHERE table_schema = DATABASE() AND table_name = 'im_roster' AND column_name = 'owner_one'`,
+    )
+    expect(owner.gen).toBe('VIRTUAL GENERATED')
+    expect(owner.expr).toMatch(/if\(\(`role_code` = _utf8mb4\\?'owner\\?'\),1,NULL\)/)
+    const keys: { k: string }[] = await ds.query(
+      `SELECT CONCAT(table_name, '.', index_name, ' ', non_unique, ' ', GROUP_CONCAT(column_name ORDER BY seq_in_index)) AS k
+         FROM information_schema.statistics
+        WHERE table_schema = DATABASE() AND table_name IN (?) AND index_name <> 'PRIMARY'
+        GROUP BY table_name, index_name, non_unique ORDER BY k`,
+      [IM],
+    )
+    expect(keys.map((r) => r.k)).toEqual([
+      'im_entry.uk_im_entry_client 0 tenant_id,room_id,author_id,client_entry_id,alive',
+      'im_entry.uk_im_entry_seq 0 tenant_id,room_id,seq,alive',
+      'im_room.idx_im_room_tenant 1 tenant_id,id',
+      'im_room.uk_im_room_pair 0 tenant_id,scope_code,pair_low_id,pair_high_id,alive',
+      'im_roster.idx_im_roster_user 1 tenant_id,user_id,deleted_at',
+      'im_roster.uk_im_roster_member 0 tenant_id,room_id,user_id,alive',
+      'im_roster.uk_im_roster_owner 0 tenant_id,room_id,owner_one,alive',
+      'im_sticker.idx_im_sticker_user 1 tenant_id,user_id,sort_no',
+      'im_sticker.uk_im_sticker_hash 0 tenant_id,user_id,sha256,alive',
+    ])
+  })
+
+  it('one direct room per pair, any number of groups; one owner and one live period per member; seqs and client ids unique', async () => {
+    const qr = ds.createQueryRunner()
+    await qr.startTransaction()
+    try {
+      const room = (kind: string, low: number | null, high: number | null, tenant = 1) =>
+        qr.query(
+          'INSERT INTO im_room (tenant_id, room_kind, pair_low_id, pair_high_id) VALUES (?, ?, ?, ?)',
+          [tenant, kind, low, high],
+        )
+      await room('direct', 901, 902)
+      await expect(room('direct', 901, 902)).rejects.toMatchObject(dup)
+      // another tenant may hold the same pair
+      await room('direct', 901, 902, 2)
+      const { insertId: group } = await room('group', null, null)
+      await room('group', null, null)
+
+      const member = (userId: number, role: string) =>
+        qr.query(
+          `INSERT INTO im_roster (tenant_id, room_id, user_id, role_code, member_label, visible_from_seq)
+           VALUES (1, ?, ?, ?, 'x', 1)`,
+          [group, userId, role],
+        )
+      const { insertId: owner } = await member(901, 'owner')
+      await expect(member(902, 'owner')).rejects.toMatchObject(dup)
+      await member(902, 'moderator')
+      await member(903, 'moderator')
+      await member(904, 'participant')
+      await expect(member(904, 'participant')).rejects.toMatchObject(dup)
+      // leaving (soft delete) frees both the member and the owner slot; a new period is a new row
+      await qr.query('UPDATE im_roster SET deleted_at = NOW(3) WHERE id = ?', [owner])
+      await member(901, 'participant')
+      await qr.query(
+        "UPDATE im_roster SET role_code = 'owner' WHERE room_id = ? AND user_id = 902",
+        [group],
+      )
+
+      const entry = (seq: number, author: number | null, clientId: string | null) =>
+        qr.query(
+          `INSERT INTO im_entry (tenant_id, room_id, seq, author_id, client_entry_id, entry_kind)
+           VALUES (1, ?, ?, ?, ?, 'text')`,
+          [group, seq, author, clientId],
+        )
+      await entry(1, 901, 'c-1')
+      await expect(entry(1, 902, 'c-2')).rejects.toMatchObject(dup)
+      await expect(entry(2, 901, 'c-1')).rejects.toMatchObject(dup)
+      await entry(2, 902, 'c-1')
+      // system events carry neither author nor client id: never collide
+      await entry(3, null, null)
+      await entry(4, null, null)
+      // client ids are case-sensitive
+      await entry(5, 901, 'C-1')
+
+      const sticker = (userId: number, sha: string) =>
+        qr.query(
+          `INSERT INTO im_sticker (tenant_id, user_id, object_id, sha256, mime, width, height)
+           VALUES (1, ?, 1, ?, 'image/webp', 240, 240)`,
+          [userId, sha],
+        )
+      const { insertId: kept } = await sticker(901, 'a'.repeat(64))
+      await expect(sticker(901, 'a'.repeat(64))).rejects.toMatchObject(dup)
+      await sticker(902, 'a'.repeat(64))
+      await qr.query('UPDATE im_sticker SET deleted_at = NOW(3) WHERE id = ?', [kept])
+      await sticker(901, 'a'.repeat(64))
+    } finally {
+      await qr.rollbackTransaction()
+      await qr.release()
+    }
   })
 })
 

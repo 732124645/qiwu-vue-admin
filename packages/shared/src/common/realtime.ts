@@ -1,4 +1,6 @@
 import type { AgentEvent } from '../platform/agent/agent.schema.js'
+import type { ImEntryHint, ImRoomHint } from '../platform/im/im.schema.js'
+import type { ImCallHint } from '../platform/im/im-media.schema.js'
 import type { Locale } from './locale.js'
 
 /**
@@ -29,14 +31,21 @@ export const RT = {
   wxoaMessage: 'wxoa:message',
   /** an agent thread changed (an item, streamed text or the turn's status); to the thread owner only */
   agentEvent: 'agent:event',
+  /** 即时通讯：会话里多了一条消息或事件（提交后发给当前全部成员，永不带正文） */
+  imEntry: 'im:entry',
+  /** 即时通讯：本人读位置变化（带 readSeq，只发本人）或成员/角色/群名/解散变化（不带，发受影响用户） */
+  imRoom: 'im:room',
+  /** 通话状态变化，只发编号与修订号，不携票据或参与者资料。 */
+  imCall: 'im:call',
 } as const
 export type RealtimeType = (typeof RT)[keyof typeof RT]
 
 /**
  * Why a session ended other than an administrator's kick (`session:kicked` `reason`; absent = a plain
- * kick): `tenant_unavailable` — its tenant was disabled, expired or multi-tenancy was turned off for it.
+ * kick): `tenant_unavailable` — its tenant was disabled, expired or multi-tenancy was turned off for it;
+ * `app_replaced` — 同一账号在另一台设备的 App 登录，单 App 会话开关把旧的 App 会话结束了。
  */
-export const SESSION_END_REASONS = ['tenant_unavailable'] as const
+export const SESSION_END_REASONS = ['tenant_unavailable', 'app_replaced'] as const
 export type SessionEndReason = (typeof SESSION_END_REASONS)[number]
 
 /** Payload of each envelope type. */
@@ -57,6 +66,11 @@ export interface RealtimePayloads {
   /** ids only: never the content or the fan's openid */
   'wxoa:message': { accountId: number; messageId: number }
   'agent:event': AgentEvent
+  /** 只有编号与类型（kind 含 `event`），客户端按需增量拉取 */
+  'im:entry': ImEntryHint
+  /** `readSeq` 存在 = 本人在别的设备读了；不存在 = 会话信息变化，客户端取该会话详情 */
+  'im:room': ImRoomHint
+  'im:call': ImCallHint
 }
 
 /** `{type, payload}`; narrowing on `type` types the payload. */

@@ -1,0 +1,29 @@
+{
+  "field": {
+    "im": {
+      "ids": "Conversations",
+      "peerId": "Chat partner",
+      "label": "Group name",
+      "userIds": "Members",
+      "userId": "Member",
+      "role": "Group role",
+      "seq": "Message number",
+      "afterSeq": "From number",
+      "beforeSeq": "Before number",
+      "seqs": "Message numbers",
+      "limit": "Count",
+      "clientEntryId": "Message id",
+      "kind": "Message type",
+      "text": "Message",
+      "objectId": "Attachment",
+      "stickerCode": "Built-in sticker",
+      "stickerId": "Sticker",
+      "rev": "Content version",
+      "thumb": "Thumbnail",
+      "proxy": "Same-origin read",
+      "roomId": "Conversation",
+      "clientCallId": "Call request id",
+      "mode": "Call type"
+    }
+  }
+}

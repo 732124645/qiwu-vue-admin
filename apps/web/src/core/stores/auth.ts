@@ -20,6 +20,7 @@ import {
   setSessionHint,
   tenantExpect,
 } from '@/core/request/http'
+import { wipeImCache } from '@/core/im/im-store'
 import { useMenuStore } from './menu'
 import { useNotifyStore } from './notify'
 
@@ -115,6 +116,8 @@ export const useAuthStore = defineStore('auth', () => {
     } catch {
       // the session is gone either way
     }
+    // 主动退出清除本账号的聊天缓存（只是会话过期或重新登录时 clear() 不删，同账号复用）
+    await wipeImCache(me.value).catch(() => undefined)
     setSessionHint(false)
     clear()
     sessionEnd.value = null

@@ -30,6 +30,7 @@ import { computed, onUnmounted } from 'vue'
 import { onHide, onShow } from '@dcloudio/uni-app'
 import { visibleTabs, type Tab } from '@/core/features'
 import { t } from '@/core/i18n'
+import { imChatVisible, imStart, imUnread } from '@/core/im/client'
 import { pollCounts, startRealtime } from '@/core/realtime'
 import { LOGIN_PAGE, hasSession, toPasswordChange } from '@/core/request'
 import { useAuthStore } from '@/core/stores/auth'
@@ -55,9 +56,16 @@ const props = defineProps<{ current: Tab }>()
 const auth = useAuthStore()
 const counts = useCountsStore()
 const tabs = computed(visibleTabs)
-/** the approval tab shows my to-dos, the message tab my unread messages; 0 / null show no badge */
+/**
+ * the approval tab shows my to-dos, the message tab my unread inbox messages plus unread chat (the chat's local
+ * count, no request); 0 / null show no badge
+ */
 const badge = (tab: Tab) =>
-  (tab === 'approval' ? counts.todo : tab === 'message' ? counts.unread : null) || 0
+  (tab === 'approval'
+    ? counts.todo
+    : tab === 'message'
+      ? (counts.unread ?? 0) + (imChatVisible.value ? imUnread.value : 0)
+      : null) || 0
 const badgeText = (tab: Tab) => (badge(tab) > 99 ? '99+' : String(badge(tab)))
 
 const icon = (tab: Tab, active: boolean) =>
@@ -75,6 +83,8 @@ onShow(() => {
   uni.setNavigationBarTitle({ title: t(`common.tab.${props.current}`) })
   counts.load()
   startRealtime()
+  // chat's cold start once per account (probe, epoch, full sync); later shows render from its cache
+  void imStart()
   stop()
   // pushes reload the counts while the socket is up; the poll covers when it is not
   timer = setInterval(pollCounts, POLL_MS)

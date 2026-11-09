@@ -1,18 +1,24 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { Inject, Injectable } from '@nestjs/common'
 import {
+  APP_SESSION_DAYS_MAX,
+  appSessionParams,
+  DEFAULT_APP_SESSION_DAYS,
+  DEFAULT_APP_SINGLE_SESSION,
   DEFAULT_TENANT_ID,
   Err,
   FIRST_PARTY_CLIENTS,
   type FirstPartyClient,
   type Locale,
   OAUTH_REFRESH_TTL_MAX_SEC,
+  type SessionMobileKind,
 } from '@qiwu/shared'
 import { AppConfigService } from '../config/config.module.js'
 import { deriveKey, open, seal, type Sealed } from '../crypto/secret-box.js'
 import { BizError } from '../http/biz-error.js'
 import { redisKey } from '../redis/cache-namespaces.js'
 import { REDIS, type Redis } from '../redis/redis.module.js'
+import { ParamService } from '../settings/param.service.js'
 import type { PrincipalRole } from './principal.js'
 import { ownerIndexKey, SessionRevoker } from './session-revoker.js'
 
@@ -27,8 +33,45 @@ export const isFirstParty = (clientId: string): boolean =>
 export const REFRESH_GRACE_MS = 30_000
 /** Absolute session lifetime fixed at sign-in (see docs/design-notes.md#auth-sessions): no renewal or rotation goes past it. */
 export const ABSOLUTE_MS = { keepSignedIn: 7 * 86_400_000, session: 12 * 3_600_000 } as const
-/** The longest any session lives: keep-signed-in or an OAuth2 client's max refresh TTL. */
-export const MAX_SESSION_MS = Math.max(ABSOLUTE_MS.keepSignedIn, OAUTH_REFRESH_TTL_MAX_SEC * 1000)
+/** App 会话在 `auth.mobile.session_days=0`（不过期）时的滑动期限：签发与每次刷新都从当时起算 400 天。 */
+export const APP_IDLE_MS = 400 * 86_400_000
+/**
+ * The longest a session lives without use (the last-seen trim window): keep-signed-in, an OAuth2 client's
+ * max refresh TTL, or an App session's sliding term.
+ */
+export const MAX_SESSION_MS = Math.max(
+  ABSOLUTE_MS.keepSignedIn,
+  OAUTH_REFRESH_TTL_MAX_SEC * 1000,
+  APP_IDLE_MS,
+)
+/** 单 App 会话：新 App 登录结束同一用户其它 App 会话的原因（`session:kicked` 带它）。 */
+export const APP_REPLACED = 'app_replaced'
+/** App 会话按当前 `auth.mobile.session_days` 已到期（刷新或清扫时发现）的结束原因。 */
+export const APP_SESSION_EXPIRED = 'app_session_expired'
+
+/** 移动端声明为 App 的会话：只有它走 App 期限与单 App 会话；H5、小程序、web 与 OAuth 按原规则。 */
+export const isAppSession = (s: Pick<Session, 'clientId' | 'mobileKind'>): boolean =>
+  s.clientId === MOBILE_CLIENT && s.mobileKind === 'app'
+
+/**
+ * App 会话的绝对到期（epoch ms），刷新与清扫共用：`days>0` 为自原始登录起 `days` 天（轮换不改
+ * `loginAt`，所以参数调小后已登录的会话也按新值到期）；`days=0` 为自 `now` 起 {@link APP_IDLE_MS} 的滑动
+ * 期限。都不超过租户到期。
+ */
+export function appSessionExpiry(
+  s: Pick<Session, 'loginAt' | 'tenantExpAt'>,
+  days: number,
+  now: number,
+): number {
+  return Math.min(
+    days > 0 ? s.loginAt + days * 86_400_000 : now + APP_IDLE_MS,
+    s.tenantExpAt ?? Infinity,
+  )
+}
+
+/** 当前 `auth.mobile.session_days`：缺失、空白、越界或非整数都回落 0（不过期）。 */
+export const appSessionDays = (params: ParamService): Promise<number> =>
+  params.int(appSessionParams.sessionDays, 0, APP_SESSION_DAYS_MAX, DEFAULT_APP_SESSION_DAYS)
 
 export interface SessionFlags {
   mustChangePassword: boolean
@@ -102,6 +145,11 @@ export interface Session extends SessionUser {
   actingTenantId?: number
   /** when the entered tenant is left at the latest */
   actingUntil?: number
+  /**
+   * 移动端会话的端类型（只在 `clientId='mobile'` 时记录）：`app` 走 App 期限与单 App 会话，其余与缺省
+   * （之前签发的会话）按原规则
+   */
+  mobileKind?: SessionMobileKind
 }
 
 /** A live session as the online list shows it (TokenService.online). */
@@ -123,6 +171,8 @@ export interface IssueOptions {
   credVer?: string
   /** third-party OAuth2 session lifetimes (replace keepSignedIn's absolute limit) */
   ttl?: SessionTtl
+  /** 移动端的端类型：只在 `clientId='mobile'` 时写进会话，其它客户端忽略 */
+  mobileKind?: SessionMobileKind
 }
 
 /**
@@ -227,8 +277,11 @@ const graceKey = (refreshToken: string, sid: string, ua: string) =>
 
 // Atomic rotation: consumes the refresh token only if it and its session still exist, so of two
 // parallel refreshes exactly one rotates and the other finds the grace entry already in place.
+// An App session's rotation (ARGV[9] not '') also writes back its session JSON with the new
+// absoluteExpAt and extends the session key and the owner index to it (the index only ever grows, GT).
 // KEYS: rt, session, old at, grace, new at, new rt, owner index, online
-// ARGV: grace JSON, grace ttl, at JSON, at ttl, rt JSON, rt ttl, sid, online score
+// ARGV: grace JSON, grace ttl, at JSON, at ttl, rt JSON, rt ttl, sid, online score,
+//       session JSON ('' = unchanged), session ttl
 const ROTATE = `
 if redis.call('EXISTS', KEYS[1]) == 0 or redis.call('EXISTS', KEYS[2]) == 0 then return 0 end
 redis.call('DEL', KEYS[1], KEYS[3])
@@ -238,6 +291,14 @@ redis.call('SET', KEYS[6], ARGV[5], 'PX', ARGV[6])
 redis.call('SREM', KEYS[7], KEYS[1], KEYS[3])
 redis.call('SADD', KEYS[7], KEYS[4], KEYS[5], KEYS[6])
 redis.call('ZADD', KEYS[8], ARGV[8], ARGV[7])
+if ARGV[9] ~= '' then
+  -- patch only absoluteExpAt of the stored JSON: a save() since the read (flags, acting tenant) stays
+  local cur = redis.call('GET', KEYS[2])
+  local patched = string.gsub(cur, '"absoluteExpAt":%d+', '"absoluteExpAt":' .. ARGV[9], 1)
+  redis.call('SET', KEYS[2], patched, 'PX', ARGV[10])
+  redis.call('PEXPIRE', KEYS[7], ARGV[10], 'NX')
+  redis.call('PEXPIRE', KEYS[7], ARGV[10], 'GT')
+end
 return 1`
 
 // An OAuth2 authorization code, indexed by expiry for SessionRevoker.revokeUser.
@@ -287,6 +348,7 @@ export class TokenService {
     @Inject(REDIS) private readonly redis: Redis,
     private readonly cfg: AppConfigService,
     private readonly revoker: SessionRevoker,
+    private readonly params: ParamService,
   ) {}
 
   private get accessMs() {
@@ -295,6 +357,12 @@ export class TokenService {
 
   private get refreshMs() {
     return this.cfg.get('REFRESH_TTL_SEC') * 1000
+  }
+
+  /** 当前单 App 会话开关 `auth.app.single_session`：缺失按默认开，其余只有 `true` 算开。 */
+  async appSingleSession(): Promise<boolean> {
+    const raw = await this.params.get(appSessionParams.singleSession)
+    return raw == null ? DEFAULT_APP_SINGLE_SESSION : raw.trim() === 'true'
   }
 
   /** `auth:credver:{userId}` (SessionRevoker.revokeUser bumps it); a sign-in passes it to `issue`. */
@@ -314,10 +382,13 @@ export class TokenService {
     if (user.userId !== null && !Number.isSafeInteger(user.tenantId))
       throw new Error('TokenService.issue: a user session needs the tenant of its user')
     const now = Date.now()
+    const clientId = opts.clientId ?? CONSOLE_CLIENT
+    // 端类型只属于 mobile 会话：别的客户端即使带了也不记录（登录入口已对它回 400）
+    const mobileKind = clientId === MOBILE_CLIENT ? opts.mobileKind : undefined
     const session: Session = {
       ...user,
       sid: randomUUID(),
-      clientId: opts.clientId ?? CONSOLE_CLIENT,
+      clientId,
       scopes: opts.scopes ?? [],
       flags: opts.flags ?? { mustChangePassword: false, passwordExpired: false },
       keepSignedIn: opts.keepSignedIn,
@@ -332,7 +403,11 @@ export class TokenService {
         user.tenantExpAt ?? Infinity,
       ),
       ...(opts.ttl && { ttl: opts.ttl }),
+      ...(mobileKind && { mobileKind }),
     }
+    // App 会话按当前参数定期限（0 = 自现在起滑动 400 天），同样不超过租户到期
+    if (isAppSession(session))
+      session.absoluteExpAt = appSessionExpiry(session, await appSessionDays(this.params), now)
     const life = Math.max(session.absoluteExpAt - now, 1)
     const t = this.mint(session, now)
     const issued = await this.redis.eval(ISSUE, {
@@ -403,11 +478,14 @@ export class TokenService {
       this.redis.mGet(sids.map((sid) => redisKey('authSession', sid))),
       this.redis.zmScore(redisKey('authSeen'), sids),
     ])
+    const sessions = raws.map((raw) => (raw ? (JSON.parse(raw) as Session) : null))
+    // 参数调小后已超期、尚未被刷新或清扫结束的 App 会话不再列出
+    const days = sessions.some((s) => s && isAppSession(s)) ? await appSessionDays(this.params) : 0
     return live.flatMap(({ score }, i) => {
-      const raw = raws[i]
-      if (!raw) return []
-      const session = JSON.parse(raw) as Session
+      const session = sessions[i]
+      if (!session) return []
       if (now >= session.absoluteExpAt || this.tenantEnded(session, now)) return []
+      if (isAppSession(session) && now >= appSessionExpiry(session, days, now)) return []
       const last = seen[i]
       return [
         { ...session, expiresAt: Number(score), lastSeenAt: last == null ? null : Number(last) },
@@ -456,6 +534,20 @@ export class TokenService {
   async load(sid: string): Promise<Session | null> {
     const session = await this.live(sid)
     return session === TENANT_UNAVAILABLE ? null : session
+  }
+
+  /**
+   * 事务内的只读会话快照：不吊销、不刷新、不发模块通知。调用方须先在事务外完成 load/current 和业务资格
+   * 校验，锁内只用于确认同一会话仍活着，不能替代正常认证流程。
+   */
+  async readLiveSnapshot(sid: string): Promise<Session | null> {
+    const raw = await this.redis.get(redisKey('authSession', sid))
+    if (!raw) return null
+    const session = JSON.parse(raw) as Session
+    const now = Date.now()
+    return session.sid !== sid || this.tenantEnded(session, now) || now >= session.absoluteExpAt
+      ? null
+      : session
   }
 
   /**
@@ -525,9 +617,20 @@ export class TokenService {
     const raw = await this.redis.get(rtKey)
     if (raw) {
       const entry = JSON.parse(raw) as RefreshEntry
-      const session = await this.refreshable(entry.sid, clientId, opts)
+      let session = await this.refreshable(entry.sid, clientId, opts)
       if ('kind' in session) return session
       const now = Date.now()
+      const app = isAppSession(session)
+      if (app) {
+        // 按原始 loginAt 与当前参数复查：参数调小后已到期的会话在这里结束（旧 access 一并失效）
+        const expAt = appSessionExpiry(session, await appSessionDays(this.params), now)
+        if (now >= expAt) {
+          await this.revoker.revokeSession(session.sid, APP_SESSION_EXPIRED)
+          return REJECTED
+        }
+        // 0 模式每次刷新滑动延长；loginAt 永远不改
+        session = { ...session, absoluteExpAt: expAt }
+      }
       const t = this.mint(session, now)
       const grace = this.seal(refreshToken, session.sid, ua, t.tokens, now + REFRESH_GRACE_MS)
       const rotated = await this.redis.eval(ROTATE, {
@@ -551,6 +654,8 @@ export class TokenService {
           String(t.rtMs),
           session.sid,
           String(now + t.rtMs),
+          app ? String(session.absoluteExpAt) : '',
+          String(Math.max(session.absoluteExpAt - now, 1)),
         ],
       })
       if (rotated === 1) return { kind: 'rotated', tokens: t.tokens, session }
@@ -614,7 +719,8 @@ export class TokenService {
 
   /**
    * A new token pair for `session` at `now`, with TTLs capped at `absoluteExpAt`; a third-party
-   * session's from its `ttl`, first-party ones' from the env.
+   * session's from its `ttl`, first-party ones' from the env. An App session's refresh token lives as
+   * long as the session (not cut to REFRESH_TTL_SEC): the App stays signed in while it is opened.
    */
   private mint(session: Session, now: number) {
     const left = session.absoluteExpAt - now
@@ -622,7 +728,10 @@ export class TokenService {
     const refreshToken = newToken()
     const atHash = sha256(accessToken)
     const atMs = Math.min(session.ttl?.accessMs ?? this.accessMs, left)
-    const rtMs = Math.min(session.ttl?.refreshMs ?? this.refreshMs, left)
+    const rtMs = Math.min(
+      session.ttl?.refreshMs ?? (isAppSession(session) ? left : this.refreshMs),
+      left,
+    )
     return {
       atKey: redisKey('authAccess', atHash),
       atValue: JSON.stringify({ sid: session.sid } satisfies AccessEntry),

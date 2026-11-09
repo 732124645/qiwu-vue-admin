@@ -77,6 +77,9 @@
     "usage": "Agent usage",
     "batch": "Batch review"
   },
+  "im": {
+    "title": "Chat"
+  },
   "action": {
     "browse": "Browse",
     "view": "View",

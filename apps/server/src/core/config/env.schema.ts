@@ -50,6 +50,7 @@ export const EFFECTIVE_CONFIG_KEYS: string[] = [
   'APP_WXOA',
   'APP_MCP',
   'APP_AGENT',
+  'APP_IM',
   'APP_DEMO_MODE',
   'SWAGGER_ENABLED',
   'DB_HOST',
@@ -122,6 +123,7 @@ export const EnvSchema = z.preprocess(
        */
       OUTBOUND_S3_PORTS: portList.default([]),
       OUTBOUND_SMTP_PORTS: portList.default([]),
+      OUTBOUND_LIVEKIT_PORTS: portList.default([]),
       CODEGEN_WRITE: flag.default(false),
       APP_DEMO_MODE: flag.default(false),
       /**
@@ -152,6 +154,16 @@ export const EnvSchema = z.preprocess(
        * (/api/agent/* 404), its menus hidden. It shares the tool registry with APP_MCP but needs it not
        */
       APP_AGENT: flag.default(false),
+      /**
+       * 员工即时通讯（see docs/im.md）：只在启动时读；关 = 模块不加载（/api/im/* 404、清理任务不注册），
+       * 迁移与种子照常
+       */
+      APP_IM: flag.default(false),
+      /** LiveKit 客户端信令地址；密钥只从本机秘密配置读取，未配置时语音消息仍可使用。 */
+      IM_LIVEKIT_URL: z.string().max(2048).default(''),
+      IM_LIVEKIT_API_URL: z.string().max(2048).default(''),
+      IM_LIVEKIT_API_KEY: z.string().max(1024).default(''),
+      IM_LIVEKIT_API_SECRET: z.string().max(4096).default(''),
       STORAGE_LOCAL_ROOT: z.string().default(DEFAULT_UPLOAD_ROOT),
       /**
        * WeChat mini program sign-in (also param `auth.wx_mp.enabled`): the AppID and its

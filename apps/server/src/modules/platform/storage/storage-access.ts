@@ -6,8 +6,13 @@ import type { FsObject } from './fs-object.entity.js'
 
 export type StorageAccessChecker = (obj: FsObject, principal: Principal) => Promise<boolean>
 
-/** 受保护附件必须经过业务检查器；模块未加载时也不能回落到上传者或全局文件权限。 */
-export const PROTECTED_ATTACHMENT_TAGS = ['wf.attachment', 'oa.attachment'] as const
+/** 受保护附件不能回落到上传者或全局权限；IM 标签只由聊天专属文件路由授权。 */
+export const PROTECTED_ATTACHMENT_TAGS = [
+  'wf.attachment',
+  'oa.attachment',
+  'im.attachment',
+  'im.sticker',
+] as const
 
 /** 平台只登记业务检查函数，不依赖工作流或项目模块。 */
 @Injectable()

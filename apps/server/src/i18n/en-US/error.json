@@ -166,5 +166,27 @@
     "reasoning_off_rejected": "The model service does not accept turning reasoning off (reasoning_effort: none). Pick another reasoning level, or ask the platform administrator to set the model's default reasoning to provider default or use the vLLM switch.",
     "provider_key_rejected": "The model service rejected the key. Check the key and the address",
     "thread_stale": "This conversation has newer messages. Reload it and try again."
+  },
+  "im": {
+    "staff_only": "Chat is available to staff only",
+    "room_not_found": "The conversation does not exist or you are no longer in it",
+    "user_unavailable": "This user cannot be chatted with (not an enabled staff member of your organization)",
+    "role_required": "Your role in this group does not allow this action",
+    "member_limit": "A group can have at most {max} members",
+    "owner_transfer_required": "Transfer the group ownership before leaving while other members remain",
+    "room_closed": "The group has been dissolved",
+    "client_id_conflict": "The message id is already used for other content",
+    "rev_conflict": "The message was changed; refresh and try again",
+    "recall_denied": "This message cannot be recalled",
+    "edit_denied": "This message cannot be edited",
+    "entry_not_found": "The message does not exist or is no longer visible",
+    "sticker_limit": "You can keep at most {max} stickers, each within the size limit",
+    "voice_invalid": "The voice file is invalid; record it again using a supported format",
+    "voice_too_long": "The voice message exceeds the duration limit",
+    "call_not_found": "The call does not exist or you are not a participant",
+    "call_conflict": "This conversation already has an unfinished call",
+    "call_state": "The call state changed; refresh and try again",
+    "call_session": "This call belongs to another session; use the original device",
+    "call_unavailable": "Calls are not configured or are temporarily unavailable"
   }
 }

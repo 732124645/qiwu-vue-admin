@@ -35,6 +35,7 @@
 | platform/iam/session | `SessionModule`（session.module.ts） |  |
 | platform/iam/tenant-package | `TenantPackageModule`（tenant-package.module.ts） |  |
 | platform/iam/user | `UserModule`（user.module.ts） |  |
+| platform/im | `ImCallMaintenanceModule`（im-call-maintenance.module.ts）, `ImModule`（im.module.ts） | APP_IM |
 | platform/messaging | `MessagingModule`（messaging.module.ts） |  |
 | platform/messaging/bulletin | `BulletinModule`（bulletin.module.ts） |  |
 | platform/messaging/inbox | `InboxModule`（inbox.module.ts） |  |
@@ -85,6 +86,7 @@
 | 开关 | 只在开启时加载的模块 | 只在开启时显示的菜单（路由名） |
 | --- | --- | --- |
 | `APP_AGENT` | AgentModule（core/agent） | agent |
+| `APP_IM` | ImModule（modules/platform/im） | im |
 | `APP_MCP` | McpModule（core/mcp） | mcp-token, mcp-tool |
 | `APP_MULTI_TENANT` |  | iam-tenant, iam-tenant-package |
 | `APP_WXOA` | WxoaModule（modules/platform/wxoa） | wxoa |
@@ -145,6 +147,12 @@
 | `iam_tenant_package` | `TenantPackage` | 平台 | 是 | modules/platform/iam/tenant-package/tenant-package.entity.ts |
 | `iam_user` | `User` | 租户 | 是 | modules/platform/iam/user/user.entity.ts |
 | `iam_user_social` | `UserSocial` | 租户 | 是 | modules/platform/iam/social/user-social.entity.ts |
+| `im_call` | `ImCallEntity` | 租户 | 是 | modules/platform/im/entities/im-call.entity.ts |
+| `im_call_member` | `ImCallMemberEntity` | 租户 | 是 | modules/platform/im/entities/im-call.entity.ts |
+| `im_entry` | `ImEntryEntity` | 租户 | 是 | modules/platform/im/entities/im.entity.ts |
+| `im_room` | `ImRoomEntity` | 租户 | 是 | modules/platform/im/entities/im.entity.ts |
+| `im_roster` | `ImRosterEntity` | 租户 | 是 | modules/platform/im/entities/im.entity.ts |
+| `im_sticker` | `ImStickerEntity` | 租户 | 是 | modules/platform/im/entities/im.entity.ts |
 | `job_run` | `Run` | 平台 | 是 | modules/platform/scheduler/run/run.entity.ts |
 | `job_task` | `Task` | 平台 | 是 | modules/platform/scheduler/task/task.entity.ts |
 | `msg_bulletin` | `Bulletin` | 租户 | 是 | modules/platform/messaging/bulletin/bulletin.entity.ts |
@@ -461,6 +469,42 @@
 |  | PUT | `/api/iam/users/:id/roles` | iam.user.assign-roles |  |
 |  | DELETE | `/api/iam/users/:id` | iam.user.remove |  |
 |  | POST | `/api/iam/users/batch-delete` | iam.user.remove |  |
+| `DirectoryController`（modules/platform/im/directory.controller.ts），全部：HomeTenant, RequireFeature(im) | GET | `/api/im/directory` |  |  |
+| `ImCallsController`（modules/platform/im/im-calls.controller.ts），全部：HomeTenant, RequireFeature(im) | GET | `/api/im/calls/active` |  |  |
+|  | GET | `/api/im/calls/:id` |  |  |
+|  | POST | `/api/im/rooms/:id/calls` |  | Idempotent |
+|  | POST | `/api/im/calls/:id/accept` |  | Idempotent |
+|  | POST | `/api/im/calls/:id/decline` |  |  |
+|  | POST | `/api/im/calls/:id/join` |  |  |
+|  | POST | `/api/im/calls/:id/leave` |  |  |
+|  | POST | `/api/im/calls/:id/end` |  |  |
+|  | POST | `/api/im/calls/:id/heartbeat` |  |  |
+| `SyncController`（modules/platform/im/sync.controller.ts），全部：HomeTenant, RequireFeature(im) | GET | `/api/im/options` |  |  |
+|  | GET | `/api/im/sync` |  |  |
+| `RoomsController`（modules/platform/im/rooms.controller.ts），全部：HomeTenant, RequireFeature(im) | POST | `/api/im/rooms/directs` |  | Idempotent |
+|  | POST | `/api/im/rooms/groups` |  | Idempotent |
+|  | GET | `/api/im/rooms/:id/members` |  |  |
+|  | POST | `/api/im/rooms/:id/members` |  |  |
+|  | DELETE | `/api/im/rooms/:id/members/:userId` |  |  |
+|  | POST | `/api/im/rooms/:id/leave` |  |  |
+|  | PUT | `/api/im/rooms/:id/owner` |  |  |
+|  | PUT | `/api/im/rooms/:id/members/:userId/role` |  |  |
+|  | PUT | `/api/im/rooms/:id/label` |  |  |
+|  | POST | `/api/im/rooms/:id/close` |  |  |
+|  | PUT | `/api/im/rooms/:id/read` |  |  |
+| `EntriesController`（modules/platform/im/entries.controller.ts），全部：HomeTenant, RequireFeature(im) | GET | `/api/im/rooms/:id/entries` |  |  |
+|  | POST | `/api/im/rooms/:id/uploads` |  | Idempotent |
+|  | POST | `/api/im/rooms/:id/voice-uploads` |  | Idempotent |
+|  | POST | `/api/im/rooms/:id/entries` |  | Idempotent |
+|  | PUT | `/api/im/rooms/:id/entries/:seq` |  |  |
+|  | POST | `/api/im/rooms/:id/entries/:seq/recall` |  |  |
+|  | GET | `/api/im/rooms/:id/entries/:seq/file` |  |  |
+| `StickersController`（modules/platform/im/stickers.controller.ts），全部：HomeTenant, RequireFeature(im) | GET | `/api/im/stickers` |  |  |
+|  | POST | `/api/im/stickers` |  | Idempotent |
+|  | POST | `/api/im/stickers/from-entry` |  | Idempotent |
+|  | PUT | `/api/im/stickers/order` |  |  |
+|  | GET | `/api/im/stickers/:id/file` |  |  |
+|  | DELETE | `/api/im/stickers/:id` |  |  |
 | `McpController`（core/mcp/mcp.controller.ts） | POST | `/api/mcp` |  | Public |
 |  | GET | `/api/mcp` |  | Public |
 |  | DELETE | `/api/mcp` |  | Public |
@@ -886,6 +930,7 @@
 | `iam-tenant-package` | page | APP_MULTI_TENANT | db/seeds/iam/tenant-menus.seed.ts |
 | `iam-user` | page |  | modules/platform/iam/user/user.seed.ts |
 | `iam-user-roles` | page |  | modules/platform/iam/user/user.seed.ts |
+| `im` | group | APP_IM | db/seeds/im/im.seed.ts |
 | `mcp-token` | page | APP_MCP | db/seeds/mcp/mcp.seed.ts |
 | `mcp-tool` | page | APP_MCP | db/seeds/mcp/mcp.seed.ts |
 | `messaging` | group |  | db/seeds/messaging/messaging.seed.ts |
@@ -1032,10 +1077,12 @@
 | `audit.http_trace.exclude_paths` | db/seeds/settings/settings.seed.ts |
 | `audit.http_trace.mode` | db/seeds/settings/settings.seed.ts |
 | `audit.retention_days` | db/seeds/settings/settings.seed.ts |
+| `auth.app.single_session` | db/seeds/settings/settings.seed.ts |
 | `auth.cross_ip_threshold` | db/seeds/settings/settings.seed.ts |
 | `auth.ip_blacklist` | db/seeds/settings/settings.seed.ts |
 | `auth.lock_minutes` | db/seeds/settings/settings.seed.ts |
 | `auth.lock_threshold` | db/seeds/settings/settings.seed.ts |
+| `auth.mobile.session_days` | db/seeds/settings/settings.seed.ts |
 | `auth.signup.default_dept_id` | db/seeds/settings/settings.seed.ts |
 | `auth.signup.default_role_id` | db/seeds/settings/settings.seed.ts |
 | `auth.signup.enabled` | db/seeds/settings/settings.seed.ts |
@@ -1050,6 +1097,18 @@
 | `iam.password_expire_days` | db/seeds/settings/settings.seed.ts |
 | `iam.password_min_length` | db/seeds/settings/settings.seed.ts |
 | `iam.user.initial_password` | db/seeds/iam/iam.seed.ts |
+| `im.call.enabled` | db/seeds/im/im.seed.ts |
+| `im.file.exts` | db/seeds/im/im.seed.ts |
+| `im.file.max_mb` | db/seeds/im/im.seed.ts |
+| `im.group.max_members` | db/seeds/im/im.seed.ts |
+| `im.history.retention_days` | db/seeds/im/im.seed.ts |
+| `im.message.edit_minutes` | db/seeds/im/im.seed.ts |
+| `im.message.group_recall_anytime` | db/seeds/im/im.seed.ts |
+| `im.message.recall_minutes` | db/seeds/im/im.seed.ts |
+| `im.message.text_max_chars` | db/seeds/im/im.seed.ts |
+| `im.sync.epoch` | db/seeds/im/im.seed.ts |
+| `im.voice.max_mb` | db/seeds/im/im.seed.ts |
+| `im.voice.max_seconds` | db/seeds/im/im.seed.ts |
 | `mcp.paused` | db/seeds/settings/settings.seed.ts |
 | `notify.wx_subscribe.enabled` | db/seeds/settings/settings.seed.ts |
 | `notify.wx_subscribe.templates` | db/seeds/settings/settings.seed.ts |
@@ -1080,6 +1139,7 @@
 | --- | --- | --- |
 | `audit.purge` | BuiltinJobs.purge | modules/platform/scheduler/builtin-jobs.ts |
 | `demo.echo` | BuiltinJobs.echo | modules/platform/scheduler/builtin-jobs.ts |
+| `im.purge` | ImPurgeJob.purge | modules/platform/im/im-purge.job.ts |
 | `notify.dispatch` | NotifyDispatcher.dispatch | core/notify/notify.ts |
 | `session.sweep` | BuiltinJobs.sweep | modules/platform/scheduler/builtin-jobs.ts |
 | `wf.task.remind` | WfRemind.remind | modules/workflow/runtime/wf-remind.ts |

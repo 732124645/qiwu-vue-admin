@@ -161,6 +161,31 @@
           }
         }
       ]
+    },
+    {
+      "root": "pages-im",
+      "pages": [
+        {
+          "path": "call/index",
+          "style": {}
+        },
+        {
+          "path": "room/index",
+          "style": {}
+        },
+        {
+          "path": "directory/index",
+          "style": {}
+        },
+        {
+          "path": "group/index",
+          "style": {}
+        },
+        {
+          "path": "stickers/index",
+          "style": {}
+        }
+      ]
     }
   ],
   "tabBar": {

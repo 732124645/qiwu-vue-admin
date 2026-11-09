@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common'
 import { InjectDataSource } from '@nestjs/typeorm'
-import { Err, masked, smsResetPasswordBody, type SmsLoginBody } from '@qiwu/shared'
+import { Err, masked, mobileKindRule, smsResetPasswordBody, type SmsLoginBody } from '@qiwu/shared'
 import bcrypt from 'bcryptjs'
 import type { DataSource } from 'typeorm'
 import { AuditWriter } from '../../../../core/audit/audit-writer.js'
@@ -42,6 +42,8 @@ export class SmsAuthService {
     via?: SignInVia,
   ): Promise<IssuedTokens> {
     const kind = via?.kind ?? 'sms'
+    // 端类型声明不合法（非 mobile 客户端带 mobileKind）→ 400，必须在花掉验证码之前：否则这次验证码白白作废
+    parseOr400(mobileKindRule, { clientId: body.clientId, mobileKind: body.mobileKind })
     const at = await this.loginTenants.resolveLoginTenant(
       { hostname: client.host },
       body.tenantCode,
@@ -87,6 +89,7 @@ export class SmsAuthService {
         timezone,
         label: masked.mobile(body.mobile),
         clientId: body.clientId,
+        mobileKind: body.mobileKind,
         ...(via && { beforeIssue: (userId: number) => via.beforeIssue(userId, null) }),
       },
       client,

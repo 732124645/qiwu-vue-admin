@@ -1,0 +1,60 @@
+import {
+  QwLiveKitConnectOptions, QwLiveKitActionOptions, QwLiveKitToggleOptions,
+  QwLiveKitSnapshot, QwLiveKitFailure, QwLiveKitEvent, QwLiveKitEventCallback
+} from '../interface.uts'
+
+/** 原生结果由固定 DTO 编码，脚本桥不接收任何 SDK 对象。 */
+function snapshot(value: string): QwLiveKitSnapshot {
+  return JSON.parse<QwLiveKitSnapshot>(value)!
+}
+
+/** 错误对象显式使用公开声明类型，避免原生桥把对象降成未分类的 JSON。 */
+function failure(code: string, operation: string): QwLiveKitFailure {
+  const value: QwLiveKitFailure = { code, operation }
+  return value
+}
+
+/** 连接结果与错误均为一次回调，凭据只传给原生引擎。 */
+export function connect(options: QwLiveKitConnectOptions): void {
+  QwLiveKitEngine.connect(options.url, options.token, options.microphone ?? false, options.camera ?? false,
+    (value: string) => { options.success?.(snapshot(value)) },
+    (code: string, operation: string) => { options.fail?.(failure(code, operation)) })
+}
+
+/** 旧连接编号不能结束当前新连接。 */
+export function disconnect(options: QwLiveKitActionOptions): void {
+  QwLiveKitEngine.disconnect(options.connectionId,
+    (value: string) => { options.success?.(snapshot(value)) },
+    (code: string, operation: string) => { options.fail?.(failure(code, operation)) })
+}
+
+function action(connectionId: string, operation: string, enabled: boolean,
+  success: ((value: QwLiveKitSnapshot) => void) | null,
+  fail: ((value: QwLiveKitFailure) => void) | null): void {
+  QwLiveKitEngine.action(connectionId, operation, enabled,
+    (value: string) => { success?.(snapshot(value)) },
+    (code: string, operation: string) => { fail?.(failure(code, operation)) })
+}
+
+/** 切换当前连接的麦克风发布。 */
+export function setMicrophoneEnabled(options: QwLiveKitToggleOptions): void { action(options.connectionId, 'setMicrophoneEnabled', options.enabled, options.success ?? null, options.fail ?? null) }
+/** 切换当前连接的摄像头发布。 */
+export function setCameraEnabled(options: QwLiveKitToggleOptions): void { action(options.connectionId, 'setCameraEnabled', options.enabled, options.success ?? null, options.fail ?? null) }
+/** 通过 SDK 切换已开启的摄像头。 */
+export function switchCamera(options: QwLiveKitActionOptions): void { action(options.connectionId, 'switchCamera', false, options.success ?? null, options.fail ?? null) }
+/** 设置内置扬声器偏好，不宣称强选所有蓝牙路由。 */
+export function setSpeakerOutputPreferred(options: QwLiveKitToggleOptions): void { action(options.connectionId, 'setSpeakerOutputPreferred', options.enabled, options.success ?? null, options.fail ?? null) }
+
+/** on 开头且仅一个 callback，供宿主 App 级注册一次持续监听。 */
+export function onLiveKitEvent(callback: QwLiveKitEventCallback): void {
+  QwLiveKitEngine.onEvent((value: string) => { callback(JSON.parse<QwLiveKitEvent>(value)!) })
+}
+
+/** 放下外部监听闭包；原生内部仍处理断开与资源释放。 */
+export function offLiveKitEvent(): void { QwLiveKitEngine.offEvent() }
+export function getSnapshot(): QwLiveKitSnapshot { return snapshot(QwLiveKitEngine.getSnapshot()) }
+
+/** 只取得系统授权，采集是否开始由宿主当前任务决定。 */
+export function requestMicrophonePermission(callback: (granted: boolean) => void): void {
+  QwLiveKitEngine.requestMicrophonePermission((granted: boolean) => { callback(granted) })
+}

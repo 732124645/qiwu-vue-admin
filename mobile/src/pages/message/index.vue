@@ -7,11 +7,95 @@
     :default-theme-style="pagingTheme.style"
     :loading-more-title-custom-style="pagingTheme.title"
     :loading-more-no-more-line-custom-style="pagingTheme.line"
+    :hide-empty-view="chatMode"
+    :to-bottom-loading-more-enabled="!chatMode"
     @query="query"
   >
     <QwPageHeader :title="t('common.tab.message')" :sub="summary" />
     <view class="qw-sheet">
-      <view class="qw-card qw-msg__bulletins" role="link" @click="openBulletins">
+      <!-- #ifndef MP-WEIXIN -->
+      <view v-if="imCalls.media.state === 'disconnecting'" class="qw-card qw-msg-call-cleanup">
+        <text>{{ t('imMedia.call.cleanup') }}</text>
+        <button
+          class="qw-im-media-button"
+          role="button"
+          :tabindex="imCallCleanupBusy ? -1 : 0"
+          :aria-disabled="imCallCleanupBusy"
+          @keydown="activateImMediaButton($event, imCallCleanupBusy, retryImCallDisconnect)"
+          :loading="imCallCleanupBusy"
+          :disabled="imCallCleanupBusy"
+          @click="retryImCallDisconnect"
+        >
+          {{ t('imMedia.call.retryDisconnect') }}
+        </button>
+      </view>
+      <!-- #endif -->
+      <view v-if="imChatVisible" class="qw-seg qw-msg__seg" role="tablist">
+        <view
+          v-for="name in MODES"
+          :key="name"
+          :class="`qw-seg__item${name === mode ? ' is-on' : ''}`"
+          role="tab"
+          :aria-selected="name === mode"
+          @click="mode = name"
+        >
+          <text class="qw-seg__label">{{ t(`im.mode.${name}`) }}</text>
+          <!-- prettier-ignore -->
+          <text v-if="modeCount(name)" class="qw-seg__n">{{ modeCount(name) > 99 ? '99+' : modeCount(name) }}</text>
+        </view>
+      </view>
+      <template v-if="chatMode">
+        <view class="qw-sec">
+          <text class="qw-sec__title">{{ t('im.rooms') }}</text>
+          <view class="qw-sec__link qw-msg__new" role="button" @click="openDirectory">
+            <QwIcon name="message" size="30rpx" />
+            <text>{{ t('im.newChat') }}</text>
+          </view>
+        </view>
+        <view v-if="rooms.length" class="qw-group qw-msg__list qw-im-rooms">
+          <view
+            v-for="room in rooms"
+            :key="room.roomId"
+            :class="`qw-row qw-im-room ${room.unread ? 'is-unread' : 'is-read'}`"
+            role="link"
+            @click="openRoom(room.roomId)"
+          >
+            <view
+              v-if="room.detail?.kind === 'group'"
+              class="qw-tile qw-tile--brand"
+              aria-hidden="true"
+            >
+              <QwIcon name="message" size="38rpx" />
+            </view>
+            <view
+              v-else
+              :class="`qw-av qw-av--${avatarTone(room.detail?.peerId ?? room.roomId)}`"
+              aria-hidden="true"
+            >
+              {{ initial(roomTitle(room, directory)) }}
+            </view>
+            <view class="qw-row__main">
+              <view class="qw-row__line">
+                <text class="qw-row__title qw-im-room__title">{{ roomTitle(room, directory) }}</text>
+                <text v-if="room.lastAt" class="qw-row__time">{{ formatShort(room.lastAt) }}</text>
+              </view>
+              <view class="qw-row__line">
+                <text class="qw-row__sub qw-msg__preview">{{ previewText(room, directory) }}</text>
+                <!-- prettier-ignore -->
+                <text v-if="room.unread" class="qw-badge qw-im-room__badge">{{ room.unread > 99 ? '99+' : room.unread }}</text>
+                <text v-if="room.unread" class="qw-sr-only">{{ t('message.unread') }}</text>
+              </view>
+            </view>
+          </view>
+        </view>
+        <QwEmpty v-else :title="t('im.noRooms')" />
+      </template>
+      <view
+        v-if="!chatMode"
+        class="qw-card qw-msg__bulletins"
+        role="link"
+        @click="openBulletins"
+      >
         <view class="qw-tile qw-tile--solid">
           <QwIcon name="megaphone" size="40rpx" />
           <!-- prettier-ignore -->
@@ -23,7 +107,7 @@
         </view>
         <QwIcon class="qw-msg__chev" name="chevron-right" size="34rpx" />
       </view>
-      <view class="qw-sec">
+      <view v-if="!chatMode" class="qw-sec">
         <text class="qw-sec__title">{{ t('message.inbox') }}</text>
         <view
           :class="`qw-sec__link qw-msg__read-all${readAllOff ? ' is-disabled' : ''}`"
@@ -36,7 +120,7 @@
           <text>{{ t('message.readAll') }}</text>
         </view>
       </view>
-      <view v-if="rows.length" class="qw-group qw-msg__list">
+      <view v-if="rows.length && !chatMode" class="qw-group qw-msg__list">
         <view
           v-for="item in rows"
           :key="item.id"
@@ -70,22 +154,35 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { onShow } from '@dcloudio/uni-app'
+import { activateImMediaButton } from '../../core/im/media-button'
+import { computed, onUnmounted, ref, shallowRef, watch } from 'vue'
+import { onHide, onShow } from '@dcloudio/uni-app'
 import {
   PAGE_SIZE_DEFAULT,
   PAGE_SIZE_MAX,
   type BulletinFeed,
   type InboxUnreadVo,
   type MyInboxItemVo,
+  type ImDirectory,
   type Page,
 } from '@qiwu/shared'
+import type { ImRoomRecord } from '@qiwu/shared/im-client'
 import QwEmpty from '@/core/components/QwEmpty.vue'
 import QwIcon, { type IconName } from '@/core/components/QwIcon.vue'
 import QwPageHeader from '@/core/components/QwPageHeader.vue'
 import QwTabBar from '@/core/components/QwTabBar.vue'
 import { formatShort } from '@/core/format'
 import { t } from '@/core/i18n'
+import {
+  imChatVisible,
+  imCurrent,
+  imOpenChat,
+  imState,
+  imUnread,
+  onImChange,
+} from '@/core/im/client'
+import { imCallCleanupBusy, imCalls, retryImCallDisconnect } from '@/core/im/calls'
+import { avatarTone, initial, previewText, roomTitle } from '@/core/im/view'
 import { api } from '@/core/request'
 import { useCountsStore } from '@/core/stores/counts'
 import { pagingTheme } from '@/core/theme'
@@ -94,6 +191,9 @@ import { pagingTheme } from '@/core/theme'
  * Message tab: the unread count under the navy header, the bulletins entry (latest title,
  * unread badge) above my inbox, newest first, paged by z-paging (pull to refresh, load on scroll). A message opens in pages-sys, which marks it read; "mark all as read" reads the rest. Sign-in-only APIs
  * over the caller's own data (see docs/design-notes.md#workflow).
+ * With chat available (the probe answered, or offline with this account's cache; never in the mini program) a
+ * chat / notifications switch on top: the chat side lists the conversations from the local cache, newest
+ * first, re-read on every change the engine reports (no request of its own; the directory loads once here).
  */
 const INBOX = '/messaging/inboxes/mine'
 /** a message's icon tile by category: business (a briefcase, brand), system (a bell, neutral) */
@@ -102,21 +202,80 @@ const CATEGORY: Record<MyInboxItemVo['category'], { icon: IconName; tone: string
   system: { icon: 'bell', tone: 'neutral' },
 }
 
+type Mode = 'chat' | 'notice'
+const MODES: readonly Mode[] = ['chat', 'notice']
+
 const counts = useCountsStore()
+const MODE_KEY = 'qw.message.mode'
+/** notifications first until the user picks chat (remembered on this device) */
+const mode = ref<Mode>(uni.getStorageSync(MODE_KEY) === 'chat' ? 'chat' : 'notice')
+const chatMode = computed(() => imChatVisible.value && mode.value === 'chat')
+const modeCount = (name: Mode) => (name === 'chat' ? imUnread.value : counts.unread ?? 0)
+const rooms = shallowRef<ImRoomRecord[]>([])
+const directory = shallowRef<ImDirectory>()
+
+/** 页面是否在前台（onShow 与 onHide 之间） */
+let listShown = true
+
+/** 从本地缓存读会话（按最近时间，没有时间的排后）与通讯录快照。 */
+async function loadRooms() {
+  const ctx = imCurrent()
+  if (!ctx) {
+    rooms.value = []
+    directory.value = undefined
+    return
+  }
+  const [list, dir] = await Promise.all([ctx.cache.listRooms(), ctx.cache.getDirectory()])
+  if (ctx !== imCurrent()) return
+  rooms.value = list
+    .filter((r) => r.detail)
+    .sort((a, b) => (b.lastAt ?? '').localeCompare(a.lastAt ?? '') || b.roomId - a.roomId)
+  directory.value = dir?.data
+  // 列表看得见的会话收到提示时增量拉取（更新预览）；不在聊天区时一个都不算看得见
+  ctx.engine.setVisibleRooms(chatMode.value && listShown ? rooms.value.map((r) => r.roomId) : [])
+}
+
+/** 聊天区不在眼前（切到通知、页面隐藏或卸载）：不再为列表拉取 */
+const hideRooms = () => imCurrent()?.engine.setVisibleRooms([])
+
+const stopWatch = onImChange((c) => {
+  if (c.type !== 'outbox') void loadRooms()
+})
+onUnmounted(() => {
+  stopWatch()
+  hideRooms()
+})
+onHide(() => {
+  listShown = false
+  hideRooms()
+})
+// 第一次切到聊天时才取通讯录与我的表情（之后带 ETag 复验）；选择记在本机
+watch([chatMode, imState], ([on]) => {
+  if (!on) return void hideRooms()
+  void loadRooms()
+  imOpenChat()
+})
+watch(imState, () => {
+  if (imCurrent()) return
+  rooms.value = []
+  directory.value = undefined
+}, { flush: 'sync' })
+watch(mode, (m) => uni.setStorageSync(MODE_KEY, m))
+
+const openRoom = (id: number) => uni.navigateTo({ url: `/pages-im/room/index?id=${id}` })
+const openDirectory = () => uni.navigateTo({ url: '/pages-im/directory/index' })
 const paging = ref<ZPagingRef<MyInboxItemVo>>()
 const rows = ref<MyInboxItemVo[]>([])
 const feed = ref<BulletinFeed>()
 const readingAll = ref(false)
 const readAllOff = computed(() => !counts.unread || readingAll.value)
 
-/** "3 unread"; a blank line until the count is in (no jump) */
-const summary = computed(() =>
-  counts.unread === null
-    ? '\u00a0'
-    : counts.unread
-      ? t('message.summary', { n: counts.unread })
-      : t('message.summaryNone'),
-)
+/** "3 unread" (inbox plus chat); a blank line until the count is in (no jump) */
+const summary = computed(() => {
+  if (counts.unread === null) return '\u00a0'
+  const n = counts.unread + (imChatVisible.value ? imUnread.value : 0)
+  return n ? t('message.summary', { n }) : t('message.summaryNone')
+})
 
 function query(page: number, pageSize: number) {
   api
@@ -156,6 +315,8 @@ const openBulletins = () => uni.navigateTo({ url: '/pages-sys/bulletin/index' })
 // background) reloads the loaded pages in one request, within the API's page size limit
 let shown = false
 onShow(() => {
+  listShown = true
+  void loadRooms()
   void loadFeed()
   if (shown && paging.value)
     void (rows.value.length >= PAGE_SIZE_MAX ? paging.value.reload() : paging.value.refresh())
@@ -223,5 +384,76 @@ onShow(() => {
 
 .qw-msg__list {
   margin-bottom: var(--qw-space-4);
+}
+
+/* chat / notifications: the segmented switch of visual-system §12.4 */
+.qw-msg__seg {
+  margin: var(--qw-space-4) var(--qw-space-4) 0;
+}
+
+.qw-seg {
+  display: flex;
+  height: 44px;
+  border-radius: var(--qw-radius-lg);
+  background: var(--qw-neutral-weak);
+}
+
+.qw-seg__item {
+  position: relative;
+  z-index: 0;
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 8rpx;
+  min-width: 0;
+  font-size: var(--qw-fs-body);
+  font-weight: 500;
+  color: var(--qw-text-2);
+  white-space: nowrap;
+}
+
+.qw-seg__item.is-on {
+  font-weight: 600;
+  color: var(--qw-text);
+}
+
+.qw-seg__item.is-on::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  top: 3px;
+  right: 3px;
+  bottom: 3px;
+  left: 3px;
+  border-radius: var(--qw-radius);
+  background: var(--qw-raised);
+  box-shadow: var(--qw-shadow-1);
+}
+
+.qw-seg__n {
+  box-sizing: border-box;
+  min-width: 36rpx;
+  height: 36rpx;
+  padding: 0 10rpx;
+  border-radius: 999px;
+  font-size: var(--qw-fs-micro);
+  font-weight: 600;
+  line-height: 36rpx;
+  text-align: center;
+  color: var(--qw-on-brand);
+  background: var(--qw-brand);
+  font-variant-numeric: tabular-nums;
+}
+
+.qw-msg__preview {
+  flex: 1;
+  min-width: 0;
+}
+.qw-msg-call-cleanup { padding: var(--qw-space-3); color: var(--qw-danger); font-size: var(--qw-fs-caption); }
+
+.qw-im-media-button:focus-visible {
+  outline: 2px solid var(--qw-brand);
+  outline-offset: 2px;
 }
 </style>

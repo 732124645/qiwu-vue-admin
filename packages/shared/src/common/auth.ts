@@ -26,6 +26,29 @@ export type FirstPartyClient = (typeof FIRST_PARTY_CLIENTS)[number]
 const firstPartyClient = z.enum(FIRST_PARTY_CLIENTS).optional()
 
 /**
+ * 移动端登录声明的端类型（只在 `clientId='mobile'` 时接受）：`app` 的会话按 App 期限与单 App 会话规则，
+ * `h5` 与缺省按原规则；微信小程序登录由服务端固定为 `mp-weixin`。这是第一方客户端的声明，不是设备
+ * 防伪，不扩大任何权限。
+ */
+export const MOBILE_KINDS = ['app', 'h5'] as const
+export type MobileKind = (typeof MOBILE_KINDS)[number]
+/** 会话里记录的端类型：客户端声明的两种，加服务端为小程序登录固定的一种。 */
+export type SessionMobileKind = MobileKind | 'mp-weixin'
+const mobileKind = z.enum(MOBILE_KINDS).optional()
+
+/**
+ * 服务端对登录体的复核：`mobileKind` 只属于 mobile 客户端，其它客户端带它 → 400（字段 mobileKind）。
+ * 不写成登录体本身的 refine：带 refine 的对象不能再 `.pick()`，而登录体被多处挑选字段复用。
+ */
+export const mobileKindRule = z
+  .object({ clientId: firstPartyClient, mobileKind })
+  .refine((b) => b.mobileKind === undefined || b.clientId === 'mobile', {
+    path: ['mobileKind'],
+    message: 'validation.invalid',
+  })
+  .register(fieldDomains, { domain: 'auth' })
+
+/**
  * A sign-in name in the stored syntax (`iam.user.username`), fullwidth forms folded first (NFKC). The
  * lookup's collation maps other spellings (accents, ligatures) onto an account, and the failure counters
  * of an account use its stored name: such a spelling would tell existing names apart.
@@ -39,6 +62,8 @@ export const loginBody = z
     keepSignedIn: z.boolean().optional(),
     captchaTicket: captchaTicket.optional(),
     clientId: firstPartyClient,
+    /** 只配 `clientId: 'mobile'`（{@link mobileKindRule}） */
+    mobileKind,
     /** the tenant to sign in to on a host bound to none; blank = the default tenant (multi-tenancy only) */
     tenantCode: tenantCode.optional(),
   })
@@ -84,6 +109,8 @@ export const smsLoginBody = z
     code: smsOtpCode,
     keepSignedIn: z.boolean().optional(),
     clientId: firstPartyClient,
+    /** 只配 `clientId: 'mobile'`（{@link mobileKindRule}） */
+    mobileKind,
     tenantCode: tenantCode.optional(),
   })
   .register(fieldDomains, { domain: 'auth' })

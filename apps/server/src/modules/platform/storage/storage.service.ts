@@ -18,6 +18,7 @@ import {
   type FsObjectVo,
   type FsPresignBody,
   type FsPresignVo,
+  IM_STORAGE_TAGS,
   type Page,
   isPublicBizTag,
   STORAGE_ALLOWED_EXTS_DEFAULT,
@@ -26,6 +27,7 @@ import {
   storageObjectPerms,
   STORAGE_MAX_SIZE_DEFAULT,
   storageParams,
+  type ImStorageTag,
   type StorageBizTag,
   WXOA_MEDIA_TAG,
   wxoaMediaRef,
@@ -341,9 +343,43 @@ export class StorageService {
       throw new BizError(Err.PAYLOAD_TOO_LARGE)
     const mime = await typeOf(file.data, ext, insideOf(file.data, ext))
     if (!mime) throw new BizError(Err.STORAGE_TYPE_REJECTED, { ext })
-    return this.storeBytes(file.data, originalName, ext, mime, {
-      bizTag: WXOA_MEDIA_TAG,
-      bizRef: wxoaMediaRef(accountId),
+    return this.vo(
+      await this.storeBytes(file.data, originalName, ext, mime, {
+        bizTag: WXOA_MEDIA_TAG,
+        bizRef: wxoaMediaRef(accountId),
+        isPublic: false,
+        uploaderId,
+      }),
+    )
+  }
+
+  /**
+   * 存一个即时通讯私有对象（上传的图片/文件、缩略图、规范化后的表情或其复制件）：扩展名必须在 `rule.exts`
+   * 里且不在永不允许的名单（html/svg/xml/js 等），大小上限取 `rule.maxBytes` 与 `storage.max_size_mb` 的较小值
+   * （超出 413），内容按魔数识别。对象未绑定（`biz_ref` 为空），由发送或存表情的事务 `bindRefs`；24 小时
+   * 内没绑定的由聊天清理任务回收。返回整行（调用方要用 sha256）。
+   */
+  async putImObject(
+    data: Buffer,
+    name: string,
+    tag: ImStorageTag,
+    uploaderId: number,
+    rule: { exts: readonly string[]; maxBytes: number },
+  ): Promise<FsObject> {
+    if (!data.length) throw new BizError(Err.STORAGE_FILE_REQUIRED)
+    const originalName = displayName(name)
+    const ext = extname(originalName).slice(1).toLowerCase()
+    if (
+      !rule.exts.some((e) => e.toLowerCase() === ext) ||
+      (STORAGE_DENIED_EXTS as readonly string[]).includes(ext)
+    )
+      throw new BizError(Err.STORAGE_TYPE_REJECTED, { ext: ext || '?' })
+    if (data.length > Math.min(rule.maxBytes, await this.maxBytes()))
+      throw new BizError(Err.PAYLOAD_TOO_LARGE)
+    const mime = await typeOf(data, ext, insideOf(data, ext))
+    if (!mime) throw new BizError(Err.STORAGE_TYPE_REJECTED, { ext })
+    return this.storeBytes(data, originalName, ext, mime, {
+      bizTag: tag,
       isPublic: false,
       uploaderId,
     })
@@ -364,12 +400,15 @@ export class StorageService {
     if (data.length > (await this.maxBytes())) throw new BizError(Err.PAYLOAD_TOO_LARGE)
     const sniffed = await fileTypeFromBuffer(data)
     if (!sniffed || !isImage(sniffed.mime)) throw new BizError(Err.UNPROCESSABLE)
-    return this.storeBytes(data, displayName(`${name}.${sniffed.ext}`), sniffed.ext, sniffed.mime, {
-      bizTag: AGENT_IMAGE_TAG,
-      bizRef,
-      isPublic: false,
-      uploaderId,
-    })
+    return this.vo(
+      await this.storeBytes(
+        data,
+        displayName(`${name}.${sniffed.ext}`),
+        sniffed.ext,
+        sniffed.mime,
+        { bizTag: AGENT_IMAGE_TAG, bizRef, isPublic: false, uploaderId },
+      ),
+    )
   }
 
   async removeWxoaMedia(accountId: number, id: number): Promise<void> {
@@ -432,7 +471,7 @@ export class StorageService {
     ext: string,
     mime: string,
     meta: { bizTag: string; bizRef?: string; isPublic: boolean; uploaderId: number },
-  ): Promise<FsObjectVo> {
+  ): Promise<FsObject> {
     const storage = await this.primary()
     const client = this.clientFor(storage)
     const key = newKey(ext)
@@ -453,7 +492,7 @@ export class StorageService {
           uploaderId: meta.uploaderId,
         }),
       )
-      return this.vo(row)
+      return row
     } catch (error) {
       await client.remove(key, meta.isPublic)
       throw error
@@ -690,7 +729,7 @@ export class StorageService {
    */
   async bindRefs(
     ids: readonly number[],
-    tag: StorageBizTag,
+    tag: StorageBizTag | ImStorageTag,
     ref: string,
     uploaderId: number,
     tx: EntityManager,
@@ -718,7 +757,17 @@ export class StorageService {
     const obj = await this.objects.findOneBy({ id })
     if (!obj) throw new NotFoundException()
     if (!(await this.canRead(obj, p))) throw new ForbiddenException()
-    // 移动端同源读取限制为20MiB，避免原生下载跟随重定向时将登录令牌发往对象存储。
+    return this.serveAuthorized(obj, { inline, proxy })
+  }
+
+  /**
+   * 调用方已授权之后的输出：S3 且非 proxy → 60 秒预签名 302；proxy → 同源读取（超过 20MiB 413，避免原生
+   * 下载跟随重定向把登录令牌发往对象存储）；本地存储 → 文件流。`inline` 只对图片生效，其余一律附件。
+   */
+  async serveAuthorized(
+    obj: FsObject,
+    { inline, proxy }: { inline: boolean; proxy: boolean },
+  ): Promise<Download> {
     if (proxy && obj.size > STORAGE_MAX_SIZE_DEFAULT) throw new PayloadTooLargeException()
     const how = disposition(inline && isImage(obj.mime) ? 'inline' : 'attachment', obj.originalName)
     const client = this.clientFor(await this.storages.findOneByOrFail({ id: obj.storageId }))
@@ -752,6 +801,9 @@ export class StorageService {
       if (!obj) throw new NotFoundException()
       // 业务附件随业务事务移除，文件管理员不能删坏仍在审批中的引用。
       if (this.access.requiresCheck(obj.bizTag) && obj.bizRef !== null)
+        throw new ForbiddenException()
+      // 聊天对象只由聊天自己的事务与清理任务删除：通用删除即使未绑定也拒绝（含 root）
+      if (!owner && (IM_STORAGE_TAGS as readonly string[]).includes(obj.bizTag))
         throw new ForbiddenException()
       await softDeleteRows(q, 'fs_object', [id])
       if (obj.isPublic)

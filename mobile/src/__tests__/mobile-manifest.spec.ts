@@ -8,6 +8,7 @@ const USED = [
   'ACCESS_NETWORK_STATE',
   'ACCESS_WIFI_STATE',
   'CAMERA',
+  'RECORD_AUDIO',
 ]
 const REMOVED = [
   'ACCESS_COARSE_LOCATION',
@@ -50,12 +51,13 @@ it('iOS: uni.chooseImage has usage strings for the camera and the photo library'
   const { ios } = json['app-plus']!.distribute as { ios?: { privacyDescription?: object } }
   expect(ios?.privacyDescription).toEqual({
     NSCameraUsageDescription: expect.stringMatching(/\S/),
+    NSMicrophoneUsageDescription: expect.stringMatching(/\S/),
     NSPhotoLibraryUsageDescription: expect.stringMatching(/\S/),
   })
 })
 
 it('the mobile package declares no unused location capability', () => {
-  expect(json['app-plus']?.modules).toEqual({})
+  expect(json['app-plus']?.modules).toEqual({ SQLite: {}, Record: {} })
   expect(json['mp-weixin']?.requiredPrivateInfos).toBeUndefined()
   expect(json['mp-weixin']?.permission).toBeUndefined()
 })
@@ -74,6 +76,6 @@ it('the App icon and splash point at committed images outside src/static', () =>
 
 it('build:app ships them: HBuilderX packs dist/build/app, which uni builds without unpackage/', () => {
   expect(pkg.scripts['build:app']).toBe(
-    "uni build -p app && node -e \"require('node:fs').cpSync('unpackage/res', 'dist/build/app/unpackage/res', { recursive: true })\"",
+    'node scripts/build-app.mjs',
   )
 })

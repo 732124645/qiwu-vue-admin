@@ -157,8 +157,10 @@ describe('outboundRule: deployer-registered ports (env), default-deny otherwise'
   const env =
     (values: Record<string, unknown>) =>
     (key: string): unknown =>
-      values[key] ?? { OUTBOUND_S3_PORTS: [], OUTBOUND_SMTP_PORTS: [] }[key] ?? false
-  const ruleOf = (values: Record<string, unknown>, purpose: 's3' | 'smtp') =>
+      values[key] ??
+      { OUTBOUND_S3_PORTS: [], OUTBOUND_SMTP_PORTS: [], OUTBOUND_LIVEKIT_PORTS: [] }[key] ??
+      false
+  const ruleOf = (values: Record<string, unknown>, purpose: 's3' | 'smtp' | 'livekit') =>
     outboundRule({ get: env(values) } as never, purpose)
 
   it('defaults only: S3 80/443, SMTP 25/465/587; the private flag passes through', () => {
@@ -186,6 +188,20 @@ describe('outboundRule: deployer-registered ports (env), default-deny otherwise'
     expect(isRefusedLiteral('s3.example.com', 9000, ruleOf({}, 's3'))).toBe(true)
     // a registered port never opens inner addresses
     expect(isRefusedLiteral('127.0.0.1', 9000, s3)).toBe(true)
+  })
+
+  it('media control only permits HTTPS by default and its extra ports never open storage or private hosts', async () => {
+    expect(ruleOf({}, 'livekit')).toEqual({ ports: [443], allowPrivate: false })
+    const values = { OUTBOUND_LIVEKIT_PORTS: [7880], OUTBOUND_S3_PORTS: [9000] }
+    const media = ruleOf(values, 'livekit')
+    await expect(assertPublicHost('8.8.8.8', 7880, media)).resolves.toBeTruthy()
+    for (const [host, port, rule] of [
+      ['8.8.8.8', 80, media],
+      ['8.8.8.8', 9000, media],
+      ['8.8.8.8', 7880, ruleOf(values, 's3')],
+      ['127.0.0.1', 7880, media],
+    ] as const)
+      await expect(assertPublicHost(host, port, rule)).rejects.toBeInstanceOf(OutboundRefused)
   })
 })
 

@@ -24,9 +24,14 @@ export const NET_TIMEOUT_MS = 5000
 export const OUTBOUND_PORTS = {
   s3: [80, 443],
   smtp: [25, 465, 587],
+  livekit: [443],
 } as const satisfies Record<string, readonly number[]>
 
-const EXTRA_PORTS = { s3: 'OUTBOUND_S3_PORTS', smtp: 'OUTBOUND_SMTP_PORTS' } as const
+const EXTRA_PORTS = {
+  s3: 'OUTBOUND_S3_PORTS',
+  smtp: 'OUTBOUND_SMTP_PORTS',
+  livekit: 'OUTBOUND_LIVEKIT_PORTS',
+} as const
 
 export interface OutboundRule {
   /** the purpose's registered ports ({@link OUTBOUND_PORTS}) */

@@ -42,6 +42,8 @@ export interface SocketData {
 
 /** Same shape AuthGuard accepts in the Authorization header. */
 const TOKEN = /^[\w-]{1,128}$/
+/** setTimeout 能表示的最长延迟（2^31-1 ms）；更长的会被当成 1 ms */
+const MAX_TIMER_MS = 2_147_483_647
 
 /**
  * Socket.IO on the HTTP server (path `/socket.io`, websocket only: no polling sessions to pin to one
@@ -166,8 +168,17 @@ export class RealtimeGateway
     // a kick between the handshake and the joins found no socket in `sid:{sid}` to end: look again
     if (!(await this.tokens.load(data.sid))) return void socket.disconnect(true)
     if (!socket.connected) return
-    // no request re-checks an idle socket: end it with the session (≤ 7 days, within setTimeout's range)
-    const timer = setTimeout(() => socket.disconnect(true), data.endsAt - Date.now())
+    // 空闲 socket 没有请求复查会话：随会话期限结束它。App 会话可长达 400 天以上，超过 setTimeout 的
+    // 上限（约 24.8 天，超出会被当成 1 ms 立即触发），所以分段等待，到期才断开
+    let timer: NodeJS.Timeout
+    const arm = () => {
+      const left = data.endsAt - Date.now()
+      timer =
+        left > MAX_TIMER_MS
+          ? setTimeout(arm, MAX_TIMER_MS)
+          : setTimeout(() => socket.disconnect(true), left)
+    }
+    arm()
     socket.once('disconnect', () => clearTimeout(timer))
   }
 

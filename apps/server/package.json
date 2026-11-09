@@ -54,6 +54,8 @@
     "file-type": "^22.1.1",
     "helmet": "^8.3.0",
     "ip2region.js": "^3.1.8",
+    "livekit-server-sdk": "2.19.2",
+    "music-metadata": "12.3.4",
     "mysql2": "^3.24.4",
     "nestjs-cls": "^7.0.1",
     "nestjs-i18n": "^10.8.5",

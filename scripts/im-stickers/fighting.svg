@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="240" height="240">
+<path d="M120 50 Q121 40 126 33" fill="none" stroke="#0B1A33" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M126 34 C138 14 166 16 172 28 C162 44 138 46 126 34 Z" fill="#3FCB8F" stroke="#0B1A33" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M120 44 C110 28 92 28 86 36 C94 48 110 50 120 44 Z" fill="#3FCB8F" stroke="#0B1A33" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="120" cy="134" r="86" fill="#7DB8F5" stroke="#0B1A33" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+<ellipse cx="88" cy="88" rx="20" ry="10" fill="#FFFFFF" opacity=".45" transform="rotate(-35 88 88)"/>
+<clipPath id="c"><circle cx="120" cy="134" r="82"/></clipPath><rect x="30" y="88" width="180" height="16" fill="#F2545B" clip-path="url(#c)"/><path d="M202 94 l22 -10 l-4 16 Z M202 100 l20 14 l-18 2 Z" fill="#F2545B" stroke="#0B1A33" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+<ellipse cx="76" cy="152" rx="13" ry="8" fill="#FF8FA3" opacity="0.55"/><ellipse cx="164" cy="152" rx="13" ry="8" fill="#FF8FA3" opacity="0.55"/>
+<ellipse cx="96" cy="128" rx="8" ry="11" fill="#0B1A33"/><circle cx="99" cy="124" r="3" fill="#FFFFFF"/><ellipse cx="144" cy="128" rx="8" ry="11" fill="#0B1A33"/><circle cx="147" cy="124" r="3" fill="#FFFFFF"/><path d="M82 112 L106 120" fill="none" stroke="#0B1A33" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/><path d="M158 112 L134 120" fill="none" stroke="#0B1A33" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="92" y="150" width="56" height="24" rx="12" fill="#FFFFFF" stroke="#0B1A33" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/><path d="M96 162 H144" fill="none" stroke="#0B1A33" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="58" cy="176" r="20" fill="#7DB8F5" stroke="#0B1A33" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/><path d="M48 168 h18 M48 178 h18" fill="none" stroke="#0B1A33" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M32 154 l-12 -8 M30 172 l-16 -2" fill="none" stroke="#0B1A33" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
