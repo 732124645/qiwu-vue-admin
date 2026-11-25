@@ -37,6 +37,7 @@ const DATA: MonitorServerVo = {
     heapTotal: 100 * 1024 ** 2,
     heapUsed: 50 * 1024 ** 2,
     external: 1024,
+    eventLoop: { p50: 10.5, p99: 21, max: 812.25, utilization: 0.375 },
   },
 }
 
@@ -106,6 +107,12 @@ describe('server monitor', () => {
     const disk = host.find('.el-table__body .el-table__row')
     expect(disk.text()).toContain('460.0 GB')
     expect(disk.text()).toContain('92.0%')
+  })
+
+  it('shows the event loop of the answering instance with what the values cover', () => {
+    expect(host.find('[data-event-loop="delay"]').text()).toBe('10.50 / 21.00 / 812.25 ms')
+    expect(host.find('[data-event-loop="utilization"]').text()).toBe('37.5%')
+    expect(host.text()).toContain(i18n.global.t('monitor.server.eventLoopNote'))
   })
 
   it('names the multi-tenancy switch read only while it is on (`/me.tenant`); off, no such row', async () => {

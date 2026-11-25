@@ -38,7 +38,8 @@
     "wxMp": {
       "code": "WeChat sign-in code"
     },
-    "tenantCode": "Tenant code"
+    "tenantCode": "Tenant code",
+    "mobileKind": "Mobile client kind"
   },
   "messaging": {
     "inboxMine": {

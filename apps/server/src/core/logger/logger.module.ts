@@ -1,7 +1,9 @@
 import { LoggerModule } from 'nestjs-pino'
-import type { Options } from 'pino-http'
+import type { ServerResponse } from 'node:http'
+import { type Options, startTime } from 'pino-http'
 import { AppConfigService } from '../config/config.module.js'
 import { requestId } from '../context/context.module.js'
+import { runningJobs } from '../monitor/running-jobs.js'
 import { driverMasked, queryMaskedUrl, stackFrames, textRedactor } from '../redact.js'
 
 /** What pino-std-serializers makes of a request (the part kept). */
@@ -73,13 +75,57 @@ function sanitizedError(serialized: Record<string, unknown>): Record<string, unk
  * pino would take from them); the error filter logs 5xx already masked with the request's secrets too
  * (`describeFault`).
  */
+const STARTUP_CONTEXTS = new Set([
+  'NestFactory',
+  'InstanceLoader',
+  'RoutesResolver',
+  'RouterExplorer',
+  'NestApplication',
+])
+
+/**
+ * 慢请求标记（`LOG_SLOW_REQUEST_MS` 大于 0 时）：响应耗时达到阈值的请求行改用 warn，并加上 `slow: true`
+ * 与当时本进程正在执行的定时任务，便于事后 `grep '"slow":true'` 查卡顿时进程在做什么。pino-http 先定级
+ * 再生成日志对象，所以在定级时判定并记下当时的任务，生成对象时取用，两者结论一致；阈值为 0 时不注册
+ * 这些钩子，日志行与原来完全相同。
+ */
+export function slowRequestOptions(
+  thresholdMs: number,
+): Pick<Options, 'customLogLevel' | 'customSuccessObject' | 'customErrorObject'> {
+  if (thresholdMs <= 0) return {}
+  const slow = new WeakMap<ServerResponse, ReturnType<typeof runningJobs.list>>()
+  const mark = (res: ServerResponse, val: object) => {
+    const jobs = slow.get(res)
+    return jobs ? { ...val, slow: true, runningJobs: jobs } : val
+  }
+  return {
+    customLogLevel: (_req, res) => {
+      const started = (res as ServerResponse & { [startTime]?: number })[startTime]
+      if (started === undefined || Date.now() - started < thresholdMs) return 'info'
+      slow.set(res, runningJobs.list())
+      return 'warn'
+    },
+    customSuccessObject: (_req, res, val: object) => mark(res, val),
+    customErrorObject: (_req, res, _err, val: object) => mark(res, val),
+  }
+}
+
 export const pinoHttpOptions = (cfg: AppConfigService): Options => ({
+  ...slowRequestOptions(cfg.get('LOG_SLOW_REQUEST_MS')),
   level: cfg.get('LOG_LEVEL'),
   genReqId: requestId,
   redact: ['req.headers.authorization', 'req.headers.cookie', 'res.headers["set-cookie"]'],
   hooks: {
     // with no message given, pino makes the error's raw message the line's `msg`: give the masked one
-    logMethod(args, method) {
+    logMethod(args, method, level) {
+      // 开发重启只省略框架的重复注册信息，不过滤警告、错误或业务日志。
+      if (
+        process.env.QW_DEV === '1' &&
+        cfg.get('NODE_ENV') === 'development' &&
+        level === 30 &&
+        STARTUP_CONTEXTS.has((args[0] as { context?: string } | undefined)?.context ?? '')
+      )
+        return
       const [first] = args as unknown[]
       const err =
         first instanceof Error ? first : (first as { err?: unknown } | null | undefined)?.err
@@ -106,7 +152,19 @@ export const pinoHttpOptions = (cfg: AppConfigService): Options => ({
     err: sanitizedError,
   },
   // pino-pretty is a devDependency: only ever loaded in development
-  transport: cfg.get('NODE_ENV') === 'development' ? { target: 'pino-pretty' } : undefined,
+  transport:
+    cfg.get('NODE_ENV') === 'development'
+      ? {
+          target: 'pino-pretty',
+          options:
+            process.env.QW_DEV === '1'
+              ? {
+                  singleLine: true,
+                  ignore: 'pid,hostname,req.headers,res.headers,req.remoteAddress,req.remotePort',
+                }
+              : undefined,
+        }
+      : undefined,
 })
 
 /** Structured JSON logs (pino); every request line carries reqId = CLS id = traceId. Needs CoreConfigModule. */

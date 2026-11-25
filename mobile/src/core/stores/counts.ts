@@ -2,7 +2,8 @@ import { ref } from 'vue'
 import { defineStore } from 'pinia'
 import type { InboxUnreadVo, Page } from '@qiwu/shared'
 import { FEATURE, hasFeature } from '@/core/features'
-import { api } from '@/core/request'
+import { api, currentSessionVersion } from '@/core/request'
+import { useAuthStore } from './auth'
 
 /**
  * While a tab page shows and no socket is connected, the counts reload this often (the
@@ -25,14 +26,35 @@ export const useCountsStore = defineStore('counts', () => {
   const tick = ref(0)
   let seq = 0
 
+  /** 套餐尚未知时先等身份，失败不猜测能力；首次成功后可靠加载本次页面的计数。 */
   function load() {
     const mine = ++seq
+    const session = currentSessionVersion()
+    const auth = useAuthStore()
+    if (!auth.me) {
+      void auth.fetchMe().then(
+        () => {
+          if (mine === seq && session === currentSessionVersion() && auth.me)
+            loadKnown(mine, session)
+        },
+        () => {},
+      )
+      return
+    }
+    loadKnown(mine, session)
+  }
+
+  /** 已知身份后读取计数，序列与会话共同阻止迟到结果覆盖。 */
+  function loadKnown(mine: number, session: number) {
+    const flags = useAuthStore().me?.flags
+    if (flags?.mustChangePassword || flags?.passwordExpired) return
+    const fresh = () => mine === seq && session === currentSessionVersion()
     const silent = { silent: true }
     if (hasFeature(FEATURE.workflow)) {
       // answers on their own: one failing keeps the others
       api.get<Page<unknown>>('/wf/tasks/todo', { page: 1, pageSize: 1 }, silent).then(
         (page) => {
-          if (mine !== seq) return
+          if (!fresh()) return
           todo.value = page.total
           tick.value++
         },
@@ -45,7 +67,7 @@ export const useCountsStore = defineStore('counts', () => {
           silent,
         )
         .then(
-          (page) => mine === seq && (running.value = page.total),
+          (page) => fresh() && (running.value = page.total),
           () => {},
         )
     } else {
@@ -53,7 +75,7 @@ export const useCountsStore = defineStore('counts', () => {
       running.value = null
     }
     api.get<InboxUnreadVo>('/messaging/inboxes/mine/unread', undefined, silent).then(
-      (count) => mine === seq && (unread.value = count.unread),
+      (count) => fresh() && (unread.value = count.unread),
       () => {},
     )
   }

@@ -1,0 +1,20 @@
+{
+  "hint": "Developer example. A fresh server-issued grant is required. Microphone and camera start off.",
+  "connect": "Connect",
+  "disconnect": "Disconnect / cancel",
+  "retryDisconnect": "Retry disconnect",
+  "microphone": "Microphone",
+  "camera": "Camera",
+  "switchCamera": "Switch camera",
+  "speaker": "Prefer built-in speaker",
+  "error": "Operation failed",
+  "unconfigured": "Connect requestConnection() to your authenticated business service first.",
+  "requestFailed": "Could not request or start the connection. Check the service and native build.",
+  "states": {
+    "idle": "Idle",
+    "connecting": "Connecting",
+    "connected": "Connected",
+    "reconnecting": "Reconnecting",
+    "disconnecting": "Disconnecting"
+  }
+}

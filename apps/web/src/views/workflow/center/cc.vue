@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, toRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { WfCcItemVo } from '@qiwu/shared'
 import { wfCenterApi } from '@/api/workflow/center'
@@ -16,13 +16,17 @@ import { at, useCenterList } from './use-center-list'
  * unread one marks it read (only the caller's own copy, server side) before the instance opens.
  */
 defineOptions({ name: 'WfCc' })
+const props = defineProps<{ modelKey?: string }>()
 const { t } = useI18n()
 const { query, rows, total, loading, filtered, search, reset, refresh, onSortChange, open } =
-  useCenterList<WfCcItemVo, { unread: string }>({
-    api: { page: wfCenterApi.ccs },
-    filters: { unread: '' },
-    sort: '-createdAt,-id',
-  })
+  useCenterList<WfCcItemVo, { unread: string }>(
+    {
+      api: { page: wfCenterApi.ccs },
+      filters: { unread: '' },
+      sort: '-createdAt,-id',
+    },
+    toRef(props, 'modelKey'),
+  )
 const showSearch = ref(true)
 const opening = ref(false)
 const columns: QwColumn[] = [

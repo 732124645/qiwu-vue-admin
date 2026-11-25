@@ -87,6 +87,7 @@ export const sessionEnd = ref<SessionEndReason | null>(null)
 /** The text of each reason. */
 export const SESSION_END_TEXT: Record<SessionEndReason, string> = {
   tenant_unavailable: 'auth.tenant.unavailable',
+  app_replaced: 'auth.session.appReplaced',
 }
 
 /**
@@ -313,6 +314,8 @@ export const api = {
     unwrap<T>(http.post(url, data, config)),
   put: <T>(url: string, data?: unknown, config?: AxiosRequestConfig) =>
     unwrap<T>(http.put(url, data, config)),
+  patch: <T>(url: string, data?: unknown, config?: AxiosRequestConfig) =>
+    unwrap<T>(http.patch(url, data, config)),
 }
 
 /** Authenticated binary GET, e.g. private file previews: `URL.createObjectURL(await fetchBlob(url))`. */

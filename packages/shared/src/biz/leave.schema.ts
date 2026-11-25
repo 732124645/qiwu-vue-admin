@@ -2,6 +2,8 @@
 import { z } from 'zod'
 import { pageQuery } from '../common/pagination.js'
 import { fieldDomains } from '../validation/zod-i18n.js'
+import { oaAttachmentIds } from '../oa/common.schema.js'
+import { wfStartBody } from '../workflow/wf-center.schema.js'
 
 /**
  * Leaves (`biz_leave_request`), `/api/biz/leaves` (see docs/design-notes.md#api-envelope), the OA sample of a `custom` process form
@@ -19,21 +21,35 @@ export const leavePerms = {
   modify: 'biz.leave.modify',
 } as const
 
-/** POST body (the submit); the applicant, dept, state and instance are the server's. */
+/** 申请单业务字段；申请人、部门、状态和实例 ID 不接受客户端写入。 */
+const leaveFields = {
+  leaveKind: z.string().trim().min(1).max(16).meta({ example: 'annual' }),
+  startAt: z.iso.datetime({ offset: true }),
+  endAt: z.iso.datetime({ offset: true }),
+  days: z.number().positive().max(9999.9).multipleOf(0.1).meta({ example: 3 }),
+  reason: z.string().trim().min(1).max(500),
+  attachmentIds: oaAttachmentIds.optional(),
+}
+
+/** 提交时比较实际时间点，申报天数保留原契约，不替代排班核算。 */
 export const leaveCreate = z
-  .object({
-    leaveKind: z.string().trim().min(1).max(16).meta({ example: 'annual' }),
-    startAt: z.iso.datetime({ offset: true }),
-    endAt: z.iso.datetime({ offset: true }),
-    // a zero or negative leave would take the process's shortest branch
-    days: z.number().positive().max(9999.9).multipleOf(0.1).meta({ example: 3 }),
-    reason: z.string().trim().min(1).max(500),
+  .object({ ...leaveFields, initiatorPicks: wfStartBody.shape.initiatorPicks.optional() })
+  .refine((row) => Date.parse(row.endAt) > Date.parse(row.startAt), {
+    path: ['endAt'],
+    error: 'validation.invalid',
   })
   .register(fieldDomains, { domain: 'biz.leave' })
 export type LeaveCreate = z.infer<typeof leaveCreate>
 
-/** PUT body: the fields sent are changed, the others kept. */
-export const leaveUpdate = leaveCreate.partial().register(fieldDomains, { domain: 'biz.leave' })
+/** 只改传入的业务字段；单边时间由服务端与锁内读取的旧值合并后再验证。 */
+export const leaveUpdate = z
+  .object(leaveFields)
+  .partial()
+  .refine((row) => !row.startAt || !row.endAt || Date.parse(row.endAt) > Date.parse(row.startAt), {
+    path: ['endAt'],
+    error: 'validation.invalid',
+  })
+  .register(fieldDomains, { domain: 'biz.leave' })
 export type LeaveUpdate = z.infer<typeof leaveUpdate>
 
 /** GET query: paging, sort and the list filters (text contains, ranges from / to, the rest equals). */
@@ -65,6 +81,7 @@ export const leaveVo = z.object({
   endAt: z.iso.datetime(),
   days: z.number(),
   reason: z.string(),
+  attachmentIds: z.array(z.number().int()),
   state: z.string(),
   instanceId: z.number().int().nullable(),
   createdBy: z.number().int().nullable(),

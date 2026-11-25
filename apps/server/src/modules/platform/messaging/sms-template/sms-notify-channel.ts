@@ -1,3 +1,4 @@
+import type { EntityManager } from 'typeorm'
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common'
 import { TransactionHost } from '@nestjs-cls/transactional'
 import type { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm'
@@ -34,13 +35,16 @@ export class SmsNotifyChannel implements NotifyChannel<SmsTemplate>, OnModuleIni
     this.channels.register(this)
   }
 
-  templates(code: string): Promise<SmsTemplate[]> {
-    return this.txHost.tx.getRepository(SmsTemplate).findBy({ code, enabled: true })
+  templates(code: string, manager: EntityManager = this.txHost.tx): Promise<SmsTemplate[]> {
+    return manager.getRepository(SmsTemplate).findBy({ code, enabled: true })
   }
 
-  async write({ template, recipient, values }: NotifyDraft<SmsTemplate>): Promise<number> {
-    const channelId = template.channelId ?? (await this.fallbackChannel())
-    const row = await this.txHost.tx.getRepository(SmsRecord).save({
+  async write(
+    { template, recipient, values }: NotifyDraft<SmsTemplate>,
+    manager: EntityManager = this.txHost.tx,
+  ): Promise<number> {
+    const channelId = template.channelId ?? (await this.fallbackChannel(manager))
+    const row = await manager.getRepository(SmsRecord).save({
       channelId,
       templateCode: template.code,
       mobile: recipient.mobile,
@@ -61,9 +65,9 @@ export class SmsNotifyChannel implements NotifyChannel<SmsTemplate>, OnModuleIni
    * A template without a channel goes through the first enabled channel no auth.* template names: the
    * sign-in code route is never a default, whichever channels are later disabled or deleted.
    */
-  private async fallbackChannel(): Promise<number | null> {
-    const auth = new Set((await authTemplates(this.txHost.tx)).map((row) => row.channelId))
-    const enabled = await this.txHost.tx.getRepository(SmsChannel).find({
+  private async fallbackChannel(manager: EntityManager = this.txHost.tx): Promise<number | null> {
+    const auth = new Set((await authTemplates(manager)).map((row) => row.channelId))
+    const enabled = await manager.getRepository(SmsChannel).find({
       where: { enabled: true },
       order: { id: 'ASC' },
       select: { id: true },

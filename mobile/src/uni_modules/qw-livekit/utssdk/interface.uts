@@ -1,0 +1,59 @@
+/** 公开桥面只含媒体状态，不包含服务器密钥、业务授权或原生 SDK 对象。 */
+export type QwLiveKitState = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'disconnecting'
+
+export type QwLiveKitFailure = {
+  code: string
+  operation: string
+}
+
+export type QwLiveKitParticipant = {
+  identity: string
+  name: string
+  local: boolean
+  microphone: boolean
+  camera: boolean
+}
+
+export type QwLiveKitSnapshot = {
+  connectionId: string
+  state: QwLiveKitState
+  localIdentity: string
+  microphone: boolean
+  camera: boolean
+  speakerPreferred: boolean
+  participants: Array<QwLiveKitParticipant>
+}
+
+export type QwLiveKitEvent = {
+  type: 'state' | 'participants' | 'tracks' | 'audio-route' | 'error'
+  snapshot: QwLiveKitSnapshot
+  error: QwLiveKitFailure | null
+}
+
+export type QwLiveKitConnectOptions = {
+  url: string
+  token: string
+  microphone?: boolean
+  camera?: boolean
+  success?: (snapshot: QwLiveKitSnapshot) => void
+  fail?: (error: QwLiveKitFailure) => void
+}
+
+export type QwLiveKitActionOptions = {
+  connectionId: string
+  success?: (snapshot: QwLiveKitSnapshot) => void
+  fail?: (error: QwLiveKitFailure) => void
+}
+
+export type QwLiveKitToggleOptions = {
+  connectionId: string
+  enabled: boolean
+  success?: (snapshot: QwLiveKitSnapshot) => void
+  fail?: (error: QwLiveKitFailure) => void
+}
+
+export type QwLiveKitConnect = (options: QwLiveKitConnectOptions) => void
+export type QwLiveKitAction = (options: QwLiveKitActionOptions) => void
+export type QwLiveKitToggle = (options: QwLiveKitToggleOptions) => void
+export type QwLiveKitEventCallback = (event: QwLiveKitEvent) => void
+export type QwLiveKitMicrophonePermission = (callback: (granted: boolean) => void) => void

@@ -1,0 +1,91 @@
+import { UTSAndroid } from 'io.dcloud.uts'
+import { QwLiveKitEngine } from 'io.qiwu.livekit'
+import {
+  QwLiveKitConnectOptions, QwLiveKitActionOptions, QwLiveKitToggleOptions,
+  QwLiveKitSnapshot, QwLiveKitFailure, QwLiveKitEvent, QwLiveKitEventCallback
+} from '../interface.uts'
+
+/** 原生结果是固定 DTO，脚本层不接收 Room、Track 或异常对象。 */
+function snapshot(value: string): QwLiveKitSnapshot { return JSON.parse<QwLiveKitSnapshot>(value)! }
+function failure(code: string, operation: string): QwLiveKitFailure {
+  const value: QwLiveKitFailure = { code, operation }
+  return value
+}
+
+/** 每次取得当前 Activity，拒绝或上下文失效只返回 false，单次请求只通知一次。 */
+function requestPermission(camera: boolean, reply: (allowed: boolean) => void): void {
+  let replied = false
+  const finish = (allowed: boolean) => {
+    if (replied) return
+    replied = true
+    reply(allowed)
+  }
+  try {
+    const activity = UTSAndroid.getUniActivity()
+    if (activity == null) { finish(false); return }
+    const permissions = [camera ? 'android.permission.CAMERA' : 'android.permission.RECORD_AUDIO']
+    if (UTSAndroid.checkSystemPermissionGranted(activity, permissions)) { finish(true); return }
+    UTSAndroid.requestSystemPermission(activity, permissions,
+      (allRight: boolean, granted: Array<string>) => {
+        finish(allRight)
+      },
+      (doNotAskAgain: boolean, granted: Array<string>) => {
+        finish(false)
+      })
+  } catch (_) { finish(false) }
+}
+
+/** 只把授权函数交原生；等待授权时连接已登记，可被正常取消。 */
+function prepare(): boolean {
+  const context = UTSAndroid.getAppContext()
+  if (context == null) return false
+  QwLiveKitEngine.prepare(context, (camera: boolean, reply: (allowed: boolean) => void) => {
+    requestPermission(camera, reply)
+  })
+  return true
+}
+
+/** 只取得麦克风授权，不创建 Room，也不开始采集。 */
+export function requestMicrophonePermission(callback: (granted: boolean) => void): void {
+  requestPermission(false, callback)
+}
+
+/** 应用 context 可用后才创建原生 Room；媒体默认关闭。 */
+export function connect(options: QwLiveKitConnectOptions): void {
+  if (!prepare()) { options.fail?.(failure('SDK_ERROR', 'connect')); return }
+  QwLiveKitEngine.connect(options.url, options.token, options.microphone ?? false, options.camera ?? false,
+    (value: string) => { options.success?.(snapshot(value)) },
+    (code: string, operation: string) => { options.fail?.(failure(code, operation)) })
+}
+
+/** 过期连接编号不会结束当前新连接。 */
+export function disconnect(options: QwLiveKitActionOptions): void {
+  QwLiveKitEngine.disconnect(options.connectionId,
+    (value: string) => { options.success?.(snapshot(value)) },
+    (code: string, operation: string) => { options.fail?.(failure(code, operation)) })
+}
+
+function action(connectionId: string, operation: string, enabled: boolean,
+  success: ((value: QwLiveKitSnapshot) => void) | null,
+  fail: ((value: QwLiveKitFailure) => void) | null): void {
+  QwLiveKitEngine.action(connectionId, operation, enabled,
+    (value: string) => { success?.(snapshot(value)) },
+    (code: string, operation: string) => { fail?.(failure(code, operation)) })
+}
+
+/** 开启时在当前原生操作内申请麦克风权限。 */
+export function setMicrophoneEnabled(options: QwLiveKitToggleOptions): void { action(options.connectionId, 'setMicrophoneEnabled', options.enabled, options.success ?? null, options.fail ?? null) }
+/** 开启时在当前原生操作内申请摄像头权限。 */
+export function setCameraEnabled(options: QwLiveKitToggleOptions): void { action(options.connectionId, 'setCameraEnabled', options.enabled, options.success ?? null, options.fail ?? null) }
+/** 通过 SDK 切换已开启的摄像头。 */
+export function switchCamera(options: QwLiveKitActionOptions): void { action(options.connectionId, 'switchCamera', false, options.success ?? null, options.fail ?? null) }
+/** 使用 SDK 的设备偏好，保留蓝牙与有线耳机的优先级。 */
+export function setSpeakerOutputPreferred(options: QwLiveKitToggleOptions): void { action(options.connectionId, 'setSpeakerOutputPreferred', options.enabled, options.success ?? null, options.fail ?? null) }
+
+/** App 级只注册一次持续回调，页面仅订阅宿主分发。 */
+export function onLiveKitEvent(callback: QwLiveKitEventCallback): void {
+  QwLiveKitEngine.onEvent((value: string) => { callback(JSON.parse<QwLiveKitEvent>(value)!) })
+}
+/** 放下脚本监听，原生内部仍处理断开与清理。 */
+export function offLiveKitEvent(): void { QwLiveKitEngine.offEvent() }
+export function getSnapshot(): QwLiveKitSnapshot { return snapshot(QwLiveKitEngine.getSnapshot()) }

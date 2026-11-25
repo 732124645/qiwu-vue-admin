@@ -1,0 +1,14 @@
+{
+  "trip": "Trip request",
+  "expense": "Expense claim",
+  "seal": "Seal request",
+  "item": "Expense item {n}",
+  "attachments": "Attachments",
+  "noAttachments": "No attachments",
+  "preview": "Open / download",
+  "reload": "Reload",
+  "documentId": "Document ID",
+  "applicant": "Applicant",
+  "department": "Applicant department ID",
+  "updatedAt": "Updated"
+}

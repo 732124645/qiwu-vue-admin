@@ -13,7 +13,7 @@ import { SettingsMcpTools } from './settings.mcp-tools.js'
 @Module({
   imports: [DictModule, DictEntryModule, ParameterModule, AppVersionModule],
   controllers: [SettingsReadController],
-  // the cfg.dict.options agent tool
+  // the cfg.dict.options MCP tool
   providers: [SettingsMcpTools],
 })
 export class SettingsModule {}

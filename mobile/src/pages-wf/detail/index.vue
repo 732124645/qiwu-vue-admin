@@ -25,7 +25,14 @@
         <view class="qw-wf__box-head">
           <text class="qw-wf__box-title">{{ t('approval.form') }}</text>
         </view>
-        <QwProcessForm v-model="values" :form="pf" :access="inst.access" :errors="formErrors" />
+        <QwProcessForm
+          v-model="values"
+          :form="pf"
+          :access="inst.access"
+          :errors="formErrors"
+          :attachments="dynamicAttachments"
+          @unavailable="attachmentFailed = true"
+        />
       </view>
       <!-- a custom form: its key fields (the view registry's summary) and the way to all of it -->
       <view v-else-if="summary" class="qw-card qw-wf__box qw-wf__summary">
@@ -36,10 +43,7 @@
             <QwIcon name="chevron-right" size="32rpx" />
           </view>
         </view>
-        <view v-for="r in summary.rows" :key="r.label" class="qw-kv">
-          <text class="qw-kv__k">{{ r.label }}</text>
-          <text class="qw-kv__v">{{ r.value }}</text>
-        </view>
+        <QwBusinessSummary :summary="summary" @unavailable="attachmentFailed = true" />
       </view>
       <!-- none: one row, to the form's page or "view it on a computer" -->
       <view
@@ -53,6 +57,10 @@
           {{ form ? t('approval.viewForm') : t('approval.desktopOnly') }}
         </text>
         <QwIcon v-if="form" name="chevron-right" size="32rpx" />
+      </view>
+      <view v-if="!documentReady" class="qw-card qw-wf__blocked" role="alert">
+        <text>{{ t('approval.documentUnavailable') }}</text>
+        <wd-button size="small" variant="soft" @click="load">{{ t('oa.reload') }}</wd-button>
       </view>
       <view class="qw-card qw-wf__box qw-wf__timeline">
         <view class="qw-wf__box-head">
@@ -121,16 +129,27 @@
       :cancel-text="t('common.action.cancel')"
       @select="pickMore"
     />
-    <DecideSheet ref="sheet" :signs="signs" @done="decided" />
+    <DecideSheet
+      ref="sheet"
+      :signs="signs"
+      :document-ready="documentReady"
+      @done="decided"
+      @conflict="load"
+    />
   </view>
 </template>
 <script setup lang="ts">
 import { computed, reactive, ref, shallowRef, watch } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
-import type { DictPayload, FormSchema, WfInstanceDetailVo } from '@qiwu/shared'
+import {
+  type DictPayload,
+  type FormSchema,
+  type FsObjectVo,
+  type WfInstanceDetailVo,
+} from '@qiwu/shared'
 import {
   avatar,
-  detailActions,
+  decisionAllowed,
   editPage,
   formPage,
   loadInstance,
@@ -145,13 +164,15 @@ import {
   type WfOn,
 } from '@/core/approvals'
 import QwEmpty from '@/core/components/QwEmpty.vue'
+import QwBusinessSummary from '@/core/components/QwBusinessSummary.vue'
 import QwIcon, { type IconName } from '@/core/components/QwIcon.vue'
 import { formatTime } from '@/core/format'
 import { t, tx } from '@/core/i18n'
 import { loadDict } from '@/core/pickers'
-import { ApiError, errorText } from '@/core/request'
+import { ApiError, currentSessionVersion, errorText } from '@/core/request'
 import { useAuthStore } from '@/core/stores/auth'
 import DecideSheet from './DecideSheet.vue'
+import { availableActions, dynamicAttachmentsController } from './decision-controller'
 import QwProcessForm from '../form/QwProcessForm.vue'
 import {
   checkValues,
@@ -159,6 +180,7 @@ import {
   formDicts,
   formText,
   formTitles,
+  decisionFormRules,
   processForm,
 } from '../form/process-form'
 
@@ -178,6 +200,15 @@ const error = shallowRef('')
 /** undefined while it loads (nothing shows), null: none (the one form row shows) */
 const summary = shallowRef<FormSummary | null>()
 const auth = useAuthStore()
+const dynamicAttachments = shallowRef<FsObjectVo[]>([])
+const dynamicReady = ref(false)
+const attachmentFailed = ref(false)
+const documentReady = computed(
+  () =>
+    !attachmentFailed.value &&
+    !!inst.value &&
+    (inst.value.formKind === 'custom' ? !!summary.value?.ready : dynamicReady.value),
+)
 
 type Dict = 'wf.instance_state' | 'wf.action'
 const dicts = reactive<Partial<Record<Dict, DictPayload>>>({})
@@ -237,13 +268,46 @@ const pf = computed<FormSchema | null>(() =>
 )
 const values = ref<Record<string, unknown>>({})
 const formErrors = shallowRef<Record<string, string>>({})
+const attachmentCheck = dynamicAttachmentsController((files, ready) => {
+  dynamicAttachments.value = files
+  dynamicReady.value = ready
+})
+// flush sync 先移除审批入口，不能留到下一次渲染或网络返回才阻塞。
+watch(
+  () => {
+    const current = inst.value
+    if (current?.formKind !== 'dynamic') return ''
+    const rules = current.schema && decisionFormRules(current.schema, current.access)
+    return JSON.stringify([
+      current.id,
+      current.schema,
+      current.access,
+      rules &&
+        rules
+          .filter((rule) => rule.type === 'qw-upload')
+          .map((rule) => [rule.field, values.value[rule.field]]),
+    ])
+  },
+  () => {
+    if (inst.value?.formKind !== 'dynamic') {
+      attachmentCheck.invalidate()
+      return
+    }
+    attachmentFailed.value = false
+    void attachmentCheck.refresh(inst.value.schema, inst.value.access, values.value)
+  },
+  { flush: 'sync' },
+)
+
 let formDictsLoaded: Awaited<ReturnType<typeof formDicts>> = new Map()
 /** my `edit` fields checked (the server's rules), field → message; their values when they pass */
 function checkEdits(): Record<string, unknown> | null {
   const f = pf.value
   const i = inst.value
   if (!f || !i) return {}
-  const fields = Object.fromEntries(Object.entries(i.fields).filter(([k]) => i.access[k] === 'edit'))
+  const fields = Object.fromEntries(
+    Object.entries(i.fields).filter(([k]) => i.access[k] === 'edit'),
+  )
   const edits = editableValues(values.value, i.access)
   formErrors.value = checkValues(fields, f, edits, formDictsLoaded, formTitles(f, formText(f)))
   return Object.keys(formErrors.value).length ? null : edits
@@ -252,9 +316,13 @@ function checkEdits(): Record<string, unknown> | null {
 watch(values, () => {
   if (Object.keys(formErrors.value).length) checkEdits()
 })
-const openForm = () => void (form.value && uni.navigateTo({ url: form.value }))
+const openForm = () => {
+  if (!form.value) return
+  reloadOnShow = true
+  uni.navigateTo({ url: form.value })
+}
 
-const acts = computed(() => (inst.value ? detailActions(inst.value) : []))
+const acts = computed(() => (inst.value ? availableActions(inst.value, documentReady.value) : []))
 const signs = computed(() => (inst.value ? mySigns(inst.value) : []))
 /** in the bar, the main one last: approve and reject of my review task, else the last two */
 const shown = computed(() => {
@@ -272,6 +340,7 @@ const sheet = ref<InstanceType<typeof DecideSheet>>()
 const SOLID = new Set<WfAction>(['approve', 'urge', 'resubmit'])
 const DANGER = new Set<WfAction>(['reject', 'cancel'])
 function act(on: WfOn) {
+  if (!decisionAllowed(on.action, documentReady.value)) return
   const edit = on.action === 'resubmit' && inst.value && editPage(inst.value, on.id)
   if (edit) {
     reloadOnShow = true
@@ -311,16 +380,28 @@ async function doUrge() {
 }
 
 let id = 0
+let loadSequence = 0
 async function load() {
+  const sequence = ++loadSequence
+  const session = currentSessionVersion()
+  inst.value = undefined
+  summary.value = undefined
+  dynamicReady.value = false
+  dynamicAttachments.value = []
+  attachmentFailed.value = false
+  error.value = ''
   try {
-    inst.value = await loadInstance(id)
-  } catch (e) {
-    error.value = errorText(e)
-    return
+    const loaded = await loadInstance(id)
+    const document = await loadSummary(loaded)
+    if (sequence !== loadSequence || session !== currentSessionVersion()) return
+    values.value = { ...loaded.formValues }
+    formErrors.value = {}
+    summary.value = document
+    inst.value = loaded
+  } catch (cause) {
+    if (sequence === loadSequence && session === currentSessionVersion())
+      error.value = errorText(cause)
   }
-  values.value = { ...inst.value.formValues }
-  formErrors.value = {}
-  summary.value = await loadSummary(inst.value)
 }
 
 onLoad((query) => {
@@ -348,6 +429,13 @@ async function decided() {
 </script>
 
 <style>
+.qw-wf__blocked {
+  display: flex;
+  align-items: center;
+  gap: var(--qw-space-3);
+  padding: var(--qw-space-4);
+  color: var(--qw-danger);
+}
 /* room for the decision bar */
 .qw-detail.has-bar {
   padding-bottom: calc(68px + var(--qw-space-4) + env(safe-area-inset-bottom));

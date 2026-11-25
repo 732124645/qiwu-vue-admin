@@ -9,6 +9,7 @@
 // Needs a fresh build (`pnpm db:reset` and ci:local build first).
 import { existsSync, readdirSync } from 'node:fs'
 import { DataSource } from 'typeorm'
+import { it as nativeIt } from 'vitest'
 import { GLOBAL_UNIQUE, PLATFORM_TABLES } from '../../src/core/db/tenant-tables.js'
 import { dataSourceOptions } from '../../src/db/data-source.js'
 import { Tenancy20261007100000 } from '../../src/db/migrations/20261007100000-tenant.js'
@@ -18,10 +19,13 @@ import {
   MIGRATION_NAMES as MIGRATIONS,
   MIGRATION_TABLES,
   runScript,
-  SCRIPT_TIMEOUT_MS,
+  SCRIPT_CASE_MS,
+  MigrationCaseFence,
+  migrationTests,
   SOURCE_MIGRATIONS,
 } from '../setup/migrations.js'
 import { restoreTestSchema } from '../setup/schema.js'
+import { recoverMigrationRun } from '../setup/migration-run-safety.js'
 
 /** 某个迁移在运行顺序里的位置；找不到就报错（迁移改名后用例不会悄悄失效）。 */
 const at = (name: string): number => {
@@ -45,12 +49,13 @@ const FOREIGN_KEYS = [
   'fk_msg_mail_template_account',
   'fk_msg_sms_template_channel',
 ]
-/** A case running dist scripts: room for each of them to use its whole timeout. */
-const SCRIPT_CASE_MS = SCRIPT_TIMEOUT_MS * 4
 
 /** The tables the migrations create (present in the migrated database at the start). */
 let ALL_TABLES: string[] = []
 let ds: DataSource
+const fence = new MigrationCaseFence()
+/** 本文件的全部普通/参数化用例都使用可取消迁移保护与同一份预算。 */
+const it = migrationTests(nativeIt, fence)
 
 const migrateCli = (command: 'run' | 'revert') => {
   const r = runScript('dist/db/migrate.js', [command])
@@ -134,6 +139,7 @@ beforeAll(async () => {
   if (!existsSync('dist/db/reset.js') || stale.length)
     throw new Error(`dist is missing or stale (${stale}): pnpm --filter @qiwu/server build`)
   ds = await new DataSource({ ...dataSourceOptions(), migrations: SOURCE_MIGRATIONS }).initialize()
+  fence.install(ds)
   // globalSetup migrated everything: the tables the migrations name that exist (one created and
   // dropped again by later migrations is none of them)
   const present = new Set(await everyTable())
@@ -142,15 +148,27 @@ beforeAll(async () => {
 
 // a script killed by its timeout may have left a migration half done: the later cases of this file
 // would only fail on that state, so they are skipped and afterAll rebuilds the database
-beforeEach(({ skip }) => {
-  if (killed.script) skip(`${killed.script} was killed: the database is rebuilt in afterAll`)
+beforeEach((context) => {
+  if (killed.script || fence.unsafe)
+    context.skip(
+      'a prior migration case may have left the database half migrated; the database is rebuilt in afterAll',
+    )
+  fence.begin(context.signal)
 })
+
+// 等待原异步函数的 finally 真正退出；超过可配置预算时 fence 终止 worker，不与恢复并行。
+afterEach(async () => {
+  await fence.drain()
+}, SCRIPT_CASE_MS)
 
 afterAll(async () => {
   // leave the globalSetup state (migrated, hardened, seeded) behind, whatever a failed case reverted
+  await fence.drain()
   if (ds?.isInitialized) {
-    if (killed.script) await ds.dropDatabase()
-    await restoreTestSchema(ds)
+    await recoverMigrationRun(async () => {
+      if (killed.script || fence.unsafe) await ds.dropDatabase()
+      await restoreTestSchema(ds)
+    })
   }
   await ds?.destroy()
 }, SCRIPT_CASE_MS)
@@ -367,7 +385,7 @@ it('ProjectPaths moves the stored view paths of the moved views, down moves them
     await runAll()
   }
   await expectApplied(MIGRATIONS.length)
-}, 120_000)
+})
 
 it('dist reset.js refuses production and databases without a _dev/_test/_e2e suffix', () => {
   for (const env of [{ NODE_ENV: 'production' }, { DB_NAME: 'qiwu' }]) {
@@ -404,7 +422,7 @@ describe('DDL conventions', () => {
     expect(bad).toEqual([])
   })
 
-  it('Every table soft-deleted, a unique key besides the primary one ends with alive, no foreign keys', async () => {
+  it('every table is soft-deleted, ordinary unique keys end with alive, effect and delivery keys stay durable, and no foreign keys remain', async () => {
     const hard = await ds.query(
       `SELECT t.table_name AS t FROM information_schema.tables t WHERE t.table_schema = DATABASE()
          AND t.table_name IN (?) AND NOT EXISTS (SELECT 1 FROM information_schema.columns c
@@ -421,13 +439,34 @@ describe('DDL conventions', () => {
       [ALL_TABLES],
     )
     expect(keys.length).toBeGreaterThan(20)
-    expect(keys.filter((k) => !k.cols.endsWith(',alive'))).toEqual([])
-    const alive = await ds.query(
-      `SELECT CONCAT(table_name, ' ', generation_expression) AS c FROM information_schema.columns
+    // 效果与投递键永久占用；缺键、添加 alive 或增加其它例外都必须由精确比较检出。
+    expect(
+      keys.filter((k) => !k.cols.endsWith(',alive')).sort((a, b) => a.k.localeCompare(b.k)),
+    ).toEqual([
+      {
+        k: 'agent_message_receipt.uk_agent_message_client',
+        cols: 'tenant_id,user_id,client_message_id',
+      },
+      {
+        k: 'agent_thread.uk_agent_thread_client',
+        cols: 'tenant_id,user_id,client_draft_id',
+      },
+      {
+        k: 'im_call.uk_im_call_media',
+        cols: 'tenant_id,media_room',
+      },
+    ])
+    const alive = await ds.query<{ t: string; c: string }[]>(
+      `SELECT table_name AS t, CONCAT(table_name, ' ', generation_expression) AS c FROM information_schema.columns
         WHERE table_schema = DATABASE() AND table_name IN (?) AND column_name = 'alive'`,
       [ALL_TABLES],
     )
-    expect(alive.length).toBe(new Set(keys.map((k) => k.k.split('.')[0])).size)
+    // 永久收据表不靠 alive 释放唯一键；其他次级唯一键所在表仍必须有正确的生成列。
+    expect(
+      [...new Set(keys.map((k) => k.k.split('.')[0]))].filter(
+        (table) => table !== 'agent_message_receipt' && !alive.some((column) => column.t === table),
+      ),
+    ).toEqual([])
     for (const { c } of alive) expect(c).toMatch(/ if\(\(`deleted_at` is null\),1,NULL\)$/)
     expect(await foreignKeys()).toEqual([])
   })
@@ -477,7 +516,7 @@ describe('Workflow tables', () => {
         'id instance_id node_id user_id from_task_id from_user_id reason read_at created_at deleted_at tenant_id',
       wf_event:
         'id instance_id task_id node_id actor_id action target_ids comment created_at deleted_at tenant_id',
-      biz_leave_request: `id user_id dept_id leave_kind start_at end_at days reason state instance_id ${AUDIT} tenant_id`,
+      biz_leave_request: `id user_id dept_id leave_kind start_at end_at days reason state instance_id ${AUDIT} tenant_id attachment_ids`,
     })
     // the engine's ids, lengths and json columns (WfInstance / WfTask, shared wf-engine.ts)
     const types = Object.fromEntries(
@@ -785,7 +824,7 @@ describe('Dict single default', () => {
       await runAll()
     }
     await expectApplied(MIGRATIONS.length)
-  }, 30_000)
+  })
 })
 
 describe('Audit user_type', () => {
@@ -910,7 +949,211 @@ describe('Audit user_type', () => {
       await runAll()
     }
     await expectApplied(MIGRATIONS.length)
-  }, 30_000)
+  })
+})
+
+describe('IM tables', () => {
+  const IM = ['im_entry', 'im_room', 'im_roster', 'im_sticker']
+  const dup = { driverError: { code: 'ER_DUP_ENTRY' } }
+
+  it('media slots remain occupied while ending and media names remain unique after soft deletion', async () => {
+    const qr = ds.createQueryRunner()
+    await qr.startTransaction()
+    try {
+      const create = (room: number, client: string, media: string, tenant = 1) =>
+        qr.query(
+          `INSERT INTO im_call (tenant_id,room_id,caller_id,client_call_id,mode_code,media_room,invite_expires_at)
+         VALUES (?,?,901,?,'audio',?,DATE_ADD(NOW(3),INTERVAL 45 SECOND))`,
+          [tenant, room, client, media],
+        )
+      const { insertId: first } = await create(90001, 'call-a', 'media-a')
+      await expect(create(90001, 'call-b', 'media-b')).rejects.toMatchObject(dup)
+      await qr.query("UPDATE im_call SET state_code='ending' WHERE id=?", [first])
+      await expect(create(90001, 'call-b', 'media-b')).rejects.toMatchObject(dup)
+      await qr.query("UPDATE im_call SET state_code='ended' WHERE id=?", [first])
+      const { insertId: second } = await create(90001, 'call-b', 'media-b')
+      await qr.query('UPDATE im_call SET deleted_at=NOW(3) WHERE id=?', [first])
+      await expect(create(90002, 'call-c', 'media-a')).rejects.toMatchObject(dup)
+      await create(90001, 'call-a', 'media-a', 2)
+      const member = (call: number, user: number) =>
+        qr.query(
+          `INSERT INTO im_call_member (tenant_id,call_id,user_id,roster_id,display_name,identity)
+         VALUES (1,?,?,1,'fixture',?)`,
+          [call, user, `member-${call}-${user}`],
+        )
+      await member(second, 901)
+      await expect(member(second, 901)).rejects.toMatchObject(dup)
+      const { insertId: other } = await create(90002, 'call-d', 'media-d')
+      await member(other, 901)
+      const generated = await qr.query('SELECT active_room_id FROM im_call WHERE id=?', [second])
+      expect(Number(generated[0].active_room_id)).toBe(90001)
+    } finally {
+      await qr.rollbackTransaction()
+      await qr.release()
+    }
+  })
+
+  it('the four chat tables have their columns, a non-null tenant_id without default and no other keys', async () => {
+    const cols: { c: string }[] = await ds.query(
+      `SELECT CONCAT(table_name, '.', column_name, ' ', column_type, ' ', is_nullable, ' ', COALESCE(column_default, '-')) AS c
+         FROM information_schema.columns
+        WHERE table_schema = DATABASE() AND table_name IN (?) AND column_name NOT IN
+          ('id', 'created_by', 'created_at', 'updated_by', 'updated_at', 'deleted_at', 'alive')
+        ORDER BY table_name, ordinal_position`,
+      [IM],
+    )
+    expect(cols.map((r) => r.c)).toEqual([
+      'im_entry.tenant_id bigint unsigned NO -',
+      'im_entry.room_id bigint unsigned NO -',
+      'im_entry.seq bigint unsigned NO -',
+      'im_entry.author_id bigint unsigned YES -',
+      'im_entry.author_kind varchar(16) YES -',
+      'im_entry.author_label varchar(64) YES -',
+      'im_entry.client_entry_id varchar(64) YES -',
+      'im_entry.request_digest char(64) YES -',
+      'im_entry.entry_kind varchar(16) NO -',
+      'im_entry.text_value mediumtext YES -',
+      'im_entry.sticker_code varchar(32) YES -',
+      'im_entry.attachment json YES -',
+      'im_entry.event_data json YES -',
+      'im_entry.target_seq bigint unsigned YES -',
+      'im_entry.content_rev int unsigned NO 1',
+      'im_entry.edited_at datetime(3) YES -',
+      'im_entry.recalled_at datetime(3) YES -',
+      'im_entry.recalled_by bigint unsigned YES -',
+      'im_room.tenant_id bigint unsigned NO -',
+      'im_room.room_kind varchar(16) NO -',
+      'im_room.scope_code varchar(24) NO staff',
+      'im_room.pair_low_id bigint unsigned YES -',
+      'im_room.pair_high_id bigint unsigned YES -',
+      'im_room.label varchar(80) YES -',
+      'im_room.last_seq bigint unsigned NO 0',
+      'im_room.floor_seq bigint unsigned NO 1',
+      'im_room.last_entry_at datetime(3) YES -',
+      'im_room.meta_rev int unsigned NO 1',
+      'im_room.closed_at datetime(3) YES -',
+      'im_roster.tenant_id bigint unsigned NO -',
+      'im_roster.room_id bigint unsigned NO -',
+      'im_roster.user_id bigint unsigned NO -',
+      'im_roster.identity_kind varchar(16) NO admin',
+      'im_roster.role_code varchar(16) NO -',
+      'im_roster.member_label varchar(64) NO -',
+      'im_roster.visible_from_seq bigint unsigned NO -',
+      'im_roster.read_seq bigint unsigned NO 0',
+      'im_roster.owner_one tinyint YES -',
+      'im_sticker.tenant_id bigint unsigned NO -',
+      'im_sticker.user_id bigint unsigned NO -',
+      'im_sticker.object_id bigint unsigned NO -',
+      'im_sticker.sha256 char(64) NO -',
+      'im_sticker.mime varchar(64) NO -',
+      'im_sticker.width smallint unsigned NO -',
+      'im_sticker.height smallint unsigned NO -',
+      'im_sticker.sort_no int NO 0',
+    ])
+    const ascii: { c: string }[] = await ds.query(
+      `SELECT CONCAT(table_name, '.', column_name) AS c FROM information_schema.columns
+        WHERE table_schema = DATABASE() AND table_name IN (?) AND collation_name = 'ascii_bin' ORDER BY c`,
+      [IM],
+    )
+    expect(ascii.map((r) => r.c)).toEqual([
+      'im_entry.client_entry_id',
+      'im_entry.request_digest',
+      'im_sticker.sha256',
+    ])
+    const [owner] = await ds.query(
+      `SELECT extra AS gen, generation_expression AS expr FROM information_schema.columns
+        WHERE table_schema = DATABASE() AND table_name = 'im_roster' AND column_name = 'owner_one'`,
+    )
+    expect(owner.gen).toBe('VIRTUAL GENERATED')
+    expect(owner.expr).toMatch(/if\(\(`role_code` = _utf8mb4\\?'owner\\?'\),1,NULL\)/)
+    const keys: { k: string }[] = await ds.query(
+      `SELECT CONCAT(table_name, '.', index_name, ' ', non_unique, ' ', GROUP_CONCAT(column_name ORDER BY seq_in_index)) AS k
+         FROM information_schema.statistics
+        WHERE table_schema = DATABASE() AND table_name IN (?) AND index_name <> 'PRIMARY'
+        GROUP BY table_name, index_name, non_unique ORDER BY k`,
+      [IM],
+    )
+    expect(keys.map((r) => r.k)).toEqual([
+      'im_entry.uk_im_entry_client 0 tenant_id,room_id,author_id,client_entry_id,alive',
+      'im_entry.uk_im_entry_seq 0 tenant_id,room_id,seq,alive',
+      'im_room.idx_im_room_tenant 1 tenant_id,id',
+      'im_room.uk_im_room_pair 0 tenant_id,scope_code,pair_low_id,pair_high_id,alive',
+      'im_roster.idx_im_roster_user 1 tenant_id,user_id,deleted_at',
+      'im_roster.uk_im_roster_member 0 tenant_id,room_id,user_id,alive',
+      'im_roster.uk_im_roster_owner 0 tenant_id,room_id,owner_one,alive',
+      'im_sticker.idx_im_sticker_user 1 tenant_id,user_id,sort_no',
+      'im_sticker.uk_im_sticker_hash 0 tenant_id,user_id,sha256,alive',
+    ])
+  })
+
+  it('one direct room per pair, any number of groups; one owner and one live period per member; seqs and client ids unique', async () => {
+    const qr = ds.createQueryRunner()
+    await qr.startTransaction()
+    try {
+      const room = (kind: string, low: number | null, high: number | null, tenant = 1) =>
+        qr.query(
+          'INSERT INTO im_room (tenant_id, room_kind, pair_low_id, pair_high_id) VALUES (?, ?, ?, ?)',
+          [tenant, kind, low, high],
+        )
+      await room('direct', 901, 902)
+      await expect(room('direct', 901, 902)).rejects.toMatchObject(dup)
+      // another tenant may hold the same pair
+      await room('direct', 901, 902, 2)
+      const { insertId: group } = await room('group', null, null)
+      await room('group', null, null)
+
+      const member = (userId: number, role: string) =>
+        qr.query(
+          `INSERT INTO im_roster (tenant_id, room_id, user_id, role_code, member_label, visible_from_seq)
+           VALUES (1, ?, ?, ?, 'x', 1)`,
+          [group, userId, role],
+        )
+      const { insertId: owner } = await member(901, 'owner')
+      await expect(member(902, 'owner')).rejects.toMatchObject(dup)
+      await member(902, 'moderator')
+      await member(903, 'moderator')
+      await member(904, 'participant')
+      await expect(member(904, 'participant')).rejects.toMatchObject(dup)
+      // leaving (soft delete) frees both the member and the owner slot; a new period is a new row
+      await qr.query('UPDATE im_roster SET deleted_at = NOW(3) WHERE id = ?', [owner])
+      await member(901, 'participant')
+      await qr.query(
+        "UPDATE im_roster SET role_code = 'owner' WHERE room_id = ? AND user_id = 902",
+        [group],
+      )
+
+      const entry = (seq: number, author: number | null, clientId: string | null) =>
+        qr.query(
+          `INSERT INTO im_entry (tenant_id, room_id, seq, author_id, client_entry_id, entry_kind)
+           VALUES (1, ?, ?, ?, ?, 'text')`,
+          [group, seq, author, clientId],
+        )
+      await entry(1, 901, 'c-1')
+      await expect(entry(1, 902, 'c-2')).rejects.toMatchObject(dup)
+      await expect(entry(2, 901, 'c-1')).rejects.toMatchObject(dup)
+      await entry(2, 902, 'c-1')
+      // system events carry neither author nor client id: never collide
+      await entry(3, null, null)
+      await entry(4, null, null)
+      // client ids are case-sensitive
+      await entry(5, 901, 'C-1')
+
+      const sticker = (userId: number, sha: string) =>
+        qr.query(
+          `INSERT INTO im_sticker (tenant_id, user_id, object_id, sha256, mime, width, height)
+           VALUES (1, ?, 1, ?, 'image/webp', 240, 240)`,
+          [userId, sha],
+        )
+      const { insertId: kept } = await sticker(901, 'a'.repeat(64))
+      await expect(sticker(901, 'a'.repeat(64))).rejects.toMatchObject(dup)
+      await sticker(902, 'a'.repeat(64))
+      await qr.query('UPDATE im_sticker SET deleted_at = NOW(3) WHERE id = ?', [kept])
+      await sticker(901, 'a'.repeat(64))
+    } finally {
+      await qr.rollbackTransaction()
+      await qr.release()
+    }
+  })
 })
 
 describe('OAuth2 clients and consents', () => {
@@ -1215,7 +1458,7 @@ describe('Tenancy', () => {
     }
     await expectApplied(MIGRATIONS.length)
     expect(await tenancyState()).toEqual(before)
-  }, 30_000)
+  })
 
   it('up fails in bounded time while another session holds a table it alters, and finishes once released', async () => {
     const holder = ds.createQueryRunner()
@@ -1252,5 +1495,5 @@ describe('Tenancy', () => {
       await new Tenancy20261007100000().up(runner) // whatever failed above
       await runner.release()
     }
-  }, 30_000)
+  })
 })

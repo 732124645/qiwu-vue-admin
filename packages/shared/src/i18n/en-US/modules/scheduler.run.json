@@ -14,7 +14,9 @@
         "startedAtFrom": "Started at (from)",
         "startedAtTo": "Started at (to)",
         "endedAt": "Ended at",
-        "costMs": "Duration (ms)"
+        "costMs": "Duration (ms)",
+        "instance": "Instance",
+        "loopMaxMs": "Max loop delay (ms)"
       }
     }
   }

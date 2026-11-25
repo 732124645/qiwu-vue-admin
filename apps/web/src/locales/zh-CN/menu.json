@@ -69,6 +69,9 @@
     "stat": "数据统计",
     "notice": "订阅通知"
   },
+  "im": {
+    "title": "聊天"
+  },
   "action": {
     "browse": "浏览",
     "view": "查看",
@@ -101,6 +104,18 @@
     "tagRemove": "删除标签",
     "enterTenant": "进入租户",
     "resetInitialPassword": "重置初始密码",
-    "retry": "重试任务"
+    "retry": "重试任务",
+    "use": "使用",
+    "batchRun": "批量执行",
+    "instructionModify": "修改租户说明",
+    "restrictionBrowse": "浏览工具限制",
+    "restrictionModify": "修改工具限制"
+  },
+  "oa": {
+    "title": "OA 办公",
+    "office": "办公工作台",
+    "trip": "我的出差",
+    "expense": "我的报销",
+    "seal": "我的用印"
   }
 }

@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import { parseEnv } from 'node:util'
 import { Test } from '@nestjs/testing'
 import { AppConfigService, CoreConfigModule } from '../../src/core/config/config.module.js'
-import { EnvSchema } from '../../src/core/config/env.schema.js'
+import { EFFECTIVE_CONFIG_KEYS, EnvSchema } from '../../src/core/config/env.schema.js'
 
 /** .env.local only; the test/e2e files may keep their throwaway APP_SECRET / SEED_ADMIN_PASSWORD */
 const ACCOUNTS = [
@@ -37,6 +37,13 @@ it('.env.example assigns no credential (not even empty) and lists each one as a 
   }
   for (const file of ['.env.test', '.env.e2e'])
     expect(Object.keys(parseEnv(read(file))).filter((k) => ACCOUNTS.includes(k))).toEqual([])
+})
+
+it('the startup config line lists no credential', () => {
+  for (const key of EFFECTIVE_CONFIG_KEYS) {
+    expect(CREDENTIALS).not.toContain(key)
+    expect(key).not.toMatch(/SECRET|PASSWORD|USER|TOKEN|^WX_MP_/)
+  }
 })
 
 it('cp .env.example .env + credentials in .env.local → the server config validates', async () => {

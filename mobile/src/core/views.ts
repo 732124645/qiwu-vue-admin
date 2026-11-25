@@ -11,18 +11,19 @@ export interface SummaryField {
   prop: string
   dict?: string
   time?: true
+  money?: true
 }
 
 export interface MobileForm {
-  createRoute: string
+  createRoute?: string
   viewComponent: string
   /** shows a document: `?id=<business key>&readonly=1` */
   view: string
   /** creates one (the submit starts its process); `?id=<business key>&task=<begin task id>` edits one sent
    * back to its owner and resubmits it */
-  form: string
+  form?: string
   /** the edit needs it (the PUT's); without it, a resubmit sends the document as it is (as the web) */
-  modify: string
+  modify?: string
   /** its icon (the detail's head, the start page's row; default `doc`) */
   icon?: IconName
   /**
@@ -30,7 +31,13 @@ export interface MobileForm {
    * key), `title` is the card's title key, a field's label `<labels>.<prop>`. None: the detail keeps its one
    * "form · view" row.
    */
-  summary?: { url: string; title: string; labels: string; fields: readonly SummaryField[] }
+  summary?: {
+    kind?: 'leave' | 'trip' | 'expense' | 'seal'
+    url: string
+    title: string
+    labels: string
+    fields: readonly SummaryField[]
+  }
 }
 
 export const MOBILE_FORMS: readonly MobileForm[] = [
@@ -42,15 +49,77 @@ export const MOBILE_FORMS: readonly MobileForm[] = [
     modify: leavePerms.modify,
     icon: 'calendar',
     summary: {
+      kind: 'leave',
       url: '/biz/leaves/:id',
       title: 'leave.form',
       labels: 'field.biz.leave',
       fields: [
+        { prop: 'state', dict: 'biz.leave_state' },
         { prop: 'leaveKind', dict: 'biz.leave_kind' },
         { prop: 'startAt', time: true },
         { prop: 'endAt', time: true },
         { prop: 'days' },
         { prop: 'reason' },
+        { prop: 'createdAt', time: true },
+      ],
+    },
+  },
+  {
+    viewComponent: 'oa/trip/view',
+    view: '/pages-biz/oa-trip/view',
+    icon: 'briefcase',
+    summary: {
+      kind: 'trip',
+      url: '/oa/trips/:id',
+      title: 'oa.trip',
+      labels: 'field.oa.trip',
+      fields: [
+        { prop: 'state', dict: 'oa.request_state' },
+        { prop: 'destination' },
+        { prop: 'startAt', time: true },
+        { prop: 'endAt', time: true },
+        { prop: 'reason' },
+        { prop: 'estimatedAmount', money: true },
+        { prop: 'createdAt', time: true },
+      ],
+    },
+  },
+  {
+    viewComponent: 'oa/expense/view',
+    view: '/pages-biz/oa-expense/view',
+    icon: 'doc',
+    summary: {
+      kind: 'expense',
+      url: '/oa/expense-claims/:id',
+      title: 'oa.expense',
+      labels: 'field.oa.expense',
+      fields: [
+        { prop: 'state', dict: 'oa.request_state' },
+        { prop: 'reason' },
+        { prop: 'tripId' },
+        { prop: 'totalAmount', money: true },
+        { prop: 'currency' },
+        { prop: 'createdAt', time: true },
+      ],
+    },
+  },
+  {
+    viewComponent: 'oa/seal/view',
+    view: '/pages-biz/oa-seal/view',
+    icon: 'doc',
+    summary: {
+      kind: 'seal',
+      url: '/oa/seal-requests/:id',
+      title: 'oa.seal',
+      labels: 'field.oa.seal',
+      fields: [
+        { prop: 'state', dict: 'oa.request_state' },
+        { prop: 'sealKind', dict: 'oa.seal_kind' },
+        { prop: 'documentName' },
+        { prop: 'purpose' },
+        { prop: 'copies' },
+        { prop: 'expectedDate' },
+        { prop: 'createdAt', time: true },
       ],
     },
   },

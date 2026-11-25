@@ -1,8 +1,11 @@
 import { Module } from '@nestjs/common'
 import { referencedBy } from '../core/db/references.js'
 import { LeaveModule } from './biz/leave/leave.module.js'
+import { OaModule } from './oa/oa.module.js'
 import { BookMcpModule } from './demo/book/book.mcp-tools.js'
 import { BookModule } from './demo/book/book.module.js'
+import { CustomerMcpModule } from './demo/customer/customer.mcp-tools.js'
+import { CustomerModule } from './demo/customer/customer.module.js'
 import { InvoiceModule } from './demo/invoice/invoice.module.js'
 import { DemoRealtimeModule } from './demo/realtime/realtime.module.js'
 import { TopicModule } from './demo/topic/topic.module.js'
@@ -11,14 +14,38 @@ import { TopicModule } from './demo/topic/topic.module.js'
 // with it: invoice.entity.ts, generated from the master-sub link)
 referencedBy('iam_dept', { table: 'demo_book', column: 'dept_id' })
 
+// 办公单据保留申请人与流程引用，删除被使用的组织或实例时必须先走业务规则。
+for (const table of ['oa_trip_request', 'oa_expense_claim', 'oa_seal_request']) {
+  referencedBy('iam_user', { table, column: 'user_id' })
+  referencedBy('iam_dept', { table, column: 'dept_id' })
+  referencedBy('wf_instance', { table, column: 'instance_id' })
+}
+referencedBy('oa_trip_request', { table: 'oa_expense_claim', column: 'trip_id' })
+referencedBy('oa_expense_claim', {
+  table: 'oa_expense_item',
+  column: 'claim_id',
+  cascade: true,
+})
+
 /**
  * Project business (see docs/design-notes.md#layering): the one registration point of the project domains
  * (`modules/<domain>/`: `biz`, the samples' `demo`, a project's own); `pnpm gen` prints the lines for
  * each generated module. The generator's single-table sample (demo_book), its tree sample (demo_topic)
  * and its master-sub sample (demo_invoice with its lines); the hand-written realtime push demo; the OA
- * leave requests (process `leave`); the book sample's agent tool (`demo.book.create`, see docs/mcp.md).
+ * leave requests (process `leave`); the book sample's MCP tool (`demo.book.create`, see docs/mcp.md); the
+ * customer sample (demo_customer) with its MCP tools.
  */
 @Module({
-  imports: [BookModule, BookMcpModule, TopicModule, InvoiceModule, DemoRealtimeModule, LeaveModule],
+  imports: [
+    BookModule,
+    BookMcpModule,
+    TopicModule,
+    InvoiceModule,
+    CustomerModule,
+    CustomerMcpModule,
+    DemoRealtimeModule,
+    LeaveModule,
+    OaModule,
+  ],
 })
 export class ProjectModule {}

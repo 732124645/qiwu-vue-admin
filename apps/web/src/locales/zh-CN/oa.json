@@ -1,0 +1,44 @@
+{
+  "title": "办公中心",
+  "subtitle": "统一办理办公申请，查看自己的审批事项",
+  "apply": "发起申请",
+  "unavailable": "流程尚未启用，请联系流程管理员",
+  "workflowUnavailable": "当前套餐未开通审批功能",
+  "allTypes": "全部类型",
+  "myRequests": "我的申请",
+  "myTodo": "我的待办",
+  "myDone": "我的已办",
+  "myCc": "抄送我的",
+  "viewProcess": "查看审批详情",
+  "returnToList": "返回列表",
+  "resubmit": "重新提交",
+  "resubmitConfirm": "确定重新提交当前申请？",
+  "resubmitted": "已重新提交",
+  "approvalPanel": "审批进度",
+  "create": "提交申请",
+  "amountInvalid": "请输入有效的人民币金额",
+  "trip": {
+    "entity": "出差申请"
+  },
+  "expense": {
+    "entity": "费用报销",
+    "addItem": "添加费用明细",
+    "removeItem": "移除明细",
+    "total": "合计金额",
+    "tripHint": "可选填本人已批准的出差单编号",
+    "itemsRequired": "请至少填写一条费用明细"
+  },
+  "seal": {
+    "entity": "用印申请"
+  },
+  "leave": {
+    "entity": "请假申请"
+  },
+  "generic": {
+    "entity": "通用审批"
+  },
+  "notAllowed": "没有发起该申请的权限",
+  "view": "查看",
+  "attachmentsUnavailable": "附件暂时无法读取，请重试后再提交",
+  "attachmentLimit": "整张报销单最多上传 10 个附件"
+}

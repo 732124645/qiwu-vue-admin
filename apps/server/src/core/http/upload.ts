@@ -28,6 +28,7 @@ const MB = 1024 * 1024
 interface UploadLimit {
   paramKey: string
   fallbackMb: number
+  ceilingMb: number
 }
 
 type LimitedRequest = { uploadMaxBytes?: number }
@@ -41,8 +42,11 @@ class UploadLimitInterceptor implements NestInterceptor {
   ) {}
 
   async intercept(ctx: ExecutionContext, next: CallHandler) {
-    const { paramKey, fallbackMb } = this.reflector.get<UploadLimit>(UPLOAD_LIMIT, ctx.getHandler())
-    const mb = await this.params.int(paramKey, 1, 2048, fallbackMb)
+    const { paramKey, fallbackMb, ceilingMb } = this.reflector.get<UploadLimit>(
+      UPLOAD_LIMIT,
+      ctx.getHandler(),
+    )
+    const mb = await this.params.int(paramKey, 1, ceilingMb, fallbackMb)
     ctx.switchToHttp().getRequest<LimitedRequest>().uploadMaxBytes = mb * MB
     return next.handle()
   }
@@ -53,9 +57,9 @@ class UploadLimitInterceptor implements NestInterceptor {
  * buffered in memory by multer and cut off beyond the MB param (`fallbackMb` when unset/invalid) with
  * 413 `payload_too_large`; a few short text fields besides. The handler reads it with `@UploadedFile()`.
  */
-export const UploadFile = (field: string, paramKey: string, fallbackMb: number) =>
+export const UploadFile = (field: string, paramKey: string, fallbackMb: number, ceilingMb = 2048) =>
   applyDecorators(
-    SetMetadata(UPLOAD_LIMIT, { paramKey, fallbackMb } satisfies UploadLimit),
+    SetMetadata(UPLOAD_LIMIT, { paramKey, fallbackMb, ceilingMb } satisfies UploadLimit),
     UseInterceptors(
       UploadLimitInterceptor,
       FileInterceptor(field, {

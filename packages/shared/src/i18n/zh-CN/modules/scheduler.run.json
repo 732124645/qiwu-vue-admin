@@ -14,7 +14,9 @@
         "startedAtFrom": "开始时间起",
         "startedAtTo": "开始时间止",
         "endedAt": "结束时间",
-        "costMs": "耗时（毫秒）"
+        "costMs": "耗时（毫秒）",
+        "instance": "执行实例",
+        "loopMaxMs": "最大循环延迟（毫秒）"
       }
     }
   }

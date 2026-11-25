@@ -4,7 +4,8 @@
       "free": "可用",
       "heap": "Node.js 堆内存",
       "multiTenant": "多租户",
-      "multiTenantOn": "已开启（由环境变量 APP_MULTI_TENANT 决定，修改后须重启全部实例）"
+      "multiTenantOn": "已开启（由环境变量 APP_MULTI_TENANT 决定，修改后须重启全部实例）",
+      "eventLoopNote": "事件循环数据是响应本次请求的实例自上次读取以来的值；多实例部署时各实例分别统计。"
     }
   },
   "menu": {

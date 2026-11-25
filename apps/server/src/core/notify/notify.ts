@@ -133,14 +133,14 @@ export interface NotifyDraft<T extends NotifyTemplate> {
 export interface NotifyChannel<T extends NotifyTemplate = NotifyTemplate> {
   readonly code: NotifyChannelCode
   /** All enabled locale rows of this code; no rows means this channel sends nothing. */
-  templates(code: string): Promise<T[]>
+  templates(code: string, manager?: EntityManager): Promise<T[]>
   /**
-   * Insert one record using the caller's TransactionHost.tx so rollback removes it. Write `pending`,
+   * 使用显式 manager（否则调用者的 TransactionHost.tx）写出箱，回滚必须删除记录。 Write `pending`,
    * or `skipped` with a reason if the recipient lacks this channel's address. Render text with
    * fillTemplate(text, draft.values, html), where html is true only for mail bodies, and truncate to
    * each record column's length. Return the inserted row id, or null when no row applies.
    */
-  write(draft: NotifyDraft<T>): Promise<number | null>
+  write(draft: NotifyDraft<T>, manager?: EntityManager): Promise<number | null>
   /**
    * Records eligible for a first claim or a retry, including stale claims, oldest first, each with its
    * tenant (the dispatch job scans them in `allTenants` and delivers each in its tenant).
@@ -319,8 +319,8 @@ export class NotifyTransactionSubscriber implements EntitySubscriberInterface, O
  * The messaging module implements this port. send() writes one record per selected channel and recipient in
  * the caller's transaction, collecting ids on its QueryRunner. Flush via channel.deliver only after the OUTERMOST
  * transaction commits; without a transaction, flush just after insertion. Rollback must leave no rows
- * or sends. Only TransactionHost / @Transactional() transactions count: a send inside a raw
- * dataSource.transaction() writes and flushes at once. The minute-based notify.dispatch job retries
+ * or sends. TransactionHost / @Transactional() and explicit native EntityManager transactions both flush after the outer commit.
+ * Native dataSource.transaction() callers must pass that transaction manager rather than the default connection. The minute-based notify.dispatch job retries
  * channel.dueRows() records after a missed flush.
  */
 @Injectable()
@@ -334,16 +334,16 @@ export class Notifier {
     private readonly settings: ParamService,
   ) {}
 
-  async send(input: NotifySend): Promise<NotifyRecordIds> {
+  /** Writes all channel records in the caller transaction; an explicit manager joins native business transactions. */
+  async send(input: NotifySend, manager: EntityManager = this.txHost.tx): Promise<NotifyRecordIds> {
     const ids: NotifyRecordIds = {}
     const selected = (input.channels ?? NOTIFY_CHANNELS)
       .map((code) => this.channels.get(code))
       .filter((channel): channel is NotifyChannel => channel !== undefined)
     const templates = await Promise.all(
-      selected.map((channel) => channel.templates(input.template)),
+      selected.map((channel) => channel.templates(input.template, manager)),
     )
     const userIds = [...new Set(input.to.filter((to): to is number => typeof to === 'number'))]
-    const manager = this.txHost.tx
     const users = userIds.length
       ? await manager.query<
           {
@@ -420,14 +420,19 @@ export class Notifier {
               : formatInZone(date, recipient.timezone).slice(0, 16)
           } else values[key] = value === null ? '' : String(value)
         }
-        const id = await channel.write({ template, recipient, params: input.params ?? {}, values })
+        const id = await channel.write(
+          { template, recipient, params: input.params ?? {}, values },
+          manager,
+        )
         if (id !== null) (ids[channel.code] ??= []).push(id)
       }
     }
-    if (this.txHost.isTransactionActive()) {
-      const runner = (this.txHost.tx as EntityManager).queryRunner
-      if (!runner) throw new Error('Notifier: active transaction has no QueryRunner')
-      pendingNotifications(runner).push(ids)
+    if (
+      manager.queryRunner?.isTransactionActive ||
+      (manager === this.txHost.tx && this.txHost.isTransactionActive())
+    ) {
+      if (!manager.queryRunner) throw new Error('Notifier: active transaction has no QueryRunner')
+      pendingNotifications(manager.queryRunner).push(ids)
     } else await this.dispatcher.flush(ids)
     return ids
   }

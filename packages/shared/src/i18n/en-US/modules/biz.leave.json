@@ -12,7 +12,9 @@
         "days": "Days",
         "reason": "Reason",
         "state": "State",
-        "instanceId": "Process instance"
+        "instanceId": "Process instance",
+        "initiatorPicks": "Selected reviewers",
+        "attachmentIds": "Attachments"
       }
     }
   }

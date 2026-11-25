@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import { onHide, onLaunch, onShow } from '@dcloudio/uni-app'
 import { locale, setLocale } from '@/core/i18n'
+import { imBackground, imForeground } from '@/core/im/client'
+import { imCallBackground, imCallForeground, initializeImCalls } from '@/core/im/calls'
+// #ifdef APP-PLUS
+import { initializeNativeImMedia } from '@/core/im/media-app'
+// #endif
 import { startRealtime, stopRealtime } from '@/core/realtime'
 import { initTheme } from '@/core/theme'
 import { checkUpdate } from '@/core/update'
@@ -10,13 +15,26 @@ onLaunch(() => {
   setLocale(locale())
   // The saved appearance (App / H5) or the system's, before the first page renders
   initTheme()
+  // #ifdef APP-PLUS
+  initializeNativeImMedia()
+  // #endif
+  initializeImCalls()
   // App only, silent unless the server offers a newer version
   void checkUpdate()
 })
 
-// The socket only while the app is in the foreground; back in front it reconnects and catches up
-onShow(startRealtime)
-onHide(stopRealtime)
+// The socket only while the app is in the foreground; back in front it reconnects and catches up (chat runs
+// one full sync of its local cache; in the background its fallback poll rests)
+onShow(() => {
+  startRealtime()
+  imForeground()
+  void imCallForeground()
+})
+onHide(() => {
+  imCallBackground()
+  stopRealtime()
+  imBackground()
+})
 </script>
 
 <style lang="scss">

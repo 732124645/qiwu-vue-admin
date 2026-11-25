@@ -110,6 +110,20 @@ pnpm dev
 
 打开 `http://localhost:5173` 登录；停止开发进程使用该终端的 Ctrl+C。需要修改后端端口时，同时给 Web 的 Vite 进程设置 `API_PROXY_TARGET` 为对应后端地址（`apps/web/vite.config.ts`）；不要为了访问 API 把 Nest 端口开放给局域网。
 
+开发重载按轮汇总文件与耗时。runner 统一管理 shared watch 与 server 增量编译，先确认共享包成功完成且编译输入仍与当前源码和配置匹配，再执行后端编译；全部成功后才替换应用进程。编译失败会显示诊断，尚在运行的旧服务不受影响。若连续保存时旧服务已进入退出阶段，则等待修复后的成功构建，修正后再次保存即可。`cold start` 是首次启动；`reload` 是后续重载。`shared compile` 和 `server compile` 分别表示两段编译耗时，`restart` 从停旧进程到新进程实际监听就绪，`total` 从收到本轮变更到就绪（冷启动从 runner 启动算起）；`vs previous` 对比上一轮成功重载，不拿冷启动作基准。翻译文件单独变更时无需编译，日志会明确标注。
+
+重复的模块初始化与路由注册信息只在开发 runner 中收起，业务日志、警告、错误和编译诊断继续显示；开发请求日志改为单行，保留请求追踪号、路径、状态和耗时。生产的结构化日志与脱敏规则不变。日志级别仍由 `LOG_LEVEL` 控制，不需要为了减少刷屏把全部信息关掉。
+
+排查请求卡顿时，可用 `LOG_SLOW_REQUEST_MS`（慢请求日志标记 `"slow":true` 与当时在跑的定时任务）、`LOG_EVENT_LOOP_INTERVAL_MS` / `LOG_EVENT_LOOP_WARN_MS`（事件循环周期日志），默认都为 0 即关闭；事后用 `grep '"slow":true'` 检索日志。说明与任务日志的 `instance` / `loop_max_ms` 见[卡顿诊断](scale-out.md#卡顿诊断)。
+
+普通 Vue 页面和样式沿用 Vite 热更新；Web 与 shared 的翻译文件新增、修改、删除会更新现有翻译实例，保留当前页面和所选语言。修改共享运行时代码或前端入口逻辑仍可能整页刷新，后端代码仍通过整个应用进程重启生效。默认网页标题的通用文案不再被当作 Vite 启动配置依赖。
+
+开发编译输出到 `apps/server/dist-dev`（已被 git 忽略），开发服务从这里启动；`pnpm build`、`db:migrate`、`db:seed` 等仍各自构建并读取 `apps/server/dist`，`nest build` 删除重建 `dist` 时不影响正在运行的开发服务。应用在就绪前非零退出时，开发脚本延迟 2 秒自动重试一次，仍失败则等下一次保存。
+
+共享包完成状态由 TypeScript 编译器明确回报，不再根据文件写盘的安静期猜测。一轮共享编译中的多个输出不会各自触发后端重启；编译期间继续保存会先完成最新输入对应的构建，再替换服务。`pnpm dev` 已包含共享编译器，不必另开 shared watcher。
+
+需要实际检查开发重载时，在准备好的默认测试通道运行 `pnpm smoke:boot --dev-reload`。它启动真实应用，用 HTTP 返回值和进程号检查共享函数体更新、后端更新、共享编译失败及恢复；所有步骤有时间上限，结束后还原临时探针源码和构建产物并停止进程。完整 `pnpm ci:local` 已包含该步骤；不要与其他使用默认测试通道的运行并行。
+
 ### 断点调试
 
 后端：用 `QW_INSPECT=1` 启动开发服务，只给后端应用进程打开 Node 调试端口 `127.0.0.1:9229`（tsc 与 Vite 不受影响；写端口号如 `QW_INSPECT=9230` 可换端口，同时把 `.vscode/launch.json` 里的 `port` 改成相同的值），并打开 source map：
@@ -142,7 +156,7 @@ pnpm --filter @qiwu/server test db-migrations # 只跑一个 spec（文件名的
 每次运行前，测试初始化会删掉测试库（`.env.test` 的 `qiwu_test`）里的全部表，再执行全部迁移、去掉租户列的默认值并写入种子。迁移多、数据库慢（如 Docker 里的 MySQL）时这一步可能要一两分钟，只跑一个 spec 也一样。
 
 - **本地快速模式**：设置 `QW_TEST_REUSE_DB=1` 后，测试库里记录的指纹（迁移、种子文件的内容，以及 `APP_MULTI_TENANT`、`APP_WXOA`、`APP_MCP`、`APP_DEMO_MODE` 开关）与当前代码一致时，跳过删库重建，只补跑未执行的迁移、加固租户列并重新写入种子（种子可重复执行）；指纹不一致时照常重建。复用的库可能留着上次运行写下的数据或中断时的半截状态，出现不相干的失败时去掉该变量完整跑一次。快速模式只用于本地反复调试；`pnpm ci:local` 会去掉该变量、CI 中忽略它，完整重建的运行才是检查结果。
-- **脚本超时**：迁移相关用例会运行编译后的 `dist/db/*.js` 脚本，每个脚本默认最多 300 秒，可用 `QW_TEST_SCRIPT_TIMEOUT_MS`（毫秒）放宽。脚本超时被终止时，该用例直接失败并写明 `script <脚本> killed after <N> ms (timeout)`；迁移用例（`db-migrations`、`tenancy-harden`）随后跳过同一文件里后面的用例，并在该文件结束时完整重建测试库，不会在迁移到一半的库上继续报出不相干的错误。
+- **脚本超时**：迁移相关用例会运行编译后的 `dist/db/*.js` 脚本，每个脚本默认最多 300 秒，可用 `QW_TEST_SCRIPT_TIMEOUT_MS`（毫秒）放宽。脚本超时被终止时，该用例直接失败并写明 `script <脚本> killed after <N> ms (timeout)`。迁移用例（`db-migrations`、`tenancy-harden` 及各迁移升级用例）只在库可能停在迁移半途时才跳过同一文件里后面的用例，并在该文件结束时（升级用例在当个用例后）完整重建测试库：用例超时、脚本被杀，或失败的用例期间有 SQL 出错、脚本非零退出、抛出的不是断言错误。所有步骤都成功、只是断言不符的失败不影响后续用例。用例超时后会先等它的收尾（`finally`）执行完再重建；这一等待（drain）也有同样的时限，超过时直接结束当前测试 worker，同一次运行的后续文件拒绝使用测试库，重新运行测试即重建。结束 worker 只在 Vitest 的 `forks` 池（每个文件一个子进程）下安全，服务端测试不要改用 `threads` 池。
 
 PowerShell 用 `$env:QW_TEST_REUSE_DB = '1'` 设置，结束后用 `Remove-Item Env:QW_TEST_REUSE_DB` 清除。
 

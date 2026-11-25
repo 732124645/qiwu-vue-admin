@@ -26,6 +26,7 @@
 
 4. **不该重试的错误**抛 BullMQ 的 `UnrecoverableError`；其他错误按默认 3 次、指数退避重试。
 5. **只处理平台表的工作**可声明平台级队列 `registerQueue({ name, platform: true })`，它的任务不带租户。
+6. **启动时登记定时任务的处理器**（在 `onApplicationBootstrap` 里调用 `upsertJobScheduler` 等）在 `APP_ROLE=api` 下要直接返回：api 实例不开 worker，登记留给 `all` / `worker` 实例，见[任务队列](../../queue.md)。
 
 ### 定时任务
 

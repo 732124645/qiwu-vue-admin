@@ -5,6 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useFullscreen } from '@vueuse/core'
 import { localized } from '@/core/i18n'
 import IconButton from '@/core/components/IconButton.vue'
+import ImHeaderEntry from '@/core/im/ImHeaderEntry.vue'
 import LocaleSwitch from '@/core/components/LocaleSwitch.vue'
 import { Icon } from '@/core/icons'
 import { useAppStore, type ComponentSize, type LayoutMode } from '@/core/stores/app'
@@ -124,6 +125,7 @@ async function onUser(command: string) {
           </el-dropdown-menu>
         </template>
       </el-dropdown>
+      <ImHeaderEntry />
       <NotifyBell />
       <LocaleSwitch icon />
       <IconButton

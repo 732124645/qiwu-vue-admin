@@ -20,6 +20,8 @@ const isPage = (to: { matched: { name?: unknown }[]; name?: unknown }) =>
   to.matched[0]?.name === LAYOUT && to.name !== 'redirect'
 
 tags.init(router.resolve(menu.homePath || '/'), (tag) => isPage(router.resolve(tag.fullPath)))
+// 恢复的标签只保留地址；名称、图标和缓存名以本次获授权的路由为准，避免菜单改名后仍显示旧标题。
+for (const tag of tags.tags.slice()) tags.open(router.resolve(tag.fullPath))
 
 watch(
   () => route.fullPath,

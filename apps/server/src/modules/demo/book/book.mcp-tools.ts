@@ -5,7 +5,7 @@ import { McpTool } from '../../../core/mcp/mcp-tool.js'
 import { Book } from './book.entity.js'
 import { BookService } from './book.service.js'
 
-// Only what the agent may set, bounded like the create route's body; written out here (not the shared
+// Only what an MCP client may set, bounded like the create route's body; written out here (not the shared
 // `bookCreate`) so the generator's other variants of the sample (read-only, …) still compile with this file.
 const createInput = z.object({
   isbn: z.string().trim().min(1).max(20).describe('the ISBN, unique among the books'),

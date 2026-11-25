@@ -1,0 +1,14 @@
+{
+  "trip": "出差单",
+  "expense": "报销单",
+  "seal": "用印单",
+  "item": "费用明细 {n}",
+  "attachments": "附件",
+  "noAttachments": "无附件",
+  "preview": "打开/下载",
+  "reload": "重新加载",
+  "documentId": "单据编号",
+  "applicant": "申请人",
+  "department": "申请部门 ID",
+  "updatedAt": "更新时间"
+}

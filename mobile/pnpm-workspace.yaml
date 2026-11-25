@@ -6,6 +6,9 @@ minimumReleaseAge: 1440
 minimumReleaseAgeStrict: true
 
 allowBuilds:
+  # Native UTS compilation is explicit; compiler packages run no install hooks.
+  '@dcloudio/uni-uts-v1': false
+  '@dcloudio/uts': false
   # vite 5's esbuild binary check
   esbuild: true
   # "please donate" banners (via @dcloudio/* -> @vitejs/plugin-legacy / babel); never allowed to run

@@ -4,6 +4,7 @@
 // engine.io's globals swapped export for export.
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
+import type { MePayload } from '@qiwu/shared'
 import eioSource from 'socket.io-client/../engine.io-client/build/esm/globals.js?raw'
 import * as eioGlobals from '@/core/eio-globals'
 import { pollCounts, realtimeUp, startRealtime, stopRealtime } from '@/core/realtime'
@@ -56,8 +57,10 @@ const tokens = (n: number) => ({ accessToken: `a${n}`, refreshToken: `r${n}`, ex
 let issued = 1
 
 const flush = () => new Promise((r) => setTimeout(r, 5))
-const OPEN = '0{"sid":"s","upgrades":[],"pingInterval":25000,"pingTimeout":20000,"maxPayload":1000000}'
-const push = (type: string, payload: object) => `42${JSON.stringify(['message', { type, payload }])}`
+const OPEN =
+  '0{"sid":"s","upgrades":[],"pingInterval":25000,"pingTimeout":20000,"maxPayload":1000000}'
+const push = (type: string, payload: object) =>
+  `42${JSON.stringify(['message', { type, payload }])}`
 
 /** The newest socket's server: opens, answers the client's CONNECT frame (returned) with `answer`. */
 async function handshake(answer = '40{"sid":"x"}') {
@@ -74,6 +77,7 @@ async function handshake(answer = '40{"sid":"x"}') {
 beforeEach(() => {
   setActivePinia(createPinia())
   setSession(tokens(1))
+  useAuthStore().me = { features: ['workflow'] } as MePayload
   issued = 1
   calls.length = 0
   tasks.length = 0

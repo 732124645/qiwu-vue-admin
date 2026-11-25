@@ -1,17 +1,26 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
-import type {
-  LoginBody,
-  MePayload,
-  SmsLoginBody,
-  WxMpBindBody,
-  WxMpLoginVo,
-} from '@qiwu/shared'
+import type { LoginBody, MePayload, SmsLoginBody, WxMpBindBody, WxMpLoginVo } from '@qiwu/shared'
+import { imSessionStart, imWipe } from '@/core/im/client'
 import { stopRealtime } from '@/core/realtime'
-import { api, sessionEnd, setSession, toPasswordChange, type MobileTokens } from '@/core/request'
+import {
+  api,
+  currentSessionVersion,
+  sessionEnd,
+  setSession,
+  toPasswordChange,
+  type MobileTokens,
+} from '@/core/request'
 import { useCountsStore } from './counts'
 
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never
+
+/**
+ * The kind of first-party mobile client the session is (fixed per build: App or H5); the mini program's
+ * WeChat sign-in is fixed by the server. A first-party claim, not device proof (docs/mobile.md).
+ */
+export const MOBILE_KIND: 'app' | 'h5' | undefined =
+  process.env.UNI_PLATFORM === 'app' ? 'app' : process.env.UNI_PLATFORM === 'h5' ? 'h5' : undefined
 
 /** whether the sign-in page may still try WeChat sign-in in this launch (takeWxLaunch) */
 let wxOnLaunch = true
@@ -31,13 +40,20 @@ export const useAuthStore = defineStore('auth', () => {
 
   /**
    * A `mobile` session (the refresh token comes back in the body), kept signed in as phone apps
-   * are (7-day absolute cap still ends it; see docs/design-notes.md#auth-sessions).
+   * are; its `mobileKind` lets the server give the App its long-lived, single App session (H5 keeps the
+   * 7-day cap; see docs/design-notes.md#auth-sessions). The app never judges expiry itself: a rejected
+   * refresh ends the session.
    */
   async function signIn(url: string, body: LoginBody | SmsLoginBody) {
     start(
       await api.post<MobileTokens>(
         url,
-        { ...body, clientId: 'mobile', keepSignedIn: true },
+        {
+          ...body,
+          clientId: 'mobile',
+          keepSignedIn: true,
+          ...(MOBILE_KIND ? { mobileKind: MOBILE_KIND } : {}),
+        },
         { silent: true },
       ),
     )
@@ -48,6 +64,8 @@ export const useAuthStore = defineStore('auth', () => {
     useCountsStore().reset()
     // a new user never inherits the previous one's socket (the tab page's show opens theirs)
     stopRealtime()
+    // chat opens again for this account: the same account reuses its cache, another one wipes the old
+    imSessionStart()
     setSession(tokens)
   }
 
@@ -74,12 +92,31 @@ export const useAuthStore = defineStore('auth', () => {
   async function wxBind(proof: DistributiveOmit<WxMpBindBody, 'ticket'>) {
     const ticket = await wxLogin()
     if (ticket !== null)
-      start(await api.post<MobileTokens>('/auth/wx-mp/bind', { ...proof, ticket }, { silent: true }))
+      start(
+        await api.post<MobileTokens>('/auth/wx-mp/bind', { ...proof, ticket }, { silent: true }),
+      )
   }
 
-  async function fetchMe() {
-    me.value = await api.get<MePayload>('/auth/me')
-    if (passwordChangeDue.value) toPasswordChange()
+  let meFlight: { session: number; promise: Promise<void> } | undefined
+  /** 首页、计数和实时连接共享身份读取；旧会话的身份和改密导航均不能应用到新会话。 */
+  function fetchMe(): Promise<void> {
+    const session = currentSessionVersion()
+    if (meFlight?.session === session) return meFlight.promise
+    const flight = {
+      session,
+      promise: api
+        .get<MePayload>('/auth/me')
+        .then((loaded) => {
+          if (session !== currentSessionVersion()) return
+          me.value = loaded
+          if (passwordChangeDue.value) toPasswordChange()
+        })
+        .finally(() => {
+          if (meFlight === flight) meFlight = undefined
+        }),
+    }
+    meFlight = flight
+    return flight.promise
   }
 
   async function logout() {
@@ -91,9 +128,12 @@ export const useAuthStore = defineStore('auth', () => {
     me.value = null
     useCountsStore().reset()
     stopRealtime()
+    // a sign-out wipes the chat cache (an expired session only locks it)
+    const wiped = imWipe()
     setSession(null)
     sessionEnd.value = null
     wxOnLaunch = false
+    await wiped
   }
 
   return {

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { Inject, Injectable } from '@nestjs/common'
 import {
   DEFAULT_TENANT_CODE,
@@ -8,8 +9,11 @@ import {
   type LoginBody,
   type MenuNode,
   type MePayload,
+  type MobileKind,
+  mobileKindRule,
   type PasswordPolicy,
   ROOT_ONLY_ROUTES,
+  type SessionMobileKind,
   type TenancyVo,
 } from '@qiwu/shared'
 import bcrypt from 'bcryptjs'
@@ -20,6 +24,7 @@ import { AppConfigService } from '../config/config.module.js'
 import { demoMode } from '../config/demo-mode.js'
 import { tenantId, withTenant } from '../context/tenant.js'
 import { BizError } from '../http/biz-error.js'
+import { parseOr400 } from '../http/validation.pipe.js'
 import { redisKey } from '../redis/cache-namespaces.js'
 import { REDIS, type Redis } from '../redis/redis.module.js'
 import { AuthParams, isBlocked, smsIpBucket } from './auth-params.js'
@@ -32,7 +37,10 @@ import { SessionCurrent } from './session-current.js'
 import { SessionRevoker } from './session-revoker.js'
 import { TENANT_LOOKUP, type TenantLookup } from './tenant-lookup.js'
 import {
+  APP_REPLACED,
   CONSOLE_CLIENT,
+  isAppSession,
+  type Issued,
   type IssuedTokens,
   type RefreshOutcome,
   type SessionFlags,
@@ -66,6 +74,29 @@ for _, k in ipairs(KEYS) do
   if tonumber(redis.call('GET', k) or '0') > 0 then redis.call('DECR', k) end
 end
 return 1`
+
+/** 单 App 会话的按用户登录锁时长：签发与替换旧会话在它之内完成。 */
+const APP_LOGIN_LOCK_MS = 10_000
+/** 锁被占用时等它释放的最长时间（之后 429） */
+const APP_LOGIN_WAIT_MS = 3_000
+// 只删仍是本持有者令牌的锁（比较后删除）：超时后被别人拿到的锁不会被误删
+// KEYS: lock · ARGV: holder token
+const RELEASE_APP_LOGIN = `
+if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end
+return 0`
+
+/**
+ * 会话里记录的端类型：微信小程序登录由服务端固定 `mp-weixin`（不信客户端），其余取登录体声明的；
+ * 先复核声明只出现在 mobile 客户端上，否则 400（字段 mobileKind）。
+ */
+const sessionMobileKind = (
+  clientId: string | undefined,
+  declared: MobileKind | undefined,
+  kind: string | undefined,
+): SessionMobileKind | undefined => {
+  parseOr400(mobileKindRule, { clientId, mobileKind: declared })
+  return kind === 'wx-mp' ? 'mp-weixin' : declared
+}
 
 /** The caller as the sign-in endpoints see it (`ip` and `host` after `trust proxy`). */
 export interface Client {
@@ -180,6 +211,7 @@ export class AuthService {
     via?: SignInVia,
   ): Promise<IssuedTokens> {
     const { username, password } = body
+    const mobileKind = sessionMobileKind(body.clientId, body.mobileKind, via?.kind)
     const clientId = body.clientId ?? CONSOLE_CLIENT
     const at: LoginTenant = await this.loginTenants.resolveLoginTenant(
       { hostname: client.host },
@@ -313,14 +345,21 @@ export class AuthService {
             throw e
           })
       const done = current
-        ? await this.tokens.issue(user, {
-            keepSignedIn: body.keepSignedIn ?? false,
-            ip: client.ip,
-            ua: client.ua,
-            flags: passwordFlags(live.passwordChangedAt, policy, now.getTime()),
-            clientId,
-            credVer,
-          })
+        ? await this.issueSingleApp(
+            live.userId,
+            isAppSession({ clientId, mobileKind }),
+            () =>
+              this.tokens.issue(user, {
+                keepSignedIn: body.keepSignedIn ?? false,
+                ip: client.ip,
+                ua: client.ua,
+                flags: passwordFlags(live.passwordChangedAt, policy, now.getTime()),
+                clientId,
+                credVer,
+                mobileKind,
+              }),
+            refund,
+          )
         : null
       if (!done) {
         log({ userId: live.userId, ok: false, msgKey: 'signin.credentials_changed' })
@@ -357,12 +396,15 @@ export class AuthService {
       timezone: string | null
       label: string
       clientId?: FirstPartyClient
+      /** 登录体声明的移动端类型（只配 `clientId: 'mobile'`）；`kind: 'wx-mp'` 时服务端固定 `mp-weixin` */
+      mobileKind?: MobileKind
       refused?: ErrorDef
       beforeIssue?: (userId: number) => Promise<void>
     },
     client: Client,
   ): Promise<IssuedTokens> {
     const refused = opts.refused ?? Err.AUTH_SMS_CODE_INVALID
+    const mobileKind = sessionMobileKind(opts.clientId, opts.mobileKind, opts.kind)
     const clientId = opts.clientId ?? CONSOLE_CLIENT
     const log = (
       ok: boolean,
@@ -410,14 +452,17 @@ export class AuthService {
         throw e
       })
     const issued = user
-      ? await this.tokens.issue(user, {
-          keepSignedIn: opts.keepSignedIn ?? false,
-          ip: client.ip,
-          ua: client.ua,
-          flags: passwordFlags(cred.passwordChangedAt, policy, now.getTime()),
-          clientId,
-          credVer,
-        })
+      ? await this.issueSingleApp(userId, isAppSession({ clientId, mobileKind }), () =>
+          this.tokens.issue(user, {
+            keepSignedIn: opts.keepSignedIn ?? false,
+            ip: client.ip,
+            ua: client.ua,
+            flags: passwordFlags(cred.passwordChangedAt, policy, now.getTime()),
+            clientId,
+            credVer,
+            mobileKind,
+          }),
+        )
       : null
     if (!issued) {
       log(false, 'signin.credentials_changed', username, userId, cred.userType)
@@ -612,6 +657,46 @@ export class AuthService {
       (s) => this.cfg.get(s),
       p.root !== true && this.cfg.get('APP_MULTI_TENANT') ? ROOT_ONLY_ROUTES : [],
     )
+  }
+
+  /**
+   * 单 App 会话（see docs/design-notes.md#auth-sessions）：App 登录且开关开着时，在按用户的短锁内签发，签发成功后
+   * 结束该用户其它 App 会话（`app_replaced`，旧设备收到 `session:kicked`）。锁保证同一用户并发的两次
+   * App 登录不会互相结束对方、也不会都留下；锁被占用（另一台正在登录）时最多等约 3 秒，仍拿不到 → 429，先执行 `busy`（退还
+   * 这次密码尝试），客户端退避重试。只用 `revokeAppSessions`，不用 `revokeUser`：后者会递增 credver、
+   * 跑模块钩子、删 OAuth2 授权码，结束不该结束的东西。非 App 登录或开关关闭时直接签发。
+   */
+  private async issueSingleApp(
+    userId: number,
+    app: boolean,
+    issue: () => Promise<Issued | null>,
+    busy?: () => Promise<void>,
+  ): Promise<Issued | null> {
+    if (!app || !(await this.tokens.appSingleSession())) return issue()
+    const key = redisKey('authAppLogin', userId)
+    const holder = randomUUID()
+    const take = () =>
+      this.redis.set(key, holder, {
+        condition: 'NX',
+        expiration: { type: 'PX', value: APP_LOGIN_LOCK_MS },
+      })
+    // 另一台正在登录：签发很快，先每 100ms 重试最多约 3 秒再答 429，免得正常的先后两次登录也被拒
+    let taken = await take()
+    for (let waited = 0; taken === null && waited < APP_LOGIN_WAIT_MS; waited += 100) {
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      taken = await take()
+    }
+    if (taken === null) {
+      await busy?.()
+      throw new BizError(Err.TOO_MANY_REQUESTS)
+    }
+    try {
+      const issued = await issue()
+      if (issued) await this.revoker.revokeAppSessions(userId, issued.session.sid, APP_REPLACED)
+      return issued
+    } finally {
+      await this.redis.eval(RELEASE_APP_LOGIN, { keys: [key], arguments: [holder] })
+    }
   }
 
   /** Sign-in log row for an existing session's user (username from the user store). */

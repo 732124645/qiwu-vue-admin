@@ -1,0 +1,20 @@
+{
+  "field": {
+    "oa": {
+      "expense": {
+        "reason": "Expense purpose",
+        "tripId": "Related trip",
+        "attachmentIds": "Attachments",
+        "initiatorPicks": "Selected reviewers",
+        "items": "Expense items",
+        "expenseDate": "Expense date",
+        "expenseKind": "Expense category",
+        "amount": "Amount",
+        "description": "Description",
+        "totalAmount": "Total amount",
+        "currency": "Currency",
+        "state": "Status"
+      }
+    }
+  }
+}

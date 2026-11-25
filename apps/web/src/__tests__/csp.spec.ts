@@ -9,7 +9,7 @@ const directives = (csp: string) => csp.split('; ')
 describe('SPA CSP', () => {
   it("default: connect-src 'self' only, the rest unchanged", () => {
     expect(spaCsp()).toBe(
-      "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self'; frame-src 'self' https:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
+      "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self'; media-src 'self' blob:; frame-src 'self' https:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
     )
     expect(connectOrigins()).toEqual([])
     expect(connectOrigins(' , ')).toEqual([])
@@ -30,7 +30,15 @@ describe('SPA CSP', () => {
     expect(directives(spaCsp(origins))).toContain(
       "connect-src 'self' https://s3.example.com https://qw-files.oss-cn-hangzhou.aliyuncs.com:8443 http://localhost:9000 http://127.0.0.1:8333",
     )
-    expect(directives(spaCsp(origins))).toHaveLength(9)
+    expect(directives(spaCsp(origins))).toHaveLength(10)
+  })
+
+  it('permits only configured secure signaling origins and local development sockets without relaxing scripts', () => {
+    const origins = connectOrigins('wss://media.example.com ws://127.0.0.1:7880')
+    expect(origins).toEqual(['wss://media.example.com', 'ws://127.0.0.1:7880'])
+    expect(directives(spaCsp(origins))).toContain("script-src 'self'")
+    expect(directives(spaCsp(origins))).toContain("media-src 'self' blob:")
+    expect(spaCsp(origins)).not.toContain("script-src 'self' 'unsafe")
   })
 
   it.each([
@@ -42,7 +50,9 @@ describe('SPA CSP', () => {
     '*',
     "'unsafe-inline'",
     'data:',
-    'wss://s3.example.com',
+    'ws://media.example.com',
+    'wss://media.example.com/rtc',
+    'wss://user:secret@media.example.com',
     'ftp://s3.example.com',
     'https://user@s3.example.com',
     'https://S3.example.com',

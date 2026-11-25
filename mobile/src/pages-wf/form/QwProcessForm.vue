@@ -5,7 +5,12 @@
       <view v-if="!v.edit && v.widget !== 'table'" :class="`qw-kv qw-pf__kv qw-pf__kv--${v.field}`">
         <text class="qw-kv__k">{{ v.title }}</text>
         <view class="qw-kv__v">
-          <text class="qw-pf__text">{{ shownText(v) }}</text>
+          <QwAttachments
+            v-if="v.widget === 'upload' && props.attachments !== undefined"
+            :files="uploadAttachments(model[v.field], props.attachments)"
+            @unavailable="emit('unavailable')"
+          />
+          <text v-else class="qw-pf__text">{{ shownText(v) }}</text>
           <text v-if="v.unsupported" class="qw-form__hint">
             {{ t('approval.dynamic.desktopField') }}
           </text>
@@ -13,7 +18,11 @@
         </view>
       </view>
       <view v-else :class="`qw-field qw-pf__field qw-pf__field--${v.field}`">
-        <text v-if="!CELLS.has(v.widget)" class="qw-field__label" :class="{ 'is-required': v.required }">
+        <text
+          v-if="!CELLS.has(v.widget)"
+          class="qw-field__label"
+          :class="{ 'is-required': v.required }"
+        >
           {{ v.title }}
         </text>
         <wd-input
@@ -97,14 +106,20 @@
           :required="v.required"
           @update:model-value="set(v.field, $event)"
         />
-        <QwUpload
-          v-else-if="v.widget === 'upload'"
-          biz-tag="wf.attachment"
-          :limit="v.props.limit ?? 10"
-          :max-size="v.props.maxSize ? v.props.maxSize * MB : undefined"
-          :model-value="uploadObjects(model[v.field])"
-          @update:model-value="set(v.field, uploadValue($event))"
-        />
+        <template v-else-if="v.widget === 'upload'">
+          <QwUpload
+            biz-tag="wf.attachment"
+            :limit="v.props.limit ?? 10"
+            :max-size="v.props.maxSize ? v.props.maxSize * MB : undefined"
+            :model-value="uploadObjects(model[v.field])"
+            @update:model-value="set(v.field, uploadValue($event))"
+          />
+          <QwAttachments
+            v-if="attachments !== undefined"
+            :files="uploadAttachments(model[v.field], attachments)"
+            @unavailable="emit('unavailable')"
+          />
+        </template>
         <QwDetailRows
           v-else-if="v.widget === 'table'"
           :model-value="str(v) || null"
@@ -164,9 +179,11 @@ import {
   type WfFieldAccess,
   type WfUserOption,
 } from '@qiwu/shared'
+import type { FsObjectVo } from '@qiwu/shared'
 import QwDeptPicker from '@/core/components/QwDeptPicker.vue'
 import QwDictSelect from '@/core/components/QwDictSelect.vue'
 import QwUpload from '@/core/components/QwUpload.vue'
+import QwAttachments from '@/core/components/QwAttachments.vue'
 import QwUserPicker from '@/core/components/QwUserPicker.vue'
 import { t } from '@/core/i18n'
 import { loadDepts, loadDict, type PickedUser } from '@/core/pickers'
@@ -181,6 +198,7 @@ import {
   pickerValue,
   shownValues,
   uploadObjects,
+  uploadAttachments,
   uploadValue,
   type FieldView,
   type Widget,
@@ -197,13 +215,29 @@ import {
 defineOptions({ options: { virtualHost: true } })
 const model = defineModel<Record<string, unknown>>({ required: true })
 const props = withDefaults(
-  defineProps<{ form: FormSchema; access?: WfFieldAccess; errors?: Record<string, string> }>(),
-  { access: undefined, errors: () => ({}) },
+  defineProps<{
+    form: FormSchema
+    access?: WfFieldAccess
+    errors?: Record<string, string>
+    attachments?: FsObjectVo[]
+  }>(),
+  { access: undefined, errors: () => ({}), attachments: undefined },
 )
+
+const emit = defineEmits<{ unavailable: [] }>()
 
 const MB = 1024 * 1024
 /** drawn as a cell with the title in it */
-const CELLS = new Set<Widget>(['choice', 'date', 'cascader', 'area', 'switch', 'user', 'dept', 'dict'])
+const CELLS = new Set<Widget>([
+  'choice',
+  'date',
+  'cascader',
+  'area',
+  'switch',
+  'user',
+  'dept',
+  'dict',
+])
 /** a cell opening one of the shared pickers */
 const PICKED = new Set<Widget>(['choice', 'date', 'cascader', 'area'])
 
@@ -219,7 +253,11 @@ const look = reactive({
   dicts: new Map<string, DictPayload>(),
 })
 const areaOptions = (nodes: GeoAreaNode[]): FormOptionItem[] =>
-  nodes.map((n) => ({ value: n.code, label: n.name, children: n.children && areaOptions(n.children) }))
+  nodes.map((n) => ({
+    value: n.code,
+    label: n.name,
+    children: n.children && areaOptions(n.children),
+  }))
 /** numbers as typed ("1." while typing), by field */
 const typed = reactive<Record<string, string>>({})
 const ignore = () => {} // shown by the request layer: ids / codes show instead
@@ -318,7 +356,11 @@ const choiceColumns = computed(() =>
 const choiceValue = computed(() => {
   const opts = picking.value?.options ?? []
   const index = (x: unknown) => opts.findIndex((o) => o.value === x)
-  if (multiple.value) return [at() ?? []].flat().map(index).filter((i) => i >= 0)
+  if (multiple.value)
+    return [at() ?? []]
+      .flat()
+      .map(index)
+      .filter((i) => i >= 0)
   const i = index(at())
   return i < 0 ? '' : i
 })
@@ -339,7 +381,9 @@ const cascade = (opts: readonly FormOptionItem[]): Cascade[] =>
     children: o.children?.length ? cascade(o.children) : undefined,
   }))
 const cascadeOptions = computed(() =>
-  !picking.value ? [] : cascade(picking.value.widget === 'area' ? look.areas : picking.value.options),
+  !picking.value
+    ? []
+    : cascade(picking.value.widget === 'area' ? look.areas : picking.value.options),
 )
 /** wd-cascader takes the leaf's value */
 const cascadeValue = computed(() => {

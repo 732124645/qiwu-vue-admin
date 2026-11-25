@@ -15,6 +15,7 @@ import { z } from 'zod'
 import { EnvSchema } from '../../src/core/config/env.schema.js'
 import { QueueService } from '../../src/core/queue/queue.service.js'
 import { REDIS, type Redis } from '../../src/core/redis/redis.module.js'
+import { SCHEDULER_RUN_QUEUE } from '../../src/modules/platform/scheduler/job-scheduler.js'
 import {
   ECHO,
   FLAKY,
@@ -126,7 +127,7 @@ it('lists every registered queue with its counts and paused flag', async () => {
   try {
     const res = await get(off, 'reader').expect(200)
     const list = z.array(queueVo).parse(res.body.data)
-    expect(list.map((q) => q.name)).toEqual([PLATFORM, ECHO, FLAKY].sort())
+    expect(list.map((q) => q.name)).toEqual([PLATFORM, ECHO, FLAKY, SCHEDULER_RUN_QUEUE].sort())
     expect(list.find((q) => q.name === FLAKY)).toMatchObject({ failed: 1, paused: false })
     expect(list.find((q) => q.name === PLATFORM)).toMatchObject({ paused: true })
     expect(Object.keys(list[0]!).sort()).toEqual(

@@ -20,5 +20,6 @@
     "strictPropertyInitialization": false,
     "noImplicitOverride": true,
     "types": ["vitest/globals", "node"]
-  }
+  },
+  "exclude": ["node_modules", "dist", "dist-dev"]
 }

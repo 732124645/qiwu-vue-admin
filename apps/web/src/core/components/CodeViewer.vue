@@ -12,6 +12,11 @@ export interface CodeFile {
 // time a file needs it; `diff` for the generator's write conflicts
 const GRAMMARS: Record<string, () => Promise<unknown>> = {
   typescript: () => import('shiki/langs/typescript.mjs'),
+  javascript: () => import('shiki/langs/javascript.mjs'),
+  python: () => import('shiki/langs/python.mjs'),
+  shellscript: () => import('shiki/langs/shellscript.mjs'),
+  html: () => import('shiki/langs/html.mjs'),
+  css: () => import('shiki/langs/css.mjs'),
   vue: () => import('shiki/langs/vue.mjs'),
   json: () => import('shiki/langs/json.mjs'),
   sql: () => import('shiki/langs/sql.mjs'),

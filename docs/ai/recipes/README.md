@@ -31,7 +31,7 @@
 | 词条   | `apps/web/src/locales/zh-CN/demo.book.json`、`packages/shared/src/i18n/zh-CN/modules/demo.book.json`             |
 | 页面   | `apps/web/src/views/demo/book/`（index、form、detail）、`apps/web/src/api/demo/book.ts`                          |
 | 测试   | `apps/server/test/e2e/demo-book.e2e-spec.ts`（生成）、`apps/server/test/e2e/demo-book-extra.e2e-spec.ts`（手写） |
-| 智能体 | `apps/server/src/modules/demo/book/book.mcp-tools.ts`                                                            |
+| MCP    | `apps/server/src/modules/demo/book/book.mcp-tools.ts`                                                            |
 
 ## 维护
 

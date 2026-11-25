@@ -1,0 +1,12 @@
+{
+  "minSdkVersion": 21,
+  "dependencies": [
+    "io.livekit:livekit-android:2.30.0",
+    "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.6.4"
+  ],
+  "project": {
+    "repositories": [
+      "maven { url 'https://jitpack.io'; content { includeGroup 'com.github.davidliu' } }"
+    ]
+  }
+}

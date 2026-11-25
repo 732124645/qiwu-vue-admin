@@ -1,0 +1,19 @@
+{
+  "name": "Qw LiveKit Example",
+  "appid": "",
+  "versionName": "0.1.0",
+  "versionCode": "1",
+  "vueVersion": "3",
+  "app-plus": {
+    "nvueStyleCompiler": "uni-app",
+    "compilerVersion": 3,
+    "distribute": {
+      "ios": {
+        "privacyDescription": {
+          "NSMicrophoneUsageDescription": "Use the microphone only when you enable it for this call.",
+          "NSCameraUsageDescription": "Use the camera only when you enable it for this call."
+        }
+      }
+    }
+  }
+}

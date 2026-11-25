@@ -16,6 +16,12 @@ import {
   type WfStartInfoVo,
   type WfStartVo,
   type WfTaskItemVo,
+  leaveVo,
+  tripVo,
+  expenseDetailVo,
+  sealVo,
+  SUB_ROWS_MAX,
+  type FsObjectVo,
   wfAddSignBody,
   wfCcBody,
   wfCommentBody,
@@ -28,7 +34,8 @@ import { MOBILE_FORMS } from './views'
 import { formatTime } from './format'
 import { t, tx } from './i18n'
 import { choiceText, dictChoices, loadDict, type PickedUser } from './pickers'
-import { api } from './request'
+import { api, ApiError, currentSessionVersion } from './request'
+import { attachmentPreviewable, loadAttachments } from './attachments'
 import { hasPerm } from './stores/auth'
 import { useCountsStore } from './stores/counts'
 
@@ -164,7 +171,8 @@ export function stateTag(dict: DictPayload | undefined, value: string) {
   const type = dict?.entries.find((e) => e.value === value)?.tagType ?? ''
   return {
     label: choiceText(dictChoices(dict), value),
-    type: (TAG_TYPES.has(type) ? type : 'info') as 'primary' | 'success' | 'warning' | 'danger' | 'info',
+    type: (TAG_TYPES.has(type) ? type : 'info') as
+      'primary' | 'success' | 'warning' | 'danger' | 'info',
   }
 }
 
@@ -173,7 +181,8 @@ export function stateTag(dict: DictPayload | undefined, value: string) {
 /** GET /wf/instances/:id: an instance the caller may see (see docs/design-notes.md#workflow), else 404, which the page shows. */
 export const loadInstance = (id: number) => api.get<WfInstanceDetailVo>(`/wf/instances/${id}`)
 
-type FormOf = Pick<WfInstanceDetailVo, 'formKind' | 'viewComponent' | 'businessKey'>
+type FormOf = Pick<WfInstanceDetailVo, 'formKind' | 'viewComponent' | 'businessKey'> &
+  Partial<Pick<WfInstanceDetailVo, 'id' | 'initiator'>>
 const mobileForm = (inst: FormOf) =>
   inst.formKind === 'custom' && inst.businessKey
     ? MOBILE_FORMS.find((f) => f.viewComponent === inst.viewComponent)
@@ -198,6 +207,10 @@ export const modelIcon = (m: { viewComponent?: string | null; createRoute?: stri
 export interface FormSummary {
   title: string
   rows: { label: string; value: string }[]
+  attachments: FsObjectVo[]
+  items: { title: string; rows: { label: string; value: string }[]; attachments: FsObjectVo[] }[]
+  ready: boolean
+  problem: string | null
 }
 
 /**
@@ -207,32 +220,119 @@ export interface FormSummary {
  */
 export async function loadSummary(inst: FormOf): Promise<FormSummary | null> {
   const s = mobileForm(inst)?.summary
-  if (!s) return null
+  if (
+    !s?.kind ||
+    !inst.businessKey ||
+    !/^[1-9]\d{0,15}$/.test(inst.businessKey) ||
+    !Number.isSafeInteger(Number(inst.businessKey))
+  )
+    return null
+  const version = currentSessionVersion()
   try {
-    const url = s.url.replace(':id', encodeURIComponent(inst.businessKey!))
-    const [doc, dicts] = await Promise.all([
-      api.get<Record<string, unknown>>(url, undefined, { silent: true }),
-      Promise.all(
-        s.fields.map((f) => (f.dict ? loadDict(f.dict).catch(() => undefined) : undefined)),
+    const raw = await api.get(s.url.replace(':id', inst.businessKey), undefined, { silent: true })
+    const doc =
+      s.kind === 'leave'
+        ? leaveVo.parse(raw)
+        : s.kind === 'trip'
+          ? tripVo.parse(raw)
+          : s.kind === 'expense'
+            ? expenseDetailVo.parse(raw)
+            : sealVo.parse(raw)
+    if (
+      doc.id !== Number(inst.businessKey) ||
+      (inst.id !== undefined && doc.instanceId !== inst.id) ||
+      (inst.initiator?.id != null && doc.userId !== inst.initiator.id)
+    )
+      return null
+    const expense = s.kind === 'expense' ? expenseDetailVo.parse(doc) : null
+    if (
+      expense &&
+      (!expense.items.length ||
+        expense.items.length > SUB_ROWS_MAX ||
+        expense.items.some((item) => item.claimId !== expense.id) ||
+        new Set(expense.items.map((item) => item.id)).size !== expense.items.length ||
+        expense.items.reduce((sum, item) => sum + Number(item.amount.replace('.', '')), 0) !==
+          Number(expense.totalAmount.replace('.', '')))
+    )
+      return null
+    const dicts = await Promise.all(
+      s.fields.map((field) =>
+        field.dict ? loadDict(field.dict).catch(() => undefined) : undefined,
       ),
-    ])
-    const text = (v: unknown, i: number) => {
-      const f = s.fields[i]!
-      if (v === null || v === undefined || v === '') return ''
-      if (f.time) return formatTime(String(v))
-      return f.dict ? choiceText(dictChoices(dicts[i]), String(v)) : String(v)
-    }
-    return {
+    )
+    const rows = s.fields.map((field, i) => {
+      const value = (doc as unknown as Record<string, unknown>)[field.prop]
+      const text =
+        value == null
+          ? ''
+          : field.time
+            ? formatTime(String(value))
+            : field.money
+              ? `${String(value)} CNY`
+              : field.dict
+                ? choiceText(dictChoices(dicts[i]), String(value))
+                : String(value)
+      return {
+        label:
+          field.prop === 'createdAt' ? t('field.common.createdAt') : t(`${s.labels}.${field.prop}`),
+        value: text,
+      }
+    })
+    rows.unshift(
+      { label: t('oa.documentId'), value: String(doc.id) },
+      { label: t('oa.applicant'), value: inst.initiator?.name ?? `#${doc.userId}` },
+      { label: t('oa.department'), value: doc.deptId === null ? '' : `#${doc.deptId}` },
+    )
+    rows.push({ label: t('oa.updatedAt'), value: formatTime(doc.updatedAt) })
+    const summary: FormSummary = {
       title: t(s.title),
-      rows: s.fields.map((f, i) => ({
-        label: t(`${s.labels}.${f.prop}`),
-        value: text(doc[f.prop], i),
-      })),
+      rows,
+      attachments: [],
+      items: [],
+      ready: false,
+      problem: null,
     }
+    let files: FsObjectVo[] = []
+    try {
+      files = await loadAttachments(
+        [...doc.attachmentIds, ...(expense?.items.flatMap((item) => item.attachmentIds) ?? [])],
+        'oa.attachment',
+      )
+      summary.ready = files.every(attachmentPreviewable)
+      if (!summary.ready) summary.problem = t('approval.attachmentDesktop')
+    } catch {
+      summary.problem = t('approval.attachmentUnavailable')
+    }
+    summary.attachments = doc.attachmentIds
+      .map((id) => files.find((file) => file.id === id))
+      .filter((file): file is FsObjectVo => !!file)
+    if (expense) {
+      const kinds = await loadDict('oa.expense_kind').catch(() => undefined)
+      summary.items = expense.items.map((item, index) => ({
+        title: t('oa.item', { n: index + 1 }),
+        rows: [
+          { label: t('field.oa.expense.expenseDate'), value: item.expenseDate },
+          {
+            label: t('field.oa.expense.expenseKind'),
+            value: choiceText(dictChoices(kinds), item.expenseKind),
+          },
+          { label: t('field.oa.expense.amount'), value: `${item.amount} CNY` },
+          { label: t('field.oa.expense.description'), value: item.description },
+        ],
+        attachments: item.attachmentIds
+          .map((id) => files.find((file) => file.id === id))
+          .filter((file): file is FsObjectVo => !!file),
+      }))
+    }
+    return version === currentSessionVersion() ? summary : null
   } catch {
     return null
   }
 }
+
+/** 无法可靠读取单据时，仅保留评论、撤销和催办，不允许凭缺失的业务信息作决定。 */
+export const decisionAllowed = (action: WfAction, documentReady: boolean) =>
+  documentReady || action === 'comment' || action === 'cancel' || action === 'urge'
 
 /**
  * Sent back to its initiator (their `begin` task `taskId`): the page editing a mapped custom form's document,
@@ -240,7 +340,7 @@ export async function loadSummary(inst: FormOf): Promise<FormSummary | null> {
  */
 export function editPage(inst: FormOf, taskId: number): string | null {
   const f = mobileForm(inst)
-  return f && hasPerm(f.modify)
+  return f?.form && f.modify && hasPerm(f.modify)
     ? `${f.form}?id=${encodeURIComponent(inst.businessKey!)}&task=${taskId}`
     : null
 }
@@ -420,11 +520,22 @@ export function decideBody(
  * POSTs `action` on task `id` (cancel: on instance `id`). 404: no longer mine; 409: handled meanwhile (a
  * withdraw: the next step acted); 422: e.g. the user holds the step; 403: the model allows no withdraw/cancel.
  */
-export const decide = (id: number, action: WfDecision, body: object) =>
-  api.post<null>(
-    action === 'cancel' ? `/wf/instances/${id}/cancel` : `/wf/tasks/${id}/${PATHS[action]}`,
-    body,
-  )
+export async function decide(
+  id: number,
+  action: WfDecision,
+  body: object,
+  onConflict?: () => void | Promise<void>,
+) {
+  try {
+    return await api.post<null>(
+      action === 'cancel' ? `/wf/instances/${id}/cancel` : `/wf/tasks/${id}/${PATHS[action]}`,
+      body,
+    )
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 409) await onConflict?.()
+    throw error
+  }
+}
 
 /** POST /wf/instances/:id/urge, silent: the page tells its 429 (once an hour) as "try later". */
 export const urge = (id: number) =>
@@ -472,7 +583,11 @@ export const picksMissing = (picks: WfStartInfoVo['picks'], picked: Picked) =>
  * POST /wf/instances: starts a dynamic model with the users picked per step and its form's values (a model
  * with a form; none: no `formValues` sent); the instance started.
  */
-export const startModel = (modelKey: string, picked: Picked, formValues?: Record<string, unknown>) =>
+export const startModel = (
+  modelKey: string,
+  picked: Picked,
+  formValues?: Record<string, unknown>,
+) =>
   api.post<WfStartVo>('/wf/instances', {
     modelKey,
     initiatorPicks: Object.fromEntries(

@@ -23,7 +23,17 @@ export interface ProjectMenuGroup {
   sortNo: number
 }
 
-export const PROJECT_MENU_GROUPS: ProjectMenuGroup[] = []
+export const PROJECT_MENU_GROUPS: ProjectMenuGroup[] = [
+  {
+    routeName: 'oa',
+    parent: null,
+    name: 'menu.oa.title',
+    nameI18n: { 'zh-CN': 'OA 办公', 'en-US': 'Office' },
+    routePath: '/oa',
+    icon: 'lucide:briefcase-business',
+    sortNo: 6,
+  },
+]
 
 export async function seedProjectMenuGroups(
   q: EntityManager,

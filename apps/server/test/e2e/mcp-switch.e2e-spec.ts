@@ -1,4 +1,4 @@
-// Agent access behind its start-up switch (see docs/mcp.md), here off (`APP_MCP=false`; the test env has
+// MCP access behind its start-up switch (see docs/mcp.md), here off (`APP_MCP=false`; the test env has
 // it on, so every other mcp spec runs with the module): the module is not loaded, so /api/mcp, the
 // discovery documents and every admin route answer 404, a live token too, and no tool is registered;
 // the side menu and the role grant tree leave the two pages out while the menu management lists them;

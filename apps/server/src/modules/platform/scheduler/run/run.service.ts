@@ -18,6 +18,8 @@ export const runColumns: ExcelColumn[] = [
   { prop: 'outcome', label: 'field.scheduler.run.outcome', dict: 'scheduler.run_outcome' },
   { prop: 'startedAt', label: 'field.scheduler.run.startedAt', type: 'datetime' },
   { prop: 'costMs', label: 'field.scheduler.run.costMs', type: 'number' },
+  { prop: 'instance', label: 'field.scheduler.run.instance' },
+  { prop: 'loopMaxMs', label: 'field.scheduler.run.loopMaxMs', type: 'number' },
 ]
 
 /**

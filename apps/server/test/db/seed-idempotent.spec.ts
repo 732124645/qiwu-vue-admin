@@ -6,6 +6,9 @@ import bcrypt from 'bcryptjs'
 import {
   applyFormCalc,
   APP_UPDATE_PARAMS,
+  appSessionParams,
+  DEFAULT_IM_FILE_EXTS,
+  imParams,
   appVersionPerms,
   CAPTCHA_IMAGE_TYPE_PARAM,
   CAPTCHA_MODE_PARAM,
@@ -16,6 +19,7 @@ import {
   bulletinPerms,
   clientPerms,
   codegenPerms,
+  customerPerms,
   compile,
   configPerms,
   fieldsFromFormSchema,
@@ -41,6 +45,9 @@ import {
   invoicePerms,
   IP_BLACKLIST_PARAM,
   leavePerms,
+  oaTripPerms,
+  oaExpensePerms,
+  oaSealPerms,
   LOCALES,
   loginSecurityParams,
   newTenantCode,
@@ -186,14 +193,34 @@ const adminRoles = async () =>
     )
   ).map((r: { code: string }) => r.code)
 
-/** Route names of the menus role `code` is granted (live links). */
-const grantsOf = async (code: string): Promise<string[]> =>
-  (
-    await ds.query(
-      'SELECT m.route_name FROM iam_role_menus rm JOIN iam_role r ON r.id = rm.role_id JOIN iam_menu m ON m.id = rm.menu_id WHERE r.code = ? AND rm.deleted_at IS NULL ORDER BY m.route_name',
-      [code],
-    )
-  ).map((r: { route_name: string }) => r.route_name)
+const OFFICE_EMPLOYEE_ROUTES = [
+  'oa',
+  'oa-office',
+  'oa-trip',
+  'oa-trip-new',
+  'oa-trip-view',
+  'oa-expense',
+  'oa-expense-new',
+  'oa-expense-view',
+  'oa-seal',
+  'oa-seal-new',
+  'oa-seal-view',
+]
+const EMPLOYEE_PERMS = [leavePerms, oaTripPerms, oaExpensePerms, oaSealPerms]
+  .flatMap((perms) => Object.values(perms))
+  .sort()
+/** 精确记录路由与动作权限；流程重授用例只读取原流程子树，办公授权仍保持首次插入语义。 */
+const grantsOf = async (
+  code: string,
+  workflowOnly = false,
+): Promise<{ route_name: string | null; perms: string | null }[]> =>
+  await ds.query(
+    `SELECT m.route_name, m.perms FROM iam_role_menus rm JOIN iam_role r ON r.id = rm.role_id JOIN iam_menu m ON m.id = rm.menu_id
+        WHERE r.code = ? AND rm.deleted_at IS NULL
+          AND (? = 0 OR m.route_name = 'home' OR m.tree_path LIKE (SELECT CONCAT(tree_path, '%') FROM iam_menu WHERE route_name = 'workflow'))
+        ORDER BY m.route_name, m.perms`,
+    [code, workflowOnly ? 1 : 0],
+  )
 
 beforeAll(async () => {
   ds = new DataSource(dataSourceOptions())
@@ -720,7 +747,7 @@ it('roles: system group → role page (before menu) → one action per rolePerms
   expect(held.map((a: { perms: string }) => a.perms)).toEqual([assignUsers])
 })
 
-it('demo: devtools group (+ the external docs link) → demo group → book, topic, invoice and realtime pages → one action per perm', async () => {
+it('demo: devtools group (+ the external docs link) → demo group → book, topic, invoice, realtime and customer pages → one action per perm', async () => {
   await runSeeds(ds)
   const menu = (routeName: string) =>
     one(
@@ -779,6 +806,7 @@ it('demo: devtools group (+ the external docs link) → demo group → book, top
     'demo-topic',
     'demo-invoice',
     'demo-realtime',
+    'demo-customer',
   ])
   const topicActions = await ds.query(
     'SELECT perms FROM iam_menu WHERE parent_id = ? AND kind = ? ORDER BY sort_no',
@@ -902,6 +930,7 @@ it('every module seeds its own menus once: one action per perm of each module, p
     bookPerms,
     topicPerms,
     invoicePerms,
+    customerPerms,
     demoRealtimePerms,
     dictPerms,
     dictEntryPerms,
@@ -929,6 +958,9 @@ it('every module seeds its own menus once: one action per perm of each module, p
     wfPerms.instance,
     wfPerms.task,
     wfPerms.data,
+    oaTripPerms,
+    oaExpensePerms,
+    oaSealPerms,
   ]
     .flatMap((p) => Object.values(p))
     .sort()
@@ -955,6 +987,13 @@ it('every module seeds its own menus once: one action per perm of each module, p
     { route_name: 'codegen-table-edit', parent: 'codegen-table', perms: codegenPerms.modify },
     { route_name: 'iam-role-users', parent: 'iam-role', perms: rolePerms['assign-users'] },
     { route_name: 'iam-user-roles', parent: 'iam-user', perms: userPerms['assign-roles'] },
+    ...['expense', 'seal', 'trip'].flatMap((kind) =>
+      ['new', 'view'].map((action) => ({
+        route_name: `oa-${kind}-${action}`,
+        parent: `oa-${kind}`,
+        perms: null,
+      })),
+    ),
     ...Object.values(dictEntryPerms).map((perms) => ({
       route_name: 'settings-dict-entry',
       parent: 'settings-dict',
@@ -1206,8 +1245,10 @@ it('menu groups and pages follow the requested order', async () => {
   expect(await children(0)).toEqual([
     'home',
     'workflow',
+    'oa',
     'biz',
     'wxoa',
+    'im',
     'system',
     'monitor',
     'devtools',
@@ -1222,6 +1263,7 @@ it('menu groups and pages follow the requested order', async () => {
     'wf-instance-detail',
     'wf-admin',
   ])
+  expect(await children(await id('oa'))).toEqual(['oa-office', 'oa-trip', 'oa-expense', 'oa-seal'])
   expect(await children(await id('wf-admin'))).toEqual([
     'wf-wizard',
     'wf-model',
@@ -1291,12 +1333,14 @@ it('menu groups and pages follow the requested order', async () => {
   ).toEqual([])
 })
 
-it('built-in menu groups: exactly BUILTIN_MENU_GROUPS, every generator prefix parent among them; 业务管理 at the top level', async () => {
+it('built-in and project menu groups: exact registered set, every generator prefix parent among the builtins; 业务管理 at the top level', async () => {
   await runSeeds(ds)
   const live: string[] = (
     await ds.query("SELECT route_name FROM iam_menu WHERE kind = 'group' AND deleted_at IS NULL")
   ).map((r: { route_name: string }) => r.route_name)
-  expect(live.sort()).toEqual([...BUILTIN_MENU_GROUPS].sort())
+  expect(live.sort()).toEqual(
+    [...BUILTIN_MENU_GROUPS, ...PROJECT_MENU_GROUPS.map((group) => group.routeName)].sort(),
+  )
   for (const { parentMenuRouteName } of Object.values(TABLE_PREFIXES))
     expect(BUILTIN_MENU_GROUPS).toContain(parentMenuRouteName)
   expect(
@@ -1872,7 +1916,7 @@ it('Menus: workflow group after home → center pages, leave (hidden new/view), 
   }
 })
 
-it('staff and member: home, the approval center and leave pages; 流程审批 without 流程管理 at sign-in, root sees both', async () => {
+it('staff and member: exact personal and office business grants without workflow administration, root sees workflow administration', async () => {
   await runSeeds(ds)
   expect(
     await one("SELECT name, data_scope, sort_no, is_builtin FROM iam_role WHERE code = 'staff'"),
@@ -1888,11 +1932,20 @@ it('staff and member: home, the approval center and leave pages; 流程审批 wi
     'wf-start',
     'wf-todo',
   ]
-  // staff holds home like member; the leave perms are action rows (no route name) of biz-leave
-  const granted = [...Object.values(leavePerms).map(() => null), ...['home', ...center].sort()]
+  // 权限和路由同时精确比较，新增管理动作不能藏在相同数量的空 route_name 中。
+  const granted = [
+    ...EMPLOYEE_PERMS.map((perms) => ({ route_name: null, perms })),
+    ...['home', ...center, ...OFFICE_EMPLOYEE_ROUTES]
+      .sort()
+      .map((route_name) => ({ route_name, perms: null })),
+  ]
   expect(await grantsOf('staff')).toEqual(granted)
   expect(await grantsOf('member')).toEqual(granted)
+  const managementPerms: string[] = Object.values(wfPerms).flatMap((perms) => Object.values(perms))
   for (const code of ['staff', 'member']) {
+    expect(
+      (await grantsOf(code)).filter((row) => row.perms && managementPerms.includes(row.perms)),
+    ).toEqual([])
     const actions = await ds.query(
       `SELECT m.perms FROM iam_role_menus rm JOIN iam_role r ON r.id = rm.role_id
          JOIN iam_menu m ON m.id = rm.menu_id JOIN iam_menu p ON p.id = m.parent_id
@@ -1938,7 +1991,18 @@ it('staff and member: home, the approval center and leave pages; 流程审批 wi
     )
     expect({ code, menus: tree(await inTenant1(() => lookup.menus(userId, false))) }).toEqual({
       code,
-      menus: ['home', { workflow }],
+      menus: [
+        'home',
+        { workflow },
+        {
+          oa: [
+            'oa-office',
+            { 'oa-trip': ['oa-trip-new', 'oa-trip-view'] },
+            { 'oa-expense': ['oa-expense-new', 'oa-expense-view'] },
+            { 'oa-seal': ['oa-seal-new', 'oa-seal-view'] },
+          ],
+        },
+      ],
     })
   }
   const all = (await inTenant1(() => lookup.menus(0, true))).find(
@@ -1952,7 +2016,7 @@ it('staff and member: home, the approval center and leave pages; 流程审批 wi
 
 it('member gets the workflow menus only when they are first inserted; a deleted role gets none', async () => {
   await runSeeds(ds)
-  const center = await grantsOf('staff') // home + the workflow rows
+  const center = await grantsOf('staff', true) // 只重授流程中心与请假，不恢复管理员撤销的办公首次授权
   // an administrator removed staff's wf-cc on the role-menu page (a soft delete: it stays removed) …
   await ds.query(
     "UPDATE iam_role_menus rm JOIN iam_role r ON r.id = rm.role_id JOIN iam_menu m ON m.id = rm.menu_id SET rm.deleted_at = NOW(3) WHERE r.code = 'staff' AND m.route_name = 'wf-cc'",
@@ -1965,10 +2029,10 @@ it('member gets the workflow menus only when they are first inserted; a deleted 
     "UPDATE iam_role SET name = 'Edited staff', data_scope = 'own_dept', sort_no = 7 WHERE code = 'staff'",
   )
   await runSeeds(ds)
-  expect(await grantsOf('member')).toEqual(['home'])
+  expect(await grantsOf('member')).toEqual([{ route_name: 'home', perms: null }])
   // staff's missing ones are ensured on every run, the removed one is not revived; its name, scope and sort stay the admin's
-  expect(center).toContain('wf-cc')
-  expect(await grantsOf('staff')).toEqual(center.filter((r) => r !== 'wf-cc'))
+  expect(center).toContainEqual({ route_name: 'wf-cc', perms: null })
+  expect(await grantsOf('staff')).toEqual(center.filter((r) => r.route_name !== 'wf-cc'))
   expect(await one("SELECT name, data_scope, sort_no FROM iam_role WHERE code = 'staff'")).toEqual({
     name: 'Edited staff',
     data_scope: 'own_dept',
@@ -2373,6 +2437,9 @@ it('dicts with labels in every language, params with defaults', async () => {
     'messaging.sms_purpose',
     'messaging.sms_receipt_status',
     'messaging.sms_record_status',
+    'oa.expense_kind',
+    'oa.request_state',
+    'oa.seal_kind',
     'scheduler.job_group',
     'scheduler.misfire',
     'scheduler.run_outcome',
@@ -2504,6 +2571,24 @@ it('dicts with labels in every language, params with defaults', async () => {
     // App updates: no update prompt unless switched on
     [APP_UPDATE_PARAMS.enabled]: 'false',
     [APP_UPDATE_PARAMS.reviewVersion]: '',
+    // App sessions: no expiry, one App session per user
+    [appSessionParams.sessionDays]: '0',
+    [appSessionParams.singleSession]: 'true',
+    // chat: defaults, the sync epoch a random UUID of this database
+    [imParams.retentionDays]: '180',
+    [imParams.epoch]: expect.stringMatching(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    ),
+    [imParams.textMaxChars]: '5000',
+    [imParams.recallMinutes]: '2',
+    [imParams.editMinutes]: '5',
+    [imParams.groupRecallAnytime]: 'true',
+    [imParams.groupMaxMembers]: '200',
+    [imParams.fileMaxMb]: '20',
+    [imParams.fileExts]: DEFAULT_IM_FILE_EXTS,
+    [imParams.voiceMaxSeconds]: '60',
+    [imParams.voiceMaxMb]: '5',
+    [imParams.callEnabled]: 'false',
   })
   // WeChat subscribe messages: a valid mapping for the new to-do, its template id left for the operator
   expect(wxSubscribeTemplates.parse(JSON.parse(params[WX_SUBSCRIBE_TEMPLATES_PARAM]))).toEqual({

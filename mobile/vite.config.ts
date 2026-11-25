@@ -97,6 +97,8 @@ export default defineConfig({
       // its real folder: with uni's preserveSymlinks, pnpm's link in node_modules finds none of its own
       // dependencies (engine.io-client, socket.io-parser…), the real folder has them beside it
       'socket.io-client': realpathSync(resolve(__dirname, 'node_modules/socket.io-client')),
+      'livekit-client': realpathSync(resolve(__dirname, '../packages/shared/node_modules/livekit-client')),
+      'recorder-core': realpathSync(resolve(__dirname, '../packages/shared/node_modules/recorder-core')),
     },
   },
   // dev server: one copy of wot-ui. Pre-bundled, `@wot-ui/ui/locale` (core/i18n.ts) would be a second copy of

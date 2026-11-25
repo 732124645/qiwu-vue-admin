@@ -5,11 +5,12 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
-import { parseEnv } from 'node:util'
+import { inspect, parseEnv } from 'node:util'
 
 const serverDir = fileURLToPath(new URL('../apps/server/', import.meta.url))
 const probeDir = join(serverDir, '.cjs-probe')
 const cjs = process.argv.includes('--cjs')
+const devReload = process.argv.includes('--dev-reload')
 const TIMEOUT_MS = 20_000
 
 const loadEnv = (file) => {
@@ -99,11 +100,25 @@ async function boot(entry) {
 }
 
 try {
-  console.log(
-    `smoke:boot OK (${cjs ? 'cjs' : 'esm'}): ${await boot(cjs ? buildCjs() : 'dist/main.js')}`,
-  )
+  if (devReload) {
+    if (cjs) throw new Error('--dev-reload and --cjs cannot be combined')
+    const { devReloadSmoke } = await import('./dev-reload-smoke.mjs')
+    await devReloadSmoke(serverDir, {
+      ...process.env,
+      ...loadEnv('.env.local'),
+      ...loadEnv('.env.test'),
+      ENV_FILE: '.env.test',
+    })
+    console.log('smoke:boot OK (dev-reload): real shared/server edits, failed build and recovery')
+  } else
+    console.log(
+      `smoke:boot OK (${cjs ? 'cjs' : 'esm'}): ${await boot(cjs ? buildCjs() : 'dist/main.js')}`,
+    )
 } catch (err) {
-  console.error(`smoke:boot FAIL (${cjs ? 'cjs' : 'esm'}): ${err.message}`)
+  console.error(
+    `smoke:boot FAIL (${devReload ? 'dev-reload' : cjs ? 'cjs' : 'esm'}):`,
+    inspect(err, { depth: null }),
+  )
   process.exitCode = 1
 } finally {
   if (cjs) rmSync(probeDir, { recursive: true, force: true })

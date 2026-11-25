@@ -1,0 +1,16 @@
+{
+  "field": {
+    "oa": {
+      "seal": {
+        "sealKind": "印章类型",
+        "documentName": "文件名称",
+        "purpose": "用印用途",
+        "copies": "份数",
+        "expectedDate": "期望用印日期",
+        "attachmentIds": "附件",
+        "initiatorPicks": "选定审批人",
+        "state": "状态"
+      }
+    }
+  }
+}

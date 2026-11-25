@@ -11,7 +11,7 @@ import { UserService } from './user.service.js'
 @Module({
   imports: [TypeOrmModule.forFeature([User]), DeptModule, RoleModule, SmsOtpModule],
   controllers: [UserController],
-  // UserMcpTools: the iam.user.search agent tool (registered only while APP_MCP is on)
+  // UserMcpTools: the iam.user.search MCP tool (registered only while APP_MCP is on)
   providers: [UserService, UserMcpTools],
 })
 export class UserModule {}

@@ -6,11 +6,15 @@
 
 不适用：没有表的纯接口、改平台模块（`apps/server/src/modules/platform/`）。
 
+扩展员工 IM 媒体时复用已有 `@qiwu/shared/im-client` 控制器、私有附件与持久发件箱。浏览器 SDK 只能从 `@qiwu/shared/im-media` 子入口引入，不能由 shared 根或 im-client 以值重导出；App 通过原生媒体端口接同一控制器，页面只拿安全快照。详细边界见 [聊天](../../im.md) 与 [LiveKit](../../livekit.md)。
+
 ## 步骤
 
-以表 `crm_customer` 为例：领域取表名第一段 `crm`，业务取其余部分 `customer`。没有独立领域的表（如 `course`）落到内置领域 `biz`。命名规则见[代码生成：名称、父菜单与路径](../../codegen.md#名称父菜单与路径)。
+以表 `crm_customer` 为例：领域取表名第一段 `crm`，业务取其余部分 `customer`。没有独立领域的表（如 `course`）落到内置领域 `biz`。内置办公业务使用 `oa_` 前缀，复用工作流的业务接入机制；项目新领域不要占用 `oa`。固定办公审批表通过业务服务接入工作流，`oa_` 表不允许通用 CRUD 导入，以免生成任意修改审批状态的入口。命名规则见[代码生成：名称、父菜单与路径](../../codegen.md#名称父菜单与路径)。
 
 需要后台界面的步骤（第 1、4、8 步的菜单管理、代码生成页面、角色授权）由开发者在运行中的应用里操作；AI 工具不自己启动 `pnpm dev`，到这些步骤时请用户操作，或保持默认继续。
+
+开发者交互运行 `pnpm dev` 时，runner 已统一处理 shared watch 和 server 增量编译，不必另开共享包 watcher。需要核对开发重载链路时，在准备好的默认测试通道运行 `pnpm smoke:boot --dev-reload`；它使用真实应用验证变更与编译失败恢复，自动还原临时探针并退出，不作为人工后台操作的替代。
 
 1. **建菜单分组**（可选）。在后台“菜单管理”建 `kind=group` 的目录，如 `crm`；保存后路由名只读。没有自己的分组时页面挂在内置的 `biz` 分组下。
 2. **建表并迁移。** 按[建表与迁移](table-migration.md)写迁移，然后运行 `pnpm db:migrate`。表必须有 `deleted_at`，否则生成器拒绝导入。
@@ -43,6 +47,8 @@
 
 参照样例：`demo_book` 的生成配置在 `apps/server/src/db/seeds/codegen/demo_book.cg.ts`，生成物见[配方索引的样例表](README.md#通用完成标准)。
 
+业务需要私有附件时，复用文件存储并登记强制业务检查器，保持平台和工作流不反向导入项目模块。保存单据和附件绑定/替换共用事务；同单据旧引用也须仍在原有效附件集合中。读取元信息、下载和预览都检查单据访问权，不授予员工全局文件查看权限。原生客户端使用同源 `content` 接口并处理大小上限，不携带系统令牌跟随对象存储重定向。详见[文件存储设计](../../design-notes.md#storage)。
+
 ## 完成检查
 
 ```sh
@@ -53,6 +59,8 @@ pnpm verify
 ```
 
 ## 常见错误
+
+办公申请先查[OA 办公](../../oa.md)的既有提交服务与 workflow handler，固定申请不可生成任意改状态的 CRUD。可选外部系统接入不能成为本系统原生路径的前置条件。
 
 - 忘了第 6 步的登记：接口 404（模块没进 `project.module.ts`）、菜单不出现（种子没进 `SEEDS.project`）、前端拿不到 schema（shared 没导出）。
 - 种子报 “menu group … is missing”：父分组既不在库里，也不在 `PROJECT_MENU_GROUPS` 里。

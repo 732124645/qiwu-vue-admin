@@ -28,7 +28,9 @@
     "demoEcho": "Sample: echo a message",
     "wfTaskRemind": "Send overdue to-do reminders",
     "wxoaMessagePurge": "Purge expired Official Account messages",
-    "wxoaFanSync": "Sync Official Account fans"
+    "wxoaFanSync": "Sync Official Account fans",
+    "clockRetention": "Legacy attendance retention (retired)",
+    "imPurge": "Purge expired chat history and unsent uploads"
   },
   "inboxTemplate": {
     "schedulerJobTimeout": "Job timeout alert"
@@ -110,5 +112,17 @@
   "tenantPackage": {
     "full": "Sample package: everything",
     "noWorkflow": "Sample package: no approvals"
+  },
+  "oa": {
+    "trip": "Business trip",
+    "tripDescription": "Submit a travel plan and select its reviewers",
+    "reviewer": "Reviewer",
+    "expense": "Expense claim",
+    "expenseDescription": "Submit CNY expense items and select reviewers",
+    "seal": "Seal request",
+    "sealDescription": "Submit a document sealing request and select reviewers",
+    "generic": "General approval",
+    "genericDescription": "Submit an office matter and select reviewers",
+    "genericForm": "General office request form"
   }
 }

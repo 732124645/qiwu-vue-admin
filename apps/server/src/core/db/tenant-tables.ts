@@ -36,6 +36,12 @@ const TEMPLATE_PLATFORM_TABLES: readonly string[] = [
   'aud_http_trace',
   'aud_http_fault',
   'cfg_mcp_tool',
+  // a retired feature's tables: created by earlier migrations and kept on upgraded databases
+  'agent_provider',
+  'agent_search_provider',
+  'agent_mcp_server',
+  'agent_mcp_tool',
+  'agent_platform_skill',
 ]
 
 /** Every platform table: the template's and the project's (`db/project-tables.ts`). */

@@ -33,11 +33,11 @@ NestJS 12（ESM）+ Vue 3.5 + Vite + Element Plus + TypeScript + MySQL + Redis�
 - `platform` 不导入 `workflow` 与项目领域；
 - `workflow` 不导入项目领域；
 - 项目领域可以使用以上各层；前后端共享的东西放 `@qiwu/shared`。
-- `packages/shared` 也跑在移动端，只能导入 zod 与自身文件（不用 Node API、不用 Vue）。
+- `packages/shared` 也跑在移动端，通用契约只导入 zod 与自身文件（不用 Node API、不用 Vue）；IM 引擎只在登记位置使用纯 JS 哈希/UTF-8。浏览器 LiveKit/录音 SDK 仅从 `@qiwu/shared/im-media` 子入口加载，不从 shared 根或 im-client 以值重导出，App 使用原生端口，见 [docs/im.md](docs/im.md)。
 
 ## 命名
 
-- **表名**：`<领域>_<业务>`，如 `erp_sale_order`。模板占用的前缀 `iam_ cfg_ msg_ aud_ fs_ job_ cg_ oauth_ im_ wxoa_ wf_ biz_ demo_ test_ meta_` 不给项目新领域用；保留的领域名见 `packages/shared/src/common/reserved-names.ts`。
+- **表名**：`<领域>_<业务>`，如 `erp_sale_order`。模板占用的前缀 `iam_ cfg_ msg_ aud_ fs_ job_ cg_ oauth_ im_ wxoa_ wf_ oa_ biz_ demo_ test_ meta_` 不给项目新领域用；保留的领域名见 `packages/shared/src/common/reserved-names.ts`。`oa_` 是绑定工作流的办公业务表，不可通过通用 CRUD 导入绕过业务服务。
 - **权限码**：`<domain>.<resource>.<verb>`，如 `erp.saleOrder.browse`（业务段小驼峰；常用动词 `browse view create modify remove import export`），在 shared 的 `xxxPerms` 对象里导出、前后端同源。绝不用 `a:b:c` 形式。
 - **字典码**用点分：`iam.gender`；**枚举值**用字符串码，不用数字。
 - **路由名**：页面 `<domain>-<business>`（`erp-sale-order`），菜单分组只用小写字母、数字与连字符（`erp-sale`），保存后只读。
@@ -54,6 +54,7 @@ NestJS 12（ESM）+ Vue 3.5 + Vite + Element Plus + TypeScript + MySQL + Redis�
 - 请求校验只用 `@qiwu/shared` 的 zod schema：`@Body({ schema })`、`@Query({ schema })`。校验消息是 `validation.*` 翻译键，schema 用 `.register(fieldDomains, { domain })` 登记字段领域；服务端不另建 `validation.json` / `field.json`。
 - 每个路由用 `@RequirePerm(xxxPerms.<verb>)` 检查权限；前端用 `v-perm` / `usePerm` 只控制显示，不代替服务端授权。
 - 数据库会话用 UTC，API 时间为 ISO-8601。
+- 私人业务请求的日志也要授权隔离：普通敏感字段用 `@Sensitive('fieldName')`，整份请求私有时用 `@Sensitive('*')` 遮蔽操作参数/结果、HTTP 请求摘要与故障消息；用真实成功和校验失败请求断言持久化日志，而不只检查装饰器。不要把私人内容放进 URL 路径或参数名。
 
 ## 多语言
 
@@ -76,7 +77,7 @@ NestJS 12（ESM）+ Vue 3.5 + Vite + Element Plus + TypeScript + MySQL + Redis�
 - **数据权限**：带 `@DataScoped` 的实体只经 `BaseCrudService` 的 `scopedQb()` 读，按 id 写之前在事务内 `lockScopedIds(ids)`，新增与改范围列时 `assertWritableScope()`。自定义过滤用 `andWhere()`，不要用会覆盖范围的 `where()`。
 - 原始 SQL 读带范围的表：在同一函数里调用 `dataScopeSql` / `dataScopeSqlFor`，把 `${scope.sql}` 插进语句；不代表调用者读数据的系统查询写 `qw:no-data-scope <理由>`。原始 SQL 还要自己写 `deleted_at IS NULL`（有意读已删除行时写 `qw:include-deleted`）。
 - Redis 键一律经 `apps/server/src/core/redis/cache-namespaces.ts` 构造（前缀 `qw:`，每个命名空间声明 `tenant` / `global-id` / `platform` 维度）。
-- 后台任务用队列：`QueueService.add` 记下当前租户，处理器继承 `TenantJobProcessor` 且必须幂等，见 [docs/queue.md](docs/queue.md)。
+- 后台任务用队列：`QueueService.add` 记下当前租户，处理器继承 `TenantJobProcessor` 且必须幂等，见 [docs/queue.md](docs/queue.md)。处理器启动时若登记定时任务（`onApplicationBootstrap` 里的 `upsertJobScheduler` 等），在 `APP_ROLE=api` 下要跳过，留给开 worker 的实例。
 - 新的 `@Public()` 路由在 `apps/server/test/e2e/tenant-public.e2e-spec.ts` 登记租户来源（模板文件，升级时可能冲突）。
 
 ## 安全默认
@@ -87,7 +88,8 @@ NestJS 12（ESM）+ Vue 3.5 + Vite + Element Plus + TypeScript + MySQL + Redis�
 - 每个非 GET 控制器方法带 `@ActionLog({ domain, verb })` 或 `@SkipActionLog()`。项目新动词（kebab-case）登记在 `apps/server/src/db/seeds/project/action-verbs.seed.ts` 的 `PROJECT_ACTION_VERBS`，不改平台的 `VERBS`。
 - 新建类写路由加 `@Idempotent()`（`core/guard/idempotent.ts`，3 秒内重复回 429）；前端提交按钮在请求期间 `loading` 且禁用（CRUD 套件已处理）。
 - 不用 `eval`、`new Function`、`vm`；富文本经 `sanitizeFields` 清洗；文件上传与 Excel 走 core 的现成服务。
-- 秘密（数据库与 Redis 凭据、`APP_SECRET`、`SEED_ADMIN_PASSWORD`）只写在 git 忽略的 `apps/server/.env.local`；`.env` 不定义这些键（空值也会遮住 `.env.local`）；任何秘密都不放 `VITE_*`。
+- 业务私有附件用 `StorageAccess.register(tag, checker, { exclusive: true, feature })` 强制单据授权；绑定、替换与业务保存同事务，不能借上传者或全局文件权限绕过。文件名读取安全元信息接口；原生客户端用固定同源 content 入口，不能带登录令牌跟随外部重定向。
+- 秘密（数据库与 Redis 凭据、`APP_SECRET`、`SEED_ADMIN_PASSWORD`）只写在 git 忽略的 `apps/server/.env.local`；`.env` 不定义这些键（空值也会遮住 `.env.local`）；非秘密键两边都写时 `.env` 生效（启动时警告重复键名）；任何秘密都不放 `VITE_*`。
 - 依赖只选维护活跃、许可宽松的包，要过 `pnpm license:check`（禁用包列表在 `scripts/license-check.mjs`）；需要构建脚本的包登记到 `pnpm-workspace.yaml` 的 `allowBuilds`。
 
 ## 前端 CRUD 套件
@@ -145,9 +147,12 @@ NestJS 12（ESM）+ Vue 3.5 + Vite + Element Plus + TypeScript + MySQL + Redis�
 | `pnpm gen import\|render\|write <table>`                               | 代码生成器                                                                                                     |
 | `pnpm ai:map`                                                          | 重新生成项目地图 `docs/ai/project-map.md`（改了模块、表、接口、权限、菜单或种子后；`verify` 会检查它是否过期） |
 | `pnpm ci:local`                                                        | 完整本地闸门（构建、全部测试、Playwright、冒烟），耗时长，需要全部测试库；由开发者决定何时跑                   |
+| `pnpm smoke:boot --dev-reload`                                         | 默认测试通道的有限真实热重载检查；准备测试库后运行，自动还原临时探针源码和产物并退出                           |
 | `pnpm mobile:verify` / `pnpm mobile:test`                              | 移动端检查（有 `mobile/` 时）                                                                                  |
 
 `pnpm dev` 只由人在终端交互运行；AI 工具不要启动常驻的开发服务器。提交信息用 Conventional Commits（commitlint 检查），scope 建议写 `<domain>/<module>`，如 `feat(erp/sale-order): ...`。
+
+开发 runner 统一等待 shared 编译成功后执行 server 增量编译，成功后替换应用；无需另开 shared watcher。收到 `ready` 才表示端口监听完成，编译错误、业务日志、警告与错误仍保留。检查热重载使用上表的有限冒烟，不遗留开发服务。
 
 ## 常见错误
 
@@ -169,3 +174,9 @@ NestJS 12（ESM）+ Vue 3.5 + Vite + Element Plus + TypeScript + MySQL + Redis�
 | `originality:check`                             | 出现 `a:b:c` 形式的权限串                                                                                       |
 | `license:check`                                 | 依赖的许可不在允许列表或是禁用包                                                                                |
 | `typecheck` 找不到 `@qiwu/shared`               | 新检出或改了 shared 的导出后先运行 `pnpm --filter @qiwu/shared build`（Web 的 e2e 用例读它的构建产物）          |
+
+- 私有页面的敏感写入或上传可显式使用请求选项 `retryAuth: false` 禁止该请求在 401 后刷新重放，并用标准 `AbortSignal` 在上下文失效时取消；默认请求行为保持。`FileUpload` 的 `contextKey` 隔离迟到上传，`downloadFile` 可接业务授权后的二进制处理；`error` 事件保留当前有效上传的原始错误，业务可据此失效页面，旧上下文或已卸载的上传不通知业务；所有权限和版本仍由服务端复核。
+
+- 移动端私有页面沿现uni请求和附件helpers处理上下文。`QwUpload` 可监听 `error` 获取当前上传的原始错误、监听 `picking` 区分自己发起的原生选择，并可提供 `selectionReady(): Promise<boolean>`，在同一次选择返回后等待页面可见与身份核验；未提供时保持原路径。自己发起的选择或预览可能产生hide/show，隐藏期禁止提交，真正unload或身份失效必须退役，H5无hide也不能悬等。附件读取helpers可选传 `retryAuth: false` 禁止401刷新重放；现uni请求没有AbortSignal时用session、页面代次及权限复核迟到结果，不宣称已取消网络。已受理的上传或已启动的原生预览仍以服务端/系统资源合同为准。
+
+- 自由文本表单使用 `useCrudForm({ translateSeeded: false, ... })` 保留用户输入的 `seed.*` 字面文本；未指定时沿用框架种子标签的显示与还原。

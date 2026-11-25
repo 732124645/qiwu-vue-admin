@@ -32,6 +32,8 @@ const HEADERS = [
   'field.scheduler.run.outcome',
   'field.scheduler.run.startedAt',
   'field.scheduler.run.costMs',
+  'field.scheduler.run.instance',
+  'field.scheduler.run.loopMaxMs',
 ]
 
 let app: NestExpressApplication
@@ -230,7 +232,7 @@ describe('export', () => {
   it('export: every row (no paging) in list order as .xlsx, headers translated, formulas escaped', async () => {
     const tag = unique()
     await add(body(`${tag}-a`))
-    await add(body(`${tag}-b`, { handler: '=1+1' }))
+    await add(body(`${tag}-b`, { handler: '=1+1', instance: 'host-a:42', loopMaxMs: 7 }))
     // counted before: an export of the action log adds its own row right after
     const rows = await count()
     const { res, ws } = await exported('admin', { sort: '-id', pageSize: 1 })
@@ -243,6 +245,8 @@ describe('export', () => {
     expect(row(ws!, 2)[0]).toBe(`${tag}-b`)
     expect(row(ws!, 3)[0]).toBe(`${tag}-a`)
     expect(row(ws!, 2)[1]).toBe("'=1+1")
+    // the process and its loop delay, for matching a run with the slow-request log
+    expect(row(ws!, 2).slice(-2)).toEqual(['host-a:42', 7])
   })
 
   it('export: English headers for an en-US request', async () => {

@@ -130,6 +130,13 @@ export const staticRoutes: RouteRecordRaw[] = [
         component: () => import('@/views/platform/messaging/inbox-mine/index.vue'),
         meta: { title: 'notify.inbox.pageTitle', icon: 'lucide:inbox' },
       },
+      // 员工聊天：静态路由，不是菜单页；入口在顶栏，是否可用由页面探测 GET /api/im/options 决定
+      {
+        path: '/im/chat',
+        name: 'im-chat',
+        component: () => import('@/views/platform/im/index.vue'),
+        meta: { title: 'im.title', icon: 'lucide:messages-square' },
+      },
     ],
   },
   // not public: an unknown path may be a menu route that is registered after sign-in
@@ -292,6 +299,26 @@ export function createAppRouter(
         query: to.meta.public ? {} : { redirect: to.fullPath },
       }
     if (auth.mustChangePassword) return forceChange()
+    // 会话仍有效时不必再登录一次：登录页直接回到要去的页面。锁屏时登录页保持可用（重新登录即解锁）。
+    // 只认两种状态：已完整加载（会话与菜单都在），或内存里什么都没有（新开页面/刷新）时静默试一次刷新和 /me；
+    // 加载到一半被守卫送来（/me 或菜单失败）照常显示登录页，否则会与守卫来回跳转
+    if (to.name === 'login' && !auth.locked) {
+      const loaded = !!auth.accessToken && !!auth.me && useMenuStore().loaded
+      let live = loaded
+      if (!loaded && !auth.accessToken && !auth.me) {
+        apiQuiet.value = true
+        try {
+          await auth.refresh()
+          await auth.fetchMe()
+          live = true
+        } catch {
+          // 会话已结束或后端出错：显示登录页
+        } finally {
+          apiQuiet.value = false
+        }
+      }
+      if (live) return safeRedirect(to.query.redirect)
+    }
     if (to.meta.public) return true
     const menu = useMenuStore()
     const mine = ++navigations

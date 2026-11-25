@@ -1,0 +1,23 @@
+{
+  "id": "qw-livekit",
+  "displayName": "Qw LiveKit",
+  "version": "0.1.0",
+  "description": "LiveKit native media bridge and video view for uni-app",
+  "keywords": [
+    "uni-app",
+    "uts",
+    "livekit",
+    "webrtc"
+  ],
+  "license": "MIT",
+  "engines": {
+    "HBuilderX": ">=5.26.0"
+  },
+  "dcloudext": {
+    "type": "uts"
+  },
+  "uni_modules": {
+    "dependencies": [],
+    "encrypt": []
+  }
+}

@@ -5,7 +5,7 @@ import { MCP_TOOL_NAME } from '@qiwu/shared'
 import { z } from 'zod'
 import { MCP_TIMEOUT_MAX_MS, MCP_TIMEOUT_MS, MCP_TOOL, type McpToolMeta } from './mcp-tool.js'
 
-/** A registered tool: its declaration, the JSON Schemas the agent sees and the bound method. */
+/** A registered tool: its declaration, the JSON Schemas the client sees and the bound method. */
 export interface RegisteredTool extends McpToolMeta {
   timeoutMs: number
   inputSchema: Record<string, unknown>
@@ -28,10 +28,10 @@ export function knownPerms(source: Record<string, unknown> = shared): Set<string
 
 /** The JSON Schema of a tool's object schema, without the `$schema` line clients do not need. */
 function jsonSchemaOf(schema: z.ZodObject, io: 'input' | 'output'): Record<string, unknown> {
-  const { $schema: _, ...rest } = z.toJSONSchema(schema, { io, unrepresentable: 'any' }) as Record<
-    string,
-    unknown
-  >
+  const { $schema: _, ...rest } = z.toJSONSchema(schema, {
+    io,
+    unrepresentable: 'any',
+  }) as Record<string, unknown>
   return rest
 }
 

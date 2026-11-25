@@ -26,7 +26,8 @@ export interface ActionLogOptions {
   bizId?: (req: Request, result: unknown) => unknown
 }
 
-const ACTION_LOG = 'qw:audit:action-log'
+/** Metadata key of `@ActionLog` (its options). */
+export const ACTION_LOG = 'qw:audit:action-log'
 const SKIP_ACTION_LOG = 'qw:audit:skip-action-log'
 
 const text = (v: unknown): string | null =>

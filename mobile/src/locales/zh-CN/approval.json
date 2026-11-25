@@ -83,5 +83,8 @@
       "row": "明细 {n}",
       "total": "合计"
     }
-  }
+  },
+  "documentUnavailable": "单据信息无法完整显示，请重新加载或在电脑端查看后办理。",
+  "attachmentUnavailable": "附件无法可靠加载，请重新加载或在电脑端查看。",
+  "attachmentDesktop": "此附件无法在手机上安全预览，或超过 20 MiB，请在电脑端查看后办理。"
 }

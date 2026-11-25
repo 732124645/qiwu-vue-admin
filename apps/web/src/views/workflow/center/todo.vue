@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { toRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RT, type WfTaskItemVo } from '@qiwu/shared'
 import { wfCenterApi } from '@/api/workflow/center'
@@ -15,11 +16,15 @@ import { at, useCenterList } from './use-center-list'
  * caller's to-dos changed) reloads the list, as it does the side menu's count (`TodoBadge`).
  */
 defineOptions({ name: 'WfTodo' })
+const props = defineProps<{ modelKey?: string }>()
 const { t } = useI18n()
-const { query, rows, total, loading, refresh, onSortChange, open } = useCenterList<WfTaskItemVo>({
-  api: { page: wfCenterApi.todo },
-  sort: '-createdAt,-id',
-})
+const { query, rows, total, loading, refresh, onSortChange, open } = useCenterList<WfTaskItemVo>(
+  {
+    api: { page: wfCenterApi.todo },
+    sort: '-createdAt,-id',
+  },
+  toRef(props, 'modelKey'),
+)
 onRealtime(RT.wfTask, () => void refresh())
 const columns: QwColumn[] = [
   { prop: 'title', label: 'wf.center.list.title', minWidth: 260, showOverflowTooltip: true },

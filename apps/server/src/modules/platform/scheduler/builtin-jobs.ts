@@ -5,6 +5,7 @@ import { AUDIT_RETENTION_PARAM, DEFAULT_AUDIT_RETENTION_DAYS } from '@qiwu/share
 import type { DataSource } from 'typeorm'
 import { z } from 'zod'
 import { sweepOnline } from '../../../core/auth/online-sweep.js'
+import { SessionRevoker } from '../../../core/auth/session-revoker.js'
 import { allTenants, DEFAULT_TENANT_ID, withTenant } from '../../../core/context/tenant.js'
 import { REDIS, type Redis } from '../../../core/redis/redis.module.js'
 import { JobHandler, type JobContext } from '../../../core/scheduler/job-handler.js'
@@ -50,6 +51,7 @@ export class BuiltinJobs {
     @Inject(REDIS) private readonly redis: Redis,
     private readonly params: ParamService,
     private readonly storage: StorageService,
+    private readonly revoker: SessionRevoker,
   ) {}
 
   /**
@@ -94,7 +96,10 @@ export class BuiltinJobs {
   @JobHandler('session.sweep')
   sweep() {
     // qw:cross-tenant the online list holds every tenant's sessions
-    return allTenants(async () => `removed ${await sweepOnline(this.redis)}`)
+    return allTenants(
+      async () =>
+        `removed ${await sweepOnline(this.redis, Date.now(), { params: this.params, revoker: this.revoker })}`,
+    )
   }
 
   /** Echoes its message after `delayMs`: a harmless task to try the pages with. */

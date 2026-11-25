@@ -3,6 +3,7 @@ import request from 'supertest'
 import { Err, WXOA_CONTENT_MAX } from '@qiwu/shared'
 import { sanitizeRichText } from '../../src/core/sanitize.js'
 import { bearer } from '../setup/auth.js'
+import { waitIdempotencyWindow } from '../setup/redis.js'
 import { addAccount, closeContentApp, openContentApp } from './wxoa-content.helpers.js'
 
 describe('wxoa drafts', () => {
@@ -71,7 +72,7 @@ describe('wxoa drafts', () => {
       .send({ articles: [{ ...article, title: 'Draft changed' }] })
       .expect(200)
     expect(changed.body.data.dirty).toBe(true)
-    await new Promise((resolve) => setTimeout(resolve, 3100))
+    await waitIdempotencyWindow(ctx.app)
     const resync = await http()
       .post(`/api/wxoa/drafts/${id}/sync`)
       .set(bearer(ctx.admin))
@@ -212,7 +213,7 @@ describe('wxoa drafts', () => {
     })
 
     // 本地改过的已拉取草稿再拉一次：内容覆盖并刷新同步摘要，不再显示未同步
-    await new Promise((resolve) => setTimeout(resolve, 3100))
+    await waitIdempotencyWindow(ctx.app)
     await http()
       .put(`/api/wxoa/drafts/${big.id}`)
       .set(bearer(ctx.admin))

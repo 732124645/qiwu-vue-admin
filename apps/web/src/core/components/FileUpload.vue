@@ -51,6 +51,7 @@ const {
   maxSize: () => maxSize,
   direct: () => direct,
 })
+defineExpose({ pending })
 </script>
 
 <template>

@@ -1,8 +1,13 @@
+import { seedOaOffice } from './project/oa-office.seed.js'
+import { seedOaSeal } from './project/oa-seal.seed.js'
+import { seedOaGeneric } from './project/oa-generic.seed.js'
+import { seedOaExpense } from './project/oa-expense.seed.js'
 import type { DataSource, EntityManager } from 'typeorm'
 import { allTenants, DEFAULT_TENANT_ID, withTenant } from '../../core/context/tenant.js'
 import { softDeleteWhere } from '../../core/db/references.js'
 import { seedLeave, seedTenantLeave } from '../../modules/biz/leave/leave.seed.js'
 import { seedBook } from '../../modules/demo/book/book.seed.js'
+import { seedCustomer } from '../../modules/demo/customer/customer.seed.js'
 import { seedInvoice } from '../../modules/demo/invoice/invoice.seed.js'
 import { seedDemoRealtime } from '../../modules/demo/realtime/realtime.seed.js'
 import { seedTopic } from '../../modules/demo/topic/topic.seed.js'
@@ -39,8 +44,10 @@ import { seedStorageConfig } from '../../modules/platform/storage/config/config.
 import { seedStorageObject } from '../../modules/platform/storage/object.seed.js'
 import { seedAudit } from './audit/audit.seed.js'
 import { seedCodegen } from './codegen/codegen.seed.js'
+import { seedCustomerSamples } from './demo/customer-sample.seed.js'
 import { seedDemo } from './demo/demo.seed.js'
 import { seedIam } from './iam/iam.seed.js'
+import { seedIm } from './im/im.seed.js'
 import { seedTenant } from './iam/tenant.seed.js'
 import { seedTenantDemo } from './iam/tenant-demo.seed.js'
 import { seedTenantMenus } from './iam/tenant-menus.seed.js'
@@ -51,6 +58,8 @@ import { seedMonitorGroup } from './monitor/monitor.seed.js'
 import { seedOauth } from './oauth/oauth.seed.js'
 import { seedProjectActionVerbs } from './project/action-verbs.seed.js'
 import { seedProjectMenuGroups } from './project/menu-groups.seed.js'
+import { seedOa } from './project/oa.seed.js'
+import { seedOaTrip } from './project/oa-trip.seed.js'
 import { PROJECT_TENANT_SEEDS, type TenantSeed } from './project/tenant.seed.js'
 import { seedScheduler } from './scheduler/scheduler.seed.js'
 import { seedSettings } from './settings/settings.seed.js'
@@ -92,10 +101,20 @@ const SEEDS: Record<string, Seed[]> = {
   oauth: [seedOauth, seedClient],
   // the MCP tool and access token pages hang under system too
   mcp: [seedMcp],
+  // the staff chat's params, purge task and the hidden group tenant packages grant chat with
+  im: [seedIm],
   scheduler: [seedScheduler, seedTask, seedRun],
   // before demo: its menu group holds the demo group
   codegen: [seedCodegen],
-  demo: [seedDemo, seedBook, seedTopic, seedInvoice, seedDemoRealtime],
+  demo: [
+    seedDemo,
+    seedBook,
+    seedTopic,
+    seedInvoice,
+    seedCustomer,
+    seedCustomerSamples,
+    seedDemoRealtime,
+  ],
   // approval processes and their OA leave sample; the staff role with its menus; the wf notification
   // templates; the leave process with its demo users (they hold role staff); the built-in process templates
   workflow: [
@@ -107,7 +126,16 @@ const SEEDS: Record<string, Seed[]> = {
   ],
   // the project's generated modules (the samples stay in demo, the leave sample with its
   // workflow), after the project menu groups they hang under and the project's action verbs
-  project: [seedProjectMenuGroups, seedProjectActionVerbs],
+  project: [
+    seedProjectMenuGroups,
+    seedProjectActionVerbs,
+    seedOa,
+    seedOaTrip,
+    seedOaExpense,
+    seedOaSeal,
+    seedOaGeneric,
+    seedOaOffice,
+  ],
   // last: the other tenants' own seeds (the project's need its menus and verbs)
   tenant: [seedTenants],
   // the demo site's sample tenants (APP_DEMO_MODE and APP_MULTI_TENANT both on), opened with their own seeds

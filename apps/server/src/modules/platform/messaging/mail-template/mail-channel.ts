@@ -1,3 +1,4 @@
+import type { EntityManager } from 'typeorm'
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common'
 import { TransactionHost } from '@nestjs-cls/transactional'
 import type { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm'
@@ -33,22 +34,25 @@ export class MailChannel implements NotifyChannel<MailTemplate>, OnModuleInit {
     this.channels.register(this)
   }
 
-  templates(code: string): Promise<MailTemplate[]> {
-    return this.txHost.tx.getRepository(MailTemplate).findBy({ code, enabled: true })
+  templates(code: string, manager: EntityManager = this.txHost.tx): Promise<MailTemplate[]> {
+    return manager.getRepository(MailTemplate).findBy({ code, enabled: true })
   }
 
-  async write({ template, recipient, params, values }: NotifyDraft<MailTemplate>): Promise<number> {
+  async write(
+    { template, recipient, params, values }: NotifyDraft<MailTemplate>,
+    manager: EntityManager = this.txHost.tx,
+  ): Promise<number> {
     const accountId =
       template.accountId ??
       (
-        await this.txHost.tx.getRepository(MailAccount).findOne({
+        await manager.getRepository(MailAccount).findOne({
           where: { enabled: true },
           order: { id: 'ASC' },
           select: { id: true },
         })
       )?.id ??
       null
-    const row = await this.txHost.tx.getRepository(MailRecord).save({
+    const row = await manager.getRepository(MailRecord).save({
       userId: recipient.userId,
       toList: recipient.email ? [recipient.email] : [],
       ccList: null,

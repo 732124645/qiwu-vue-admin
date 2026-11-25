@@ -1,0 +1,20 @@
+{
+  "field": {
+    "oa": {
+      "expense": {
+        "reason": "报销事由",
+        "tripId": "关联出差",
+        "attachmentIds": "附件",
+        "initiatorPicks": "选定审批人",
+        "items": "费用明细",
+        "expenseDate": "费用日期",
+        "expenseKind": "费用类别",
+        "amount": "金额",
+        "description": "费用说明",
+        "totalAmount": "报销总额",
+        "currency": "币种",
+        "state": "状态"
+      }
+    }
+  }
+}

@@ -30,7 +30,9 @@
         "rss": "Resident memory",
         "heapTotal": "Heap total",
         "heapUsed": "Heap used",
-        "external": "External memory"
+        "external": "External memory",
+        "eventLoopDelay": "Event loop delay p50 / p99 / max",
+        "eventLoopUtilization": "Event loop utilization"
       }
     }
   }

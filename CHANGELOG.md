@@ -1,8 +1,158 @@
 # Changelog
 
-中文说明：本文件按功能区域汇总栖梧 / Qiwu 的用户可见变化，正文使用英文。`1.0.0` 于 2026-10-05 发布，`1.0.3` 于 2026-10-06 发布（`1.0.1`、`1.0.2` 未发布，内容并入 `1.0.3`），`1.1.0`（多租户）、`1.2.0`（手写 SQL 的数据权限）、`1.2.1`（修复）与 `1.3.0`（任务队列）于 2026-10-14 发布，`1.3.1`（开发调试开关）与 `1.4.0`（安全审查修复）于 2026-10-15 发布，`1.4.1`（界面细节）、`1.5.0`（微信公众号管理，默认关闭）与 `1.6.0`（MCP 智能体接入，默认关闭；下游合并改进）于 2026-10-20 发布，`1.6.1`（后端连不上时停在原页面等待；README 更新）与 `1.7.0`（AI 编程友好：公开开发规则、任务配方、检查报错带修复提示、项目地图）于 2026-10-21 发布，`1.7.1`（列表操作列不再截断误点）于 2026-10-22 发布。
+中文说明：本文件按功能区域汇总栖梧 / Qiwu 的用户可见变化，正文使用英文。`1.0.0` 于 2026-10-05 发布，`1.0.3` 于 2026-10-06 发布（`1.0.1`、`1.0.2` 未发布，内容并入 `1.0.3`），`1.1.0`（多租户）、`1.2.0`（手写 SQL 的数据权限）、`1.2.1`（修复）与 `1.3.0`（任务队列）于 2026-10-14 发布，`1.3.1`（开发调试开关）与 `1.4.0`（安全审查修复）于 2026-10-15 发布，`1.4.1`（界面细节）、`1.5.0`（微信公众号管理，默认关闭）与 `1.6.0`（MCP 接入，供外部 AI 客户端调用，默认关闭；下游合并改进）于 2026-10-20 发布，`1.6.1`（后端连不上时停在原页面等待；README 更新）与 `1.7.0`（AI 编程友好：公开开发规则、任务配方、检查报错带修复提示、项目地图）于 2026-10-21 发布，`1.7.1`（列表操作列不再截断误点）于 2026-10-22 发布。`1.8.0` 至 `1.16.0` 已从公开仓库撤回（标签与发布已删除，下方记录标为 YANKED），其中与内置智能助手无关的变化——基础办公申请、运维（进程角色拆分、连接池设置、卡顿诊断、配置可见性）、员工即时通讯与音视频通话以及若干修复——并入 2026-11-25 发布的 `1.17.0`；内置智能助手在 `1.17.0` 中整体移除。
 
 All notable product changes are recorded here in Keep a Changelog style. The initial release below summarizes the delivered features. Planned work is identified explicitly.
+
+## [1.17.0] - 2026-11-25
+
+Versions 1.8.0 to 1.16.0 have been withdrawn from the public repository. Their changes other than the in-app assistant are included in this release; their entries below are kept, marked [YANKED], with the assistant-only items removed. Coming from 1.7.1, read those entries as part of this release.
+
+### Removed
+
+- The in-app assistant, as a whole: the `APP_AGENT` switch, every `/api/agent/*` route, the 智能体 menu group with its pages, the assistant's seeds (including the customer sample's enrichment skill), `docs/agent.md`, and the recipes `agent-skill` / `agent-extension` with their skills `qiwu-agent-skill` / `qiwu-agent-extension`. MCP access (`APP_MCP`) stays; its routes, guards and the tools of the modules are unchanged for external clients.
+
+### Breaking changes for projects built on the template
+
+- `@McpTool` no longer accepts `preview`, `highRisk`, `perCallConfirmation` or `confirmationRevision`; `MCP_CONFIRMATION_REVISION` and `ToolExecutionContext` are gone and a tool method receives only its validated input. `ToolHost` keeps the MCP path only (its in-app `call`, `list` and preview methods and the `AgentToolResult`, `AgentCallRef` and `ToolPreview` types are removed). `@AgentBatchTarget` is removed.
+- The personal inbox routes no longer return the `action` field on an item.
+- The B8xxx error codes (`Err.AGENT_*`) are removed; the range stays unused.
+- Removed from the server core: `AuditWriter.onAction` (with `ActionHeard`), `ParamService.onInvalidate`, `maskSecrets` (core `redact.ts`; the other redaction helpers stay), `StorageService.putAgentImage` (with `AGENT_IMAGE_TAG`), the `agent*` entries of `CACHE_NAMESPACES`, `agentOn` and the `APP_AGENT` key of the env schema, `MENU_FEATURES` and `GRANT_SWITCHES`. The `cfg_mcp_tool.agent_policy` column is no longer mapped.
+- Removed from `@qiwu/shared`: the agent schemas and their exports (`platform/agent/*`), the agent i18n modules and seed strings, `DEMO_CUSTOMER_TARGET` / `DEMO_CUSTOMER_ENRICH_SKILL`, the realtime event `RT.agentEvent` (`agent:event`), `agent` from `BUILTIN_MENU_GROUPS` and `agent-setting` from `PLATFORM_ONLY_ROUTES`.
+- Dependencies: the server no longer depends on `openai`, the web no longer on `marked`. A project that imports either directly adds it to its own `package.json`.
+
+### Upgrade notes
+
+- Run migrations and seeds as usual. The migration `20261125040531-agent-retire` soft-deletes, on a database upgraded from a release with the assistant, its menus, their role and tenant package grants, the `agent.*` system parameters and the assistant's inbox and mail templates. The assistant's tables and their rows are kept, never dropped; remove them yourself only after a backup and when nothing of yours reads them.
+- Old assistant data stays in Redis without affecting the application: the BullMQ queues `agent-turn`, `agent-cleanup`, `agent-automation` and `agent-memory` (keys `qw:queue:<queue>:*`, including their repeatable jobs) and the keys `qw:agent:*` and `qw:lock:agent-*`. After every old instance has stopped, they can be removed with `SCAN` + `UNLINK` (never `KEYS` or `FLUSHDB`); see docs/upgrade.md for the commands.
+- `APP_AGENT` can be deleted from `.env`; left there it is ignored (the env schema drops unknown keys).
+
+## [1.16.0] - 2026-11-09 [YANKED]
+
+### Added
+
+- Employee instant messaging for desktop Web and the uni-app employee client: private and group conversations, text and emoji, images and files, original and personal stickers, message editing and recall, read positions, and tenant-aware staff directory. `APP_IM` remains off by default; tenant packages can control access. Local caches and a persistent outbox reduce repeated transfers and survive reloads.
+- Voice messages with server-verified WAV duration and private attachment access, persistent retries, and cleanup when sent or discarded. Voice messages do not require a LiveKit service.
+- Configurable foreground one-to-one and small-group audio/video calls, up to eight participants, using official LiveKit SDKs. The application owns staff authorization, invitations and call history; LiveKit carries media. Includes Android/iOS uni-app UTS bridge source and a native video component, plus self-hosting, TURN and integration guidance.
+- App session settings: an optional long-lived session and a single-App-session policy, with the existing expiry, logout, replacement and security-revocation paths retained.
+
+### Fixed
+
+- Re-added locale files hot-update their translations instead of unnecessarily reloading the page.
+
+### Upgrade notes
+
+- Back up the database, run migrations and seeds, and keep `APP_IM` off until chat is configured. New calls also require LiveKit configuration and `im.call.enabled`; use the documented server version and disable automatic room creation. See docs/im.md, docs/livekit.md and docs/upgrade.md.
+- App upgrades require a new native package or custom development base containing SQLite, recording and the native plugin; a wgt update cannot add these modules. Set the deployment API URL and complete platform signing and installation.
+
+### Known limits
+
+- This is a source release. It contains bridge source, dependency coordinates and third-party notices, with no bundled native SDK binaries or signed APK/IPA. The Android SDK's `android-jain-sip-ri` transitive dependency still needs a version-specific redistribution-license clarification; adding notices or passing npm license checks does not close that gate. See the plugin README and the upstream issue linked there before distributing an Android build.
+- Native compilation/linking and simulator platform tests have passed. Product-host signing/install, physical Android/iPhone audio/video, a deployed LiveKit/TURN service and old-token reconnect rejection after room deletion have not been accepted. Simulator/H5 results do not prove device media or network reachability.
+- Calls require the App to be in the foreground. Mini-program chat, offline push, background answering, external/member chat, screen sharing and call recording are not included.
+
+## [1.15.0] - 2026-10-30 [YANKED]
+
+### Added
+
+- Process roles: `APP_ROLE=all|api|worker` (default `all`, as before). An `api` process serves HTTP and Socket.IO but runs no cron, no misfire catch-up and no queue worker; "Run once" is handed to a worker through a queue. A `worker` process runs cron and every queue worker and still pushes to browsers through the Redis adapter. The PM2 template adds an optional worker app (`QW_PM2_WORKER_INSTANCES`, default 0 keeps the single app) and the deploy script health-checks it.
+- Database pool settings: `DB_POOL_SIZE` (default 10), `DB_POOL_ACQUIRE_TIMEOUT_MS` and `DB_POOL_QUEUE_LIMIT` (default 0 = unlimited, as before). A request that cannot get a connection in time fails with 503 "The service is busy" instead of waiting for the browser's timeout.
+- Stall diagnostics: the server monitor shows event-loop delay (p50/p99/max) and utilization of the answering instance; `LOG_SLOW_REQUEST_MS` marks slow requests with `"slow":true` and the scheduled tasks running in that process; `LOG_EVENT_LOOP_INTERVAL_MS` / `LOG_EVENT_LOOP_WARN_MS` log event-loop delay periodically; the run log records the executing instance and the event-loop maximum during each run. All off by default.
+- Startup visibility: a warning lists keys set to different values in both `.env` and `.env.local` (names only; `.env` wins), and an `effective config` line logs the non-secret settings in effect (`EFFECTIVE_CONFIG_KEYS`, extendable).
+
+### Changed
+
+- Deploy guide: every `pm2` command is shown as the application user (`sudo -u qiwu -H pm2 …`) with a hint for "Process or Namespace not found"; the nginx example enables HTTP/2; a capacity note relates PM2 instances, pool size and MySQL `max_connections`.
+
+### Upgrade notes
+
+- Run migrations (two nullable columns `job_run.instance` / `job_run.loop_max_ms`, and one on a retired feature's table). Nothing changes until the new settings are used. The queue monitor lists a new `scheduler-run` queue. See docs/upgrade.md before splitting processes with PM2.
+
+## [1.14.1] - 2026-10-30 [YANKED]
+
+### Fixed
+
+- Opening the sign-in page while still signed in (a bookmark, a link, the back button or a new tab) no longer asks for the password again: it goes straight to the page asked for, or home. A locked screen, a session that has ended and a session that failed to load still show the sign-in form.
+
+## [1.14.0] - 2026-10-29 [YANKED]
+
+This version contained only changes to the in-app assistant, which has been removed.
+
+## [1.13.1] - 2026-10-28 [YANKED]
+
+### Fixed
+
+- Migration fence tests write their temporary specs inside the server directory, so they also run on Windows.
+- Tests that wait for the duplicate-submit window now wait until the keys are actually gone instead of sleeping for a fixed time, which was not enough on Docker Desktop Redis.
+- MCP tool-call arguments are masked in HTTP request traces, so private business content passed to tools is not kept in the trace log.
+
+## [1.13.0] - 2026-10-28 [YANKED]
+
+This version contained only changes to the in-app assistant, which has been removed.
+
+## [1.12.0] - 2026-10-27 [YANKED]
+
+### Fixed
+
+- The development server builds into its own output directory, so a production build no longer breaks a running `pnpm dev`; it retries once when the backend exits before it is ready.
+- Server tests bind their temporary listeners to the loopback address and start every spec file with empty rate-limit buckets, so unrelated local services and earlier files no longer cause sporadic 401, 404 or 429 answers.
+
+### Upgrade notes
+
+- No new migrations. Add `dist-dev/` to the ignore list of a project derived from an older template.
+
+## [1.11.0] - 2026-10-27 [YANKED]
+
+### Changed
+
+- Development rebuilds report changed files, elapsed time and restart results. Shared-package output is coordinated so a single change does not cause repeated backend restarts; failed compilation keeps the previous working server available. Locale edits preserve the current page.
+
+### Fixed
+
+- Fully masked audit routes now suppress complete payloads, URL queries and free-form error text. Static data-scope checks also verify delegated locking paths and reject ambiguous service names.
+- Reported issues around development reloads are covered by the corresponding integration checks.
+
+### Upgrade notes and limits
+
+- Back up the database and keep Redis and `APP_SECRET`. Run migrations and seeds; never reset an existing database to upgrade.
+- The public distribution now contains basic office requests and the existing approval engine only. Native attendance and office-application assistant tools were present in v1.10.0 and its history is preserved; they are outside the current public distribution. Its upgrade migration disables their old menus, grants and retention jobs while preserving historical business rows. Existing users must review their own dependencies and retain backups before upgrading.
+
+## [1.10.0] - 2026-10-23 [YANKED]
+
+### Added
+
+- Office requests on the existing workflow engine: leave, travel, expense claims, seal use and a general dynamic form, with one desktop entry and the existing personal requests, to-dos, handled tasks and CC lists. Saving a fixed request, its attachments and starting approval share a transaction; approval outcomes write back to the business record in the same transaction.
+- Travel requests with optional estimated cost; CNY expense claims with complete line items and exact server-calculated totals, optionally referencing the requester's approved travel; seal requests with document, purpose, copies and expected date. Approval does not represent payment or actual seal use.
+- Complete mobile decision information for fixed office requests and authenticated private attachments, alongside the existing dynamic forms and approval actions. Failed decision data or attachment loading blocks approval; a concurrent action refreshes the task instead of replaying the write. Existing mobile leave submission and editing remain available; travel, expense and seal creation/editing use desktop.
+- Native mobile clock-in/out independent of DingTalk and the workflow capability: server time and tenant workday timezone, durable duplicate protection, personal records, optional foreground office-site location checks, policy and site administration, department-scoped original records and daily activity summaries with approved leave/travel intervals. Historical department and policy snapshots are preserved; raw employee coordinates are not stored and are masked in request logs.
+
+### Changed
+
+- Private office and workflow attachments require business and field access even for uploaders or global file administrators. Global file lists omit these attachments and cannot delete bound files. Mobile content uses a bounded same-origin endpoint without object-store redirects carrying the session token.
+- Leave validates ordered times and positive bounded declared duration while keeping its existing API, data and published process configuration. New travel, expense, seal and general models are initialized only when missing, using the tenant's protected administrator role with explicit self-review and no silent missing-reviewer approval.
+- The mobile workbench waits for known account features before querying approval counts, and discards old-account responses.
+
+### Upgrade notes and limits
+
+- Run migrations and the idempotent seeds before using the new pages; never reset an existing database to upgrade. First installation adds normal office-request and personal attendance access to the staff/member roles, without attendance or workflow management permissions. Later administrator changes, revoked links and disabled/deleted models remain intact.
+- Leave keeps its original sample process, including its existing missing-approver and self-approval settings; review these before business use. Initial native attendance is enabled in Asia/Shanghai with no location check and 180-day retention. Site mode uses WGS84 coordinates and needs deployment-specific foreground location permissions.
+- Daily summaries count active user/recorded-department pairs, not a complete employee roster. No absence, lateness, working-time or payroll judgement is inferred. Overnight or multiple shifts, scheduling, holidays, leave balances, corrections, offline clock uploads, hardware fraud protection and DingTalk integration are outside this release.
+- H5 automation and app/mini-program builds were verified. Real app/mini-program location authorization and on-site clock-in/out remain unverified; successful builds are not device acceptance. SMTP and object-storage delivery also need acceptance in the deployment environment.
+
+## [1.9.1] - 2026-10-22 [YANKED]
+
+### Fixed
+
+- MCP tools show localized names, purposes and permission labels, with stable protocol identifiers kept as secondary information. Known system tools have Chinese descriptions. Access-token scopes use the same readable tool names.
+- Restored page tabs refresh their titles, icons and cache names from the currently authorized routes.
+
+## [1.9.0] - 2026-10-22 [YANKED]
+
+This version contained only changes to the in-app assistant, which has been removed.
+
+## [1.8.0] - 2026-10-22 [YANKED]
+
+This version contained only changes to the in-app assistant, which has been removed.
 
 ## [1.7.1] - 2026-10-22
 

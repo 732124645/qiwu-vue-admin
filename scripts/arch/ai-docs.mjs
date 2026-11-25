@@ -38,7 +38,7 @@ const BUILTIN = new Set(
 const VALUE_FLAGS = new Set(['--filter', '-F', '-C', '--dir'])
 const PLACEHOLDER = /[<*{]/
 // machine-local or built files: present on one machine, absent on a fresh clone
-const LOCAL = /(^|\/)(\.env[\w.-]*|dist|node_modules|coverage)(\/|$)/
+const LOCAL = /(^|\/)(\.env[\w.-]*|dist|dist-dev|node_modules|coverage)(\/|$)/
 const PNPM = /(?:^|[\s;&|(])pnpm(?:\.cmd)?((?:\s+[^\s;&|)`]+)*)/g
 const FENCE = /^\s*(```|~~~)/
 const CODE = /`([^`\n]+)`/g

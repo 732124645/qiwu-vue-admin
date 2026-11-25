@@ -36,7 +36,9 @@ const HOME_FEATURES: Readonly<Record<string, string>> = {
  * The workbench's shortcuts and counters the session may use: its `perm` held (when it has one) and its
  * feature in the package (display only: the server enforces both).
  */
-export function visibleShortcuts<T extends { name: string; perm?: string }>(list: readonly T[]): T[] {
+export function visibleShortcuts<T extends { name: string; perm?: string }>(
+  list: readonly T[],
+): T[] {
   const auth = useAuthStore()
   return list.filter((entry) => {
     const feature = HOME_FEATURES[entry.name]

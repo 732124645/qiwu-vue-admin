@@ -11,9 +11,15 @@
 | --- | --- | --- |
 | biz/leave | `LeaveModule`（leave.module.ts） |  |
 | demo/book | `BookMcpModule`（book.mcp-tools.ts）, `BookModule`（book.module.ts） |  |
+| demo/customer | `CustomerMcpModule`（customer.mcp-tools.ts）, `CustomerModule`（customer.module.ts） |  |
 | demo/invoice | `InvoiceModule`（invoice.module.ts） |  |
 | demo/realtime | `DemoRealtimeModule`（realtime.module.ts） |  |
 | demo/topic | `TopicModule`（topic.module.ts） |  |
+| oa | `OaModule`（oa.module.ts） |  |
+| oa/attachment | `OaAttachmentModule`（oa-attachment.module.ts） |  |
+| oa/expense | `ExpenseModule`（expense.module.ts） |  |
+| oa/seal | `SealModule`（seal.module.ts） |  |
+| oa/trip | `TripModule`（trip.module.ts） |  |
 | platform/audit | `AuditModule`（audit.module.ts） |  |
 | platform/audit/action-log | `ActionLogModule`（action-log.module.ts） |  |
 | platform/audit/http-fault | `HttpFaultModule`（http-fault.module.ts） |  |
@@ -29,6 +35,7 @@
 | platform/iam/session | `SessionModule`（session.module.ts） |  |
 | platform/iam/tenant-package | `TenantPackageModule`（tenant-package.module.ts） |  |
 | platform/iam/user | `UserModule`（user.module.ts） |  |
+| platform/im | `ImCallMaintenanceModule`（im-call-maintenance.module.ts）, `ImModule`（im.module.ts） | APP_IM |
 | platform/messaging | `MessagingModule`（messaging.module.ts） |  |
 | platform/messaging/bulletin | `BulletinModule`（bulletin.module.ts） |  |
 | platform/messaging/inbox | `InboxModule`（inbox.module.ts） |  |
@@ -78,6 +85,7 @@
 
 | 开关 | 只在开启时加载的模块 | 只在开启时显示的菜单（路由名） |
 | --- | --- | --- |
+| `APP_IM` | ImModule（modules/platform/im） | im |
 | `APP_MCP` | McpModule（core/mcp） | mcp-token, mcp-tool |
 | `APP_MULTI_TENANT` |  | iam-tenant, iam-tenant-package |
 | `APP_WXOA` | WxoaModule（modules/platform/wxoa） | wxoa |
@@ -102,6 +110,7 @@
 | `cg_column` | `CgColumn` | 平台 | 是 | modules/platform/codegen/cg-column.entity.ts |
 | `cg_table` | `CgTable` | 平台 | 是 | modules/platform/codegen/cg-table.entity.ts |
 | `demo_book` | `Book` | 租户 | 是 | modules/demo/book/book.entity.ts |
+| `demo_customer` | `Customer` | 租户 | 是 | modules/demo/customer/customer.entity.ts |
 | `demo_invoice` | `Invoice` | 租户 | 是 | modules/demo/invoice/invoice.entity.ts |
 | `demo_invoice_line` | `InvoiceLine` | 租户 | 是 | modules/demo/invoice/invoice-line.entity.ts |
 | `demo_topic` | `Topic` | 租户 | 是 | modules/demo/topic/topic.entity.ts |
@@ -116,6 +125,12 @@
 | `iam_tenant_package` | `TenantPackage` | 平台 | 是 | modules/platform/iam/tenant-package/tenant-package.entity.ts |
 | `iam_user` | `User` | 租户 | 是 | modules/platform/iam/user/user.entity.ts |
 | `iam_user_social` | `UserSocial` | 租户 | 是 | modules/platform/iam/social/user-social.entity.ts |
+| `im_call` | `ImCallEntity` | 租户 | 是 | modules/platform/im/entities/im-call.entity.ts |
+| `im_call_member` | `ImCallMemberEntity` | 租户 | 是 | modules/platform/im/entities/im-call.entity.ts |
+| `im_entry` | `ImEntryEntity` | 租户 | 是 | modules/platform/im/entities/im.entity.ts |
+| `im_room` | `ImRoomEntity` | 租户 | 是 | modules/platform/im/entities/im.entity.ts |
+| `im_roster` | `ImRosterEntity` | 租户 | 是 | modules/platform/im/entities/im.entity.ts |
+| `im_sticker` | `ImStickerEntity` | 租户 | 是 | modules/platform/im/entities/im.entity.ts |
 | `job_run` | `Run` | 平台 | 是 | modules/platform/scheduler/run/run.entity.ts |
 | `job_task` | `Task` | 平台 | 是 | modules/platform/scheduler/task/task.entity.ts |
 | `msg_bulletin` | `Bulletin` | 租户 | 是 | modules/platform/messaging/bulletin/bulletin.entity.ts |
@@ -128,6 +143,10 @@
 | `msg_sms_otp` | `SmsOtp` | 租户 | 是 | modules/platform/messaging/sms-otp/sms-otp.entity.ts |
 | `msg_sms_record` | `SmsRecord` | 租户 | 是 | modules/platform/messaging/sms-record/sms-record.entity.ts |
 | `msg_sms_template` | `SmsTemplate` | 平台 | 是 | modules/platform/messaging/sms-template/sms-template.entity.ts |
+| `oa_expense_claim` | `OaExpenseClaim` | 租户 | 是 | modules/oa/expense/expense.entity.ts |
+| `oa_expense_item` | `OaExpenseItem` | 租户 | 是 | modules/oa/expense/expense-item.entity.ts |
+| `oa_seal_request` | `OaSealRequest` | 租户 | 是 | modules/oa/seal/seal.entity.ts |
+| `oa_trip_request` | `OaTripRequest` | 租户 | 是 | modules/oa/trip/trip.entity.ts |
 | `oauth_client` | `Client` | 平台 | 是 | modules/platform/oauth/client/client.entity.ts |
 | `wf_cc` | `WfCcRow` | 租户 | 是 | modules/workflow/runtime/wf-runtime.entity.ts |
 | `wf_event` | `WfEventRow` | 租户 | 是 | modules/workflow/runtime/wf-runtime.entity.ts |
@@ -220,6 +239,13 @@
 |  | PUT | `/api/demo/books/:id/enabled` | demo.book.modify |  |
 |  | DELETE | `/api/demo/books/:id` | demo.book.remove |  |
 |  | POST | `/api/demo/books/batch-delete` | demo.book.remove |  |
+| `CustomerController`（modules/demo/customer/customer.controller.ts） | GET | `/api/demo/customers` | demo.customer.browse |  |
+|  | GET | `/api/demo/customers/export` | demo.customer.export |  |
+|  | GET | `/api/demo/customers/:id` | demo.customer.view |  |
+|  | POST | `/api/demo/customers` | demo.customer.create | Idempotent |
+|  | PUT | `/api/demo/customers/:id` | demo.customer.modify |  |
+|  | DELETE | `/api/demo/customers/:id` | demo.customer.remove |  |
+|  | POST | `/api/demo/customers/batch-delete` | demo.customer.remove |  |
 | `InvoiceController`（modules/demo/invoice/invoice.controller.ts） | GET | `/api/demo/invoices` | demo.invoice.browse |  |
 |  | GET | `/api/demo/invoices/:id` | demo.invoice.view |  |
 |  | POST | `/api/demo/invoices` | demo.invoice.create | Idempotent |
@@ -321,6 +347,42 @@
 |  | PUT | `/api/iam/users/:id/roles` | iam.user.assign-roles |  |
 |  | DELETE | `/api/iam/users/:id` | iam.user.remove |  |
 |  | POST | `/api/iam/users/batch-delete` | iam.user.remove |  |
+| `DirectoryController`（modules/platform/im/directory.controller.ts），全部：HomeTenant, RequireFeature(im) | GET | `/api/im/directory` |  |  |
+| `ImCallsController`（modules/platform/im/im-calls.controller.ts），全部：HomeTenant, RequireFeature(im) | GET | `/api/im/calls/active` |  |  |
+|  | GET | `/api/im/calls/:id` |  |  |
+|  | POST | `/api/im/rooms/:id/calls` |  | Idempotent |
+|  | POST | `/api/im/calls/:id/accept` |  | Idempotent |
+|  | POST | `/api/im/calls/:id/decline` |  |  |
+|  | POST | `/api/im/calls/:id/join` |  |  |
+|  | POST | `/api/im/calls/:id/leave` |  |  |
+|  | POST | `/api/im/calls/:id/end` |  |  |
+|  | POST | `/api/im/calls/:id/heartbeat` |  |  |
+| `SyncController`（modules/platform/im/sync.controller.ts），全部：HomeTenant, RequireFeature(im) | GET | `/api/im/options` |  |  |
+|  | GET | `/api/im/sync` |  |  |
+| `RoomsController`（modules/platform/im/rooms.controller.ts），全部：HomeTenant, RequireFeature(im) | POST | `/api/im/rooms/directs` |  | Idempotent |
+|  | POST | `/api/im/rooms/groups` |  | Idempotent |
+|  | GET | `/api/im/rooms/:id/members` |  |  |
+|  | POST | `/api/im/rooms/:id/members` |  |  |
+|  | DELETE | `/api/im/rooms/:id/members/:userId` |  |  |
+|  | POST | `/api/im/rooms/:id/leave` |  |  |
+|  | PUT | `/api/im/rooms/:id/owner` |  |  |
+|  | PUT | `/api/im/rooms/:id/members/:userId/role` |  |  |
+|  | PUT | `/api/im/rooms/:id/label` |  |  |
+|  | POST | `/api/im/rooms/:id/close` |  |  |
+|  | PUT | `/api/im/rooms/:id/read` |  |  |
+| `EntriesController`（modules/platform/im/entries.controller.ts），全部：HomeTenant, RequireFeature(im) | GET | `/api/im/rooms/:id/entries` |  |  |
+|  | POST | `/api/im/rooms/:id/uploads` |  | Idempotent |
+|  | POST | `/api/im/rooms/:id/voice-uploads` |  | Idempotent |
+|  | POST | `/api/im/rooms/:id/entries` |  | Idempotent |
+|  | PUT | `/api/im/rooms/:id/entries/:seq` |  |  |
+|  | POST | `/api/im/rooms/:id/entries/:seq/recall` |  |  |
+|  | GET | `/api/im/rooms/:id/entries/:seq/file` |  |  |
+| `StickersController`（modules/platform/im/stickers.controller.ts），全部：HomeTenant, RequireFeature(im) | GET | `/api/im/stickers` |  |  |
+|  | POST | `/api/im/stickers` |  | Idempotent |
+|  | POST | `/api/im/stickers/from-entry` |  | Idempotent |
+|  | PUT | `/api/im/stickers/order` |  |  |
+|  | GET | `/api/im/stickers/:id/file` |  |  |
+|  | DELETE | `/api/im/stickers/:id` |  |  |
 | `McpController`（core/mcp/mcp.controller.ts） | POST | `/api/mcp` |  | Public |
 |  | GET | `/api/mcp` |  | Public |
 |  | DELETE | `/api/mcp` |  | Public |
@@ -410,6 +472,18 @@
 |  | GET | `/api/monitor/queues/:name/jobs` | monitor.queue.browse |  |
 |  | POST | `/api/monitor/queues/:name/jobs/:id/retry` | monitor.queue.retry |  |
 |  | DELETE | `/api/monitor/queues/:name/jobs/:id` | monitor.queue.remove |  |
+| `ExpenseController`（modules/oa/expense/expense.controller.ts），全部：RequireFeature(workflow) | GET | `/api/oa/expense-claims` | oa.expense.browse |  |
+|  | GET | `/api/oa/expense-claims/:id` |  |  |
+|  | POST | `/api/oa/expense-claims` | oa.expense.create | Idempotent |
+|  | PUT | `/api/oa/expense-claims/:id` | oa.expense.modify |  |
+| `SealController`（modules/oa/seal/seal.controller.ts），全部：RequireFeature(workflow) | GET | `/api/oa/seal-requests` | oa.seal.browse |  |
+|  | GET | `/api/oa/seal-requests/:id` |  |  |
+|  | POST | `/api/oa/seal-requests` | oa.seal.create | Idempotent |
+|  | PUT | `/api/oa/seal-requests/:id` | oa.seal.modify |  |
+| `TripController`（modules/oa/trip/trip.controller.ts），全部：RequireFeature(workflow) | GET | `/api/oa/trips` | oa.trip.browse |  |
+|  | GET | `/api/oa/trips/:id` |  |  |
+|  | POST | `/api/oa/trips` | oa.trip.create | Idempotent |
+|  | PUT | `/api/oa/trips/:id` | oa.trip.modify |  |
 | `ClientController`（modules/platform/oauth/client/client.controller.ts），全部：PlatformOnly | GET | `/api/oauth/clients` | oauth.client.browse |  |
 |  | GET | `/api/oauth/clients/:id` | oauth.client.view |  |
 |  | POST | `/api/oauth/clients` | oauth.client.create | Idempotent |
@@ -488,11 +562,13 @@
 |  | POST | `/api/storage/configs/batch-delete` | storage.config.remove |  |
 | `StorageController`（modules/platform/storage/storage.controller.ts） | GET | `/api/storage/objects` | storage.object.browse |  |
 |  | GET | `/api/storage/objects/export` | storage.object.export |  |
+|  | GET | `/api/storage/objects/:id/metadata` |  |  |
 |  | GET | `/api/storage/objects/:id` | storage.object.view |  |
 |  | POST | `/api/storage/objects` |  | Idempotent |
 |  | POST | `/api/storage/objects/presign` |  |  |
 |  | POST | `/api/storage/objects/confirm` |  |  |
 |  | GET | `/api/storage/objects/:id/download` |  |  |
+|  | GET | `/api/storage/objects/:id/content` |  |  |
 |  | DELETE | `/api/storage/objects/:id` | storage.object.remove |  |
 | `WfAdminController`（modules/workflow/admin/wf-admin.controller.ts） | GET | `/api/wf/instances` | wf.instance.browse |  |
 |  | GET | `/api/wf/tasks` | wf.task.browse |  |
@@ -648,6 +724,7 @@
 | `clientPerms` | oauth.client.browse, oauth.client.view, oauth.client.create, oauth.client.modify, oauth.client.remove, oauth.client.reset-secret | shared:platform/oauth/client.schema.ts |
 | `codegenPerms` | codegen.table.browse, codegen.table.view, codegen.table.import, codegen.table.modify, codegen.table.remove, codegen.table.generate, codegen.table.write | shared:platform/codegen/codegen-api.schema.ts |
 | `configPerms` | storage.config.browse, storage.config.view, storage.config.create, storage.config.modify, storage.config.remove | shared:platform/storage/config.schema.ts |
+| `customerPerms` | demo.customer.browse, demo.customer.view, demo.customer.create, demo.customer.modify, demo.customer.remove, demo.customer.export | shared:demo/customer.schema.ts |
 | `demoRealtimePerms` | demo.realtime.send, demo.realtime.broadcast | shared:demo/realtime.schema.ts |
 | `deptPerms` | iam.dept.browse, iam.dept.view, iam.dept.create, iam.dept.modify, iam.dept.remove | shared:platform/iam/dept.schema.ts |
 | `dictEntryPerms` | settings.dictEntry.browse, settings.dictEntry.view, settings.dictEntry.create, settings.dictEntry.modify, settings.dictEntry.remove, settings.dictEntry.export | shared:platform/settings/dict-entry.schema.ts |
@@ -665,6 +742,9 @@
 | `mcpPerms` | mcp.tool.browse, mcp.tool.modify, mcp.token.browse, mcp.token.revoke | shared:platform/mcp/mcp.schema.ts |
 | `menuPerms` | iam.menu.browse, iam.menu.view, iam.menu.create, iam.menu.modify, iam.menu.remove | shared:platform/iam/menu.schema.ts |
 | `monitorPerms` | monitor.server.browse, monitor.redis.browse, monitor.cache.browse, monitor.cache.remove, monitor.mysql.browse, monitor.queue.browse, monitor.queue.retry, monitor.queue.remove | shared:platform/monitor/monitor.schema.ts |
+| `oaExpensePerms` | oa.expense.browse, oa.expense.view, oa.expense.create, oa.expense.modify | shared:oa/expense.schema.ts |
+| `oaSealPerms` | oa.seal.browse, oa.seal.view, oa.seal.create, oa.seal.modify | shared:oa/seal.schema.ts |
+| `oaTripPerms` | oa.trip.browse, oa.trip.view, oa.trip.create, oa.trip.modify | shared:oa/trip.schema.ts |
 | `paramPerms` | settings.param.browse, settings.param.view, settings.param.create, settings.param.modify, settings.param.remove, settings.param.export | shared:platform/settings/param.schema.ts |
 | `positionPerms` | iam.position.browse, iam.position.view, iam.position.create, iam.position.modify, iam.position.remove, iam.position.export | shared:platform/iam/position.schema.ts |
 | `rolePerms` | iam.role.browse, iam.role.view, iam.role.create, iam.role.modify, iam.role.remove, iam.role.export, iam.role.grant, iam.role.assign-users | shared:platform/iam/role.schema.ts |
@@ -700,6 +780,7 @@
 | `codegen-table-edit` | page |  | db/seeds/codegen/codegen.seed.ts |
 | `demo` | group |  | db/seeds/demo/demo.seed.ts |
 | `demo-book` | page |  | modules/demo/book/book.seed.ts |
+| `demo-customer` | page |  | modules/demo/customer/customer.seed.ts |
 | `demo-invoice` | page |  | modules/demo/invoice/invoice.seed.ts |
 | `demo-realtime` | page |  | modules/demo/realtime/realtime.seed.ts |
 | `demo-topic` | page |  | modules/demo/topic/topic.seed.ts |
@@ -718,6 +799,7 @@
 | `iam-tenant-package` | page | APP_MULTI_TENANT | db/seeds/iam/tenant-menus.seed.ts |
 | `iam-user` | page |  | modules/platform/iam/user/user.seed.ts |
 | `iam-user-roles` | page |  | modules/platform/iam/user/user.seed.ts |
+| `im` | group | APP_IM | db/seeds/im/im.seed.ts |
 | `mcp-token` | page | APP_MCP | db/seeds/mcp/mcp.seed.ts |
 | `mcp-tool` | page | APP_MCP | db/seeds/mcp/mcp.seed.ts |
 | `messaging` | group |  | db/seeds/messaging/messaging.seed.ts |
@@ -736,6 +818,7 @@
 | `monitor-queue` | page |  | modules/platform/monitor/monitor.seed.ts |
 | `monitor-redis` | page |  | modules/platform/monitor/monitor.seed.ts |
 | `monitor-server` | page |  | modules/platform/monitor/monitor.seed.ts |
+| `oa` | group |  | db/seeds/project/menu-groups.seed.ts |
 | `oauth-client` | page |  | modules/platform/oauth/client/client.seed.ts |
 | `scheduler-run` | page |  | modules/platform/scheduler/run/run.seed.ts |
 | `scheduler-task` | page |  | modules/platform/scheduler/task/task.seed.ts |
@@ -808,6 +891,9 @@
 | `messaging.sms_purpose` | otp, notice, promo | db/seeds/messaging/delivery.seed.ts |
 | `messaging.sms_receipt_status` | delivered, failed | db/seeds/messaging/delivery.seed.ts |
 | `messaging.sms_record_status` | pending, sending, sent, failed, skipped | db/seeds/messaging/delivery.seed.ts |
+| `oa.expense_kind` | transport, lodging, meal, office, other | db/seeds/project/oa.seed.ts |
+| `oa.request_state` | draft, in_review, approved, rejected, canceled | db/seeds/project/oa.seed.ts |
+| `oa.seal_kind` | company, contract, finance, other | db/seeds/project/oa.seed.ts |
 | `scheduler.job_group` | default, system | db/seeds/scheduler/scheduler.seed.ts |
 | `scheduler.misfire` | skip, run_once | db/seeds/scheduler/scheduler.seed.ts |
 | `scheduler.run_outcome` | ok, failed, skipped, timeout | db/seeds/scheduler/scheduler.seed.ts |
@@ -843,10 +929,12 @@
 | `audit.http_trace.exclude_paths` | db/seeds/settings/settings.seed.ts |
 | `audit.http_trace.mode` | db/seeds/settings/settings.seed.ts |
 | `audit.retention_days` | db/seeds/settings/settings.seed.ts |
+| `auth.app.single_session` | db/seeds/settings/settings.seed.ts |
 | `auth.cross_ip_threshold` | db/seeds/settings/settings.seed.ts |
 | `auth.ip_blacklist` | db/seeds/settings/settings.seed.ts |
 | `auth.lock_minutes` | db/seeds/settings/settings.seed.ts |
 | `auth.lock_threshold` | db/seeds/settings/settings.seed.ts |
+| `auth.mobile.session_days` | db/seeds/settings/settings.seed.ts |
 | `auth.signup.default_dept_id` | db/seeds/settings/settings.seed.ts |
 | `auth.signup.default_role_id` | db/seeds/settings/settings.seed.ts |
 | `auth.signup.enabled` | db/seeds/settings/settings.seed.ts |
@@ -861,6 +949,18 @@
 | `iam.password_expire_days` | db/seeds/settings/settings.seed.ts |
 | `iam.password_min_length` | db/seeds/settings/settings.seed.ts |
 | `iam.user.initial_password` | db/seeds/iam/iam.seed.ts |
+| `im.call.enabled` | db/seeds/im/im.seed.ts |
+| `im.file.exts` | db/seeds/im/im.seed.ts |
+| `im.file.max_mb` | db/seeds/im/im.seed.ts |
+| `im.group.max_members` | db/seeds/im/im.seed.ts |
+| `im.history.retention_days` | db/seeds/im/im.seed.ts |
+| `im.message.edit_minutes` | db/seeds/im/im.seed.ts |
+| `im.message.group_recall_anytime` | db/seeds/im/im.seed.ts |
+| `im.message.recall_minutes` | db/seeds/im/im.seed.ts |
+| `im.message.text_max_chars` | db/seeds/im/im.seed.ts |
+| `im.sync.epoch` | db/seeds/im/im.seed.ts |
+| `im.voice.max_mb` | db/seeds/im/im.seed.ts |
+| `im.voice.max_seconds` | db/seeds/im/im.seed.ts |
 | `mcp.paused` | db/seeds/settings/settings.seed.ts |
 | `notify.wx_subscribe.enabled` | db/seeds/settings/settings.seed.ts |
 | `notify.wx_subscribe.templates` | db/seeds/settings/settings.seed.ts |
@@ -877,7 +977,9 @@
 
 ## 队列
 
-（无）
+| 队列 | 登记位置 | 处理器 |
+| --- | --- | --- |
+| `scheduler-run` | modules/platform/scheduler/job-scheduler.module.ts | RunOnceProcessor（modules/platform/scheduler/run-once.processor.ts） |
 
 ## 定时任务处理器
 
@@ -885,6 +987,7 @@
 | --- | --- | --- |
 | `audit.purge` | BuiltinJobs.purge | modules/platform/scheduler/builtin-jobs.ts |
 | `demo.echo` | BuiltinJobs.echo | modules/platform/scheduler/builtin-jobs.ts |
+| `im.purge` | ImPurgeJob.purge | modules/platform/im/im-purge.job.ts |
 | `notify.dispatch` | NotifyDispatcher.dispatch | core/notify/notify.ts |
 | `session.sweep` | BuiltinJobs.sweep | modules/platform/scheduler/builtin-jobs.ts |
 | `wf.task.remind` | WfRemind.remind | modules/workflow/runtime/wf-remind.ts |
@@ -897,5 +1000,8 @@
 | --- | --- | --- | --- | --- |
 | `cfg.dict.options` | read | （只需登录） | SettingsMcpTools.options | modules/platform/settings/settings.mcp-tools.ts |
 | `demo.book.create` | write | `demo.book.create` | BookMcpTools.create | modules/demo/book/book.mcp-tools.ts |
+| `demo.customer.get` | read | `demo.customer.view` | CustomerMcpTools.get | modules/demo/customer/customer.mcp-tools.ts |
+| `demo.customer.search` | read | `demo.customer.browse` | CustomerMcpTools.search | modules/demo/customer/customer.mcp-tools.ts |
+| `demo.customer.update` | write | `demo.customer.modify` | CustomerMcpTools.update | modules/demo/customer/customer.mcp-tools.ts |
 | `iam.me.get` | read | （只需登录） | ProfileMcpTools.me | modules/platform/iam/profile/profile.mcp-tools.ts |
 | `iam.user.search` | read | `iam.user.browse` | UserMcpTools.search | modules/platform/iam/user/user.mcp-tools.ts |

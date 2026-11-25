@@ -12,6 +12,7 @@ import { dataSourceOptions } from '../../src/db/data-source.js'
 import { SOURCE_MIGRATIONS } from './migrations.js'
 import { restoreTestSchema, schemaFingerprint, storedFingerprint } from './schema.js'
 import { assertTestChannel, holdTestRun } from './test-channel.js'
+import { migrationRunUnsafe, recoverMigrationRun } from './migration-run-safety.js'
 
 export default async function setup(): Promise<() => Promise<void>> {
   if (!process.env.DB_NAME?.endsWith('_test'))
@@ -27,12 +28,15 @@ export default async function setup(): Promise<() => Promise<void>> {
     await ds.initialize()
     try {
       const reuse =
+        !migrationRunUnsafe() &&
         process.env.QW_TEST_REUSE_DB === '1' &&
         !process.env.CI &&
         (await storedFingerprint(ds)) === schemaFingerprint()
-      if (reuse) console.log(`globalSetup: QW_TEST_REUSE_DB=1, reusing ${process.env.DB_NAME}`)
-      else await ds.dropDatabase()
-      await restoreTestSchema(ds)
+      await recoverMigrationRun(async () => {
+        if (reuse) console.log(`globalSetup: QW_TEST_REUSE_DB=1, reusing ${process.env.DB_NAME}`)
+        else await ds.dropDatabase()
+        await restoreTestSchema(ds)
+      })
     } finally {
       await ds.destroy()
     }

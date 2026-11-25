@@ -77,13 +77,21 @@ export class StorageController {
     return this.excel.export('files', objectColumns, this.storage.exportRows(query))
   }
 
+  /** 附件展示无需文件管理权限，但必须通过与下载一致的业务可见性检查。 */
+  @Get(':id/metadata')
+  @ApiOperation({ summary: 'Safe metadata of an accessible object' })
+  @ApiEnvelope(fsObjectVo)
+  metadata(@Param('id', ParseIntPipe) id: number) {
+    return this.storage.metadata(id, me())
+  }
+
   /** Any object's detail (key, hash, business reference). */
   @Get(':id')
   @RequirePerm(storageObjectPerms.view)
   @ApiOperation({ summary: 'One stored object' })
   @ApiEnvelope(fsObjectDetailVo)
   detail(@Param('id', ParseIntPipe) id: number) {
-    return this.storage.detail(id)
+    return this.storage.detail(id, me())
   }
 
   /** Any signed-in user; the business tag decides public (images only) or private. */
@@ -152,7 +160,7 @@ export class StorageController {
   }
 
   /**
-   * Private objects: the uploader, `storage.object.view` or the tag's access checker (else 403). Never
+   * Private business attachments require their tag checker; other objects allow the uploader or file viewer. Never
    * rendered by the browser as a page: attachment (inline only for images when asked), nosniff, sandbox.
    * An S3 object answers 302 to a 60 s presigned GET with the same type and disposition.
    */
@@ -168,7 +176,32 @@ export class StorageController {
     // the response by hand: a file or a redirect (the envelope never wraps either)
     @Res() res: Response,
   ): Promise<void> {
-    const out = await this.storage.download(id, inline === true, me())
+    return this.sendDownload(id, inline === true, res)
+  }
+
+  /** 原生客户端只访问同源内容，不携带系统令牌跟随对象存储重定向。 */
+  @Get(':id/content')
+  @Header('X-Content-Type-Options', 'nosniff')
+  @Header('Content-Security-Policy', "default-src 'none'; sandbox")
+  @RateLimit(60, 60_000)
+  @ApiOperation({ summary: 'Read file content without redirects; at most 20 MiB' })
+  @ApiProduces('application/octet-stream')
+  async content(
+    @Param('id', ParseIntPipe) id: number,
+    @Query({ schema: fsDownloadQuery }) { inline }: FsDownloadQuery,
+    @Res() res: Response,
+  ): Promise<void> {
+    return this.sendDownload(id, inline === true, res, true)
+  }
+
+  /** 两个读取入口共享业务授权和安全响应头，代理模式永不返回外部位置。 */
+  private async sendDownload(
+    id: number,
+    inline: boolean,
+    res: Response,
+    proxy = false,
+  ): Promise<void> {
+    const out = await this.storage.download(id, inline, me(), proxy)
     if ('redirect' in out) return res.redirect(302, out.redirect)
     const { type, length, disposition } = out.getHeaders()
     res.set({

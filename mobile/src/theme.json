@@ -9,7 +9,17 @@
     "tabColor": "#5f6b80",
     "tabSelected": "#1d68dd",
     "tabBg": "#ffffff",
-    "tabBorder": "white"
+    "tabBorder": "white",
+    "qw": {
+      "canvas": "#f2f4f7",
+      "surface": "#ffffff",
+      "text": "#0f1a2b",
+      "text2": "#4b5870",
+      "brand": "#1f6feb",
+      "onBrand": "#ffffff",
+      "danger": "#c8322f",
+      "radius": 14
+    }
   },
   "dark": {
     "navBg": "#0f1624",
@@ -21,6 +31,16 @@
     "tabColor": "#7a879e",
     "tabSelected": "#6fa3ff",
     "tabBg": "#0f1624",
-    "tabBorder": "black"
+    "tabBorder": "black",
+    "qw": {
+      "canvas": "#080d16",
+      "surface": "#0f1624",
+      "text": "#e8edf5",
+      "text2": "#9aa7bd",
+      "brand": "#1f6feb",
+      "onBrand": "#ffffff",
+      "danger": "#f26b68",
+      "radius": 14
+    }
   }
 }

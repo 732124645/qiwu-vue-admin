@@ -1,0 +1,44 @@
+{
+  "title": "Office",
+  "subtitle": "Submit office requests and follow your approval tasks",
+  "apply": "Start a request",
+  "unavailable": "This process is not enabled. Contact a workflow administrator.",
+  "workflowUnavailable": "Approvals are not included in this tenant package.",
+  "allTypes": "All types",
+  "myRequests": "My requests",
+  "myTodo": "My to-dos",
+  "myDone": "Handled by me",
+  "myCc": "Copied to me",
+  "viewProcess": "View approval details",
+  "returnToList": "Back to list",
+  "resubmit": "Resubmit",
+  "resubmitConfirm": "Resubmit this request?",
+  "resubmitted": "Request resubmitted",
+  "approvalPanel": "Approval progress",
+  "create": "Submit request",
+  "amountInvalid": "Enter a valid CNY amount.",
+  "trip": {
+    "entity": "Business trip"
+  },
+  "expense": {
+    "entity": "Expense claim",
+    "addItem": "Add expense item",
+    "removeItem": "Remove item",
+    "total": "Total amount",
+    "tripHint": "Optional: the ID of your approved trip",
+    "itemsRequired": "Add at least one expense item."
+  },
+  "seal": {
+    "entity": "Seal request"
+  },
+  "leave": {
+    "entity": "Leave request"
+  },
+  "generic": {
+    "entity": "General approval"
+  },
+  "notAllowed": "You do not have permission to submit this request.",
+  "view": "View",
+  "attachmentsUnavailable": "Attachments are unavailable. Retry before submitting.",
+  "attachmentLimit": "An expense claim allows at most 10 attachments in total."
+}

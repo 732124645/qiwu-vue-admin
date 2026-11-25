@@ -13,6 +13,39 @@ const PATH = join(process.cwd(), '../../scripts/ci-local.mjs')
 const { runLanes } = (await import(pathToFileURL(PATH).href)) as {
   runLanes: (lanes: Step[][], opts: { logDir: string }) => Promise<[string, string, string][]>
 }
+const { default: FileTimes } = await import(
+  pathToFileURL(join(process.cwd(), '../../scripts/vitest-file-times.mjs')).href
+)
+
+it('prints a failed case and its original stack before the run ends', () => {
+  const write = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+  try {
+    new FileTimes().onTestCaseResult({
+      module: { moduleId: '/tmp/fixture.spec.ts' },
+      fullName: 'multipart fixture',
+      result: () => ({
+        state: 'failed',
+        errors: [{ stack: 'Expected 201, received 400\nat upload' }],
+      }),
+    })
+    expect(write).toHaveBeenCalledTimes(1)
+    expect(write.mock.calls[0]?.[0]).toContain('multipart fixture')
+    expect(write.mock.calls[0]?.[0]).toContain('Expected 201, received 400\nat upload')
+  } finally {
+    write.mockRestore()
+  }
+})
+
+it('keeps successful and skipped cases quiet', () => {
+  const write = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+  try {
+    for (const state of ['passed', 'skipped'])
+      new FileTimes().onTestCaseResult({ result: () => ({ state }) })
+    expect(write).not.toHaveBeenCalled()
+  } finally {
+    write.mockRestore()
+  }
+})
 
 let dir: string
 beforeEach(() => {
@@ -123,6 +156,7 @@ describe.skipIf(process.platform === 'win32')('POSIX parallel lanes', () => {
       'playwright tenant:',
       'mobile e2e',
       'smoke:boot',
+      'dev reload smoke',
     ]
     for (const out of [plan(), parallel]) {
       const at = order.map((step) => out.indexOf(`▶ ${step}`))
@@ -193,8 +227,10 @@ describe('--part: one slice of the gate per CI job', () => {
       shard(1),
       '▶ gen:check-golden: RUN  pnpm gen:check-golden --skip-build',
       '▶ smoke:boot: RUN  pnpm smoke:boot',
+      '▶ dev reload smoke: RUN  pnpm smoke:boot --dev-reload',
     ])
-    expect(steps('--part', 'server', '--shard', '2/3')).toEqual([...setup, shard(2)])
+    for (const i of [2, 3])
+      expect(steps('--part', 'server', '--shard', `${i}/3`)).toEqual([...setup, shard(i)])
   })
 
   it('coverage merges the blob reports (the thresholds apply there); needs the install only', () => {
@@ -222,10 +258,14 @@ describe('--part: one slice of the gate per CI job', () => {
     const checks = names(steps('--part', 'checks'))
     expect(checks).toEqual(
       full.filter(
-        (step) => !/^(test server|gen:check-golden|playwright|mobile e2e|smoke:boot)/.test(step),
+        (step) =>
+          !/^(test server|gen:check-golden|playwright|mobile e2e|smoke:boot|dev reload smoke)/.test(
+            step,
+          ),
       ),
     )
     expect(checks).not.toContain('smoke:boot')
+    expect(checks).not.toContain('dev reload smoke')
     expect(checks).toContain('mobile build mp-weixin')
   })
 

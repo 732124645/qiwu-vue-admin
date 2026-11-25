@@ -6,6 +6,7 @@ import { tenantId } from '../../../../core/context/tenant.js'
 import { paginate } from '../../../../core/db/page.js'
 import { Inbox } from './inbox.entity.js'
 
+/** 收件行转为本人收件箱的返回形状（时间转 ISO，正文原样）。 */
 const item = (row: Inbox) =>
   myInboxItemVo.parse({
     ...row,

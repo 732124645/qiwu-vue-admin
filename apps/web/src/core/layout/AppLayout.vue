@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { breakpointsElement, useBreakpoints } from '@vueuse/core'
 import { shownFrame } from '@/core/router/build-routes'
+import { useImStore } from '@/core/im/im-store'
 import { useAppStore } from '@/core/stores/app'
 import { useAuthStore } from '@/core/stores/auth'
 import { useMenuStore } from '@/core/stores/menu'
@@ -20,6 +21,8 @@ import TenantBanner from './TenantBanner.vue'
 defineOptions({ name: 'AppLayout' })
 
 const { t } = useI18n()
+const im = useImStore()
+const CallPanel = defineAsyncComponent(() => import('@/views/platform/im/components/CallPanel.vue'))
 const route = useRoute()
 const app = useAppStore()
 const auth = useAuthStore()
@@ -160,6 +163,7 @@ const frames = computed(() =>
       </div>
     </div>
     <SettingsDrawer v-model="settingsOpen" />
+    <CallPanel v-if="im.enabled" />
   </el-watermark>
 </template>
 
@@ -235,6 +239,19 @@ const frames = computed(() =>
 .app-layout--fixed .app-layout__main {
   overflow: auto;
 }
+/* Workspace pages fill the remaining layout height; ordinary pages keep their scrolling behavior. */
+.app-layout:has(.qw-workspace) {
+  height: 100vh;
+}
+.app-layout:has(.qw-workspace) .app-layout__aside {
+  position: static;
+  height: auto;
+}
+.app-layout__main:has(> .qw-workspace) {
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+}
 @media (max-width: 767px) {
   .app-layout__main {
     padding: 16px;
@@ -248,11 +265,13 @@ const frames = computed(() =>
   .app-layout__footer {
     display: none;
   }
-  .app-layout--fixed {
+  .app-layout--fixed,
+  .app-layout:has(.qw-workspace) {
     height: auto;
   }
   .app-layout__main,
-  .app-layout--fixed .app-layout__main {
+  .app-layout--fixed .app-layout__main,
+  .app-layout__main:has(> .qw-workspace) {
     padding: 0;
     overflow: visible;
     background: none;

@@ -2,6 +2,7 @@ import { beforeAll, afterAll, describe, expect, it } from 'vitest'
 import request from 'supertest'
 import { Err } from '@qiwu/shared'
 import { bearer } from '../setup/auth.js'
+import { waitIdempotencyWindow } from '../setup/redis.js'
 import { addAccount, closeContentApp, openContentApp } from './wxoa-content.helpers.js'
 import { WxoaInboundHub } from '../../src/modules/platform/wxoa/core/wxoa-inbound-hub.js'
 
@@ -241,7 +242,7 @@ describe('wxoa publishes', () => {
   })
 
   it('rejects unsynchronised changes, a draft of another account and a missing draft', async () => {
-    await new Promise((resolve) => setTimeout(resolve, 3100))
+    await waitIdempotencyWindow(ctx.app)
     await http()
       .put(`/api/wxoa/drafts/${draftId}`)
       .set(bearer(ctx.admin))

@@ -12,7 +12,9 @@
         "days": "请假天数",
         "reason": "请假事由",
         "state": "状态",
-        "instanceId": "流程实例"
+        "instanceId": "流程实例",
+        "initiatorPicks": "选定审批人",
+        "attachmentIds": "附件"
       }
     }
   }

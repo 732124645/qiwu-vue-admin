@@ -12,6 +12,7 @@
     "unprocessable": "The request cannot be processed",
     "too_many_requests": "Too many requests. Please try again later",
     "internal": "Something went wrong on the server. Please try again later",
+    "service_busy": "The service is busy, please try again later.",
     "demo_read_only": "This action is unavailable in demo mode."
   },
   "auth": {
@@ -139,10 +140,32 @@
     "token_limit": "A user keeps at most {max} live access tokens. Revoke the ones you no longer use first",
     "tool_unknown": "There is no tool named {name}",
     "write_not_allowed": "The token does not allow write tools: {name}",
-    "paused": "Agent access is paused. Please try again later",
+    "paused": "MCP access is paused. Please try again later",
     "tool_disabled": "This tool is switched off",
     "tool_not_allowed": "The token does not allow this tool",
     "output_too_large": "The tool's answer is over the {max}-byte limit. Narrow the request",
     "timeout": "The tool did not finish within {seconds} seconds"
+  },
+  "im": {
+    "staff_only": "Chat is available to staff only",
+    "room_not_found": "The conversation does not exist or you are no longer in it",
+    "user_unavailable": "This user cannot be chatted with (not an enabled staff member of your organization)",
+    "role_required": "Your role in this group does not allow this action",
+    "member_limit": "A group can have at most {max} members",
+    "owner_transfer_required": "Transfer the group ownership before leaving while other members remain",
+    "room_closed": "The group has been dissolved",
+    "client_id_conflict": "The message id is already used for other content",
+    "rev_conflict": "The message was changed; refresh and try again",
+    "recall_denied": "This message cannot be recalled",
+    "edit_denied": "This message cannot be edited",
+    "entry_not_found": "The message does not exist or is no longer visible",
+    "sticker_limit": "You can keep at most {max} stickers, each within the size limit",
+    "voice_invalid": "The voice file is invalid; record it again using a supported format",
+    "voice_too_long": "The voice message exceeds the duration limit",
+    "call_not_found": "The call does not exist or you are not a participant",
+    "call_conflict": "This conversation already has an unfinished call",
+    "call_state": "The call state changed; refresh and try again",
+    "call_session": "This call belongs to another session; use the original device",
+    "call_unavailable": "Calls are not configured or are temporarily unavailable"
   }
 }

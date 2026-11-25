@@ -13,13 +13,15 @@
     "dev:app": "uni -p app",
     "build:h5": "uni build",
     "build:mp-weixin": "uni build -p mp-weixin && node scripts/mp-size.mjs",
-    "build:app": "uni build -p app && node -e \"require('node:fs').cpSync('unpackage/res', 'dist/build/app/unpackage/res', { recursive: true })\"",
+    "build:app": "node scripts/build-app.mjs",
     "typecheck": "vue-tsc --noEmit -p tsconfig.json && vue-tsc --noEmit -p tsconfig.node.json",
-    "test": "vitest run",
+    "native:ios": "node scripts/native-ios.mjs",
+    "test": "node --test scripts/native-ios.test.mjs scripts/native-android.test.mjs scripts/build-app.test.mjs && vitest run",
     "e2e": "playwright test",
     "license:check": "node ../scripts/license-check.mjs --dir .",
     "audit:report": "node scripts/audit-report.mjs",
-    "verify": "pnpm typecheck && pnpm license:check"
+    "verify": "pnpm typecheck && pnpm license:check",
+    "native:android": "node scripts/native-android.mjs"
   },
   "dependencies": {
     "@dcloudio/uni-app": "3.0.0-5020620260917001",
@@ -40,6 +42,7 @@
     "@dcloudio/types": "3.4.31",
     "@dcloudio/uni-cli-shared": "3.0.0-5020620260917001",
     "@dcloudio/uni-stacktracey": "3.0.0-5020620260917001",
+    "@dcloudio/uni-uts-v1": "3.0.0-5020620260917001",
     "@dcloudio/vite-plugin-uni": "3.0.0-5020620260917001",
     "@playwright/test": "1.63.0",
     "@types/node": "22.20.4",

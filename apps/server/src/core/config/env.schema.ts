@@ -22,6 +22,45 @@ const portList = z
   )
 
 /**
+ * MySQL pool sizing (see docs/deploy.md): every process holds its own pool. Defaults keep mysql2's
+ * own (10 connections, unbounded wait queue, no acquire timeout). Shared with `dataSourceOptions()`,
+ * which the `db:*` scripts call without the full schema.
+ */
+export const DbPoolEnvShape = {
+  /** connections per process (TypeORM `poolSize` → mysql2 `connectionLimit`) */
+  DB_POOL_SIZE: z.coerce.number().int().positive().default(10),
+  /** wait for a free connection at most this long, then fail with 503; 0 = no limit */
+  DB_POOL_ACQUIRE_TIMEOUT_MS: z.coerce.number().int().min(0).default(0),
+  /** at most this many requests wait for a connection, the next fails with 503; 0 = no limit */
+  DB_POOL_QUEUE_LIMIT: z.coerce.number().int().min(0).default(0),
+}
+
+/**
+ * Non-secret keys the server logs once after `listen` (`main.ts`): the values a deployer checks first.
+ * A project appends its own non-secret keys; credentials (`*_PASSWORD`, `*_USER*`, `APP_SECRET`,
+ * `WX_MP_*`) never go here. Keys outside `EnvSchema` are read from the process env.
+ */
+export const EFFECTIVE_CONFIG_KEYS: string[] = [
+  'NODE_ENV',
+  'HOST',
+  'PORT',
+  'LOG_LEVEL',
+  'APP_ROLE',
+  'APP_MULTI_TENANT',
+  'APP_WXOA',
+  'APP_MCP',
+  'APP_IM',
+  'APP_DEMO_MODE',
+  'SWAGGER_ENABLED',
+  'DB_HOST',
+  'DB_NAME',
+  'DB_POOL_SIZE',
+  'REDIS_DB',
+  'REDIS_KEY_PREFIX',
+  'NODE_APP_INSTANCE',
+]
+
+/**
  * Server env, validated once at startup by `@nestjs/config` (Standard Schema):
  * missing/invalid values stop the boot. Keys mirror `apps/server/.env.example` (the credentials only
  * as comments there: they belong in `.env.local`).
@@ -43,12 +82,21 @@ export const EnvSchema = z.preprocess(
       LOG_LEVEL: z
         .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])
         .default('info'),
+      /**
+       * Stall diagnostics (see docs/scale-out.md), all 0 = off: a request line whose response took at
+       * least LOG_SLOW_REQUEST_MS is marked `slow` with the jobs then running in the process (warn); every
+       * LOG_EVENT_LOOP_INTERVAL_MS one event-loop line, at warn when its max reaches LOG_EVENT_LOOP_WARN_MS
+       */
+      LOG_SLOW_REQUEST_MS: z.coerce.number().int().min(0).default(0),
+      LOG_EVENT_LOOP_INTERVAL_MS: z.coerce.number().int().min(0).default(0),
+      LOG_EVENT_LOOP_WARN_MS: z.coerce.number().int().min(0).default(0),
 
       DB_HOST: z.string().default('127.0.0.1'),
       DB_PORT: port.default(3306),
       DB_USER: z.string(),
       DB_PASSWORD: z.string().optional(),
       DB_NAME: z.string(),
+      ...DbPoolEnvShape,
 
       REDIS_HOST: z.string().default('127.0.0.1'),
       REDIS_PORT: port.default(6379),
@@ -74,8 +122,17 @@ export const EnvSchema = z.preprocess(
        */
       OUTBOUND_S3_PORTS: portList.default([]),
       OUTBOUND_SMTP_PORTS: portList.default([]),
+      OUTBOUND_LIVEKIT_PORTS: portList.default([]),
       CODEGEN_WRITE: flag.default(false),
       APP_DEMO_MODE: flag.default(false),
+      /**
+       * What this process runs (see docs/scale-out.md), read at startup only: `all` = HTTP, cron and every
+       * queue worker; `api` = HTTP only (task writes still publish `job:sync`, "run once" is queued for a
+       * worker, jobs are only added); `worker` = cron and every queue worker, still listening (health
+       * checks, Socket.IO pushes through the Redis adapter). At least one `all` or `worker` instance is
+       * required, or cron and queues stop.
+       */
+      APP_ROLE: z.enum(['all', 'api', 'worker']).default('all'),
       /**
        * Multi-tenancy (see docs/design-notes.md#tenancy): read at startup only, every instance restarts
        * to switch it; off = the single default tenant
@@ -87,10 +144,20 @@ export const EnvSchema = z.preprocess(
        */
       APP_WXOA: flag.default(false),
       /**
-       * Agent access over MCP (see docs/mcp.md): read at startup only; off = the module is not loaded
+       * Access for external AI clients over MCP (see docs/mcp.md): read at startup only; off = the module is not loaded
        * (/api/mcp and its admin routes 404), its menus hidden
        */
       APP_MCP: flag.default(false),
+      /**
+       * 员工即时通讯（see docs/im.md）：只在启动时读；关 = 模块不加载（/api/im/* 404、清理任务不注册），
+       * 迁移与种子照常
+       */
+      APP_IM: flag.default(false),
+      /** LiveKit 客户端信令地址；密钥只从本机秘密配置读取，未配置时语音消息仍可使用。 */
+      IM_LIVEKIT_URL: z.string().max(2048).default(''),
+      IM_LIVEKIT_API_URL: z.string().max(2048).default(''),
+      IM_LIVEKIT_API_KEY: z.string().max(1024).default(''),
+      IM_LIVEKIT_API_SECRET: z.string().max(4096).default(''),
       STORAGE_LOCAL_ROOT: z.string().default(DEFAULT_UPLOAD_ROOT),
       /**
        * WeChat mini program sign-in (also param `auth.wx_mp.enabled`): the AppID and its

@@ -1,0 +1,12 @@
+{
+  "demo": {
+    "customer": {
+      "entity": "customer"
+    }
+  },
+  "menu": {
+    "demo": {
+      "customer": "Sample customers"
+    }
+  }
+}

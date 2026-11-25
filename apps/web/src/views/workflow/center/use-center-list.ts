@@ -1,4 +1,4 @@
-import { onActivated, watch } from 'vue'
+import { onActivated, watch, type Ref } from 'vue'
 import { useRouter } from 'vue-router'
 import dayjs from 'dayjs'
 import { useCrudList } from '@/core/composables/use-crud'
@@ -14,8 +14,17 @@ export const at = (iso: string | null) => (iso ? dayjs(iso).format('YYYY-MM-DD H
  */
 export function useCenterList<T extends object, F extends object = Record<string, unknown>>(
   options: Parameters<typeof useCrudList<T, F>>[0],
+  modelKey?: Ref<string | undefined>,
 ) {
-  const list = useCrudList<T, F>(options)
+  const list = useCrudList<T, F>({
+    ...options,
+    api: {
+      ...options.api,
+      page: (q) =>
+        options.api.page({ ...q, ...(modelKey?.value ? { modelKey: modelKey.value } : {}) }),
+    },
+  })
+  if (modelKey) watch(modelKey, () => void list.search())
   let mounted = false
   onActivated(() => {
     if (mounted) void list.refresh()

@@ -6,6 +6,7 @@
 // (`-t pages`).
 // Test handlers are a provider of this spec's testing module; tasks are added through the API or straight
 // into job_task, runs read from job_run.
+import { type IntervalHistogram, monitorEventLoopDelay } from 'node:perf_hooks'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { Injectable, Logger } from '@nestjs/common'
 import type { NestExpressApplication } from '@nestjs/platform-express'
@@ -18,8 +19,10 @@ import type { DataSource } from 'typeorm'
 import { z } from 'zod'
 import { AppModule } from '../../src/app.module.js'
 import { setupApp } from '../../src/app.setup.js'
+import { MAX_SESSION_MS } from '../../src/core/auth/token.service.js'
 import { clsGet } from '../../src/core/context/cls.js'
 import { RedisLock } from '../../src/core/guard/redis-lock.js'
+import { runningJobs } from '../../src/core/monitor/running-jobs.js'
 import { redisKey } from '../../src/core/redis/cache-namespaces.js'
 import { ParamService } from '../../src/core/settings/param.service.js'
 import { REDIS, type Redis } from '../../src/core/redis/redis.module.js'
@@ -46,6 +49,12 @@ class TestJobs {
   @JobHandler('test.strict', z.object({ days: z.number().int().min(1) }).strict())
   strict({ days }: { days: number }) {
     return `days=${days}`
+  }
+
+  /** A result JSON cannot hold: recording the run fails. */
+  @JobHandler('test.bigint')
+  bigint() {
+    return 1n
   }
 
   /** runs of `test.block` / `test.stubborn` by key, in start order */
@@ -604,6 +613,51 @@ describe('lock', () => {
     expect(ttl).toBeLessThanOrEqual(5 * 60_000)
   })
 
+  it('a running attempt is listed among the running jobs until it ends; its run records the process and its loop delay', async () => {
+    const key = unique()
+    const id = await insertTask({ handler: 'test.block', params: { key } })
+    const listed = () => runningJobs.list().filter((j) => j.taskId === id)
+    const fire = scheduler.fire(id, nextAt(), 'cron')
+    await until(() => startedOf(key) === 1)
+    expect(listed()).toEqual([expect.objectContaining({ taskId: id, handler: 'test.block' })])
+    jobs.open(key)
+    await fire
+    expect(listed()).toEqual([])
+    // a skipped fire never executed: its process is known, its loop delay is not
+    const blocked = scheduler.fire(id, nextAt(), 'cron')
+    await until(() => startedOf(key) === 2)
+    await scheduler.fire(id, nextAt(), 'cron')
+    jobs.open(key)
+    await blocked
+    const rows = await ds.query<
+      { outcome: string; instance: string; loop_max_ms: number | null }[]
+    >('SELECT outcome, instance, loop_max_ms FROM job_run WHERE task_id = ? ORDER BY id', [id])
+    expect(rows.map((r) => r.outcome)).toEqual(['ok', 'skipped', 'ok'])
+    for (const r of rows) expect(r.instance).toMatch(new RegExp(`:${process.pid}$`))
+    expect(rows.map((r) => r.loop_max_ms === null)).toEqual([false, true, false])
+  })
+
+  it('a run whose recording fails still stops its loop-delay histogram', async () => {
+    const proto = Object.getPrototypeOf(monitorEventLoopDelay()) as IntervalHistogram
+    const enable = vi.spyOn(proto, 'enable')
+    const disable = vi.spyOn(proto, 'disable')
+    const failed = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
+    try {
+      const id = await insertTask({ handler: 'test.bigint' })
+      await scheduler.fire(id, nextAt(), 'cron')
+      expect(failed).toHaveBeenCalledWith(
+        expect.objectContaining({ taskId: id }),
+        'job fire failed',
+      )
+      expect(enable).toHaveBeenCalled()
+      expect(disable).toHaveBeenCalledTimes(enable.mock.calls.length)
+    } finally {
+      enable.mockRestore()
+      disable.mockRestore()
+      failed.mockRestore()
+    }
+  })
+
   it('timeout: the handler is aborted, the run recorded as timeout; no overlap until it really returned', async () => {
     const key = unique()
     const id = await insertTask({
@@ -980,6 +1034,7 @@ describe('retry', () => {
     expect(rows.map((r) => [r.name, r.handler, r.enabled])).toEqual([
       ['seed.task.wxoaMessagePurge', 'wxoa.message.purge', 0],
       ['seed.task.wxoaFanSync', 'wxoa.fan.sync', 0],
+      ['seed.task.imPurge', 'im.purge', 0],
       ['seed.task.auditPurge', 'audit.purge', 1],
       ['seed.task.sessionSweep', 'session.sweep', 1],
       ['seed.task.notifyDispatch', 'notify.dispatch', 0],
@@ -1003,7 +1058,8 @@ describe('retry', () => {
       { score: now + 3_600_000, value: `${PREFIX}live` },
     ])
     await redis.zAdd(redisKey('authSeen'), [
-      { score: now - 31 * 86_400_000, value: `${PREFIX}ancient` },
+      // 超过最长会话（App 长期会话）的最后活跃时间才清掉
+      { score: now - MAX_SESSION_MS - 86_400_000, value: `${PREFIX}ancient` },
       { score: now - 8 * 86_400_000, value: `${PREFIX}third-party` },
       { score: now, value: `${PREFIX}live` },
     ])

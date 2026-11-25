@@ -34,6 +34,10 @@ export class Leave extends BaseEntity {
   @Column({ length: 500 })
   reason: string
 
+  /** 私有附件由业务事务绑定，历史空值在响应中规范为空数组。 */
+  @Column({ name: 'attachment_ids', type: 'json', nullable: true })
+  attachmentIds: number[] | null
+
   /** 状态（draft/in_review/approved/rejected/canceled） */
   @Column({ length: 12, default: 'draft' })
   state: string

@@ -191,6 +191,43 @@ export interface PickedFile {
   size?: number
 }
 
+/** 统一系统文件选择结果，供上传字段和聊天图片复用；取消时不产生待上传文件。 */
+export function chooseUploadFiles(count: number, images = false): Promise<PickedFile[]> {
+  const type = images ? 'image' : 'all'
+  return new Promise((resolve) => {
+    const cancel = () => resolve([])
+    if (process.env.UNI_PLATFORM === 'mp-weixin')
+      uni.chooseMessageFile({
+        count,
+        type,
+        success: (r) =>
+          resolve(r.tempFiles.map((file) => ({ path: file.path, name: file.name, size: file.size }))),
+        fail: cancel,
+      })
+    else if (process.env.UNI_PLATFORM === 'h5')
+      uni.chooseFile({
+        count,
+        type,
+        success: (r) =>
+          resolve(
+            ([r.tempFiles].flat() as (File & { path: string })[]).map((file) => ({
+              path: file.path,
+              name: file.name,
+              size: file.size,
+            })),
+          ),
+        fail: cancel,
+      })
+    else
+      uni.chooseImage({
+        count,
+        sizeType: ['compressed'],
+        success: (r) => resolve([r.tempFilePaths].flat().map((path) => ({ path }))),
+        fail: cancel,
+      })
+  })
+}
+
 export interface PendingUpload {
   key: number
   name: string

@@ -1,6 +1,11 @@
 <script lang="ts">
 import type { ComposeOption } from 'echarts/core'
-import type { BarSeriesOption, GaugeSeriesOption, LineSeriesOption } from 'echarts/charts'
+import type {
+  BarSeriesOption,
+  GaugeSeriesOption,
+  LineSeriesOption,
+  PieSeriesOption,
+} from 'echarts/charts'
 import type {
   AriaComponentOption,
   GridComponentOption,
@@ -14,6 +19,7 @@ export type QwChartOption = ComposeOption<
   | BarSeriesOption
   | GaugeSeriesOption
   | LineSeriesOption
+  | PieSeriesOption
   | AriaComponentOption
   | GridComponentOption
   | TitleComponentOption
@@ -27,7 +33,7 @@ import { computed, nextTick, shallowRef, watch } from 'vue'
 import VChart from 'vue-echarts'
 import { use } from 'echarts/core'
 import { SVGRenderer } from 'echarts/renderers'
-import { BarChart, GaugeChart, LineChart } from 'echarts/charts'
+import { BarChart, GaugeChart, LineChart, PieChart } from 'echarts/charts'
 import {
   AriaComponent,
   GridComponent,
@@ -44,6 +50,7 @@ use([
   BarChart,
   GaugeChart,
   LineChart,
+  PieChart,
   AriaComponent,
   LegendComponent,
   GridComponent,

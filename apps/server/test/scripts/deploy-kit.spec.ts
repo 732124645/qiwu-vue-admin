@@ -50,14 +50,74 @@ function install(name: string, as = name): string {
 const run = (file: string, args: string[], env: NodeJS.ProcessEnv = process.env) =>
   spawnSync(file, args, { encoding: 'utf8', env })
 
-it('ecosystem.config.cjs: two cluster workers behind the current symlink', () => {
+/** ecosystem.config.cjs as PM2 reads it under `env` (a fresh load each time: it reads the env once) */
+function ecosystem(env: Record<string, string> = {}) {
   const require = createRequire(import.meta.url)
-  const [app] = require(join(KIT, 'ecosystem.config.cjs')).apps
-  const server = '/srv/qiwu/current/apps/server'
-  expect(app).toMatchObject({ exec_mode: 'cluster', instances: 2, cwd: server })
-  expect(app.node_args).toBe(
-    `--env-file-if-exists=${server}/.env.local --env-file-if-exists=${server}/.env`,
-  )
+  const file = join(KIT, 'ecosystem.config.cjs')
+  const keys = [
+    'QW_DEPLOY_ROOT',
+    'QW_PM2_NAME',
+    'QW_PM2_INSTANCES',
+    'QW_PM2_WORKER_INSTANCES',
+    'QW_WORKER_PORT',
+  ]
+  for (const k of keys) vi.stubEnv(k, env[k])
+  try {
+    delete require.cache[require.resolve(file)]
+    return require(file).apps as Record<string, unknown>[]
+  } finally {
+    vi.unstubAllEnvs()
+  }
+}
+
+const server = '/srv/qiwu/current/apps/server'
+/** the single app every deploy had before worker instances could be configured */
+const oneApp = {
+  name: 'qiwu-server',
+  cwd: server,
+  script: 'dist/main.js',
+  node_args: `--env-file-if-exists=${server}/.env.local --env-file-if-exists=${server}/.env`,
+  exec_mode: 'cluster',
+  instances: 2,
+  listen_timeout: 30000,
+  kill_timeout: 10000,
+  min_uptime: '30s',
+  max_restarts: 10,
+  autorestart: true,
+  time: true,
+  merge_logs: true,
+  error_file: '/srv/qiwu/logs/server-error.log',
+  out_file: '/srv/qiwu/logs/server-out.log',
+  env_production: { NODE_ENV: 'production' },
+}
+
+it('ecosystem.config.cjs: two cluster workers behind the current symlink, one app by default', () => {
+  expect(ecosystem()).toEqual([oneApp])
+  expect(ecosystem({ QW_PM2_WORKER_INSTANCES: '0' })).toEqual([oneApp])
+})
+
+it('ecosystem.config.cjs: worker instances add a worker app on its own port, the first serves HTTP only', () => {
+  expect(ecosystem({ QW_PM2_WORKER_INSTANCES: '1', QW_PM2_INSTANCES: '3' })).toEqual([
+    { ...oneApp, instances: 3, env_production: { NODE_ENV: 'production', APP_ROLE: 'api' } },
+    {
+      ...oneApp,
+      name: 'qiwu-server-worker',
+      instances: 1,
+      error_file: '/srv/qiwu/logs/worker-error.log',
+      out_file: '/srv/qiwu/logs/worker-out.log',
+      env_production: { NODE_ENV: 'production', APP_ROLE: 'worker', PORT: '3001' },
+    },
+  ])
+  const [, worker] = ecosystem({
+    QW_PM2_WORKER_INSTANCES: '2',
+    QW_WORKER_PORT: '3105',
+    QW_PM2_NAME: 'shop',
+  })
+  expect(worker).toMatchObject({
+    name: 'shop-worker',
+    instances: 2,
+    env_production: { APP_ROLE: 'worker', PORT: '3105' },
+  })
 })
 
 describe.skipIf(WINDOWS)('shell scripts', () => {
@@ -318,7 +378,7 @@ describe.skipIf(!LINUX_TOOLS)('server-deploy.sh --dry-run against a scratch root
       '-m',
       'r',
     )
-    for (const tag of ['v1.2.2', 'v1.2.3', 'v1.2.5']) git('tag', tag)
+    for (const tag of ['v1.2.2', 'v1.2.3', 'v1.2.5', 'v1.2.6', 'v1.2.7']) git('tag', tag)
     git('-c', 'user.name=t', '-c', 'user.email=t@example.com', 'tag', '-a', 'v1.2.4', '-m', 'r')
     commit = git('rev-parse', 'HEAD')
     writeFileSync(
@@ -338,17 +398,21 @@ describe.skipIf(!LINUX_TOOLS)('server-deploy.sh --dry-run against a scratch root
     mkdirSync(join(dir, 'shared/apps/server'), { recursive: true })
     writeFileSync(join(dir, 'shared/apps/server/.env'), `STORAGE_LOCAL_ROOT=${dir}/uploads\n`)
     // stand-in for PM2: "pid <name>" lists STUB_WORKERS workers (default QW_PM2_INSTANCES) whose
-    // working directory, in <root>/proc, is STUB_CWD (default: the release behind current)
+    // working directory, in <root>/proc, is STUB_CWD (default: the release behind current); for the
+    // worker app "<name>-worker" STUB_WORKER_APP_N (default QW_PM2_WORKER_INSTANCES) and STUB_WORKER_APP_CWD
     mkdirSync(join(dir, 'stub'))
     writeFileSync(
       join(dir, 'stub/pm2'),
       [
         '#!/usr/bin/env bash',
         '[[ $1 == pid ]] || exit 0',
-        'cwd=$STUB_CWD n=$STUB_WORKERS',
-        '[[ -n $cwd ]] || cwd=$(readlink -f "$QW_DEPLOY_ROOT/current")/apps/server',
+        'cwd=$STUB_CWD n=$STUB_WORKERS base=0',
         '[[ -n $n ]] || n=$QW_PM2_INSTANCES',
-        'for ((i = 1; i <= n; i++)); do',
+        'if [[ $2 == "$QW_PM2_NAME-worker" ]]; then',
+        '  cwd=$STUB_WORKER_APP_CWD n=${STUB_WORKER_APP_N:-$QW_PM2_WORKER_INSTANCES} base=100',
+        'fi',
+        '[[ -n $cwd ]] || cwd=$(readlink -f "$QW_DEPLOY_ROOT/current")/apps/server',
+        'for ((i = base + 1; i <= base + n; i++)); do',
         '  mkdir -p "$QW_DEPLOY_ROOT/proc/$i" && ln -sfn "$cwd" "$QW_DEPLOY_ROOT/proc/$i/cwd" && echo "$i"',
         'done',
         '',
@@ -481,6 +545,35 @@ describe.skipIf(!LINUX_TOOLS)('server-deploy.sh --dry-run against a scratch root
     expect(elsewhere.stdout).toContain('the earlier release is unhealthy too')
     for (const tag of ['v1.2.3', 'v1.2.4'])
       expect(existsSync(join(dir, 'releases', release(tag)!, 'DEPLOYED'))).toBe(false)
+  })
+
+  it('with worker instances, stays unhealthy until the worker app answers and runs the new release', () => {
+    const split = (extra: NodeJS.ProcessEnv = {}) => ({
+      QW_PM2_WORKER_INSTANCES: '1',
+      QW_WORKER_HEALTH_URL: `file://${dir}/current/worker-health.json`,
+      ...extra,
+    })
+    const workerHealthy = (top: string) =>
+      writeFileSync(join(top, 'worker-health.json'), '{"code":0,"data":{"status":"ok"}}')
+    // the worker app's health URL does not answer ok
+    const silent = dry([tarball('v1.2.3'), 'v1.2.3'], split())
+    expect({ status: silent.status, out: silent.stdout }).toMatchObject({ status: 3 })
+    // the worker app still runs elsewhere (an old release)
+    const old = dry(
+      [tarball('v1.2.4', true, workerHealthy), 'v1.2.4'],
+      split({ STUB_WORKER_APP_CWD: join(dir, 'src') }),
+    )
+    expect({ status: old.status, out: old.stdout }).toMatchObject({ status: 3 })
+    // no worker app process at all
+    const none = dry(
+      [tarball('v1.2.5', true, workerHealthy), 'v1.2.5'],
+      split({ STUB_WORKER_APP_N: '0' }),
+    )
+    expect({ status: none.status, out: none.stdout }).toMatchObject({ status: 3 })
+    const ok = dry([tarball('v1.2.6', true, workerHealthy), 'v1.2.6'], split())
+    expect({ status: ok.status, out: ok.stdout }).toMatchObject({ status: 0 })
+    // without worker instances the worker app is not checked
+    expect(dry([tarball('v1.2.7'), 'v1.2.7']).status).toBe(0)
   })
 
   it('switches back when the new release fails its health check; --rollback goes to the previous one', () => {

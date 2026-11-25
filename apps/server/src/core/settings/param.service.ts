@@ -53,7 +53,8 @@ export class ParamService {
     if (!keys.length) return 0
     const tx = this.redis.multi()
     for (const k of new Set(keys)) tx.incr(redisKey('paramVer', k)).unlink(redisKey('param', k))
-    return droppedBy(await tx.exec())
+    const dropped = droppedBy(await tx.exec())
+    return dropped
   }
 
   /**

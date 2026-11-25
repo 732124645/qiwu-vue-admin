@@ -24,6 +24,7 @@ import { clsSet } from '../context/cls.js'
 import { withTenant } from '../context/tenant.js'
 import { RateLimit } from '../guard/rate-limit.decorator.js'
 import { BizError } from '../http/biz-error.js'
+import { Sensitive } from '../redact.js'
 import { foreignOrigin } from '../http/origin.js'
 import { McpAuth } from './mcp-auth.js'
 import { mcpResource, resourceMetadataUrl, siteOrigin } from './mcp-resource.js'
@@ -55,6 +56,8 @@ export class McpController {
   ) {}
 
   // each tools/call is logged by McpService (one row per call, refusals too)
+  // 工具参数可含私人业务内容；HTTP trace 在工具校验前记录，统一遮蔽整个参数对象。
+  @Sensitive('arguments')
   @SkipActionLog()
   @Post()
   @Public()

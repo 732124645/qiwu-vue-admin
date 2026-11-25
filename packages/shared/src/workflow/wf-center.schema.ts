@@ -208,7 +208,10 @@ export type WfInstanceItemVo = z.infer<typeof wfInstanceItemVo>
 
 /** GET /api/wf/instances/mine: the instances the caller started, newest first. */
 export const wfMineQuery = pageQuery(['startedAt', 'id'])
-  .extend({ state: z.enum(WF_INSTANCE_STATES).optional() })
+  .extend({
+    state: z.enum(WF_INSTANCE_STATES).optional(),
+    modelKey: z.string().trim().min(1).max(64).optional(),
+  })
   .register(fieldDomains, { domain: 'wf.instance' })
 export type WfMineQuery = z.output<typeof wfMineQuery>
 
@@ -228,8 +231,12 @@ export const wfTaskItemVo = z.object({
 })
 export type WfTaskItemVo = z.infer<typeof wfTaskItemVo>
 export const wfTodoQuery = pageQuery(['createdAt', 'id'])
+  .extend({ modelKey: z.string().trim().min(1).max(64).optional() })
+  .register(fieldDomains, { domain: 'wf.instance' })
 export type WfTodoQuery = z.output<typeof wfTodoQuery>
 export const wfDoneQuery = pageQuery(['handledAt', 'id'])
+  .extend({ modelKey: z.string().trim().min(1).max(64).optional() })
+  .register(fieldDomains, { domain: 'wf.instance' })
 export type WfDoneQuery = z.output<typeof wfDoneQuery>
 
 /** GET /api/wf/ccs/mine: copies sent to the caller, newest first; POST /api/wf/ccs/:id/read marks one read. */
@@ -244,7 +251,10 @@ export const wfCcItemVo = z.object({
 })
 export type WfCcItemVo = z.infer<typeof wfCcItemVo>
 export const wfCcQuery = pageQuery(['createdAt', 'id'])
-  .extend({ unread: z.stringbool().optional() })
+  .extend({
+    unread: z.stringbool().optional(),
+    modelKey: z.string().trim().min(1).max(64).optional(),
+  })
   .register(fieldDomains, { domain: 'wf.instance' })
 export type WfCcQuery = z.output<typeof wfCcQuery>
 

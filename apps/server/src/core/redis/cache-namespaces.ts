@@ -56,6 +56,8 @@ export const CACHE_NAMESPACES = {
   authPermVer: ns('auth:permver:', false, false, 'global-id'),
   /** user id → revocation counter (SessionRevoker.revokeUser): a sign-in racing it cannot start a session */
   authCredVer: ns('auth:credver:', false, false, 'global-id'),
+  /** user id → 单 App 会话的登录锁（10 秒，持有者令牌）：同一用户的 App 登录签发与替换旧会话串行 */
+  authAppLogin: ns('auth:app-login:', false, false, 'global-id'),
   /** `{sid}:{actingUntil}` → 1 for 60 s: the stay in another tenant whose leave is logged (TenantActing) */
   authActingLeave: ns('auth:acting-leave:', false, false, 'global-id'),
   /**

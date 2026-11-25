@@ -1,0 +1,172 @@
+<template>
+  <scroll-view class="page" scroll-y>
+    <text class="hint">{{ labels.hint }}</text>
+    <text>{{ labels.states[snapshot ? snapshot.state : 'idle'] }}</text>
+    <text v-if="notice" class="hint">{{ notice }}</text>
+    <text v-if="failure" class="hint">{{ labels.error }}: {{ failure.operation }} / {{ failure.code }}</text>
+    <button :loading="busy" :disabled="busy || (snapshot && snapshot.state !== 'idle')" @click="start">
+      {{ labels.connect }}
+    </button>
+    <button :loading="closing" :disabled="closing || (!busy && (!snapshot || snapshot.state === 'idle'))" @click="end">
+      {{ canRetryDisconnect ? labels.retryDisconnect : labels.disconnect }}
+    </button>
+    <view class="row">
+      <text>{{ labels.microphone }}</text>
+      <switch :checked="!!(snapshot && snapshot.microphone)" :disabled="!connected || busy" @change="microphone" />
+    </view>
+    <view class="row">
+      <text>{{ labels.camera }}</text>
+      <switch :checked="!!(snapshot && snapshot.camera)" :disabled="!connected || busy" @change="camera" />
+    </view>
+    <view class="row">
+      <text>{{ labels.speaker }}</text>
+      <switch :checked="!!(snapshot && snapshot.speakerPreferred)" :disabled="!connected || busy" @change="speaker" />
+    </view>
+    <button :loading="busy" :disabled="!connected || busy || !snapshot.camera" @click="flipCamera">
+      {{ labels.switchCamera }}
+    </button>
+    <view v-for="person in videos" :key="snapshot.connectionId + ':' + person.identity">
+      <text>{{ person.name || person.identity }}</text>
+      <qw-livekit class="video" :connection-id="snapshot.connectionId" :participant-id="person.identity" />
+    </view>
+  </scroll-view>
+</template>
+
+<script>
+import {
+  connect, disconnect, getSnapshot, setMicrophoneEnabled, setCameraEnabled,
+  setSpeakerOutputPreferred, switchCamera,
+} from '@/uni_modules/qw-livekit'
+import { requestConnection } from '../connection.js'
+import { stopMedia, subscribe } from '../events.js'
+import zh from '../locales/zh-CN.json'
+import en from '../locales/en-US.json'
+
+export default {
+  data() {
+    return {
+      labels: uni.getLocale().startsWith('zh') ? zh : en,
+      snapshot: null, failure: null, notice: '', busy: false,
+      shown: false, generation: 0,
+    }
+  },
+  computed: {
+    connected() { return this.snapshot && this.snapshot.state === 'connected' },
+    canRetryDisconnect() { return this.snapshot && this.snapshot.state === 'disconnecting' && this.failure && this.failure.code === 'SDK_ERROR' && this.failure.operation === 'disconnect' },
+    closing() { return !!(this.snapshot && this.snapshot.state === 'disconnecting' && !this.canRetryDisconnect) },
+    videos() { return this.shown && this.snapshot ? this.snapshot.participants.filter((p) => p.camera) : [] },
+  },
+  created() { this.unsubscribe = null },
+  onShow() {
+    this.shown = true
+    this.generation++
+    this.unsubscribe?.()
+    this.unsubscribe = subscribe((event) => {
+      if (!this.shown) return
+      this.snapshot = event.snapshot
+      if (event.error) this.failure = event.error
+    })
+    this.snapshot = getSnapshot()
+    // 后台失败可能发生在退订后；重新显示时补一次清理，让原生复核是否可重试。
+    if (this.snapshot.state === 'disconnecting') stopMedia(true)
+  },
+  onHide() { this.retire() },
+  onUnload() { this.retire() },
+  methods: {
+    current(at) { return this.shown && at === this.generation },
+    complete(at, snapshot) {
+      if (!this.current(at)) {
+        // 只关闭迟到回调自己的连接编号，不能结束后来建立的新连接。
+        disconnect({ connectionId: snapshot.connectionId })
+        return
+      }
+      this.snapshot = snapshot
+      this.busy = false
+    },
+    failed(at, error) {
+      if (!this.current(at)) return
+      this.failure = error
+      this.snapshot = getSnapshot()
+      this.busy = false
+    },
+    async start() {
+      if (this.busy || !this.shown || (!this.snapshot || this.snapshot.state !== 'idle')) return
+      const at = this.generation
+      this.busy = true
+      this.notice = ''
+      this.failure = null
+      try {
+        const grant = await requestConnection()
+        // 页面隐藏/取消之后返回的票据不得再次连接或开麦。
+        if (!this.current(at)) return
+        if (!grant || !grant.url || !grant.token) {
+          this.notice = this.labels.unconfigured
+          this.busy = false
+          return
+        }
+        connect({
+          url: grant.url, token: grant.token, microphone: false, camera: false,
+          success: (snapshot) => this.complete(at, snapshot),
+          fail: (error) => this.failed(at, error),
+        })
+      } catch {
+        if (this.current(at)) {
+          this.notice = this.labels.requestFailed
+          this.busy = false
+        }
+      }
+    },
+    perform(action, enabled) {
+      if (!this.connected || this.busy) return
+      const at = this.generation
+      const options = {
+        connectionId: this.snapshot.connectionId,
+        success: (snapshot) => this.complete(at, snapshot),
+        fail: (error) => this.failed(at, error),
+      }
+      if (enabled !== undefined) options.enabled = enabled
+      this.busy = true
+      this.failure = null
+      try {
+        action(options)
+      } catch {
+        if (this.current(at)) {
+          this.notice = this.labels.requestFailed
+          this.busy = false
+        }
+      }
+    },
+    flipCamera() { this.perform(switchCamera) },
+    microphone(event) { this.perform(setMicrophoneEnabled, event.detail.value) },
+    camera(event) { this.perform(setCameraEnabled, event.detail.value) },
+    speaker(event) { this.perform(setSpeakerOutputPreferred, event.detail.value) },
+    end() {
+      const retry = !!this.canRetryDisconnect
+      this.generation++
+      this.busy = false
+      this.failure = null
+      this.notice = ''
+      stopMedia(retry)
+      this.snapshot = getSnapshot()
+    },
+    retire() {
+      this.shown = false
+      this.generation++
+      this.unsubscribe?.()
+      this.unsubscribe = null
+      stopMedia(true)
+      this.snapshot = null
+      this.failure = null
+      this.notice = ''
+      this.busy = false
+    },
+  },
+}
+</script>
+
+<style>
+.page { flex: 1; padding: 16px; }
+.hint { margin-bottom: 12px; }
+.row { flex-direction: row; align-items: center; justify-content: space-between; margin-top: 12px; }
+.video { width: 300px; height: 220px; margin-top: 12px; }
+</style>

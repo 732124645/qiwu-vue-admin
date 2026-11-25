@@ -1,5 +1,6 @@
 import { fork, type ChildProcess } from 'node:child_process'
 import { existsSync } from 'node:fs'
+import { hostname } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { REALTIME_EVENT, RT, type RealtimeMessage, type SessionVo } from '@qiwu/shared'
 import bcrypt from 'bcryptjs'
@@ -69,12 +70,12 @@ async function cleanup() {
   }
 }
 
-function boot(): Promise<string> {
+function boot(env: NodeJS.ProcessEnv = {}): Promise<string> {
   if (!existsSync(new URL('../../dist/app.module.js', import.meta.url)))
     throw new Error('Build first: pnpm --filter @qiwu/server build')
   const child = fork(runner, [], {
     cwd: fileURLToPath(new URL('../../', import.meta.url)),
-    env: { ...process.env, I18N_DIR: 'dist/i18n' },
+    env: { ...process.env, I18N_DIR: 'dist/i18n', ...env },
     execArgv: [],
     stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
   })
@@ -342,3 +343,88 @@ it('restarts one process and rejoins subscriptions: fresh connections receive re
     { timeout: 5000 },
   )
 }, 40_000)
+
+it('api + worker processes: the worker runs "run once" and cron, its push reaches a socket on the api process', async () => {
+  for (const worker of workers.splice(0)) await stop(worker)
+  const taskIds: number[] = []
+  let inboxId = 0
+  let dispatchId = 0
+  const since = new Date()
+  await clearThrottle()
+  try {
+    // every second: the api process must fire none of them (each fire time runs once, on whoever ticks first)
+    taskIds.push(
+      await insertRow(ds.manager, 'job_task', {
+        name: unique(),
+        handler: 'demo.echo',
+        cron: '* * * * * *',
+      }),
+    )
+    const [dispatch] = await ds.query('SELECT id FROM job_task WHERE handler = ? LIMIT 1', [
+      'notify.dispatch',
+    ])
+    dispatchId = Number(dispatch.id)
+    inboxId = await inTenant1(() =>
+      insertRow(ds.manager, 'msg_inbox', {
+        user_id: ids.recipient,
+        template_code: PREFIX,
+        locale: 'en-US',
+        category: 'system',
+        title: unique(),
+        body: 'role split',
+      }),
+    )
+    urls = [await boot({ APP_ROLE: 'api' }), await boot({ APP_ROLE: 'worker' })]
+    const instance = `${hostname()}:${workers[1]!.child.pid}`.slice(0, 64)
+    const admin = await http(0)
+      .post('/api/auth/login')
+      .send({ username: 'admin', password: process.env.SEED_ADMIN_PASSWORD })
+      .timeout(5000)
+      .expect(200)
+    const onApi = open(await login('recipient', 0), 0)
+    await connect(onApi.socket)
+    const run = await http(0)
+      .post(`/api/scheduler/tasks/${dispatchId}/run`)
+      .set(bearer(admin.body.data.accessToken))
+      .timeout(5000)
+      .expect(200)
+    expect(Date.parse(run.body.data.scheduledAt)).not.toBeNaN()
+    // notify.dispatch ran on the worker, which delivered the inbox record through RealtimeService
+    await vi.waitFor(
+      () =>
+        expect(onApi.inbox).toContainEqual({
+          type: RT.notifyNew,
+          payload: { id: inboxId, title: expect.any(String) },
+        }),
+      { timeout: 10_000 },
+    )
+    const dispatched: { instance: string }[] = await ds.query(
+      'SELECT instance FROM job_run WHERE task_id = ? AND started_at >= ?',
+      [dispatchId, since],
+    )
+    expect(dispatched).toEqual([{ instance }])
+    // cron: several fires, every one run by the worker
+    await vi.waitFor(
+      async () => {
+        const fired: { instance: string }[] = await ds.query(
+          'SELECT instance FROM job_run WHERE task_id = ? AND instance IS NOT NULL',
+          [taskIds[0]],
+        )
+        expect(fired.length).toBeGreaterThanOrEqual(4)
+        expect(new Set(fired.map((r) => r.instance))).toEqual(new Set([instance]))
+      },
+      { timeout: 10_000, interval: 500 },
+    )
+  } finally {
+    if (taskIds.length) {
+      await ds.query('DELETE FROM job_run WHERE task_id IN (?)', [taskIds])
+      await ds.query('DELETE FROM job_task WHERE id IN (?)', [taskIds])
+    }
+    if (dispatchId)
+      await ds.query('DELETE FROM job_run WHERE task_id = ? AND started_at >= ?', [
+        dispatchId,
+        since,
+      ])
+    if (inboxId) await ds.query('DELETE FROM msg_inbox WHERE id = ?', [inboxId])
+  }
+}, 60_000)

@@ -119,3 +119,52 @@ export const DEFAULT_HTTP_TRACE_MODE: HttpTraceMode = 'write'
 export const HTTP_TRACE_EXCLUDE_PARAM = 'audit.http_trace.exclude_paths'
 export const DEFAULT_HTTP_TRACE_EXCLUDE =
   '/api/health, GET /api/monitor/, GET /api/messaging/bulletins/feed'
+
+/**
+ * App 会话期限与单 App 会话（只作用于移动端声明为 App 的会话）：`sessionDays` 为 0 表示不过期
+ * （每次刷新滑动延长），1–36500 为自登录起的绝对天数，非法值按 0；`singleSession` 为 `true` 时同一
+ * 用户只保留最新登录的一个 App 会话。两者都只许 root 修改。
+ */
+export const appSessionParams = {
+  sessionDays: 'auth.mobile.session_days',
+  singleSession: 'auth.app.single_session',
+} as const
+export const DEFAULT_APP_SESSION_DAYS = 0
+export const APP_SESSION_DAYS_MAX = 36500
+export const DEFAULT_APP_SINGLE_SESSION = true
+
+/**
+ * 即时通讯参数（see docs/im.md）。数值参数按 `IM_INT_PARAMS` 的边界读取（越界或非法回落默认值），
+ * 布尔参数 `=== 'true'`；`epoch` 是首次种子写入的随机 UUID，改值让所有客户端缓存重建。保留天数与
+ * epoch 只许 root 修改。
+ */
+export const imParams = {
+  retentionDays: 'im.history.retention_days',
+  epoch: 'im.sync.epoch',
+  textMaxChars: 'im.message.text_max_chars',
+  recallMinutes: 'im.message.recall_minutes',
+  editMinutes: 'im.message.edit_minutes',
+  groupRecallAnytime: 'im.message.group_recall_anytime',
+  groupMaxMembers: 'im.group.max_members',
+  fileMaxMb: 'im.file.max_mb',
+  fileExts: 'im.file.exts',
+  voiceMaxSeconds: 'im.voice.max_seconds',
+  voiceMaxMb: 'im.voice.max_mb',
+  callEnabled: 'im.call.enabled',
+} as const
+
+/** 数值参数的读取边界与默认值（`ParamService.int(key, min, max, fallback)`）。 */
+export const IM_INT_PARAMS = {
+  retentionDays: { key: imParams.retentionDays, min: 0, max: 36500, fallback: 180 },
+  textMaxChars: { key: imParams.textMaxChars, min: 1, max: 20000, fallback: 5000 },
+  recallMinutes: { key: imParams.recallMinutes, min: 0, max: 1440, fallback: 2 },
+  editMinutes: { key: imParams.editMinutes, min: 0, max: 1440, fallback: 5 },
+  groupMaxMembers: { key: imParams.groupMaxMembers, min: 2, max: 2000, fallback: 200 },
+  fileMaxMb: { key: imParams.fileMaxMb, min: 1, max: 1024, fallback: 20 },
+  voiceMaxSeconds: { key: imParams.voiceMaxSeconds, min: 1, max: 300, fallback: 60 },
+  voiceMaxMb: { key: imParams.voiceMaxMb, min: 1, max: 20, fallback: 5 },
+} as const satisfies Record<string, { key: string; min: number; max: number; fallback: number }>
+
+export const DEFAULT_IM_GROUP_RECALL_ANYTIME = true
+/** 文件扩展名默认值；读取时再与 `storage.allowed_exts` 取交集。 */
+export const DEFAULT_IM_FILE_EXTS = 'pdf,txt,doc,docx,xls,xlsx,ppt,pptx,zip'

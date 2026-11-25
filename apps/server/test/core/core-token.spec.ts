@@ -8,9 +8,11 @@ import { CoreConfigModule } from '../../src/core/config/config.module.js'
 import { ownerIndexKey, SessionRevoker } from '../../src/core/auth/session-revoker.js'
 import { sweepOnline } from '../../src/core/auth/online-sweep.js'
 import { RealtimeService } from '../../src/core/realtime/realtime.service.js'
+import { ParamService } from '../../src/core/settings/param.service.js'
 import {
   ABSOLUTE_MS,
   type CodeEntry,
+  MAX_SESSION_MS,
   MOBILE_CLIENT,
   REFRESH_GRACE_MS,
   type SessionUser,
@@ -70,6 +72,14 @@ beforeAll(async () => {
       SessionRevoker,
       RealtimeService,
       { provide: AuditWriter, useValue: { action: () => undefined } },
+      // 参数一律取默认值：App 长期会话的行为由 auth-app-lifetime.e2e 覆盖
+      {
+        provide: ParamService,
+        useValue: {
+          int: async (_k: string, _a: number, _b: number, f: number) => f,
+          get: async () => null,
+        },
+      },
     ],
   }).compile()
   tokens = moduleRef.get(TokenService)
@@ -290,7 +300,7 @@ describe('third-party sessions', () => {
   const crm = { ...opts, clientId: 'crm-ttl', scopes: ['user.read'], ttl }
 
   it.each(['sweep', 'issue'])(
-    '%s keeps 8-day-old last-seen times of 30-day sessions, prunes beyond 30 days',
+    '%s keeps 8-day-old last-seen times of 30-day sessions, prunes beyond the longest session',
     async (action) => {
       const t = await tokens.issue(user(45), {
         ...crm,
@@ -302,7 +312,7 @@ describe('third-party sessions', () => {
       const lastSeen = now - 8 * 86_400_000
       await redis.zAdd(seen, [
         { score: lastSeen, value: t.session.sid },
-        { score: now - 30 * 86_400_000 - 1, value: 'expired-sid' },
+        { score: now - MAX_SESSION_MS - 1, value: 'expired-sid' },
       ])
       if (action === 'sweep') await sweepOnline(redis, now)
       else await tokens.issue(user(46), opts)
@@ -402,6 +412,63 @@ describe('third-party sessions', () => {
 })
 
 describe('SessionRevoker', () => {
+  it('notifies session termination after every credential key is gone, including a repeated missing session', async () => {
+    const issued = await tokens.issue(user(701), opts)
+    const notices: {
+      sid: string
+      reason: string
+      present: boolean
+      owner: number | null | undefined
+      access: number
+      refresh: number
+    }[] = []
+    revoker.onSessionEnded(async (sid, reason, ended) => {
+      if (sid !== issued.session.sid) return
+      notices.push({
+        sid,
+        reason,
+        present: !!(await tokens.readLiveSnapshot(sid)),
+        owner: ended?.userId,
+        access: await redis.exists(atKey(issued.accessToken)),
+        refresh: await redis.exists(rtKey(issued.refreshToken)),
+      })
+    })
+    await revoker.revokeSession(issued.session.sid, 'signout')
+    await revoker.revokeSession(issued.session.sid, 'signout')
+    expect(notices).toEqual([
+      {
+        sid: issued.session.sid,
+        reason: 'signout',
+        present: false,
+        owner: 701,
+        access: 0,
+        refresh: 0,
+      },
+      {
+        sid: issued.session.sid,
+        reason: 'signout',
+        present: false,
+        owner: undefined,
+        access: 0,
+        refresh: 0,
+      },
+    ])
+  })
+
+  it('keeps revocation final even if a post-termination business handler fails', async () => {
+    const issued = await tokens.issue(user(702), opts)
+    let notices = 0
+    revoker.onSessionEnded(async (sid) => {
+      if (sid !== issued.session.sid) return
+      notices++
+      throw new Error('fixture handler unavailable')
+    })
+    await expect(revoker.revokeUser(702, 'disabled')).resolves.toHaveLength(1)
+    expect(notices).toBe(1)
+    expect(await tokens.authenticate(issued.accessToken)).toBeNull()
+    expect(await tokens.refresh(issued.refreshToken, UA)).toEqual({ kind: 'rejected' })
+    expect(await redis.exists(redisKey('authSession', issued.session.sid))).toBe(0)
+  })
   it('revokeSession ends one session; revokeUser ends all but exceptSid, only for that user', async () => {
     const a = await tokens.issue(user(7), opts)
     const b = await tokens.issue(user(7), opts)

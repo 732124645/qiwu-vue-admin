@@ -5,6 +5,7 @@ import { CoreAuditModule } from './core/audit/audit.module.js'
 import { CoreAuthModule } from './core/auth/auth.module.js'
 import { CoreCaptchaModule } from './core/captcha/captcha.module.js'
 import { CoreConfigModule } from './core/config/config.module.js'
+import { imOn } from './core/config/im-switch.js'
 import { mcpOn } from './core/config/mcp-switch.js'
 import { wxoaOn } from './core/config/wxoa-switch.js'
 import { CoreContextModule } from './core/context/context.module.js'
@@ -16,6 +17,7 @@ import { HealthController } from './core/health/health.controller.js'
 import { CoreHttpModule } from './core/http/http.module.js'
 import { CoreI18nModule } from './core/i18n/i18n.module.js'
 import { CoreLoggerModule } from './core/logger/logger.module.js'
+import { CoreMonitorModule } from './core/monitor/event-loop.js'
 import { McpModule } from './core/mcp/mcp.module.js'
 import { CoreMcpTokenModule } from './core/mcp/token-revocation.js'
 import { CoreNotifyModule } from './core/notify/notify.js'
@@ -27,6 +29,8 @@ import { AuditModule } from './modules/platform/audit/audit.module.js'
 import { CodegenModule } from './modules/platform/codegen/codegen.module.js'
 import { GeoModule } from './modules/platform/geo/geo.module.js'
 import { IamModule } from './modules/platform/iam/iam.module.js'
+import { ImModule } from './modules/platform/im/im.module.js'
+import { ImCallMaintenanceModule } from './modules/platform/im/im-call-maintenance.module.js'
 import { MessagingModule } from './modules/platform/messaging/messaging.module.js'
 import { MonitorModule } from './modules/platform/monitor/monitor.module.js'
 import { OauthModule } from './modules/platform/oauth/oauth.module.js'
@@ -47,7 +51,7 @@ import { WorkflowModule } from './modules/workflow/workflow.module.js'
     // TypeORM DataSource + @Transactional() (CLS plugin): after CoreContextModule
     CoreDbModule,
     CoreRedisModule,
-    // BullMQ job queues on the shared Redis client (workers run on every instance)
+    // BullMQ job queues on the shared Redis client (workers run on every instance but APP_ROLE=api ones)
     CoreQueueModule,
     // AuditWriter (sign-in log, @ActionLog): needs the DataSource
     CoreAuditModule,
@@ -64,6 +68,7 @@ import { WorkflowModule } from './modules/workflow/workflow.module.js'
     // Single-use captcha ticket verifier for auth and SMS
     CoreCaptchaModule,
     CoreLoggerModule,
+    CoreMonitorModule,
     CoreI18nModule,
     CoreThrottlerModule,
     CoreHttpModule,
@@ -76,8 +81,12 @@ import { WorkflowModule } from './modules/workflow/workflow.module.js'
     ConditionalModule.registerWhen(WxoaModule, (env) => wxoaOn(env), { debug: false }),
     // access tokens end with their user's or tenant's sessions whatever APP_MCP says
     CoreMcpTokenModule,
-    // 智能体接入只在 APP_MCP 打开时加载：关闭时 /api/mcp 与其管理接口不存在，工具不注册
+    // MCP 接入只在 APP_MCP 打开时加载：关闭时 /api/mcp 与其管理接口不存在，工具不注册
     ConditionalModule.registerWhen(McpModule, (env) => mcpOn(env), { debug: false }),
+    // 遗留通话的媒体清理不随菜单开关和实例角色停止，默认无存量时不外呼。
+    ImCallMaintenanceModule,
+    // 员工即时通讯只在 APP_IM 打开时加载：关闭时 /api/im/* 不存在，历史清理处理器不注册。
+    ConditionalModule.registerWhen(ImModule, (env) => imOn(env), { debug: false }),
     SchedulerModule,
     MessagingModule,
     AuditModule,

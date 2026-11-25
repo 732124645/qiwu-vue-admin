@@ -1,4 +1,4 @@
-// Agent access seed (see docs/mcp.md): the platform page "MCP 工具" and the tenant page "访问令牌" under
+// MCP access seed (see docs/mcp.md): the platform page "MCP 工具" and the tenant page "访问令牌" under
 // the system group, one action row per permission. Seeded whatever APP_MCP says: while it is off the
 // menus are hidden by core/auth/menu-features.ts (side menu and grant trees). The `mcp.paused` param is
 // a settings param (db/seeds/settings). Names are i18n keys (the web locale fragments mcp.*.json).

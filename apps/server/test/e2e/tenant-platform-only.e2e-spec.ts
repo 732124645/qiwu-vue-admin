@@ -274,7 +274,8 @@ describe('@PlatformOnly() on the routes', () => {
     expect(marked.get('DictController.page')).toBe('platform')
     expect(marked.has('DictController.options')).toBe(false)
     expect(marked.get('MonitorController.server')).toBe('platform')
-    // exactly the API logs, the cache and queue monitors are root only, every other marked route 'platform'
+    // exactly the API logs and the cache and queue monitors are root only, every other marked route
+    // 'platform'
     const rootOnly = [...marked].filter(([, who]) => who === 'root').map(([key]) => key)
     expect(rootOnly.sort()).toEqual(
       [
@@ -637,6 +638,8 @@ const OPEN_ROUTES = [
   'GET /api/settings/dicts/:code/entries',
   'GET /api/settings/dicts/options',
   'GET /api/storage/objects/:id/download',
+  'GET /api/storage/objects/:id/metadata',
+  'GET /api/storage/objects/:id/content',
   'POST /api/storage/objects',
   'POST /api/storage/objects/confirm',
   'POST /api/storage/objects/presign',
@@ -702,7 +705,9 @@ describe('@HomeTenant() and @RequireFeature on the routes', () => {
       'LeaveController.get',
     ]
     expect(approvals.filter((key) => feature.get(key) !== 'workflow')).toEqual([])
-    expect([...new Set(feature.values())]).toEqual(['workflow'])
+    expect([...new Set(feature.values())].sort()).toEqual(['im', 'workflow'])
+    for (const name of ['punch', 'today', 'request', 'mine'])
+      expect(feature.has(`ClockController.${name}`)).toBe(false)
   })
 })
 

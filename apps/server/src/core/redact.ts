@@ -15,6 +15,7 @@ const SENSITIVE = 'qw:redact:sensitive'
 /**
  * `@Sensitive('paramValue')` on a controller or route: fields whose values may be secrets under a
  * plain name, masked like the secret key names (any depth, query too) wherever the request is logged.
+ * `@Sensitive('*')` 显式遮蔽完整结构化数据、URL查询及错误自由文本，避免未知字段或键名泄漏。
  * Every logger of requests reads them with `sensitiveFields` (action log, http trace) or, given only
  * the request, `rememberedSensitive` (the error filter's http fault).
  */
@@ -48,6 +49,7 @@ const secret = (name: string, fields: readonly string[]) =>
 export function redactedUrl(url: string, fields: readonly string[] = []): string {
   const at = url.indexOf('?')
   if (at < 0) return url
+  if (fields.includes('*')) return `${url.slice(0, at)}?${MASK}`
   const query = url
     .slice(at + 1)
     .split('&')
@@ -82,6 +84,7 @@ export function redactedJson(
   max: number,
   fields: readonly string[] = [],
 ): string | null {
+  if (fields.includes('*')) return value === undefined ? null : JSON.stringify(MASK).slice(0, max)
   try {
     const json = JSON.stringify(value, (k, v: unknown) =>
       k && secret(k, fields) ? MASK : typeof v === 'bigint' ? String(v) : v,
@@ -128,6 +131,7 @@ export function textRedactor(
   request: unknown,
   fields: readonly string[] = [],
 ): (text: string) => string {
+  if (fields.includes('*')) return () => MASK
   // longest first: a secret containing another is replaced whole
   const values = [...new Set(secretValues(request, fields))].sort((a, b) => b.length - a.length)
   return (text) => {

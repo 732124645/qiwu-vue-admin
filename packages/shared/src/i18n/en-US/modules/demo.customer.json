@@ -1,0 +1,17 @@
+{
+  "field": {
+    "demo": {
+      "customer": {
+        "name": "Name",
+        "website": "Website",
+        "industry": "Industry",
+        "city": "City",
+        "scale": "Scale",
+        "phone": "Phone",
+        "address": "Address",
+        "intro": "Introduction",
+        "deptId": "Department"
+      }
+    }
+  }
+}

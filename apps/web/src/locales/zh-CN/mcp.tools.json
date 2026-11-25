@@ -1,0 +1,34 @@
+{
+  "mcp": {
+    "tools": {
+      "iam_me_get": {
+        "title": "我的账户信息",
+        "description": "读取当前登录用户的基本信息。"
+      },
+      "iam_user_search": {
+        "title": "查询用户",
+        "description": "按关键词查询权限范围内的用户。"
+      },
+      "cfg_dict_options": {
+        "title": "查询字典选项",
+        "description": "读取指定字典的可用选项。"
+      },
+      "demo_customer_search": {
+        "title": "查询客户",
+        "description": "查找权限范围内的示例客户。"
+      },
+      "demo_customer_get": {
+        "title": "查看客户详情",
+        "description": "读取一个可访问客户的详细信息。"
+      },
+      "demo_customer_update": {
+        "title": "补充客户资料",
+        "description": "更新可访问客户的资料。"
+      },
+      "demo_book_create": {
+        "title": "新建图书",
+        "description": "创建示例图书。"
+      }
+    }
+  }
+}

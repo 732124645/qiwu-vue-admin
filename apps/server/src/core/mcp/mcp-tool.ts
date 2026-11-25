@@ -14,7 +14,7 @@ export interface McpToolMeta {
   name: string
   /** a short human title */
   title: string
-  /** what the agent reads to decide when to call it: what it does, what it returns */
+  /** what the client reads to decide when to call it: what it does, what it returns */
   description: string
   /**
    * the permission the caller must hold (a code of the shared `*Perms` constants), or null for data any
@@ -23,7 +23,7 @@ export interface McpToolMeta {
   perm: string | null
   /** `write` tools change data: a token must allow them explicitly */
   kind: McpToolKind
-  /** the arguments, validated before the method runs; also what the agent sees as the JSON Schema */
+  /** the arguments, validated before the method runs; also what the client sees as the JSON Schema */
   input: z.ZodObject
   /** the answer's shape: the answer is parsed with it (unknown keys dropped) and sent as structured content */
   output?: z.ZodObject

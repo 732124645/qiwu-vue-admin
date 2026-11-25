@@ -1,0 +1,11 @@
+{
+  "deploymentTarget": "15.0",
+  "dependencies-spms": [
+    {
+      "name": "LiveKit",
+      "url": "https://github.com/livekit/client-sdk-swift.git",
+      "kind": "exactVersion",
+      "version": "2.19.0"
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-import { BullModule } from '@nestjs/bullmq'
+import { BullModule, BullRegistrar } from '@nestjs/bullmq'
 import {
   Global,
   Inject,
@@ -6,8 +6,10 @@ import {
   Module,
   type OnApplicationBootstrap,
   type OnModuleDestroy,
+  type OnModuleInit,
 } from '@nestjs/common'
 import { DiscoveryModule } from '@nestjs/core'
+import { AppConfigService } from '../config/config.module.js'
 import { queuePrefix } from '../redis/cache-namespaces.js'
 import { REDIS, type Redis } from '../redis/redis.module.js'
 import { QUEUE_JOB_DEFAULTS } from './queue-registry.js'
@@ -43,7 +45,8 @@ export async function checkEvictionPolicy(
  * blocking reads. Every key is under `queuePrefix()` (`qw:queue:`). Modules declare queues with
  * `registerQueue` and processors as `TenantJobProcessor` subclasses; `QueueService.add` adds jobs.
  * Workers stop (finishing the jobs they run) in the first shutdown phase, before the other services'
- * shutdown work, the Socket.IO server and the shared clients close.
+ * shutdown work, the Socket.IO server and the shared clients close. `APP_ROLE=api` creates no worker
+ * at all (the queues still take jobs); the other roles start one per processor, as `all` always did.
  */
 @Global()
 @Module({
@@ -56,18 +59,30 @@ export async function checkEvictionPolicy(
         prefix: queuePrefix(),
         defaultJobOptions: QUEUE_JOB_DEFAULTS,
       }),
+      // workers are created in onModuleInit below, by role (never started and then closed)
+      extraOptions: { manualRegistration: true },
     }),
   ],
   providers: [QueueService],
   exports: [QueueService],
 })
-export class CoreQueueModule implements OnApplicationBootstrap, OnModuleDestroy {
+export class CoreQueueModule implements OnModuleInit, OnApplicationBootstrap, OnModuleDestroy {
   private readonly logger = new Logger('Queue')
 
   constructor(
     @Inject(REDIS) private readonly redis: Redis,
     private readonly queues: QueueService,
+    private readonly registrar: BullRegistrar,
+    private readonly cfg: AppConfigService,
   ) {}
+
+  /**
+   * 按进程角色决定是否开 worker：api 角色一个都不创建，启动的任何时刻都不会领到任务；
+   * 其余角色为每个处理器创建一个（与默认的自动注册相同）。
+   */
+  onModuleInit() {
+    if (this.cfg.get('APP_ROLE') !== 'api') this.registrar.register()
+  }
 
   async onApplicationBootstrap() {
     // BullMQ reports connection trouble as 'error' events: logged, never thrown
@@ -78,11 +93,23 @@ export class CoreQueueModule implements OnApplicationBootstrap, OnModuleDestroy 
   }
 
   /**
-   * Each worker finishes its current jobs while everything they may use still runs: the destroy phase
-   * comes before every `beforeApplicationShutdown` (the scheduler and the notification outbox stop
-   * there), the Socket.IO server close and the Redis and database closes.
+   * 先停领新任务并有界保存进度；7 秒后强制关 worker，仍未完成的调用保留持久记录供新进程核对。
+   * 在共享 Redis 与数据库关闭之前完成这一阶段，不把无限等待交给发布进程。
    */
   async onModuleDestroy() {
-    await Promise.all(this.queues.workers().map((w) => w.close()))
+    const workers = this.queues.workers()
+    let timer: NodeJS.Timeout | undefined
+    // pause(false) 停领新任务并等当前任务；超过发布期限后强制关 worker，持久租约负责接管。
+    try {
+      await Promise.race([
+        Promise.all([this.queues.drain(), ...workers.map((w) => w.pause(false))]),
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, 7000)
+        }),
+      ])
+    } finally {
+      clearTimeout(timer)
+      await Promise.all(workers.map((w) => w.close(true)))
+    }
   }
 }

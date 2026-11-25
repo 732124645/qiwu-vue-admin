@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, toRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { WfInstanceItemVo } from '@qiwu/shared'
 import { wfCenterApi } from '@/api/workflow/center'
@@ -15,13 +15,17 @@ import { at, useCenterList } from './use-center-list'
 
 /** 我的发起 (see docs/design-notes.md#workflow): the instances the caller started, newest first, by state. */
 defineOptions({ name: 'WfMine' })
+const props = defineProps<{ modelKey?: string }>()
 const { t } = useI18n()
 const { query, rows, total, loading, filtered, search, reset, refresh, onSortChange, open } =
-  useCenterList<WfInstanceItemVo, { state: string }>({
-    api: { page: wfCenterApi.mine },
-    filters: { state: '' },
-    sort: '-startedAt,-id',
-  })
+  useCenterList<WfInstanceItemVo, { state: string }>(
+    {
+      api: { page: wfCenterApi.mine },
+      filters: { state: '' },
+      sort: '-startedAt,-id',
+    },
+    toRef(props, 'modelKey'),
+  )
 const showSearch = ref(true)
 const columns: QwColumn[] = [
   { prop: 'title', label: 'wf.center.list.title', minWidth: 260, showOverflowTooltip: true },

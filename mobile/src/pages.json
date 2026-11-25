@@ -111,6 +111,18 @@
         {
           "path": "demo/invoice/form",
           "style": {}
+        },
+        {
+          "path": "oa-trip/view",
+          "style": {}
+        },
+        {
+          "path": "oa-expense/view",
+          "style": {}
+        },
+        {
+          "path": "oa-seal/view",
+          "style": {}
         }
       ]
     },
@@ -147,6 +159,31 @@
             "navigationStyle": "custom",
             "navigationBarTextStyle": "white"
           }
+        }
+      ]
+    },
+    {
+      "root": "pages-im",
+      "pages": [
+        {
+          "path": "call/index",
+          "style": {}
+        },
+        {
+          "path": "room/index",
+          "style": {}
+        },
+        {
+          "path": "directory/index",
+          "style": {}
+        },
+        {
+          "path": "group/index",
+          "style": {}
+        },
+        {
+          "path": "stickers/index",
+          "style": {}
         }
       ]
     }
